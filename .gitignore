@@ -3,9 +3,11 @@ texcomb/libs/
 Logs/
 herta-blender_updater/
 theherta4_updater/
+mimiblender_plugin_updater/
 test/
 references/
 .venv/
 tmp/
 tests/
 TheHerta4.zip
+MIMIBlender.zip

@@ -76,10 +76,10 @@ import math
 **确认使用情况的方法**：
 ```bash
 # 在 obj_utils.py 中搜索 math. 和 mathutils. 前缀的使用
-grep -n "math\." d:\Dev\TheHerta4\utils\obj_utils.py
-grep -n "mathutils\." d:\Dev\TheHerta4\utils\obj_utils.py
+grep -n "math\." d:\Dev\MIMIBlender\utils\obj_utils.py
+grep -n "mathutils\." d:\Dev\MIMIBlender\utils\obj_utils.py
 # 搜索不带前缀的调用（说明来自通配符导入）
-grep -n "\bradians\b\|\bdegrees\b\|\bpi\b\|\bsin\b\|\bcos\b\|\bsqrt\b" d:\Dev\TheHerta4\utils\obj_utils.py
+grep -n "\bradians\b\|\bdegrees\b\|\bpi\b\|\bsin\b\|\bcos\b\|\bsqrt\b" d:\Dev\MIMIBlender\utils\obj_utils.py
 ```
 
 #### `utils/algorithm_utils.py`
@@ -113,7 +113,7 @@ from .m_ini_builder import (
 3. 用 flake8 的 F403/F405 规则自动检测：
 ```bash
 pip install flake8
-flake8 --select F403,F405 d:\Dev\TheHerta4
+flake8 --select F403,F405 d:\Dev\MIMIBlender
 ```
 
 ## 风险

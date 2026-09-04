@@ -39,8 +39,8 @@ import importlib
 importlib.reload(addon_updater_ops)
 
 bl_info = {
-    "name": "TheHerta4",
-    "description": "Blender Plugin of SSMT4",
+    "name": "MIMIBlender",
+    "description": "MIMITools的Blender插件",
     "blender": (5, 2, 0),
     "version": (4, 1, 49),
     "location": "View3D",
@@ -51,11 +51,11 @@ bl_info = {
 class UpdaterPanel(bpy.types.Panel):
     """Update Panel"""
     bl_label = "检查版本更新"
-    bl_idname = "HERTA_PT_UpdaterPanel"
+    bl_idname = "MIMI_PT_UpdaterPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_context = "objectmode"
-    bl_category = "TheHerta4"
+    bl_category = "MIMITools"
     bl_order = 99
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -79,9 +79,9 @@ class UpdaterPanel(bpy.types.Panel):
         addon_updater_ops.update_settings_ui(self, context)
 
 
-class HertaUpdatePreference(bpy.types.AddonPreferences):
+class MIMIBlenderUpdatePreference(bpy.types.AddonPreferences):
     # Addon updater preferences.
-    bl_label = "TheHerta 更新器"
+    bl_label = "MIMIBlender 更新器"
     bl_idname = __package__
 
     
@@ -130,7 +130,7 @@ def register():
             step()
         except Exception:
             import traceback
-            print(f"[TheHerta4] register step failed: {getattr(step, '__module__', step)}")
+            print(f"[MIMIBlender] register step failed: {getattr(step, '__module__', step)}")
             traceback.print_exc()
 
 
@@ -144,7 +144,7 @@ def _register_steps():
     def _register_updater():
         addon_updater_ops.register(bl_info)
         bpy.utils.register_class(UpdaterPanel)
-        bpy.utils.register_class(HertaUpdatePreference)
+        bpy.utils.register_class(MIMIBlenderUpdatePreference)
     yield _register_updater
 
     # 3. UI Panels & Logic
@@ -180,7 +180,7 @@ def unregister():
     # 直接注销会抛 RuntimeError 并中断后续所有注销，导致下次启用时
     # “already registered” 连锁失败、面板消失。
     def _unregister_updater():
-        bpy.utils.unregister_class(HertaUpdatePreference)
+        bpy.utils.unregister_class(MIMIBlenderUpdatePreference)
         bpy.utils.unregister_class(UpdaterPanel)
         addon_updater_ops.unregister()
 
@@ -213,7 +213,7 @@ def unregister():
             step()
         except Exception:
             import traceback
-            print(f"[TheHerta4] unregister step failed: {getattr(step, '__module__', step)}")
+            print(f"[MIMIBlender] unregister step failed: {getattr(step, '__module__', step)}")
             traceback.print_exc()
 
 

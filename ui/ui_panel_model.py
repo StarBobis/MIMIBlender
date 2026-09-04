@@ -602,7 +602,7 @@ class RenameAmatureFromGame(bpy.types.Operator):
         return {'FINISHED'}
 
 class ModelResetLocation(bpy.types.Operator):
-    bl_idname = "herta.model_reset_location"
+    bl_idname = "mimiblender.model_reset_location"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "重置模型在x,y,z轴上的位置为0"
     bl_description = "把当前选中的obj的x,y,z轴上的位置全部重置为0，使模型回到坐标原点"
@@ -631,7 +631,7 @@ class ModelSortVertexGroupByName(bpy.types.Operator):
         return {'FINISHED'}
     
 class ModelVertexGroupRenameByLocation(bpy.types.Operator):
-    bl_idname = "herta.vertex_group_rename_by_location"
+    bl_idname = "mimiblender.vertex_group_rename_by_location"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "将目标obj的顶点组按位置对应关系改名"
     bl_description = "先选中一个源obj，再选中一个目标obj，再点击此按钮，会根据顶点组对应位置把目标obj的顶点组改名为源obj的顶点组名称，目标obj的顶点组中，和源obj顶点组位置相近的顶点组将被改名为源obj对应位置的顶点组的名称，未能识别的顶点组将被命名为unknown"
@@ -770,10 +770,10 @@ class PanelModelProcess(bpy.types.Panel):
     所以面板里放一份方便萌新使用，当然默认是关闭状态也不影响视觉，萌新用的多了成为大佬之后就会用右键菜单里的选项了。
     '''
     bl_label = "模型处理面板" 
-    bl_idname = "VIEW3D_PT_Herta_ModelProcess_Panel"
+    bl_idname = "VIEW3D_PT_MIMI_ModelProcess_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'TheHerta4'
+    bl_category = 'MIMITools'
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -821,7 +821,7 @@ class PanelModelProcess(bpy.types.Panel):
 
 class CatterRightClickMenu(bpy.types.Menu):
     '''
-    光在Herta面板上放着也不行，因为部分用户的插件数量特别多的时候根本看不到Herta面板
+    光在MIMITools面板上放着也不行，因为部分用户的插件数量特别多的时候根本看不到MIMITools面板
     所以在右键的3Dmigoto菜单中也放上一份，这样方便查找。
     '''
     bl_idname = "VIEW3D_MT_object_3Dmigoto"

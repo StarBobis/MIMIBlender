@@ -102,7 +102,7 @@ def merge_objects(
 ```bash
 # 使用 mypy 检查类型（需要安装 mypy）
 pip install mypy
-mypy d:\Dev\TheHerta4 --ignore-missing-imports
+mypy d:\Dev\MIMIBlender --ignore-missing-imports
 ```
 
 ## 风险

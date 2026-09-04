@@ -218,13 +218,13 @@ class GlobalConfig:
 
     @staticmethod
     def path_mimitools_reversed_root():
-        # Sword4 panel reads the MMT toolchain only, SSMT is never involved.
+        # MIMITools reverse panel reads the MMT toolchain only, SSMT is never involved.
         settings = GlobalConfig._mmt_family_settings()
         work_folder = str(settings.get("DBMTWorkFolder", "") or "").strip()
         if work_folder:
             return os.path.join(work_folder, "Reversed")
         # Only MMT / MIMITools cache folders are valid here,
-        # SSMT4CachedFolder must not be used by Sword4 panel.
+        # SSMT4CachedFolder must not be used by MIMITools reverse panel.
         for cache_folder_name in ("MMTCachedFolder", "MIMIToolsCachedFolder"):
             candidate = os.path.join(GlobalConfig.path_appdata_local(), cache_folder_name, "Reversed")
             if os.path.isdir(candidate):

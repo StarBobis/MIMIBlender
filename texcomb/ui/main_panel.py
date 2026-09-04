@@ -30,7 +30,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
     bl_idname = "SMC_PT_Main_Panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI" if globs.is_blender_modern else "TOOLS"
-    bl_category = "TheHerta4"
+    bl_category = "MIMITools"
     bl_order = 10
 
     def draw(self, context: bpy.types.Context) -> None:

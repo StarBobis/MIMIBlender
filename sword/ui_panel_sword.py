@@ -26,7 +26,7 @@ def _get_sword_reversed_workspace_items(self, context):
     global sword_reversed_workspace_items_cache
 
     try:
-        # Sword4 panel reads MMT toolchain only, never the SSMT cache folder.
+        # MIMITools reverse panel reads MMT toolchain only, never the SSMT cache folder.
         reversed_root = GlobalConfig.path_mimitools_reversed_root()
         if not reversed_root or not os.path.isdir(reversed_root):
             sword_reversed_workspace_items_cache = [
@@ -311,7 +311,7 @@ class SwordImportAllReversed(bpy.types.Operator):
             if not selected_workspace_name:
                 self.report({"ERROR"}, "当前未选择指定工作空间，请先选择 Reversed 下的子文件夹")
                 return ""
-            # Sword4 panel reads MMT toolchain only, never the SSMT cache folder.
+            # MIMITools reverse panel reads MMT toolchain only, never the SSMT cache folder.
             reversed_root = GlobalConfig.path_mimitools_reversed_root()
             if not reversed_root:
                 self.report({"ERROR"}, "未找到 MMT 的 Reversed 目录，请先在 MMT 中运行一键逆向")
@@ -527,7 +527,7 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
     bl_idname = "VIEW3D_PT_image_material_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Sword4'
+    bl_category = 'MIMITools'
     # bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -548,7 +548,7 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         # 导入 ib vb fmt格式文件
         layout.operator(Import3DMigotoRaw.bl_idname,icon='IMPORT')
 
-        # 手动导入SSMT格式模型（与TheHerta4面板中的按钮相同）
+        # 手动导入SSMT格式模型（与MIMITools面板中的按钮相同）
         layout.operator(SSMT4ImportRaw.bl_idname,icon='IMPORT')
 
         # 自动检测按钮
@@ -597,7 +597,7 @@ class Sword_SplitModel_By_DrawIndexed_Panel(Panel):
     bl_idname = "VIEW3D_PT_Sword_SplitModel_By_DrawIndexed_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Sword4'
+    bl_category = 'MIMITools'
     # bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):

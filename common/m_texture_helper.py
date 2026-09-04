@@ -122,7 +122,7 @@ class M_TextureHelper:
     @classmethod
     def _get_texconv_path(cls) -> str:
         """查找内置 texconv.exe 路径。"""
-        # 优先 TheHerta4 自身 resources
+        # 优先 MIMIBlender 自身 resources
         addon_dir = Path(__file__).parent.parent.resolve()
         candidates = [
             addon_dir / 'resources' / 'texconv.exe',
@@ -242,7 +242,7 @@ class M_TextureHelper:
             print(f"[M_TextureHelper] 转换贴图: {source_path} -> {target_format}")
             target_dir = os.path.dirname(target_path)
             os.makedirs(target_dir, exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix="theherta4_texconv_") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="mimiblender_texconv_") as temp_dir:
                 args = [
                     texconv, '-ft', 'dds', '-f', target_format,
                     '-o', temp_dir, '-y', '--', source_path,

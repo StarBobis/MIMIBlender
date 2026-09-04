@@ -95,5 +95,5 @@
 
 ```bash
 # 搜索中文注释
-grep -rn "[\u4e00-\u9fff]" --include="*.py" d:\Dev\TheHerta4 | grep "^.*#"
+grep -rn "[\u4e00-\u9fff]" --include="*.py" d:\Dev\MIMIBlender | grep "^.*#"
 ```

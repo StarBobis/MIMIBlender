@@ -254,7 +254,7 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
     bl_idname = "VIEW3D_PT_fast_preview_texture"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'TheHerta4'
+    bl_category = 'MIMITools'
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):

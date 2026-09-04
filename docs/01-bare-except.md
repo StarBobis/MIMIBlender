@@ -194,7 +194,7 @@ except Exception:
 
 1. 全局搜索 `except:` 确保零残留：
    ```
-   grep -rn "except:" --include="*.py" d:\Dev\TheHerta4
+   grep -rn "except:" --include="*.py" d:\Dev\MIMIBlender
    ```
 2. 在 Blender 中执行「一键导入」+「生成 Mod」完整流程，确认无异常
 3. 手动删除一个物体后触发 `apply_mirror_transform`，确认 `ReferenceError` 被正确处理

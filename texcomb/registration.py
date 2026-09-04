@@ -34,7 +34,7 @@ def register_all() -> None:
     """Register all components of the addon.
 
     Registers all classes and properties used by the material combiner.
-    Called from the main TheHerta4 plugin's register().
+    Called from the main MIMIBlender plugin's register().
     """
     _register_classes()
     extend_types.register()
@@ -44,7 +44,7 @@ def unregister_all() -> None:
     """Unregister all components of the addon.
 
     Unregisters all classes and properties used by the material combiner.
-    Called from the main TheHerta4 plugin's unregister().
+    Called from the main MIMIBlender plugin's unregister().
     """
     _unregister_classes()
     extend_types.unregister()

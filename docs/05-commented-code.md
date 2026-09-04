@@ -112,13 +112,13 @@
 
 1. 全局搜索注释掉的代码模式：
 ```bash
-grep -rn "^#\s*def " --include="*.py" d:\Dev\TheHerta4
-grep -rn "^#\s*if " --include="*.py" d:\Dev\TheHerta4
-grep -rn "^#\s*import " --include="*.py" d:\Dev\TheHerta4
+grep -rn "^#\s*def " --include="*.py" d:\Dev\MIMIBlender
+grep -rn "^#\s*if " --include="*.py" d:\Dev\MIMIBlender
+grep -rn "^#\s*import " --include="*.py" d:\Dev\MIMIBlender
 ```
 2. 搜索 `# print(` 注释掉的调试输出：
 ```bash
-grep -rn "# print(" --include="*.py" d:\Dev\TheHerta4
+grep -rn "# print(" --include="*.py" d:\Dev\MIMIBlender
 ```
 
 ## 风险

@@ -38,7 +38,7 @@ class PanelBasicInformation(bpy.types.Panel):
     bl_idname = "VIEW3D_PT_CATTER_Buttons_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'TheHerta4'
+    bl_category = 'MIMITools'
 
     def draw(self, context):
         layout = self.layout

@@ -79,7 +79,7 @@ material-combiner-addon
 
 - **macOS** | Open a Terminal console and execute the following commands:
     ```bash
-    /Applications/Blender.app/Contents/MacOS/Blender -b --python-expr "__import__('pip._internal')._internal.main(['install', '--target', '/path/to/TheHerta4/texcomb/libs', '--upgrade', 'Pillow'])"
+    /Applications/Blender.app/Contents/MacOS/Blender -b --python-expr "__import__('pip._internal')._internal.main(['install', '--target', '/path/to/MIMIBlender/texcomb/libs', '--upgrade', 'Pillow'])"
     ```
   If you install Blender or the addon in a different location, adjust the paths accordingly.
 

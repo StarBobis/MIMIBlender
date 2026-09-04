@@ -1,26 +1,26 @@
 
-# TheHerta4
+# MIMIBlender
 
 <div align="center">
 
 
-[![GitHub stars](https://img.shields.io/github/stars/StarBobis/TheHerta4?style=flat&logo=github&color=gold)](https://github.com/StarBobis/TheHerta4/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/StarBobis/TheHerta4?style=flat&logo=github&color=blue)](https://github.com/StarBobis/TheHerta4/forks)
-[![GitHub issues](https://img.shields.io/github/issues/StarBobis/TheHerta4?style=flat&logo=github&color=red)](https://github.com/StarBobis/TheHerta4/issues)
-[![GitHub license](https://img.shields.io/github/license/StarBobis/TheHerta4?style=flat&color=brightgreen)](https://github.com/StarBobis/TheHerta4/blob/main/LICENSE.txt)
-[![GitHub last commit](https://img.shields.io/github/last-commit/StarBobis/TheHerta4?style=flat&logo=git&color=orange)](https://github.com/StarBobis/TheHerta4/commits/main)
-[![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/StarBobis/TheHerta4/latest/total?style=flat&logo=github&color=blue&label=最新版下载量)](https://github.com/StarBobis/TheHerta4/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/StarBobis/MIMIBlender?style=flat&logo=github&color=gold)](https://github.com/StarBobis/MIMIBlender/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/StarBobis/MIMIBlender?style=flat&logo=github&color=blue)](https://github.com/StarBobis/MIMIBlender/forks)
+[![GitHub issues](https://img.shields.io/github/issues/StarBobis/MIMIBlender?style=flat&logo=github&color=red)](https://github.com/StarBobis/MIMIBlender/issues)
+[![GitHub license](https://img.shields.io/github/license/StarBobis/MIMIBlender?style=flat&color=brightgreen)](https://github.com/StarBobis/MIMIBlender/blob/main/LICENSE.txt)
+[![GitHub last commit](https://img.shields.io/github/last-commit/StarBobis/MIMIBlender?style=flat&logo=git&color=orange)](https://github.com/StarBobis/MIMIBlender/commits/main)
+[![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/StarBobis/MIMIBlender/latest/total?style=flat&logo=github&color=blue&label=最新版下载量)](https://github.com/StarBobis/MIMIBlender/releases/latest)
 [![Blender](https://img.shields.io/badge/Blender-5.2%20LTS-e67e22?style=flat&logo=blender&logoColor=white)](https://www.blender.org/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
-[![GitHub release](https://img.shields.io/github/v/release/StarBobis/TheHerta4?style=flat-square&logo=github)](https://github.com/StarBobis/TheHerta4/releases)
+[![GitHub release](https://img.shields.io/github/v/release/StarBobis/MIMIBlender?style=flat-square&logo=github)](https://github.com/StarBobis/MIMIBlender/releases)
 [![VibeCoding With DeepSeek V4 Pro](https://img.shields.io/badge/VibeCoding_With-DeepSeek_V4_Pro-4D6BFE?style=flat&logo=deepseek&logoColor=white)](https://deepseek.com/)
 
 </div>
 
 
-📦 **A Blender addon for SSMT4** — Import and export SSMT4 model format directly in Blender. Built for 3Dmigoto-based game modding.
+📦 **MIMITools的Blender插件** — Import and export SSMT4 model format directly in Blender. Built for 3Dmigoto-based game modding.
 
-- 🔄 SSMT4 and TheHerta4 versions are almost always updated together. Please use the latest versions of both to avoid feature mismatches.
+- 🔄 SSMT4 and MIMIBlender versions are almost always updated together. Please use the latest versions of both to avoid feature mismatches.
 - 🐞 **Blender 5.2 LTS** is required. Older Blender versions are not supported.
 - 📦 **Requirements:** `fake-bpy-module-5.2`, `numpy`
 
@@ -77,11 +77,11 @@
 
 ### Installation
 
-1. 💾 [Download the latest release](https://github.com/StarBobis/TheHerta4/releases/latest)
+1. 💾 [Download the latest release](https://github.com/StarBobis/MIMIBlender/releases/latest)
 2. 🌀 Open Blender → `Edit` → `Preferences` → `Add-ons`
 3. 📂 Click **Install...** and select the downloaded `.zip`
-4. ✅ Enable **"TheHerta4"** from the add-ons list
-5. 🔍 Find the panel in `3D Viewport` → `Sidebar (N)` → **TheHerta4** and **Sword4** tab
+4. ✅ Enable **"MIMIBlender"** from the add-ons list
+5. 🔍 Find the panel in `3D Viewport` → `Sidebar (N)` → **MIMITools** tab
 
 ### Basic Workflow
 
@@ -105,7 +105,7 @@ If you find this tool useful, consider supporting the project:
 
 ## 🔧 Blueprint Nodes & Forks
 
-This repository (**TheHerta4**) focuses on the **core import/export engine**. Complex blueprint nodes are developed separately in fork versions.
+This repository (**MIMIBlender**) focuses on the **core import/export engine**. Complex blueprint nodes are developed separately in fork versions.
 
 👉 For the full feature set, check out the versions maintained by **XiEr**:
 - [TheHerta3 by xuhuan9102](https://github.com/xuhuan9102/TheHerta3)
@@ -129,7 +129,7 @@ To work on the plugin itself:
 
 <div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=StarBobis/TheHerta4&type=Date)](https://star-history.com/#StarBobis/TheHerta4&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=StarBobis/MIMIBlender&type=Date)](https://star-history.com/#StarBobis/MIMIBlender&Date)
 
 </div>
 
@@ -137,7 +137,7 @@ To work on the plugin itself:
 
 ## 🙏 Special Thanks
 
-TheHerta4 learns from several different projects. Without their wonderful code, TheHerta4 wouldn't be this amazing.
+MIMIBlender learns from several different projects. Without their wonderful code, MIMIBlender wouldn't be this amazing.
 
 Great thanks to:
 
