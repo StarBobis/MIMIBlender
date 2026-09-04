@@ -1,0 +1,77 @@
+"""D3D11 顶点缓冲区语义名常量。
+
+集中管理所有 D3D11 Input Layout 中使用的语义名字符串，
+避免散落在 obj_buffer_helper.py、各类游戏导出器中。
+
+用法:
+    from ..common.d3d11_semantics import D3D11Semantic
+    if d3d11_element_name.startswith(D3D11Semantic.COLOR):
+"""
+
+
+class D3D11Semantic:
+    """D3D11 HLSL 语义名常量"""
+
+    POSITION = "POSITION"
+    NORMAL = "NORMAL"
+    TANGENT = "TANGENT"
+    BINORMAL = "BINORMAL"
+    BITANGENT = "BINORMAL"
+
+    COLOR = "COLOR"
+    TEXCOORD = "TEXCOORD"
+
+    BLENDINDICES = "BLENDINDICES"
+    BLENDWEIGHTS = "BLENDWEIGHTS"
+
+    SV_POSITION = "SV_POSITION"
+    SV_INSTANCEID = "SV_INSTANCEID"
+    SV_VERTEXID = "SV_VERTEXID"
+
+    POSITIONT = "POSITIONT"
+    TESSFACTOR = "TESSFACTOR"
+
+
+class D3D11Format:
+    """D3D11 DXGI 格式名称常量"""
+
+    R32G32B32A32_FLOAT = "R32G32B32A32_FLOAT"
+    R32G32B32_FLOAT = "R32G32B32_FLOAT"
+    R32G32_FLOAT = "R32G32_FLOAT"
+    R32_FLOAT = "R32_FLOAT"
+
+    R16G16B16A16_FLOAT = "R16G16B16A16_FLOAT"
+    R16G16B16A16_SNORM = "R16G16B16A16_SNORM"
+    R16G16_FLOAT = "R16G16_FLOAT"
+    R16G16_SNORM = "R16G16_SNORM"
+    R16G16_UNORM = "R16G16_UNORM"
+
+    R8G8B8A8_UNORM = "R8G8B8A8_UNORM"
+    R8G8B8A8_SNORM = "R8G8B8A8_SNORM"
+    R8G8B8A8_UINT = "R8G8B8A8_UINT"
+    R8G8B8A8_SINT = "R8G8B8A8_SINT"
+
+    R8G8_UNORM = "R8G8_UNORM"
+    R8G8_SNORM = "R8G8_SNORM"
+    R8G8_UINT = "R8G8_UINT"
+
+    R8_UNORM = "R8_UNORM"
+    R8_UINT = "R8_UINT"
+
+    R32_UINT = "R32_UINT"
+    R32G32_UINT = "R32G32_UINT"
+    R16_UINT = "R16_UINT"
+
+    B8G8R8A8_UNORM = "B8G8R8A8_UNORM"
+
+
+class D3D11Category:
+    """D3D11 缓冲区类别名称常量。WWMI/Unreal 引擎中用于标识缓冲区用途。"""
+
+    POSITION = "Position"
+    NORMAL = "Normal"
+    TANGENT = "Tangent"
+    BINORMAL = "Binormal"
+    BLEND = "Blend"
+    COLOR = "Color"
+    TEXCOORD = "Texcoord"
