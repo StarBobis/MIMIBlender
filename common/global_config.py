@@ -273,8 +273,43 @@ class GlobalConfig:
         return reversed_root
 
     @classmethod
+    def _read_d3dx_ini_mod_folder_name(cls):
+        """Read the actual mod folder from d3dx.ini's include_recursive.
+
+        3DMigoto does not require the mod folder to be named ``Mods``.  The
+        real folder is configured in the [Include] section of the d3dx.ini
+        located next to the 3DMigoto DLL.  Fall back to ``Mods`` if the file
+        or setting cannot be found.
+        """
+        if not cls.current_game_migoto_folder:
+            return "Mods"
+        d3dx_ini_path = os.path.join(cls.current_game_migoto_folder, "d3dx.ini")
+        try:
+            with open(d3dx_ini_path, "r", encoding="utf-8-sig") as d3dx_ini_file:
+                for raw_line in d3dx_ini_file:
+                    line = raw_line.strip()
+                    if not line or line.startswith(";") or line.startswith("#"):
+                        continue
+                    if line.startswith("[") and line.endswith("]"):
+                        continue
+                    key, separator, value = line.partition("=")
+                    if separator and key.strip().lower() == "include_recursive":
+                        mod_folder = value.strip().strip("\"'").strip()
+                        if mod_folder:
+                            # Keep only the first component if d3dx.ini uses
+                            # comma-separated recursive include directories.
+                            mod_folder = mod_folder.split(",")[0].strip().strip("\"'").strip()
+                            mod_folder = mod_folder.rstrip("\\/")
+                            if mod_folder:
+                                return mod_folder
+                return "Mods"
+        except (OSError, UnicodeDecodeError):
+            return "Mods"
+
+    @classmethod
     def path_mods_folder(cls):
-        return os.path.join(cls.current_game_migoto_folder,"Mods\\") 
+        mod_folder = cls._read_d3dx_ini_mod_folder_name()
+        return os.path.join(cls.current_game_migoto_folder, mod_folder + "\\")
 
     @staticmethod
     def path_total_workspace_folder():

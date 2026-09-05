@@ -42,7 +42,7 @@ bl_info = {
     "name": "MIMIBlender",
     "description": "MIMITools的Blender插件",
     "blender": (5, 2, 0),
-    "version": (1, 0, 1),
+    "version": (1, 0, 2),
     "location": "View3D",
     "category": "Generic"
 }
