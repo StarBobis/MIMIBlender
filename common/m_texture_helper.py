@@ -128,10 +128,10 @@ class M_TextureHelper:
             addon_dir / 'resources' / 'texconv.exe',
             addon_dir / '..' / 'resources' / 'texconv.exe',
         ]
-        # 其次 SSMT4 工作空间常见位置
+        # 其次 SSMT5/ProjectBunny 工作空间常见位置
         ssmt_candidates = [
-            Path('D:/Dev/ssmt4/src-tauri/resources/texconv.exe'),
-            Path('D:/Dev/ssmt4/src-tauri/target/debug/resources/texconv.exe'),
+            Path('D:/Dev/SSMT5/src-tauri/resources/texconv.exe'),
+            Path('D:/Dev/SSMT5/src-tauri/target/debug/resources/texconv.exe'),
         ]
         for p in candidates + ssmt_candidates:
             if p.exists():

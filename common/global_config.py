@@ -87,7 +87,7 @@ class GlobalConfig:
     @classmethod
     def read_from_main_json_ssmt4(cls) :
         try:
-            # SSMT4 panel must read SSMT tool's own settings only,
+            # SSMT5/ProjectBunny panel must read its own settings only,
             # never fall back to MMT / MIMITools settings here.
             main_settings = GlobalConfig._ssmt_settings()
             cls.gamename = main_settings.get("CurrentGameName", "")
@@ -101,9 +101,9 @@ class GlobalConfig:
                 or main_settings.get("CurrentWorkSpace", "")
                 or ""
             )
-            # SSMT writes its cache folder path under the legacy key
-            # "DBMTWorkFolder" in SSMT4GlobalConfigs/settings.json.
-            # When the key is empty, SSMT uses the default SSMT4CachedFolder.
+            # SSMT5/ProjectBunny writes its cache folder path under the legacy key
+            # "DBMTWorkFolder" in ProjectBunnyGlobalConfigs/settings.json.
+            # When the key is empty, fall back to the legacy SSMT4CachedFolder.
             ssmt_work_folder = str(main_settings.get("DBMTWorkFolder", "") or "").strip()
             if not ssmt_work_folder:
                 ssmt_work_folder = os.path.join(
@@ -111,15 +111,18 @@ class GlobalConfig:
                 )
             cls.ssmtlocation = ssmt_work_folder + "\\"
 
-            # SSMT4 panel only trusts the game config written by SSMT itself,
-            # MMT / MIMITools game configs must not leak into this panel.
+            # SSMT5/ProjectBunny panel only trusts the game config written by
+            # the host itself; MMT / MIMITools game configs must not leak here.
+            # Try the new ProjectBunny location first, then the legacy SSMT4 one.
             game_config_json_path = ""
-            candidate = os.path.join(
-                GlobalConfig.path_ssmt4_global_configs_folder(),
-                "Games", cls.gamename, "Config.json"
-            )
-            if os.path.exists(candidate):
-                game_config_json_path = candidate
+            for config_root in (
+                GlobalConfig.path_project_bunny_global_configs_folder(),
+                os.path.join(GlobalConfig.path_appdata_local(), "SSMT4GlobalConfigs\\"),
+            ):
+                candidate = os.path.join(config_root, "Games", cls.gamename, "Config.json")
+                if os.path.exists(candidate):
+                    game_config_json_path = candidate
+                    break
 
             game_config_json = GlobalConfig._load_json_dict(game_config_json_path)
             cls.current_game_migoto_folder = game_config_json.get("installDir", "")
@@ -146,7 +149,7 @@ class GlobalConfig:
     
     @staticmethod
     def path_reverse_output_folder():
-        # Reverse output belongs to the MMT toolchain, read MMT settings first.
+        # Reverse output belongs to the ProjectBunny/MMT toolchain.
         settings = GlobalConfig._mmt_family_settings()
         reverse_output_folder = str(settings.get("ReverseOutputFolder", "") or "").strip()
         if reverse_output_folder:
@@ -155,7 +158,7 @@ class GlobalConfig:
 
     @staticmethod
     def reverse_output_format():
-        # Reverse output format is written by the MMT toolchain on reverse success,
+        # Reverse output format is written by ProjectBunny/MMT on reverse success,
         # symmetric to ReverseOutputFolder. Values: ib_vb_fmt / ssmt_fmt.
         # When the key is missing, treat the output as the legacy ib_vb_fmt format.
         settings = GlobalConfig._mmt_family_settings()
@@ -165,19 +168,26 @@ class GlobalConfig:
         return "ib_vb_fmt"
 
     @staticmethod
+    def path_project_bunny_global_configs_folder():
+        # SSMT5/ProjectBunny now writes Blender-facing configs here.
+        return os.path.join(GlobalConfig.path_appdata_local(), "ProjectBunnyGlobalConfigs\\")
+
+    @staticmethod
     def path_mimitools_settings_json():
+        # Kept as legacy fallback only; new host no longer writes this file.
         return os.path.join(GlobalConfig.path_appdata_local(), "MIMIToolsGlobalConfigs", "MIMIToolsSettings.json")
 
     @staticmethod
     def path_mmt_settings_json():
-        return os.path.join(GlobalConfig.path_appdata_local(), "MMTGlobalConfigs", "MMTSettings.json")
+        return os.path.join(GlobalConfig.path_project_bunny_global_configs_folder(), "MMTSettings.json")
 
     @staticmethod
     def path_mmt_global_configs_folder():
-        return os.path.join(GlobalConfig.path_appdata_local(), "MMTGlobalConfigs\\")
+        return GlobalConfig.path_project_bunny_global_configs_folder()
 
     @staticmethod
     def path_mimitools_global_configs_folder():
+        # Kept as legacy fallback only; new host no longer writes this folder.
         return os.path.join(GlobalConfig.path_appdata_local(), "MIMIToolsGlobalConfigs\\")
 
     @staticmethod
@@ -192,33 +202,45 @@ class GlobalConfig:
 
     @staticmethod
     def _ssmt_settings():
-        # Read SSMT tool's own settings file only, no cross-tool fallback.
-        return GlobalConfig._load_json_dict(
-            os.path.join(GlobalConfig.path_ssmt4_global_configs_folder(), "settings.json")
+        # Read SSMT5/ProjectBunny's settings.json first, then fall back to the
+        # legacy SSMT4GlobalConfigs/settings.json for older installs.
+        settings = GlobalConfig._load_json_dict(
+            os.path.join(GlobalConfig.path_project_bunny_global_configs_folder(), "settings.json")
         )
+        if not settings:
+            settings = GlobalConfig._load_json_dict(
+                os.path.join(GlobalConfig.path_appdata_local(), "SSMT4GlobalConfigs", "settings.json")
+            )
+        return settings
 
     @staticmethod
     def _mmt_settings():
-        # Read MMT tool's own settings file only, no cross-tool fallback.
+        # Read the host reverse/app-state file written by SSMT5/ProjectBunny.
         return GlobalConfig._load_json_dict(GlobalConfig.path_mmt_settings_json())
 
     @staticmethod
     def _mimitools_settings():
-        # Read MIMITools settings file only, no cross-tool fallback.
+        # Legacy fallback only; the new host no longer writes MIMIToolsSettings.json.
         return GlobalConfig._load_json_dict(GlobalConfig.path_mimitools_settings_json())
 
     @staticmethod
     def _mmt_family_settings():
-        # The reverse toolchain is shared by MMT and MIMITools.
-        # MMT has higher priority, SSMT settings must never be read here.
+        # The reverse toolchain is shared by MMT/MIMITools/ProjectBunny.
+        # ProjectBunny's MMTSettings.json has highest priority; legacy
+        # MMTGlobalConfigs and MIMIToolsSettings remain fallbacks for older installs.
         settings = GlobalConfig._mmt_settings()
+        if not settings:
+            settings = GlobalConfig._load_json_dict(
+                os.path.join(GlobalConfig.path_appdata_local(), "MMTGlobalConfigs", "MMTSettings.json")
+            )
         if not settings:
             settings = GlobalConfig._mimitools_settings()
         return settings
 
     @staticmethod
     def path_mimitools_reversed_root():
-        # MIMITools reverse panel reads the MMT toolchain only, SSMT is never involved.
+        # MIMITools reverse panel reads the ProjectBunny/MMT toolchain only,
+        # SSMT extraction settings are never involved.
         settings = GlobalConfig._mmt_family_settings()
         work_folder = str(settings.get("DBMTWorkFolder", "") or "").strip()
         if work_folder:
@@ -233,7 +255,7 @@ class GlobalConfig:
 
     @staticmethod
     def path_mimitools_reverse_output_folder():
-        # Reverse output folder is stored by the MMT toolchain only.
+        # Reverse output folder is stored by the ProjectBunny/MMT toolchain.
         settings = GlobalConfig._mmt_family_settings()
         reverse_output_folder = str(settings.get("ReverseOutputFolder", "") or "").strip()
         if reverse_output_folder:
@@ -353,17 +375,22 @@ class GlobalConfig:
     
     @staticmethod
     def path_ssmt4_global_configs_folder():
-        return os.path.join(GlobalConfig.path_appdata_local(),"SSMT4GlobalConfigs\\")
+        # SSMT5/ProjectBunny's settings.json now lives in ProjectBunnyGlobalConfigs.
+        return GlobalConfig.path_project_bunny_global_configs_folder()
 
     # 定义基础的Json文件路径
     @staticmethod
     def path_main_json_ssmt4():
+        legacy_ssmt4 = os.path.join(GlobalConfig.path_appdata_local(), "SSMT4GlobalConfigs\\")
+        legacy_mmt = os.path.join(GlobalConfig.path_appdata_local(), "MMTGlobalConfigs\\")
         for folder, filename in (
-            (GlobalConfig.path_ssmt4_global_configs_folder(), "settings.json"),
-            (GlobalConfig.path_mmt_global_configs_folder(), "MMTSettings.json"),
+            (GlobalConfig.path_project_bunny_global_configs_folder(), "settings.json"),
+            (legacy_ssmt4, "settings.json"),
+            (GlobalConfig.path_project_bunny_global_configs_folder(), "MMTSettings.json"),
+            (legacy_mmt, "MMTSettings.json"),
             (GlobalConfig.path_mimitools_global_configs_folder(), "MIMIToolsSettings.json"),
         ):
             candidate = os.path.join(folder, filename)
             if os.path.exists(candidate):
                 return candidate
-        return os.path.join(GlobalConfig.path_ssmt4_global_configs_folder(), "settings.json")
+        return os.path.join(GlobalConfig.path_project_bunny_global_configs_folder(), "settings.json")
