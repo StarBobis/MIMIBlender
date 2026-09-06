@@ -76,7 +76,7 @@ class WorkSpaceModel:
 
     def _read_config_json(self, folder_path: str) -> Dict[str, str]:
         '''Reads the alias mapping in a given folder, returning a {draw_ib: alias_name} dict.
-        Prefers Config.json (old format); if absent, tries Config\Tabs\*.json (new format).'''
+        Prefers Config.json (old format); if absent, tries Config/Tabs/*.json (new format).'''
         result = {}
         config_path = os.path.join(folder_path, "Config.json")
         if os.path.exists(config_path):
@@ -625,7 +625,7 @@ class SSMTWorkSpace:
     def get_drawib_aliasname_dict_for_path(folder_path: str) -> Dict[str, str]:
         '''
         Reads the DrawIB-to-alias mapping from the given directory.
-        Prefers Config.json (old format); if absent, tries Config\Tabs\*.json (new format).
+        Prefers Config.json (old format); if absent, tries Config/Tabs/*.json (new format).
         '''
         drawib_aliasname_dict = {}
 
