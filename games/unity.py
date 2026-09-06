@@ -1,4 +1,4 @@
-﻿import math
+import math
 import os
 
 from ..common.global_config import GlobalConfig
@@ -109,7 +109,7 @@ class ExportUnity:
             resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
             resource_vb_section.append("type = Buffer")
             resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.draw_ib + "-" + category_name + ".buf")
+            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.get_category_buffer_filename(category_name))
             resource_vb_section.new_line()
 
         for submesh_model in drawib_model.submesh_model_list:
@@ -247,7 +247,7 @@ class ExportUnity:
                 resource_vb_section.append("type = Buffer")
 
             resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.draw_ib + "-" + category_name + ".buf")
+            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.get_category_buffer_filename(category_name))
             resource_vb_section.new_line()
 
         for submesh_model in drawib_model.submesh_model_list:

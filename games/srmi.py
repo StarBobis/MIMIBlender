@@ -1,4 +1,4 @@
-﻿from ..model.blueprint_model import BluePrintModel
+from ..model.blueprint_model import BluePrintModel
 from dataclasses import dataclass,field
 from ..common.global_config import GlobalConfig
 from ..common.global_properties import GlobalProperties
@@ -45,7 +45,7 @@ class ExportSRMI:
             
             # Generate VB files
             for category, category_buf in drawib_model.category_buffer_dict.items():
-                category_buf_filename = draw_ib + "-" + category + ".buf"
+                category_buf_filename = drawib_model.get_category_buffer_filename(category)
                 category_buf_filepath = os.path.join(buf_output_folder, category_buf_filename)
                 with open(category_buf_filepath, 'wb') as f:
                     category_buf.tofile(f)
@@ -229,7 +229,7 @@ class ExportSRMI:
                 resource_buffer_section.append("[Resource" + draw_ib + category_name + "]")
                 resource_buffer_section.append("type = Buffer")
                 resource_buffer_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict.get(category_name, 0)))
-                resource_buffer_section.append("filename = Meshes\\" + draw_ib + "-" + category_name + ".buf")
+                resource_buffer_section.append("filename = Meshes\\" + drawib_model.get_category_buffer_filename(category_name))
                 resource_buffer_section.new_line()
 
             for category_name in d3d11_game_type.OrderedCategoryNameList:
@@ -237,7 +237,7 @@ class ExportSRMI:
                     resource_buffer_section.append("[Resource" + draw_ib + category_name + "CS]")
                     resource_buffer_section.append("type = StructuredBuffer")
                     resource_buffer_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict.get(category_name, 0)))
-                    resource_buffer_section.append("filename = Meshes\\" + draw_ib + "-" + category_name + ".buf")
+                    resource_buffer_section.append("filename = Meshes\\" + drawib_model.get_category_buffer_filename(category_name))
                     resource_buffer_section.new_line()
 
             for submesh_model in drawib_model.submesh_model_list:

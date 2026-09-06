@@ -1,4 +1,4 @@
-﻿
+
 from dataclasses import field, dataclass
 import os
 
@@ -317,6 +317,33 @@ class DrawIBModel:
     def get_submesh_texture_markup_info_list(self, submesh_model: SubMeshModel) -> list:
         return self.submesh_texturemarkinfolist_dict.get(submesh_model.submesh_name, [])
 
+    def get_lod_name(self) -> str:
+        """Return the LOD name shared by the Submeshes of this DrawIB ('' when none).
+
+        Submesh names carry the LOD prefix (e.g. 'LOD0.94517393-0'), so the
+        prefix is read from the first Submesh. Category buffers are exported
+        once per DrawIB and get the same prefix so files of different LODs
+        never collide.
+        """
+        for submesh_model in self.submesh_model_list:
+            submesh_name = str(getattr(submesh_model, "submesh_name", "") or "").strip()
+            if submesh_name.upper().startswith("LOD") and "." in submesh_name:
+                lod_name = submesh_name.split(".", 1)[0]
+                if lod_name[3:].isdigit():
+                    return lod_name
+        return ""
+
+    def get_category_buffer_filename(self, category: str) -> str:
+        """Return the exported CategoryBuffer file name for this DrawIB.
+
+        Mirrors the IB naming ('<display_str>-Index.buf'): when the DrawIB
+        belongs to an LOD, the LOD prefix is added in front of the DrawIB,
+        e.g. 'LOD0.94517393-Position.buf'.
+        """
+        lod_name = self.get_lod_name()
+        prefix = lod_name + "." if lod_name else ""
+        return f"{prefix}{self.draw_ib}-{category}.buf"
+
     def generate_buffer_files(self, output_folder: str):
         for submesh_model in self.submesh_model_list:
             ib = self.submesh_ib_dict.get(submesh_model.submesh_name, [])
@@ -325,7 +352,7 @@ class DrawIBModel:
                 BufferExportHelper.write_buf_ib_r32_uint(ib, os.path.join(output_folder, ib_filename))
 
         for category, category_buf in self.category_buffer_dict.items():
-            category_buf_filename = self.draw_ib + "-" + category + ".buf"
+            category_buf_filename = self.get_category_buffer_filename(category)
             filepath = os.path.join(output_folder, category_buf_filename)
             with open(filepath, 'wb') as f:
                 category_buf.tofile(f)
