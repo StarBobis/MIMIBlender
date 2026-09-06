@@ -1,18 +1,14 @@
 import bpy
 import os
-import shutil
 from bpy.props import StringProperty, CollectionProperty, IntProperty, BoolProperty, EnumProperty
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 from bpy_extras.io_utils import ImportHelper
 import bpy.utils.previews
 
-from ..utils.obj_utils import ObjUtils
-
 from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
 from ..common.ssmt_import_helper import SSMTImportHelper
 
-from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 
 # Store the preview image collection
@@ -455,61 +451,6 @@ class SWORD4RefreshReversedWorkspaceList(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class Import3DMigotoRaw(bpy.types.Operator, ImportHelper):
-    """Import raw 3DMigoto vertex and index buffers"""
-    bl_idname = "import_mesh.migoto_raw_buffers_mmt"
-    bl_label = "Import .fmt .ib .vb Model"
-    bl_description = "Import 3Dmigoto .ib .vb .fmt files. You only need to select the .fmt file."
-    bl_options = {'REGISTER','UNDO'}
-
-    # We only need to select the fmt file, because the other files are determined by the fmt file name prefix.
-    # This allows importing .ib and .vb files that have multiple .fmt files describing different data types.
-    filename_ext = '.fmt'
-
-    filter_glob: bpy.props.StringProperty(
-        default='*.fmt',
-        options={'HIDDEN'},
-    ) # type: ignore
-
-    files: bpy.props.CollectionProperty(
-        name="File Path",
-        type=bpy.types.OperatorFileListElement,
-    ) # type: ignore
-
-    def execute(self, context):
-        # Add to a newly created collection for later operations
-        # The collection name should be the name of the current folder
-        dirname = os.path.dirname(self.filepath)
-
-        collection_name = os.path.basename(dirname)
-        collection = bpy.data.collections.new(collection_name)
-        bpy.context.scene.collection.children.link(collection)
-
-        # If the user does not select any fmt file, read all fmt files by default.
-        import_filename_list = []
-        if len(self.files) == 1:
-            if str(self.filepath).endswith(".fmt"):
-                import_filename_list.append(self.filepath)
-            else:
-                for filename in os.listdir(self.filepath):
-                    if filename.endswith(".fmt"):
-                        import_filename_list.append(filename)
-        else:
-            for fmt_file in self.files:
-                import_filename_list.append(fmt_file.name)
-
-        # Import each fmt file
-        for fmt_file_name in import_filename_list:
-            fmt_file_path = os.path.join(dirname, fmt_file_name)
-            mbf = MigotoBinaryFile(fmt_path=fmt_file_path)
-            MeshImportHelper.create_mesh_obj_from_mbf(mbf=mbf,import_collection=collection)
-
-        # Select all objects under the collection (users are used to having everything selected after import).
-        CollectionUtils.select_collection_objects(collection)
-
-        return {'FINISHED'}
-
-
 # Panel UI layout
 class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
     bl_label = "Mod Reverse Panel"
@@ -533,12 +474,6 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
 
         # One-click import of the reverse result button
         layout.operator("ssmt.import_all_reverse",icon='IMPORT')
-        
-        # Import ib vb fmt format files
-        layout.operator(Import3DMigotoRaw.bl_idname,icon='IMPORT')
-
-        # Auto detect button
-        row = layout.row()
 
         # Folder selection button
         row = layout.row()
@@ -602,7 +537,6 @@ def register():
     pcoll = bpy.utils.previews.new()
     preview_collections["main"] = pcoll
 
-    bpy.utils.register_class(Import3DMigotoRaw)
     bpy.utils.register_class(Sword_ImportTexture_ImageListItem)
     bpy.utils.register_class(SWORD_UL_FastImportTextureList)
     bpy.utils.register_class(Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel)
@@ -662,5 +596,4 @@ def unregister():
     bpy.utils.unregister_class(SWORD4RefreshReversedWorkspaceList)
     bpy.utils.unregister_class(SWORD_UL_FastImportTextureList)
     bpy.utils.unregister_class(Sword_ImportTexture_ImageListItem)
-    bpy.utils.unregister_class(Import3DMigotoRaw)
                 

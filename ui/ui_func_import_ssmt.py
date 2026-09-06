@@ -1,4 +1,4 @@
-﻿
+
 '''
 Import model configuration panel
 '''
@@ -7,7 +7,8 @@ import shutil
 import bpy
 import re
 
-# Workaround for AttributeError: 'IMPORT_MESH_OT_migoto_raw_buffers_mmt' object has no attribute 'filepath'
+# Workaround for the AttributeError raised when a file-picker operator does not inherit
+# ImportHelper: the 'filepath' attribute would be missing.
 from bpy_extras.io_utils import ImportHelper
 
 from ..utils.json_utils import JsonUtils
@@ -1034,7 +1035,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
     '''
     Import only the given list of submeshes.
     submesh_lod_info_list: [(lod_name, submesh_folder_path), ...]
-    e.g. [("LOD0", r"D:\SSMTCacheFolder\WorkSpace\GF2\Default\LOD0\3ed2b2ba-2592-76086"), ...]
+    e.g. [("LOD0", "D:/SSMTCacheFolder/WorkSpace/GF2/Default/LOD0/3ed2b2ba-2592-76086"), ...]
     force_gametype_name: when given (e.g. "CPU_P12_N12_TA16_C16_T4_"),
       forces every submesh to try only that data type (used for the DrawIB
       unified data-type scenario).
