@@ -158,21 +158,14 @@ class M_IniHelper:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("  ; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
                     draw_line = obj_model.get_drawindexed_str(obj_name_draw_offset_dict)
-                    from .m_custom_shader_helper import M_CustomShaderHelper
-                    drawindexed_str_list.extend(
-                        "  " + line
-                        for line in M_CustomShaderHelper.get_draw_lines(obj_model, draw_line)
-                    )
+                    drawindexed_str_list.append("  " + draw_line)
                 drawindexed_str_list.append("endif")
             else:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
                     draw_line = obj_model.get_drawindexed_str(obj_name_draw_offset_dict)
-                    from .m_custom_shader_helper import M_CustomShaderHelper
-                    drawindexed_str_list.extend(
-                        M_CustomShaderHelper.get_draw_lines(obj_model, draw_line)
-                    )
+                    drawindexed_str_list.append(draw_line)
             drawindexed_str_list.append("")
 
         return drawindexed_str_list
@@ -216,21 +209,14 @@ class M_IniHelper:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("  ; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
                     draw_line = obj_model.get_drawindexed_instanced_str(obj_name_draw_offset_dict)
-                    from .m_custom_shader_helper import M_CustomShaderHelper
-                    drawindexed_str_list.extend(
-                        "  " + line
-                        for line in M_CustomShaderHelper.get_draw_lines(obj_model, draw_line)
-                    )
+                    drawindexed_str_list.append("  " + draw_line)
                 drawindexed_str_list.append("endif")
             else:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
                     draw_line = obj_model.get_drawindexed_instanced_str(obj_name_draw_offset_dict)
-                    from .m_custom_shader_helper import M_CustomShaderHelper
-                    drawindexed_str_list.extend(
-                        M_CustomShaderHelper.get_draw_lines(obj_model, draw_line)
-                    )
+                    drawindexed_str_list.append(draw_line)
             drawindexed_str_list.append("")
 
         return drawindexed_str_list

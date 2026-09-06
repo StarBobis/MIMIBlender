@@ -19,9 +19,6 @@ class DrawCallModel:
     # Effective conditions, resolved when BlueprintModel is parsed
     work_key_list:list[M_Key] = field(init=False,repr=False,default_factory=list)
 
-    # Custom command list connected via the CustomShader input of Object Info
-    custom_shader_node_list:list = field(init=False,repr=False,default_factory=list)
-
     # These attributes are computed at the SubMeshModel level and used for ini output
     index_count:int = field(init=False,repr=False,default=0)
     vertex_count:int = field(init=False,repr=False,default=0)

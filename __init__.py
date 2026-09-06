@@ -20,7 +20,6 @@ from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
 from .blueprint import blueprint_node_panel
 
-from .blueprint import blueprint_node_custom_shader
 from .blueprint import blueprint_node_face_mod
 from .blueprint import blueprint_node_group
 from .blueprint import blueprint_file_drop
@@ -35,7 +34,7 @@ bl_info = {
     "name": "MIMIBlender",
     "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
-    "version": (1, 0, 2),
+    "version": (1, 0, 3),
     "location": "View3D",
     "category": "Generic"
 }
@@ -77,7 +76,6 @@ def _register_steps():
     yield blueprint_node_menu.register
     yield blueprint_node_panel.register
 
-    yield blueprint_node_custom_shader.register
     yield blueprint_node_face_mod.register
     yield blueprint_file_drop.register
     yield blueprint_node_highlight.register
@@ -99,7 +97,6 @@ def unregister():
         blueprint_file_drop.unregister,
         blueprint_node_face_mod.unregister,
         blueprint_node_group.unregister,
-        blueprint_node_custom_shader.unregister,
         blueprint_node_panel.unregister,
         blueprint_node_menu.unregister,
         ui_func_export.unregister,

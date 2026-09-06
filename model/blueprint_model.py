@@ -17,14 +17,12 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import SSMTNode_Object_Group, SSMTNode_SwitchKey, SSMTNode_Object_Info, SSMTNode_Result_Output
 
-from ..blueprint.blueprint_node_custom_shader import SSMTNode_CustomShader
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
     GROUP_NODE_IDNAME,
     GROUP_OUTPUT_IDNAME,
     _group_socket_for_interface,
 )
-from ..common.m_custom_shader_helper import M_CustomShaderHelper
 
 
 class BluePrintModel:
@@ -32,7 +30,6 @@ class BluePrintModel:
     _KEY_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
     
     def __init__(self, tree=None, context=None, output_node=None):
-        M_CustomShaderHelper.begin_export()
         # Global key name and key attribute dict
         self.keyname_mkey_dict:dict[str,M_Key] = {} 
 
@@ -226,7 +223,6 @@ class BluePrintModel:
 
         elif unknown_node.bl_idname == SSMTNode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
-            custom_shader_nodes = self._get_custom_shader_nodes(unknown_node)
 
             # Filter empty meshes early while parsing the blueprint, so the later export step never hits the "all vertex groups locked" error.
             if obj is None or obj.type != 'MESH' or obj.data is None or len(obj.data.vertices) == 0:
@@ -245,7 +241,6 @@ class BluePrintModel:
                         submesh_name=submesh_name,
                     )
                     obj_model.work_key_list = copy.deepcopy(chain_key_list)
-                    obj_model.custom_shader_node_list.extend(custom_shader_nodes)
                     self.ordered_draw_obj_data_model_list.append(obj_model)
                     self._unico_temp_objects.append(temp_obj)
                     LOG.info(f"BluePrintModel: UniComponent split '{unknown_node.object_name}' -> "
@@ -262,8 +257,6 @@ class BluePrintModel:
                     obj_model.display_name = unknown_node.original_object_name
 
                 obj_model.work_key_list = copy.deepcopy(chain_key_list)
-
-                obj_model.custom_shader_node_list.extend(custom_shader_nodes)
                 
                 self.ordered_draw_obj_data_model_list.append(obj_model)
 
@@ -319,22 +312,6 @@ class BluePrintModel:
             return
         for link in parent_socket.links:
             self.parse_single_node(link.from_node, chain_key_list)
-
-    @staticmethod
-    def _get_custom_shader_nodes(object_node):
-        result = []
-        for socket in getattr(object_node, 'inputs', []):
-            if getattr(socket, 'bl_idname', '') != 'SSMTSocketCustomShader' or not socket.is_linked:
-                continue
-            for link in socket.links:
-                node = link.from_node
-                if (
-                    getattr(node, 'bl_idname', '') == SSMTNode_CustomShader.bl_idname
-                    and not getattr(node, 'mute', False)
-                    and node not in result
-                ):
-                    result.append(node)
-        return result
 
     def _unico_split_object(
         self,

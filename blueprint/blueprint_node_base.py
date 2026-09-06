@@ -29,17 +29,6 @@ class SSMTSocketObject(NodeSocket):
 # 1. Define the custom node tree type
 
 
-class SSMTSocketCustomShader(NodeSocket):
-    '''Custom Shader command list socket.'''
-    bl_idname = 'SSMTSocketCustomShader'
-    bl_label = 'CustomShader Socket'
-
-    def draw_color(self, context, node):
-        return (0.95, 0.55, 0.15, 1.0)
-
-    def draw(self, context, layout, node, text):
-        layout.label(text=text)
-
 class SSMTBlueprintTree(NodeTree):
     '''SSMT Mod Logic Blueprint'''
     bl_idname = 'SSMTBlueprintTreeType'
@@ -446,7 +435,6 @@ def register():
     bpy.utils.register_class(SSMTSubmeshListItem)
     bpy.utils.register_class(SSMTBlueprintTree)
     bpy.utils.register_class(SSMTSocketObject)
-    bpy.utils.register_class(SSMTSocketCustomShader)
     bpy.utils.register_class(THEHERTA3_OT_OpenPersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_DeletePersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_RenamePersistentBlueprint)
@@ -462,7 +450,6 @@ def unregister():
     BlueprintExportHelper.unregister_workspace_tree_sync_timer()
     del SSMTBlueprintTree.ssmt_submesh_items
     bpy.utils.unregister_class(SSMT_OT_ApplyFramePropertiesToAll)
-    bpy.utils.unregister_class(SSMTSocketCustomShader)
     bpy.utils.unregister_class(SSMT_PT_FrameProperties)
     bpy.utils.unregister_class(THEHERTA3_OT_RenamePersistentBlueprint)
     bpy.utils.unregister_class(THEHERTA3_OT_DeletePersistentBlueprint)

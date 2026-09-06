@@ -391,34 +391,6 @@ class SSMTNode_Object_Info(SSMTNodeBase):
 
     def init(self, context):
         self.outputs.new('SSMTSocketObject', "Object")
-        self._add_custom_shader_socket()
-
-    def _get_custom_shader_sockets(self):
-        return [
-            sock for sock in self.inputs
-            if getattr(sock, 'bl_idname', '') == 'SSMTSocketCustomShader'
-        ]
-
-    def _add_custom_shader_socket(self):
-        self.inputs.new('SSMTSocketCustomShader', 'CustomShader')
-
-    def ensure_custom_shader_socket(self):
-        if not self._get_custom_shader_sockets():
-            self._add_custom_shader_socket()
-
-    def update(self):
-        self.ensure_custom_shader_socket()
-        custom_shader_sockets = self._get_custom_shader_sockets()
-        if custom_shader_sockets and custom_shader_sockets[-1].is_linked:
-            self._add_custom_shader_socket()
-            custom_shader_sockets = self._get_custom_shader_sockets()
-        while (
-            len(custom_shader_sockets) > 1
-            and not custom_shader_sockets[-1].is_linked
-            and not custom_shader_sockets[-2].is_linked
-        ):
-            self.inputs.remove(custom_shader_sockets[-1])
-            custom_shader_sockets = self._get_custom_shader_sockets()
 
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'SSMTBlueprintTreeType' else None
@@ -444,16 +416,6 @@ class SSMTNode_Object_Info(SSMTNodeBase):
 
             if self.submesh_name and self.submesh_name not in BlueprintExportHelper.get_tree_submesh_names(tree=tree):
                 layout.label(text="Current Submesh is not in the list; export will fall back to object name resolution", icon='ERROR')
-
-        for socket in self._get_custom_shader_sockets():
-            if not socket.is_linked:
-                continue
-            linked_node = socket.links[0].from_node if socket.links else None
-            mark_name = str(getattr(linked_node, 'mark_name', '') or '').strip()
-            layout.label(
-                text='CustomShader ' + (mark_name or '?'),
-                icon='NODE_COMPOSITING',
-            )
 
 
 
@@ -842,16 +804,6 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-    # During Blender registration bpy.data can still be _RestrictData, which
-    # does not expose node_groups.  Existing blueprints are refreshed later
-    # when normal data access is available.
-    node_groups = getattr(getattr(bpy, 'data', None), 'node_groups', ())
-    for tree in node_groups:
-        if getattr(tree, 'bl_idname', '') != 'SSMTBlueprintTreeType':
-            continue
-        for node in tree.nodes:
-            if getattr(node, 'bl_idname', '') == SSMTNode_Object_Info.bl_idname:
-                node.ensure_custom_shader_socket()
     bpy.types.VIEW3D_HT_header.append(draw_view3d_header)
 
 
