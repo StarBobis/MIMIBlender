@@ -1,4 +1,4 @@
-"""Texture 节点的默认命名规则。"""
+"""Default naming rules for Texture nodes."""
 
 import re
 

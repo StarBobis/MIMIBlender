@@ -119,9 +119,9 @@ class ObjUtils:
     @staticmethod
     def join_objects(context, objects):
         '''
-        Nico: 卧槽，居然用的是原始的join，我之前的思路是直接对每个obj获取buffer属性然后拼接
-        怪不得之前的思路做出来有毛病呢
-        所以说后面WWMI的统计每个Component的顶点组部分得用这种join技术才行
+        Nico: Damn, it actually uses the plain join operator; my earlier approach of reading the
+        buffer attribute of each obj and splicing it together was buggy.
+        So WWMI's per-Component vertex-group statistics need this join technique after all.
         '''
         if len(objects) == 1:
             return
@@ -164,42 +164,42 @@ class ObjUtils:
 
     @staticmethod
     def select_obj(target_obj:bpy.types.Object):
-        # 假设 obj_copy 已经是你新建/复制的物体
+        # Assume obj_copy is the object you have just created/copied
         view_layer = bpy.context.view_layer
 
-        # 1. 清空当前所有选中（可选，但通常需要）
+        # 1. Clear all current selections (optional, but usually needed)
         # bpy.ops.object.select_all(action='DESELECT')
-        # Nico: 注意，这里不能用 bpy.ops.object.select_all(action='DESELECT')，
-        # 因为这个操作有 poll() 检查，
+        # Nico: note that bpy.ops.object.select_all(action='DESELECT') cannot be used here,
+        # because that operator has a poll() check,
         # bpy.ops.object.select_all 
-        # 通常要求当前的上下文是 3D 视图（3D Viewport）。
-        # 如果你的脚本是在其他面板（比如属性面板）的按钮回调中运行，或者在后台运行，
-        # 当前的 Context 可能不满足这个要求，导致 poll() 检查失败。
-        # 修复方法：
-        # 不要使用 bpy.ops.object.select_all(action='DESELECT') 这种依赖 Context 的操作符，
-        # 而是直接使用 Blender 的数据 API 来修改对象的选中状态。
-        # 这种方式更底层，不受 Context 限制，更加稳定。
+        # and it usually requires the current context to be a 3D viewport.
+        # If the script runs in a button callback of another panel (e.g. the Properties panel), or in the background,
+        # the current Context may not satisfy this requirement, causing the poll() check to fail.
+        # Fix:
+        # Do not use operators that depend on the Context, such as bpy.ops.object.select_all(action='DESELECT');
+        # instead, modify the object selection state directly with Blender's data API.
+        # This is lower-level, not restricted by the Context, and more stable.
         for obj in bpy.context.selected_objects:
             obj.select_set(False)
 
-        # 2. 设活动对象
+        # 2. Set the active object
         view_layer.objects.active = target_obj
 
-        # 3. 选中它
+        # 3. Select it
         target_obj.select_set(True)
 
-        # 4. 强制刷新（某些模式下需要）
+        # 4. Force a refresh (needed in some modes)
         view_layer.update()
 
     @staticmethod
     def get_obj_by_name(name: str) -> bpy.types.Object | None:
-        """根据名称拿到 Object；找不到返回 None"""
-        return bpy.data.objects.get(name)          # 等价于 bpy.data.objects[name]，但不会抛 KeyError
+        """Get the Object by name; return None if not found"""
+        return bpy.data.objects.get(name)          # Equivalent to bpy.data.objects[name], but without raising KeyError
     
     @staticmethod
     def get_mesh_evaluate_from_obj(obj:bpy.types.Object) -> bpy.types.Mesh:
         '''
-        Nico: 通过evaluated_get获取到的是一个新的mesh，用于导出，不影响原始Mesh
+        Nico: evaluated_get returns a new mesh meant for export; it does not affect the original Mesh
         '''
         return obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh()
 
@@ -209,29 +209,29 @@ class ObjUtils:
         new_collection = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(new_collection)
 
-        # 复制原对象并链接到新的集合
+        # Copy the original object and link it to the new collection
         obj_copy = obj.copy()
         obj_copy.data = obj.data.copy()
         new_collection.objects.link(obj_copy)
         
-        # 取消原对象的选择状态
+        # Deselect the original object
         obj.select_set(False)
         
-        # 设置活动对象为副本，并进入编辑模式
+        # Make the copy the active object and enter Edit Mode
         bpy.context.view_layer.objects.active = obj_copy
-        obj_copy.select_set(True)  # 确保副本被选中
+        obj_copy.select_set(True)  # ensure the copy is selected
         bpy.ops.object.mode_set(mode='EDIT')
         
-        # 分离松散部分
+        # Separate into loose parts
         bpy.ops.mesh.separate(type='LOOSE')
         
-        # 返回到对象模式
+        # Return to Object Mode
         bpy.ops.object.mode_set(mode='OBJECT')
 
-        # 清理：取消副本的选择状态，以防影响后续操作
+        # Cleanup: deselect the copy so it does not affect later operations
         obj_copy.select_set(False)
 
-        # 分离后清理多出来的 Basis.001（形态键复制时 Blender 可能自动创建重复的 Basis）
+        # After separating, remove the extra Basis.001 (Blender may auto-create duplicate Basis shape keys when copying)
         for coll_obj in new_collection.objects:
             if coll_obj.type == 'MESH' and coll_obj.data.shape_keys:
                 sk_to_remove = []
@@ -244,17 +244,17 @@ class ObjUtils:
     @staticmethod
     def merge_objects(obj_list, target_collection=None):
         """
-        合并给定的对象列表。
+        Merge the given list of objects.
         
-        :param obj_list: 要合并的对象列表
-        :param target_collection: 目标集合，如果为None，则使用当前场景的活动集合
+        :param obj_list: list of objects to merge
+        :param target_collection: target collection; if None, use the active collection of the current scene
         """
-        # 确保至少有一个对象可以进行合并
+        # Make sure there is at least one object to merge
         if len(obj_list) < 1:
-            print("没有足够的对象进行合并")
+            print("Not enough objects to merge")
             return
         
-        # 如果目标集合未指定，则使用当前场景的默认集合
+        # If no target collection was given, use the default collection of the current scene
         if target_collection is None:
             target_collection = bpy.context.collection
         
@@ -284,38 +284,38 @@ class ObjUtils:
 
     @classmethod
     def normalize_all(cls,obj):
-        # 调用前需确保选中了这个obj，也就是当前的active对象是这个obj
+        # Before calling this, make sure obj is selected, i.e. it is the current active object
         cls.select_obj(obj)
 
         # print("Normalize All Weights For: " + obj.name)
-        # 选择你要操作的对象，这里假设场景中只有一个导入的OBJ对象
+        # Select the object to operate on; this assumes the scene contains a single imported OBJ object
         if obj and obj.type == 'MESH':
-            # 检查是否全部被锁定
+            # Check whether all vertex groups are locked
             if cls.is_all_vertex_groups_locked(obj):
-                print(f"警告: 对象 {obj.name} 的所有顶点组均被锁定，正在尝试解锁以执行归一化...")
+                print(f"Warning: All vertex groups of object {obj.name} are locked; unlocking them to run normalization...")
                 for vg in obj.vertex_groups:
                     vg.lock_weight = False
 
-            # 进入权重编辑模式（如果需要）
+            # Enter Weight Paint mode (if needed)
             bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
             
-            # 确保该对象是活动的，并且被选中
+            # Make sure the object is active and selected
             bpy.context.view_layer.objects.active = obj
             obj.select_set(True)
             
-            # 对所有顶点组应用 Normalize All
+            # Apply Normalize All to all vertex groups
             bpy.ops.object.vertex_group_normalize_all()
 
-            # 回到物体模式
+            # Return to Object Mode
             bpy.ops.object.mode_set(mode='OBJECT')
         else:
-            print("没有找到合适的网格对象来执行规范化操作。")
+            print("No suitable mesh object found to perform normalization.")
 
     @staticmethod
     def mesh_triangulate(me:bpy.types.Mesh):
         '''
-        三角化一个mesh
-        注意这个三角化之后就变成新的mesh了
+        Triangulate a mesh
+        Note that after this the mesh becomes the new triangulated mesh
         '''
         bm = bmesh.new()
         bm.from_mesh(me)
@@ -326,11 +326,11 @@ class ObjUtils:
     @staticmethod
     def get_bpy_context_object():
         '''
-        获取当前场景中的obj对象,如果为None则抛出Fatal异常
+        Get the current scene's obj object; raise Fatal if it is None
         '''
         obj = bpy.context.object
         if obj is None:
-            # 为空时不导出
+            # Do not export when it is None
             raise Fatal('No object selected')
         
         return obj
@@ -338,30 +338,30 @@ class ObjUtils:
     @staticmethod
     def selected_obj_delete_loose():
         
-        # 获取当前选中的对象
+        # Get the currently selected objects
         selected_objects = bpy.context.selected_objects
-        # 检查是否选中了一个Mesh对象
+        # Check whether a Mesh object is selected
         for obj in selected_objects:
             if obj.type == 'MESH':
-                # 设置当前对象为活动对象 （不设置的话后面没法切换编辑模式，就会报错）
+                # Make the current object active (otherwise Edit Mode cannot be entered later and it errors out)
                 bpy.context.view_layer.objects.active = obj
-                # 获取选中的网格对象
+                # Get the selected mesh object
                 bpy.ops.object.mode_set(mode='EDIT')
-                # 选择所有的顶点
+                # Select all vertices
                 bpy.ops.mesh.select_all(action='SELECT')
-                # 执行删除孤立顶点操作
+                # Run the delete-loose-vertices operator
                 bpy.ops.mesh.delete_loose()
-                # 切换回对象模式
+                # Switch back to Object Mode
                 bpy.ops.object.mode_set(mode='OBJECT')
 
     @staticmethod
     def is_contains_locked_weights(obj):
         locked_groups = []
-        # 确保对象类型为MESH，因为只有这种类型的对象才有顶点组
+        # Restrict to MESH objects, since only they have vertex groups
         if obj.type == 'MESH':
-            # 遍历对象的所有顶点组
+            # Iterate over all of the object's vertex groups
             for vg in obj.vertex_groups:
-                # 如果顶点组被锁定，则添加到列表中
+                # Collect the locked vertex groups into a list
                 if vg.lock_weight:
                     locked_groups.append(vg.name)
         if len(locked_groups) != 0:
@@ -372,16 +372,16 @@ class ObjUtils:
     @staticmethod
     def is_all_vertex_groups_locked(obj):
         '''
-        判断是否所有的顶点组都被锁定了，因为所有的顶点组都被锁定的话就无法对权重执行Normalize All了
+        Return whether all vertex groups are locked, since Normalize All cannot be run on the weights while every group is locked
         '''
         vgs_number = 0
         locked_groups = []
-        # 确保对象类型为MESH，因为只有这种类型的对象才有顶点组
+        # Restrict to MESH objects, since only they have vertex groups
         if obj.type == 'MESH':
-            # 遍历对象的所有顶点组
+            # Iterate over all of the object's vertex groups
             for vg in obj.vertex_groups:
                 vgs_number = vgs_number + 1
-                # 如果顶点组被锁定，则添加到列表中
+                # Collect the locked vertex groups into a list
                 if vg.lock_weight:
                     locked_groups.append(vg.name)
         if len(locked_groups) == vgs_number:
@@ -417,7 +417,7 @@ class ObjUtils:
     @staticmethod
     def copy_object(context, obj, name=None, collection=None):
         '''
-        collection指的是复制后链接到哪个collection里
+        collection is where the copy is linked after duplication
         '''
         with OpenObject(context, obj, mode='OBJECT') as obj:
             new_obj = obj.copy()
@@ -432,24 +432,24 @@ class ObjUtils:
     @staticmethod
     def reset_obj_rotation(obj):
         if obj.type == "MESH":
-            # 将旋转角度归零
-            obj.rotation_euler[0] = 0.0  # X轴
-            obj.rotation_euler[1] = 0.0  # Y轴
-            obj.rotation_euler[2] = 0.0  # Z轴
+            # Reset the rotation to zero
+            obj.rotation_euler[0] = 0.0  # X axis
+            obj.rotation_euler[1] = 0.0  # Y axis
+            obj.rotation_euler[2] = 0.0  # Z axis
 
     @staticmethod
     def reset_obj_location(obj):
         if obj.type == "MESH":
-            # 将位置归零
-            obj.location[0] = 0.0  # X轴
-            obj.location[1] = 0.0  # Y轴
-            obj.location[2] = 0.0  # Z轴
+            # Reset the location to zero
+            obj.location[0] = 0.0  # X axis
+            obj.location[1] = 0.0  # Y axis
+            obj.location[2] = 0.0  # Z axis
 
     @staticmethod
     def apply_mirror_transform(obj):
         '''
-        应用镜像变换：将 Scale X 设为 -1 并应用缩放变换
-        使用 Blender 内置的变换应用功能
+        Apply the mirror transform: set Scale X to -1 and apply the scale transform,
+        using Blender's built-in apply-transform feature
         '''
         if obj.type != 'MESH':
             return
@@ -496,7 +496,7 @@ class ObjUtils:
     @staticmethod
     def flip_face_normals(obj):
         '''
-        翻转面朝向：使用 Blender 内置的翻转法线功能
+        Flip face orientation using Blender's built-in flip-normals feature
         '''
         if obj.type != 'MESH':
             return
@@ -542,23 +542,23 @@ class ObjUtils:
     @classmethod
     def prepare_copy_for_mirror_workflow(cls, copy_obj):
         '''
-        为非镜像工作流准备副本
-        在三角化之前执行
+        Prepare the copy for the non-mirror workflow
+        Run this before triangulation
         
-        优化：
-        1. 只检查启用的骨骼修改器
-        2. 禁用的修改器会在 _apply_all_modifiers 中删除
+        Optimizations:
+        1. Only inspect enabled armature modifiers
+        2. Disabled modifiers are removed inside _apply_all_modifiers
         
-        情况一：物体包含启用的骨骼绑定但无形态键
-          - 应用所有修改器
+        Case 1: object has an enabled armature binding but no shape keys
+          - Apply all modifiers
         
-        情况二：物体同时包含启用的骨骼绑定和形态键
-          - 归零形态键获取基态
-          - 应用修改器
-          - 重新应用形态键（保留原始参数值）
+        Case 2: object has both an enabled armature binding and shape keys
+          - Zero the shape keys to obtain the base state
+          - Apply the modifiers
+          - Re-apply the shape keys (keeping their original values)
         
-        情况三：物体没有启用的骨骼绑定
-          - 直接跳过，后续会处理其他修改器
+        Case 3: object has no enabled armature binding
+          - Skip it; other modifiers are handled later
         '''
         if copy_obj.type != 'MESH':
             return
@@ -570,25 +570,25 @@ class ObjUtils:
         has_shape_keys = copy_obj.data.shape_keys is not None
         
         if not has_enabled_armature:
-            print(f"物体 {copy_obj.name} 无启用的骨骼绑定，无需前处理")
+            print(f"Object {copy_obj.name} has no enabled armature binding; no preprocessing needed")
             return
         
         if has_shape_keys:
-            print(f"物体 {copy_obj.name} 有启用的骨骼绑定和形态键，执行特殊前处理")
+            print(f"Object {copy_obj.name} has an enabled armature binding and shape keys; running special preprocessing")
             cls._prepare_with_shape_keys(copy_obj)
         else:
-            print(f"物体 {copy_obj.name} 有启用的骨骼绑定无形态键，应用修改器")
+            print(f"Object {copy_obj.name} has an enabled armature binding but no shape keys; applying modifiers")
             cls._apply_all_modifiers(copy_obj)
     
     @staticmethod
     def _prepare_with_shape_keys(obj):
         '''
-        处理有形态键的绑定物体
-        1. 删除禁用的修改器（优化：不应用不需要的修改器）
-        2. 保存形态键参数
-        3. 归零形态键
-        4. 应用修改器（使用优化算法）
-        5. 重新应用形态键（保留原始参数值）
+        Handle a bound object (armature-deformed) that has shape keys
+        1. Remove disabled modifiers (optimization: do not apply unneeded ones)
+        2. Save the shape key values
+        3. Zero out the shape keys
+        4. Apply the modifiers (using the optimized routine)
+        5. Re-apply the shape keys (preserving the original values)
         '''
         if obj.type != 'MESH':
             return
@@ -598,11 +598,11 @@ class ObjUtils:
         
         disabled_modifiers = [mod for mod in obj.modifiers if not mod.show_viewport]
         for mod in reversed(disabled_modifiers):
-            print(f"删除禁用的修改器: {mod.name} ({mod.type})")
+            print(f"Removing disabled modifier: {mod.name} ({mod.type})")
             obj.modifiers.remove(mod)
         
         if not obj.modifiers:
-            print(f"物体 {obj.name} 没有启用的修改器，跳过应用")
+            print(f"Object {obj.name} has no enabled modifiers; skipping apply")
             return
         
         shape_key_values = {}
@@ -628,8 +628,8 @@ class ObjUtils:
     @classmethod
     def apply_mirror_workflow(cls, obj):
         '''
-        应用非镜像工作流：Scale X = -1 + 翻转面朝向
-        注意：如果物体有骨骼绑定，会先应用修改器将骨骼变形烘焙到网格上
+        Apply the non-mirror workflow: Scale X = -1 + flip face orientation
+        Note: if the object has an armature binding, the modifiers are applied first to bake the bone deformation into the mesh
         '''
         if obj.type != 'MESH':
             return
@@ -645,13 +645,13 @@ class ObjUtils:
     @staticmethod
     def _apply_all_modifiers(obj):
         '''
-        应用物体上的所有修改器
-        将修改器效果烘焙到网格数据中
-        如果物体有形态键，使用特殊方式处理
+        Apply all modifiers on the object.
+        Bake the modifier effects into the mesh data.
+        If the object has shape keys, handle them in a special way.
         
-        优化：
-        1. 先删除禁用的修改器（不应用）
-        2. 只应用启用的修改器
+        Optimizations:
+        1. Remove disabled modifiers first (they are not applied)
+        2. Apply only the enabled modifiers
         '''
         if obj.type != 'MESH':
             return
@@ -673,11 +673,11 @@ class ObjUtils:
             
             disabled_modifiers = [mod for mod in obj.modifiers if not mod.show_viewport]
             for mod in reversed(disabled_modifiers):
-                print(f"删除禁用的修改器: {mod.name} ({mod.type})")
+                print(f"Removing disabled modifier: {mod.name} ({mod.type})")
                 obj.modifiers.remove(mod)
             
             if not obj.modifiers:
-                print(f"物体 {obj.name} 没有启用的修改器")
+                print(f"Object {obj.name} has no enabled modifiers")
                 return
             
             from .shapekey_utils import ShapeKeyUtils
@@ -685,7 +685,7 @@ class ObjUtils:
             has_shape_keys = obj.data.shape_keys is not None
             
             if has_shape_keys:
-                print(f"物体 {obj.name} 有形态键，使用特殊方式应用修改器")
+                print(f"Object {obj.name} has shape keys; applying modifiers in a special way")
                 modifier_names = [mod.name for mod in obj.modifiers]
                 ShapeKeyUtils.apply_modifiers_for_object_with_shape_keys(
                     bpy.context, 
@@ -693,7 +693,7 @@ class ObjUtils:
                     disable_armatures=False
                 )
             else:
-                print(f"物体 {obj.name} 无形态键，直接应用修改器")
+                print(f"Object {obj.name} has no shape keys; applying modifiers directly")
                 for modifier in obj.modifiers[:]:
                     try:
                         bpy.ops.object.modifier_apply(modifier=modifier.name)
@@ -726,7 +726,7 @@ class ObjUtils:
     @classmethod
     def apply_mirror_workflow_to_objects(cls, obj_list):
         '''
-        对多个物体应用非镜像工作流
+        Apply the non-mirror workflow to multiple objects
         '''
         for obj in obj_list:
             if obj and obj.type == 'MESH':
@@ -735,8 +735,8 @@ class ObjUtils:
     @staticmethod
     def create_backup_object(obj):
         '''
-        创建物体的完整备份（包括网格数据）
-        返回备份物体
+        Create a complete backup of the object (including its mesh data).
+        Return the backup object.
         '''
         if obj.type != 'MESH':
             return None
@@ -757,7 +757,7 @@ class ObjUtils:
     @staticmethod
     def restore_from_backup(original_obj, backup_obj):
         '''
-        从备份物体恢复原始物体的网格数据
+        Restore the original object's mesh data from the backup object
         '''
         if not original_obj or not backup_obj:
             return
@@ -770,7 +770,7 @@ class ObjUtils:
     @staticmethod
     def delete_backup_object(backup_obj):
         '''
-        删除备份物体
+        Delete the backup object
         '''
         if not backup_obj:
             return
@@ -786,8 +786,8 @@ class ObjUtils:
     @classmethod
     def create_backup_objects(cls, obj_list):
         '''
-        为多个物体创建备份
-        返回 {原始物体: 备份物体} 的字典
+        Create backups for multiple objects.
+        Return a dictionary mapping {original object: backup object}.
         '''
         backup_dict = {}
         for obj in obj_list:
@@ -800,7 +800,7 @@ class ObjUtils:
     @classmethod
     def restore_and_cleanup_backups(cls, backup_dict):
         '''
-        从备份恢复所有物体并清理备份数据
+        Restore all objects from their backups and clean up the backup data
         '''
         for original_obj, backup_obj in backup_dict.items():
             cls.restore_from_backup(original_obj, backup_obj)
@@ -814,7 +814,7 @@ class ObjUtils:
                 pass
 
     # ============================================================
-    #  独立函数整合 — 以下均为从模块级移入的静态工具方法
+    #  Consolidation of standalone functions - the following are static utility methods moved in from module level
     # ============================================================
 
     @staticmethod
@@ -972,7 +972,7 @@ class ObjUtils:
 
     @staticmethod
     def mesh_triangulate_raw(me):
-        '''三角化一个 mesh（不涉及 context，纯数据操作）'''
+        '''Triangulate a mesh (pure data operation, no context involved)'''
         bm = bmesh.new()
         bm.from_mesh(me)
         bmesh.ops.triangulate(bm, faces=bm.faces, quad_method='BEAUTY', ngon_method='BEAUTY')
@@ -982,8 +982,8 @@ class ObjUtils:
     @staticmethod
     def mesh_triangulate_beauty(obj):
         '''
-        使用 Blender 内置的 BEAUTY 算法进行三角化
-        使用 bpy.ops.mesh.quads_convert_to_tris 确保一致的三角化结果
+        Triangulate with Blender's built-in BEAUTY algorithm.
+        Uses bpy.ops.mesh.quads_convert_to_tris to guarantee consistent triangulation results.
         '''
         if obj.type != 'MESH':
             return

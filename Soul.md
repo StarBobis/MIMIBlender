@@ -1,9 +1,8 @@
-# AI编码需要遵守如下规则
+# AI Coding Rules
 
-- 所有注释全部使用英文编写，禁止使用中文防止可能出现乱码问题
-- 生成的代码必须带有不少于代码量30%的注释
-- 所有创建的文件夹和文件名全部都必须是小写，因为Git无法追踪到文件名大小写变化
-- 不要轻易使用PowerShell脚本，如非必要请编写Python脚本执行，防止乱码问题
-- 生成代码时，非必要尽可能使用简单的语法，确保生成的代码能够让未受过编程训练的普通人/非专业程序员也能轻松读懂和维护
+- All comments must be written in English; Chinese is forbidden to avoid possible garbled-character (encoding) issues.
+- Generated code must include comments of no less than 30% of the code volume.
+- All created folders and file names must be lowercase, because Git cannot track case-only renames of file names.
+- Do not use PowerShell scripts lightly; unless necessary, write Python scripts instead, to avoid garbled-character issues.
+- When generating code, use simple syntax wherever possible, so that ordinary people without programming training / non-professional programmers can easily read and maintain the generated code.
 - 
-

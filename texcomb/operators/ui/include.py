@@ -25,25 +25,25 @@ def draw_ui(context: bpy.types.Context, m_col: bpy.types.UILayout) -> None:
     elif globs.pil_install_attempted:
         if globs.pil_install_success:
             col = m_col.box().column()
-            col.label(text="安装完成", icon="CHECKMARK")
-            col.label(text="Pillow 已安装，请重启 Blender 后使用")
+            col.label(text="Installation Complete", icon="CHECKMARK")
+            col.label(text="Pillow is installed; restart Blender to use it")
         else:
             box = m_col.box().column()
-            box.label(text="安装失败", icon="ERROR")
+            box.label(text="Installation Failed", icon="ERROR")
             box.separator()
 
             if globs.pil_install_error_message:
                 error_box = box.box()
                 error_col = error_box.column()
-                error_col.label(text="错误详情:", icon="INFO")
+                error_col.label(text="Error details:", icon="INFO")
                 for line in textwrap.wrap(globs.pil_install_error_message, width=60):
                     error_col.label(text=line)
                 box.separator()
 
             row = box.row(align=True)
             row.scale_y = 1.2
-            row.operator("smc.get_pillow", text="重试安装", icon="FILE_REFRESH")
-            row.operator("smc.check_pillow", text="检查安装", icon="FILE_TICK")
+            row.operator("smc.get_pillow", text="Retry Install", icon="FILE_REFRESH")
+            row.operator("smc.check_pillow", text="Check Install", icon="FILE_TICK")
     else:
         MaterialCombinerPanel.draw_pillow_installer(context, m_col)
 
@@ -74,16 +74,16 @@ def _materials_list(scn: Scene, m_col: bpy.types.UILayout) -> None:
     col.scale_y = 1.2
     col.operator(
         "smc.refresh_ob_data",
-        text="更新材质列表"
+        text="Refresh Material List"
         if scn.smc_ob_data
-        else "生成材质列表",
+        else "Generate Material List",
     )
     col = m_col.column()
     col.scale_y = 1.5
     col.operator(
-        "smc.combiner", text="保存图集到..."
+        "smc.combiner", text="Save Atlas to..."
     ).cats = True
     col.separator()
     col = m_col.column()
-    col.label(text="如果这个插件帮你省了时间:")
+    col.label(text="If this addon saved you some time:")
 

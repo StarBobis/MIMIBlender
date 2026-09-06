@@ -335,7 +335,7 @@ def collect_texture_diagnostics(data: Structure) -> List[str]:
         alpha_diagnostic = item["gfx"].get("alpha_diagnostic")
         if alpha_diagnostic:
             messages.append(
-                "材质 '{}' 的 Alpha 未参与合并：{}".format(
+                "Material '{}' alpha was not included in the merge: {}".format(
                     mat.name, alpha_diagnostic
                 )
             )
@@ -348,16 +348,17 @@ def _get_texture_fallback_message(
     """Explain why a material will be treated as color-only."""
     if not img:
         return (
-            "材质 '{}' 未找到连接到当前输出的主贴图，将按纯色材质处理。"
+            "Material '{}' has no main texture connected to the current output; "
+            "it will be treated as a solid color material."
         ).format(mat.name)
 
     pack_issue = get_image_pack_issue(img)
     if pack_issue:
-        return "材质 '{}' 的贴图 '{}' 无法打包，将按纯色处理：{}".format(
+        return "Material '{}' texture '{}' cannot be packed and will be treated as solid color: {}".format(
             mat.name, img.name, pack_issue
         )
 
-    return "材质 '{}' 的贴图 '{}' 打包失败，将按纯色材质处理。".format(
+    return "Material '{}' texture '{}' failed to pack and will be treated as a solid color material.".format(
         mat.name, img.name
     )
 
@@ -741,7 +742,7 @@ def _apply_alpha_texture(
             alpha_img = _get_uv_image(item, alpha_img, size)
         img.putalpha(alpha_img)
     except Exception as e:
-        item["gfx"]["alpha_diagnostic"] = "Alpha 贴图应用失败: {}".format(e)
+        item["gfx"]["alpha_diagnostic"] = "Failed to apply the alpha texture: {}".format(e)
     return img
 
 
@@ -990,8 +991,8 @@ def _save_atlas_with_type(
     )
 
     path = os.path.join(scn.smc_save_path, filename)
-    # 确保输出始终为 RGBA 模式，即使源贴图无 Alpha（如 JPG）
-    # 这样输出的图片始终带 Alpha 通道，为后续需要透明度的场景做好准备
+    # Ensure the output is always in RGBA mode, even if the source texture has no alpha (e.g. JPG)
+    # This way the output image always carries an alpha channel, ready for later transparency needs
     if atlas.mode != "RGBA":
         atlas = atlas.convert("RGBA")
     atlas.save(path)
@@ -1061,8 +1062,8 @@ def _configure_material_multi(  # noqa: PLR0915
 
     node_tree = mat.node_tree
     # node_bsdf = node_tree.nodes["Principled BSDF"]
-    # 按照名称查找会受到语言影响，如果是中文就无法查找到了
-    # 这里改为按照类型查找
+    # Name-based lookup depends on the UI language; a Chinese name would not be found
+    # Look up by node type instead
     node_bsdf = next(
         n for n in node_tree.nodes if n.type == "BSDF_PRINCIPLED"
     )
@@ -1076,7 +1077,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "albedo" in textures:
         node_albedo = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_albedo.image = textures["albedo"].image
-        node_albedo.label = "漫反射图集"
+        node_albedo.label = "Diffuse Atlas"
         node_albedo.location = x_offset, y_offset
 
         node_tree.links.new(
@@ -1090,7 +1091,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "metallic" in textures:
         node_metallic = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_metallic.image = textures["metallic"].image
-        node_metallic.label = "金属度图集"
+        node_metallic.label = "Metallic Atlas"
         node_metallic.location = x_offset, y_offset - y_spacing
         node_metallic.image.colorspace_settings.name = "Non-Color"
 
@@ -1102,7 +1103,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "roughness" in textures:
         node_roughness = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_roughness.image = textures["roughness"].image
-        node_roughness.label = "粗糙度图集"
+        node_roughness.label = "Roughness Atlas"
         node_roughness.location = x_offset, y_offset - y_spacing * 2
         node_roughness.image.colorspace_settings.name = "Non-Color"
 
@@ -1114,7 +1115,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "specular" in textures:
         node_specular = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_specular.image = textures["specular"].image
-        node_specular.label = "高光图集"
+        node_specular.label = "Specular Atlas"
         node_specular.location = x_offset, y_offset - y_spacing * 3
         node_specular.image.colorspace_settings.name = "Non-Color"
 
@@ -1126,7 +1127,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "emission" in textures:
         node_emission = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_emission.image = textures["emission"].image
-        node_emission.label = "自发光图集"
+        node_emission.label = "Emission Atlas"
         node_emission.location = x_offset, y_offset - y_spacing * 4
 
         node_tree.links.new(
@@ -1139,7 +1140,7 @@ def _configure_material_multi(  # noqa: PLR0915
     if "normal_map" in textures:
         node_normal_tex = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_normal_tex.image = textures["normal_map"].image
-        node_normal_tex.label = "法线贴图图集"
+        node_normal_tex.label = "Normal Map Atlas"
         node_normal_tex.location = x_offset - 300, y_offset - y_spacing * 5
         node_normal_tex.image.colorspace_settings.name = "Non-Color"
 

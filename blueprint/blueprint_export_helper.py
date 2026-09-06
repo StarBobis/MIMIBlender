@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 import bpy
 from ..common.global_config import GlobalConfig
@@ -7,7 +7,7 @@ from ..workspace.ssmt_workspace import SSMTWorkSpace
 
 class BlueprintExportHelper:
 
-    # 运行时记录当前操作对应的蓝图树，避免按钮触发后丢失上下文
+    # Record the blueprint tree of the current operation at runtime, so the context is not lost after a button press
     runtime_blueprint_tree_name = ""
     runtime_output_node = None
     _workspace_tree_sync_timer_registered = False
@@ -73,11 +73,11 @@ class BlueprintExportHelper:
         preferred_name = BlueprintExportHelper.get_preferred_blueprint_name(context=context)
 
         for tree in BlueprintExportHelper.get_all_blueprint_trees():
-            description = "当前默认蓝图" if tree.name == preferred_name else "选择该蓝图进行打开或生成 Mod"
+            description = "Current Default Blueprint" if tree.name == preferred_name else "Choose this blueprint to open or generate a Mod"
             items.append((tree.name, tree.name, description))
 
         if not items:
-            items.append(("__NONE__", "当前没有蓝图", "当前没有可选蓝图，请先打开蓝图界面或执行一键导入"))
+            items.append(("__NONE__", "No Blueprint Available", "No blueprint available. Please open the blueprint editor or run one-click import first."))
 
         return items
 
@@ -88,7 +88,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def reveal_tree_in_node_editors(context, tree):
-        '''让所有已打开的 SSMT 蓝图节点编辑器切换到指定的蓝图树。'''
+        '''Switch every open SSMT Blueprint node editor to the specified blueprint tree.'''
         if not BlueprintExportHelper._is_valid_blueprint_tree(tree):
             return
 
@@ -144,7 +144,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def _bind_workspace_tree_to_space(space):
-        """当区域刚切换到 SSMT 树类型时绑定工作空间同名蓝图。"""
+        """Bind the workspace blueprint of the same name when an area has just switched to the SSMT tree type."""
         if getattr(space, "tree_type", "") != 'SSMTBlueprintTreeType':
             return None
         workspace_name = str(GlobalConfig.get_workspace_name() or "").strip()
@@ -160,7 +160,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def _sync_workspace_tree_timer():
-        """仅在区域切换到 SSMT 蓝图类型时绑定工作空间蓝图一次。"""
+        """Bind the workspace blueprint only once, when an area switches to the SSMT Blueprint type."""
         current_tree_type_by_space = {}
         for window in getattr(bpy.context.window_manager, "windows", []):
             for area in getattr(window.screen, "areas", []):
@@ -206,7 +206,7 @@ class BlueprintExportHelper:
     
     @staticmethod
     def get_current_blueprint_tree(context=None):
-        """获取当前工作空间对应的蓝图树"""
+        """Get the blueprint tree that matches the current workspace"""
         tree = BlueprintExportHelper._get_blueprint_tree_from_context(context)
         if BlueprintExportHelper._is_valid_blueprint_tree(tree):
             BlueprintExportHelper.set_runtime_blueprint_tree(tree)
@@ -282,7 +282,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def find_node_in_all_blueprints(node_name):
-        """在所有蓝图中查找指定名称的节点"""
+        """Find the node with the given name in all blueprints"""
         for node_group in bpy.data.node_groups:
             if node_group.bl_idname == 'SSMTBlueprintTreeType':
                 node = node_group.nodes.get(node_name)
@@ -293,7 +293,7 @@ class BlueprintExportHelper:
     @staticmethod
     @staticmethod
     def get_node_from_bl_idname(tree, node_type:str):
-        """在树中查找输出节点 (假设只有一个)"""
+        """Find the output node in the tree (assumes there is only one)"""
         if not tree:
             return None
         for node in tree.nodes:
@@ -303,7 +303,7 @@ class BlueprintExportHelper:
     
     @staticmethod
     def get_nodes_from_bl_idname(tree, node_type:str):
-        """在树中查找所有匹配的节点"""
+        """Find all matching nodes in the tree"""
         if not tree:
             return []
         nodes = []
@@ -335,16 +335,16 @@ class BlueprintExportHelper:
     @staticmethod
     def get_connected_nodes(current_node):
         """
-        按照插槽顺序返回所有连接的节点
+        Return all connected nodes in socket order
         """
         connected_groups = []
         if not current_node:
             return connected_groups
             
-        # 遍历 Output 节点的所有输入插槽
+        # Iterate over all input sockets of the Output node
         for socket in current_node.inputs:
             if socket.is_linked:
-                # 遍历连线 (通常一个插槽只有一个连线，但数据结构是列表)
+                # Iterate over the links (a socket usually has one link, but the data structure is a list)
                 for link in socket.links:
                     source_node = link.from_node
                     connected_groups.append(source_node)
@@ -368,7 +368,7 @@ class BlueprintExportHelper:
 
         downstream = {node: [] for node in output_nodes}
         upstream = {node: [] for node in output_nodes}
-        output_socket_name = "输出"
+        output_socket_name = "Output"
         for node in output_nodes:
             outputs = getattr(node, "outputs", None)
             output_socket = outputs.get(output_socket_name) if hasattr(outputs, "get") else None
@@ -384,22 +384,22 @@ class BlueprintExportHelper:
                 upstream[target].append(node)
 
         if any(len(targets) > 1 for targets in downstream.values()):
-            raise ValueError("一个生成 Mod 输出不能同时连接多个输出节点")
+            raise ValueError("A Generate Mod output cannot connect to multiple output nodes at once")
 
         terminals = [node for node in output_nodes if not downstream[node]]
         if not terminals:
-            raise ValueError("生成 Mod 输出节点之间存在循环连接")
+            raise ValueError("Circular connection between Generate Mod output nodes")
 
         chains = []
         visited = set()
 
         def visit(node, chain, active):
             if node in active:
-                raise ValueError("生成 Mod 输出节点之间存在循环连接")
+                raise ValueError("Circular connection between Generate Mod output nodes")
             active = active | {node}
             parents = upstream[node]
             if len(parents) > 1:
-                raise ValueError("一个生成 Mod 输出不能接收多个输出节点")
+                raise ValueError("A Generate Mod output cannot receive from multiple output nodes at once")
             if parents:
                 visit(parents[0], chain, active)
             if node not in visited:
@@ -416,13 +416,13 @@ class BlueprintExportHelper:
         # terminal from the INI chain's perspective and is covered above.
         if len(visited) != len(output_nodes):
             missing = [node.name for node in output_nodes if node not in visited]
-            raise ValueError("无法解析生成 Mod 输出链: " + ", ".join(missing))
+            raise ValueError("Unable to parse the Generate Mod output chain: " + ", ".join(missing))
         return chains
 
 
     @staticmethod
     def get_current_shapekeyname_mkey_dict(context=None):
-        """从「生成形态键」节点读取勾选的形态键列表和按键映射"""
+        """Read the checked shapekey list and key mapping from the shapekey-generation node"""
         tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not tree:
             return {}

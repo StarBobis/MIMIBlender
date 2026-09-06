@@ -1,111 +1,111 @@
-# 07 — 类型标注缺失
+# 07 - Missing Type Annotations
 
-## 严重程度
+## Severity
 
-🟡 **中等** — 部分文件的函数参数和返回值缺少类型标注，IDE 无法补全，新人不知道传什么类型。
+🟡 **Medium** - Parameters and return values in some files lack type annotations: the IDE cannot autocomplete, and newcomers do not know which types to pass.
 
-## 影响范围
+## Scope of Impact
 
-### 完全缺失类型标注的文件
+### Files completely missing type annotations
 
-| 文件 | 行数 | 说明 |
+| File | Lines | Description |
 |------|:----:|------|
-| `utils/vertexgroup_utils.py` | 230 | 几乎零类型标注 |
-| `utils/mesh_utils.py` | 200+ | 部分方法有，部分没有 |
-| `games/unity.py` | 200+ | `__init__` 和多个方法无类型 |
-| `games/wwmi.py` | 700+ | `__init__` 无类型，内部方法部分有 |
+| `utils/vertexgroup_utils.py` | 230 | Almost no type annotations |
+| `utils/mesh_utils.py` | 200+ | Some methods annotated, some not |
+| `games/unity.py` | 200+ | `__init__` and several methods have no types |
+| `games/wwmi.py` | 700+ | `__init__` untyped; some internal methods annotated |
 
-### 部分缺失的关键方法
+### Key methods only partially annotated
 
-| 文件 | 方法 | 问题 |
+| File | Method | Problem |
 |------|------|------|
-| `utils/obj_utils.py` | `merge_objects(obj_list, target_collection=None)` | `obj_list` 是 `list[bpy.types.Object]` 还是 `list[str]`？ |
-| `utils/obj_utils.py` | `copy_object(context, obj, name=None, collection=None)` | `context` 是什么类型？`obj` 是 Object 还是 str？ |
-| `utils/collection_utils.py` | `create_new_collection(collection_name, color_tag, link_to_parent_collection_name="")` | `color_tag` 的取值是什么？ |
-| `common/m_ini_helper.py` | `_get_slot_texture_source_path(draw_ib_model, part_name, texture_markup_info)` | `texture_markup_info` 的类型？ |
-| `games/wwmi.py` | `__init__(self, blueprint_model)` | `blueprint_model` 的类型？ |
+| `utils/obj_utils.py` | `merge_objects(obj_list, target_collection=None)` | Is `obj_list` a `list[bpy.types.Object]` or a `list[str]`? |
+| `utils/obj_utils.py` | `copy_object(context, obj, name=None, collection=None)` | What type is `context`? Is `obj` an Object or a str? |
+| `utils/collection_utils.py` | `create_new_collection(collection_name, color_tag, link_to_parent_collection_name="")` | What values can `color_tag` take? |
+| `common/m_ini_helper.py` | `_get_slot_texture_source_path(draw_ib_model, part_name, texture_markup_info)` | What type is `texture_markup_info`? |
+| `games/wwmi.py` | `__init__(self, blueprint_model)` | What type is `blueprint_model`? |
 
-### 返回类型缺失
+### Missing return types
 
-很多方法没有标注返回值类型，包括关键的导出方法：
+Many methods do not annotate their return value, including key export methods:
 
-| 文件 | 方法 | 返回类型 |
+| File | Method | Return type |
 |------|------|----------|
-| `model/drawib_model_wwmi.py` | `build_merged_object()` | 返回 `MergedObject` 但未标注 |
-| `common/buffer_export_helper.py` | `write_buf_ib_r32_uint()` | 无返回类型 |
-| `model/submesh_model.py` | `calc_buffer()` | 返回 None 但未标注 |
+| `model/drawib_model_wwmi.py` | `build_merged_object()` | Returns `MergedObject` but is unannotated |
+| `common/buffer_export_helper.py` | `write_buf_ib_r32_uint()` | No return type |
+| `model/submesh_model.py` | `calc_buffer()` | Returns None but is unannotated |
 
-## 修复方案
+## Proposed Fix
 
-### 原则
+### Principles
 
-1. 所有公共方法必须标注参数类型和返回类型
-2. 私有方法（`_method_name`）最低标注参数类型
-3. 使用 `typing` 模块的标准类型：`List`, `Dict`, `Optional`, `Union`
-4. Blender 类型使用 `bpy.types.Object`, `bpy.types.Mesh` 等
+1. All public methods must annotate parameter types and return types.
+2. Private methods (`_method_name`) must at minimum annotate parameter types.
+3. Use the standard types from the `typing` module: `List`, `Dict`, `Optional`, `Union`.
+4. Use Blender types such as `bpy.types.Object`, `bpy.types.Mesh`.
 
-### 修复模板
+### Fix template
 
 ```python
-# 修复前
+# Before
 def merge_objects(obj_list, target_collection=None):
-    """合并给定的对象列表。"""
+    """Merge the given list of objects."""
     ...
 
-# 修复后
+# After
 def merge_objects(
     obj_list: list[bpy.types.Object],
     target_collection: bpy.types.Collection | None = None
 ) -> None:
-    """合并给定的对象列表。"""
+    """Merge the given list of objects."""
     ...
 ```
 
-### 常见 Blender 类型速查
+### Quick reference of common Blender types
 
-| Python 标注 | Blender 类型 | 说明 |
+| Python annotation | Blender type | Description |
 |-------------|-------------|------|
-| `bpy.types.Object` | 3D 物体 | 场景中的任何物体 |
-| `bpy.types.Mesh` | 网格数据 | `.data` 属性 |
-| `bpy.types.Collection` | 集合 | 物体容器 |
-| `bpy.types.Material` | 材质 | 物体材质 |
-| `bpy.types.NodeTree` | 节点树 | 蓝图编辑器中的树 |
-| `bpy.types.Node` | 节点 | 蓝图编辑器中的单个节点 |
-| `bpy.types.Context` | 上下文 | Blender 的 Context 对象 |
-| `bpy.types.VertexGroup` | 顶点组 | 物体上的顶点组 |
-| `bpy.types.ShapeKey` | 形态键 | shape key |
-| `bmesh.types.BMesh` | BMesh | 底层网格编辑 |
+| `bpy.types.Object` | 3D object | Any object in the scene |
+| `bpy.types.Mesh` | Mesh data | `.data` attribute |
+| `bpy.types.Collection` | Collection | Container for objects |
+| `bpy.types.Material` | Material | Object material |
+| `bpy.types.NodeTree` | Node tree | A tree in the Blueprint editor |
+| `bpy.types.Node` | Node | A single node in the Blueprint editor |
+| `bpy.types.Context` | Context | Blender's Context object |
+| `bpy.types.VertexGroup` | Vertex group | A vertex group on an object |
+| `bpy.types.ShapeKey` | Shape key | shape key |
+| `bmesh.types.BMesh` | BMesh | Low-level mesh editing |
 
-### 项目自定义类型
+### Project-specific custom types
 
-| Python 标注 | 类型 | 定义位置 |
+| Python annotation | Type | Defined in |
 |-------------|------|----------|
-| `DrawCallModel` | 绘制调用模型 | `model/draw_call_model.py` |
-| `SubMeshModel` | 子网格模型 | `model/submesh_model.py` |
-| `DrawIBModel` | DrawIB 模型 | `model/drawib_model.py` |
-| `BluePrintModel` | 蓝图模型 | `model/blueprint_model.py` |
-| `WorkSpaceModel` | 工作空间模型 | `workspace/ssmt_workspace.py` |
-| `D3D11GameType` | D3D11 游戏类型 | `common/d3d11_gametype.py` |
+| `DrawCallModel` | Draw call model | `model/draw_call_model.py` |
+| `SubMeshModel` | Submesh model | `model/submesh_model.py` |
+| `DrawIBModel` | DrawIB model | `model/drawib_model.py` |
+| `BluePrintModel` | Blueprint model | `model/blueprint_model.py` |
+| `WorkSpaceModel` | Workspace model | `workspace/ssmt_workspace.py` |
+| `D3D11GameType` | D3D11 game type | `common/d3d11_gametype.py` |
 
-### 优先级
+### Priorities
 
-| 优先级 | 文件 | 原因 |
+| Priority | File | Reason |
 |:------:|------|------|
-| **高** | `utils/obj_utils.py` | 被全项目引用，类型标注收益最大 |
-| **高** | `games/unity.py` | 基类，影响所有游戏导出器 |
-| **中** | `common/m_ini_helper.py` | 复杂的 INI 生成逻辑 |
-| **中** | `utils/collection_utils.py` | 全项目使用的工具类 |
-| **低** | `utils/vertexgroup_utils.py` | 使用频率较低 |
+| **High** | `utils/obj_utils.py` | Referenced across the whole project; annotations yield the biggest benefit |
+| **High** | `games/unity.py` | Base class that affects all game exporters |
+| **Medium** | `common/m_ini_helper.py` | Complex INI generation logic |
+| **Medium** | `utils/collection_utils.py` | Utility class used project-wide |
+| **Low** | `utils/vertexgroup_utils.py` | Used less frequently |
 
-## 验证方法
+## Verification
 
 ```bash
-# 使用 mypy 检查类型（需要安装 mypy）
+# Check types with mypy (requires installing mypy)
 pip install mypy
 mypy d:\Dev\MIMIBlender --ignore-missing-imports
 ```
 
-## 风险
+## Risks
 
-- **低**：添加类型标注不改变运行时行为
-- 唯一风险：错误的类型标注会误导开发者。标注前需仔细确认实际类型
+- **Low**: adding type annotations does not change runtime behavior
+- The only risk: incorrect annotations mislead developers. Confirm the actual types carefully before annotating

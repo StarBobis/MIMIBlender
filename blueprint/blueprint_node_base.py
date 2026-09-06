@@ -1,7 +1,7 @@
 '''
-存放一些构建SSMT蓝图架构的基础节点
-每种节点放在单独的py文件中
-方便阅读理解
+Base nodes used to build the SSMT blueprint architecture.
+Each node type lives in its own py file
+so the code is easy to read and understand.
 '''
 import bpy
 from bpy.types import NodeTree, Node, NodeSocket, PropertyGroup
@@ -18,7 +18,7 @@ class SSMTSubmeshListItem(PropertyGroup):
 class SSMTSocketObject(NodeSocket):
     '''Custom Socket for Object Data'''
     bl_idname = 'SSMTSocketObject'
-    bl_label = '物体插槽'
+    bl_label = 'Object Socket'
 
     def draw_color(self, context, node):
         return (0.0, 0.8, 0.8, 1.0) # Cyan/Teal
@@ -26,13 +26,13 @@ class SSMTSocketObject(NodeSocket):
     def draw(self, context, layout, node, text):
         layout.label(text=text)
 
-# 1. 定义自定义节点树类型
+# 1. Define the custom node tree type
 
 
 class SSMTSocketTexture(NodeSocket):
     '''Custom Socket for Texture Slot'''
     bl_idname = 'SSMTSocketTexture'
-    bl_label = '贴图插槽'
+    bl_label = 'Texture Socket'
 
     def draw_color(self, context, node):
         return (0.8, 0.4, 0.9, 1.0)  # Purple/Magenta
@@ -44,7 +44,7 @@ class SSMTSocketTexture(NodeSocket):
 class SSMTSocketCustomShader(NodeSocket):
     '''Custom Shader command list socket.'''
     bl_idname = 'SSMTSocketCustomShader'
-    bl_label = 'CustomShader 插槽'
+    bl_label = 'CustomShader Socket'
 
     def draw_color(self, context, node):
         return (0.95, 0.55, 0.15, 1.0)
@@ -55,22 +55,22 @@ class SSMTSocketCustomShader(NodeSocket):
 class SSMTBlueprintTree(NodeTree):
     '''SSMT Mod Logic Blueprint'''
     bl_idname = 'SSMTBlueprintTreeType'
-    bl_label = 'SSMT蓝图'
+    bl_label = 'SSMT Blueprint'
     bl_icon = 'NODETREE'
 
 
-# 2. 定义基础节点
+# 2. Define the base nodes
 class SSMTNodeBase(Node):
     @classmethod
     def poll(cls, ntree):
         return ntree.bl_idname == 'SSMTBlueprintTreeType'
     
     def calculate_text_width(self, text, padding=40):
-        """计算文本所需的宽度（估算值）"""
+        """Estimate the width required to display the text."""
         if not text:
             return 200
         
-        # 中文字符宽度约为英文字符的2倍
+        # Chinese characters are roughly twice as wide as English characters
         char_count = 0
         for char in text:
             if '\u4e00' <= char <= '\u9fff':
@@ -78,14 +78,14 @@ class SSMTNodeBase(Node):
             else:
                 char_count += 1
         
-        # 每个字符约占用12像素宽度（Blender 节点 UI 字体较宽）
+        # Each character takes about 12 px of width (the Blender node UI font is fairly wide)
         width = char_count * 12 + padding
         
-        # 确保最小宽度为200
+        # Enforce a minimum width of 200
         return max(200, width)
     
     def update_node_width(self, texts):
-        """根据文本内容更新节点宽度"""
+        """Update the node width based on the given texts."""
         if not texts:
             return
         
@@ -95,14 +95,14 @@ class SSMTNodeBase(Node):
             if width > max_width:
                 max_width = width
         
-        # 给下拉列表预留额外宽度（右侧箭头和边距约50px）
+        # Reserve extra width for the dropdown (right arrow and margins, about 50 px)
         self.width = max_width + 50
     
 
 class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
     bl_idname = "theherta3.open_persistent_blueprint"
-    bl_label = "打开蓝图界面"
-    bl_description = "打开一个独立的蓝图窗口，用于配置Mod逻辑"
+    bl_label = "Open Blueprint"
+    bl_description = "Open a standalone blueprint window for configuring Mod logic"
     bl_options = {'REGISTER', 'UNDO'}
 
     blueprint_name: bpy.props.StringProperty(
@@ -112,12 +112,12 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
     ) # type: ignore
     
     def execute(self, context):
-        # 1. 获取或创建蓝图树
+        # 1. Get or create the blueprint tree
         GlobalConfig.read_from_main_json_ssmt4()
         requested_tree_name = str(self.blueprint_name or "").strip()
         tree_name = requested_tree_name or GlobalConfig.get_workspace_name()
         
-        # 查找是否存在同名的 NodeGroup
+        # Look for an existing NodeGroup with the same name
         tree = bpy.data.node_groups.get(tree_name)
         if tree and getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
             tree = None
@@ -127,7 +127,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
             tree = BlueprintExportHelper.get_selected_blueprint_tree(requested_tree_name, context=context)
 
         if not tree:
-            # 创建新的 NodeTree，类型必须是我们定义的 bl_idname
+            # Create a new NodeTree; the type must be our custom bl_idname
             tree = bpy.data.node_groups.new(name=tree_name, type='SSMTBlueprintTreeType')
             tree.use_fake_user = True
 
@@ -138,7 +138,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
         if global_properties and getattr(global_properties, "selected_blueprint_name", "") != tree.name:
             global_properties.selected_blueprint_name = tree.name
         
-        # 1.5 检查是否存在已开启的窗口；存在则复用，不再关闭重建。
+        # 1.5 Check for an already-open window editing this tree; reuse it instead of closing and reopening.
         target_window = None
         for window in context.window_manager.windows:
             for area in window.screen.areas:
@@ -153,7 +153,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
         if target_window:
             return {'FINISHED'}
 
-        # 2. 打开独立主窗口，避免普通子窗口一直压在 Blender 主界面上方。
+        # 2. Open a separate main window so ordinary child windows do not stay on top of the Blender main UI.
         old_windows = set(context.window_manager.windows)
 
         try:
@@ -170,25 +170,25 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
             target_area = max(screen.areas, key=lambda a: a.width * a.height)
             
             if target_area:
-                target_area.ui_type = 'SSMTBlueprintTreeType' # 似乎不起作用，NodeEditor需要指定tree type
+                target_area.ui_type = 'SSMTBlueprintTreeType' # Seems ineffective; the node editor needs the tree type set
                 target_area.type = 'NODE_EDITOR'
                 
-                # 设置空间属性
+                # Configure space properties
                 for space in target_area.spaces:
                     if space.type == 'NODE_EDITOR':
-                        space.tree_type = 'SSMTBlueprintTreeType' # 关键：切换到自定义树类型
-                        space.node_tree = tree # 设置要编辑的数据块
-                        space.pin = True # 锁定
+                        space.tree_type = 'SSMTBlueprintTreeType' # Key: switch to the custom tree type
+                        space.node_tree = tree # Set the data block to edit
+                        space.pin = True # Pin
                         
-                        # 尝试调整视图 (可选)
+                        # Try to adjust the view (optional)
                         
         return {'FINISHED'}
 
 
 class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
     bl_idname = "theherta3.delete_persistent_blueprint"
-    bl_label = "删除蓝图"
-    bl_description = "删除当前选中的蓝图"
+    bl_label = "Delete Blueprint"
+    bl_description = "Delete the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     blueprint_name: bpy.props.StringProperty(
@@ -209,7 +209,7 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
     def invoke(self, context, event):
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "当前没有蓝图可删除！")
+            self.report({'WARNING'}, "There is no blueprint to delete!")
             return {'CANCELLED'}
 
         self.blueprint_name = target_tree.name
@@ -217,16 +217,16 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="确认删除当前选中的蓝图吗？", icon='TRASH')
+        layout.label(text="Delete the currently selected blueprint?", icon='TRASH')
         layout.label(text=self.blueprint_name)
-        layout.label(text="删除后无法恢复，请确认不是误操作。", icon='ERROR')
+        layout.label(text="This cannot be undone; please confirm this is not a mistake.", icon='ERROR')
 
     def execute(self, context):
         from .blueprint_export_helper import BlueprintExportHelper
 
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "当前没有蓝图可删除！")
+            self.report({'WARNING'}, "There is no blueprint to delete!")
             return {'CANCELLED'}
 
         for window in context.window_manager.windows:
@@ -254,14 +254,14 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, "已删除蓝图: " + deleted_blueprint_name)
+        self.report({'INFO'}, "Deleted blueprint: " + deleted_blueprint_name)
         return {'FINISHED'}
 
 
 class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
     bl_idname = "theherta3.rename_persistent_blueprint"
-    bl_label = "重命名蓝图"
-    bl_description = "重命名当前选中的蓝图"
+    bl_label = "Rename Blueprint"
+    bl_description = "Rename the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     blueprint_name: bpy.props.StringProperty(
@@ -271,7 +271,7 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
     ) # type: ignore
 
     new_blueprint_name: bpy.props.StringProperty(
-        name="新蓝图名称",
+        name="New Blueprint Name",
         default="",
     ) # type: ignore
 
@@ -287,7 +287,7 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
     def invoke(self, context, event):
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "当前没有蓝图可重命名！")
+            self.report({'WARNING'}, "There is no blueprint to rename!")
             return {'CANCELLED'}
 
         self.blueprint_name = target_tree.name
@@ -296,33 +296,33 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="请输入新的蓝图名称", icon='GREASEPENCIL')
-        layout.prop(self, "new_blueprint_name", text="名称")
+        layout.label(text="Enter the new blueprint name", icon='GREASEPENCIL')
+        layout.prop(self, "new_blueprint_name", text="Name")
 
     def execute(self, context):
         from .blueprint_export_helper import BlueprintExportHelper
 
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "当前没有蓝图可重命名！")
+            self.report({'WARNING'}, "There is no blueprint to rename!")
             return {'CANCELLED'}
 
         new_name = str(self.new_blueprint_name or "").strip()
         if not new_name:
-            self.report({'ERROR'}, "蓝图名称不能为空！")
+            self.report({'ERROR'}, "Blueprint name cannot be empty!")
             return {'CANCELLED'}
 
         if new_name == "__NONE__":
-            self.report({'ERROR'}, "蓝图名称不能使用保留值 __NONE__！")
+            self.report({'ERROR'}, "Blueprint name cannot use the reserved value __NONE__!")
             return {'CANCELLED'}
 
         if new_name == target_tree.name:
-            self.report({'INFO'}, "蓝图名称未发生变化")
+            self.report({'INFO'}, "Blueprint name is unchanged")
             return {'CANCELLED'}
 
         existing_tree = bpy.data.node_groups.get(new_name)
         if existing_tree and existing_tree != target_tree:
-            self.report({'ERROR'}, "已存在同名蓝图，请使用其他名称！")
+            self.report({'ERROR'}, "A blueprint with that name already exists; please use a different name!")
             return {'CANCELLED'}
 
         old_name = target_tree.name
@@ -339,27 +339,27 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, "已将蓝图重命名为: " + target_tree.name)
+        self.report({'INFO'}, "Renamed blueprint to: " + target_tree.name)
         return {'FINISHED'}
     
 class SSMT_PT_FrameProperties(bpy.types.Panel):
-    '''Frame 框属性面板：选中 Frame 节点后可在侧边栏调节颜色、透明度、标签等属性'''
+    '''Frame properties panel: with a Frame node selected, adjust its color, transparency, label, etc. from the sidebar'''
     bl_idname = "SSMT_PT_FrameProperties"
-    bl_label = "Frame 框属性"
+    bl_label = "Frame Properties"
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
     bl_category = "SSMT"
 
     @classmethod
     def poll(cls, context):
-        # 仅在 SSMT 蓝图树中显示
+        # Show only inside an SSMT blueprint tree
         space = context.space_data
         if space.type != 'NODE_EDITOR':
             return False
         tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
         if not tree or getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
             return False
-        # 检查是否有 Frame 节点被选中
+        # Check whether a Frame node is selected
         if not context.selected_nodes:
             return False
         for node in context.selected_nodes:
@@ -369,64 +369,64 @@ class SSMT_PT_FrameProperties(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        # 收集所有选中的 Frame 节点
+        # Collect all selected Frame nodes
         frames = [n for n in context.selected_nodes if n.bl_idname == 'NodeFrame']
         if not frames:
             return
 
-        # 全部用第一个 frame 的属性来设置，多选时统一应用
+        # Use the first frame's properties as the source; with multiple frames selected, apply them uniformly
         frame = frames[0]
 
-        # === 标签 ===
+        # === Label ===
         box = layout.box()
-        box.label(text="标签", icon='FONT_DATA')
+        box.label(text="Label", icon='FONT_DATA')
         col = box.column(align=True)
-        col.prop(frame, "label", text="名称")
-        col.prop(frame, "label_size", text="字体大小")
+        col.prop(frame, "label", text="Name")
+        col.prop(frame, "label_size", text="Font Size")
 
-        # === 外观 ===
+        # === Appearance ===
         box = layout.box()
-        box.label(text="外观", icon='MATERIAL')
+        box.label(text="Appearance", icon='MATERIAL')
         col = box.column(align=True)
-        col.prop(frame, "use_custom_color", text="自定义颜色")
+        col.prop(frame, "use_custom_color", text="Custom Color")
         if frame.use_custom_color:
             col.prop(frame, "color", text="")
-        col.prop(frame, "shrink", text="自动收缩大小")
+        col.prop(frame, "shrink", text="Auto Shrink")
 
-        # === 尺寸 ===
+        # === Size ===
         box = layout.box()
-        box.label(text="尺寸", icon='MESH_PLANE')
+        box.label(text="Size", icon='MESH_PLANE')
         col = box.column(align=True)
-        col.prop(frame, "width", text="宽度")
-        col.prop(frame, "height", text="高度")
+        col.prop(frame, "width", text="Width")
+        col.prop(frame, "height", text="Height")
 
-        # === 扩展文本 ===
+        # === Extended text ===
         box = layout.box()
-        box.label(text="描述文本", icon='TEXT')
+        box.label(text="Description Text", icon='TEXT')
         col = box.column()
         col.prop(frame, "text", text="")
 
-        # === 可见性 ===
+        # === Visibility ===
         box = layout.box()
-        box.label(text="可见性", icon='HIDE_OFF')
+        box.label(text="Visibility", icon='HIDE_OFF')
         col = box.column(align=True)
-        col.prop(frame, "hide", text="隐藏")
-        col.prop(frame, "mute", text="静音（禁用）")
+        col.prop(frame, "hide", text="Hide")
+        col.prop(frame, "mute", text="Mute (Disable)")
 
-        # === 多选统一应用按钮 ===
+        # === Apply-to-all button for multi-selection ===
         if len(frames) > 1:
             layout.separator()
-            layout.label(text=f"已选中 {len(frames)} 个 Frame", icon='INFO')
-            layout.label(text="修改上方属性后，点击按钮应用到全部", icon='LOOP_BACK')
-            op = layout.operator("ssmt.apply_frame_properties_to_all", text="应用到所有选中 Frame", icon='CHECKMARK')
+            layout.label(text=f"Selected {len(frames)} Frames", icon='INFO')
+            layout.label(text="After editing the properties above, click the button to apply to all", icon='LOOP_BACK')
+            op = layout.operator("ssmt.apply_frame_properties_to_all", text="Apply to All Selected Frames", icon='CHECKMARK')
             op.source_frame_name = frame.name
             op.tree_name = frame.id_data.name if frame.id_data else ""
 
 
 class SSMT_OT_ApplyFramePropertiesToAll(bpy.types.Operator):
-    '''将第一个选中 Frame 的所有属性复制到其余选中的 Frame'''
+    '''Copy all properties of the first selected Frame to the other selected Frames'''
     bl_idname = "ssmt.apply_frame_properties_to_all"
-    bl_label = "应用到所有选中 Frame"
+    bl_label = "Apply to All Selected Frames"
     bl_options = {'REGISTER', 'UNDO'}
 
     source_frame_name: bpy.props.StringProperty()  # type: ignore
@@ -450,7 +450,7 @@ class SSMT_OT_ApplyFramePropertiesToAll(bpy.types.Operator):
             for prop in props:
                 setattr(frame, prop, getattr(source, prop))
 
-        self.report({'INFO'}, f"已将 {source.label or source.name} 的属性应用到 {len(frames)} 个 Frame")
+        self.report({'INFO'}, f"Applied properties of {source.label or source.name} to {len(frames)} Frames")
         return {'FINISHED'}
 
 

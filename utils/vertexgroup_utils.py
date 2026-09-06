@@ -13,7 +13,7 @@ class VertexGroupUtils:
     @staticmethod
     def remove_unused_vertex_groups(obj):
         '''
-        移除给定obj的未使用的顶点组
+        Remove the unused vertex groups of the given obj
         '''
         if obj.type == "MESH":
             # obj = bpy.context.active_object
@@ -32,7 +32,7 @@ class VertexGroupUtils:
     @staticmethod
     def remove_all_vertex_groups(obj):
         '''
-        移除给定obj的未使用的顶点组
+        Remove all vertex groups of the given obj
         '''
         if obj.type == "MESH":
             for x in obj.vertex_groups:
@@ -110,8 +110,8 @@ class VertexGroupUtils:
     @staticmethod
     def merge_vertex_groups_with_same_number_v2():
         '''
-        merge_vertex_groups_with_same_number 的 Mode 3 优化版本
-        大幅提升执行速度 (Differential Update Strategy)
+        Optimized version of Mode 3 of merge_vertex_groups_with_same_number
+        Greatly improved execution speed (Differential Update Strategy)
 
         
         '''
@@ -234,37 +234,37 @@ class VertexGroupUtils:
         bpy.ops.object.vertex_group_sort()
 
 
-    # 由虹汐哥改进的版本，骨骼位置放到了几何中心
+    # Improved version by HongXi: bones are placed at the geometry center
     @staticmethod
     def create_armature_from_vertex_groups(bone_length=0.1):
-        # 验证选择对象
+        # Validate the selected object
         obj = bpy.context.active_object
         if not obj or obj.type != 'MESH':
-            raise Exception("请先选择一个网格物体")
+            raise Exception("Please select a mesh object first")
         
         if not obj.vertex_groups:
-            raise Exception("目标物体没有顶点组")
+            raise Exception("The target object has no vertex groups")
 
-        # 预计算世界变换矩阵
+        # Precompute the world transformation matrix
         matrix = obj.matrix_world
 
-        # 创建骨架物体
+        # Create the armature object
         armature = bpy.data.armatures.new("AutoRig_Armature")
         armature_obj = bpy.data.objects.new("AutoRig", armature)
         bpy.context.scene.collection.objects.link(armature_obj)
 
-        # 设置活动对象
+        # Set the active object
         bpy.context.view_layer.objects.active = armature_obj
         armature_obj.select_set(True)
 
-        # 预收集顶点组数据 {顶点组索引: [顶点列表]}
+        # Pre-collect the vertex group data {vertex group index: [vertex list]}
         vg_verts = {vg.index: [] for vg in obj.vertex_groups}
         for v in obj.data.vertices:
             for g in v.groups:
                 if g.group in vg_verts:
                     vg_verts[g.group].append(v)
 
-        # 进入编辑模式创建骨骼
+        # Enter edit mode to create the bones
         bpy.ops.object.mode_set(mode='EDIT')
         try:
             for vg in obj.vertex_groups:
@@ -272,14 +272,14 @@ class VertexGroupUtils:
                 if not verts:
                     continue
 
-                # 计算几何中心（世界坐标）
+                # Compute the geometry center (world coordinates)
                 coords = [matrix @ v.co for v in verts]
                 center = sum(coords, Vector()) / len(coords)
 
-                # 创建垂直方向骨骼
+                # Create the bone along the vertical direction
                 bone = armature.edit_bones.new(vg.name)
                 bone.head = center
-                bone.tail = center + Vector((0, 0, 0.1))  # 固定Z轴方向
+                bone.tail = center + Vector((0, 0, 0.1))  # Fixed Z-axis direction
 
         finally:
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -322,18 +322,18 @@ class VertexGroupUtils:
     @staticmethod
     def split_mesh_by_each_vertex_group(obj: bpy.types.Object):
         """
-        将指定物体按每个顶点组拆分为独立的网格。
-        每个顶点组用到的所有顶点组成一个新的mesh，保留所有属性（UV、权重、颜色、法线、形态键等）。
-        结果放入名为 '{obj.name}_Split' 的新集合。
+        Split the given object into separate meshes by each vertex group.
+        All vertices used by each vertex group form a new mesh, preserving all attributes (UV, weight, color, normal, shape keys, etc.).
+        Results are placed into a new collection named '{obj.name}_Split'.
         """
         origin_name = obj.name
         collection_name = f"{origin_name}_Split"
 
-        # 创建目标集合
+        # Create the target collection
         new_collection = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(new_collection)
 
-        # 统计每个顶点组的顶点数，跳过空组
+        # Count the vertices of each vertex group, skipping empty groups
         vg_vert_count: dict[str, int] = {}
         for vg in obj.vertex_groups:
             count = 0
@@ -346,40 +346,40 @@ class VertexGroupUtils:
                 vg_vert_count[vg.name] = count
 
         if not vg_vert_count:
-            raise Fatal(f"物体 '{origin_name}' 没有非空的顶点组")
+            raise Fatal(f"Object '{origin_name}' has no non-empty vertex groups")
 
-        # 保存用户上下文
+        # Save the user's context
         original_active = bpy.context.view_layer.objects.active
         original_selected = [o for o in bpy.context.selected_objects]
 
         for vg_name in vg_vert_count:
-            # 复制完整对象（网格数据独立拷贝）
+            # Copy the full object (the mesh data is copied independently)
             new_obj = obj.copy()
             new_obj.data = obj.data.copy()
             new_obj.name = f"{origin_name}_{vg_name}"
             new_collection.objects.link(new_obj)
 
-            # 选中副本并激活
+            # Select the copy and make it active
             bpy.ops.object.select_all(action='DESELECT')
             new_obj.select_set(True)
             bpy.context.view_layer.objects.active = new_obj
 
-            # 进入编辑模式
+            # Enter edit mode
             bpy.ops.object.mode_set(mode='EDIT')
 
-            # 选择当前顶点组中的顶点
+            # Select the vertices of the current vertex group
             bpy.ops.mesh.select_all(action='DESELECT')
             bpy.ops.object.vertex_group_set_active(group=vg_name)
             bpy.ops.object.vertex_group_select()
 
-            # 反选 → 删除不属于当前顶点组的顶点
+            # Invert the selection -> delete vertices not in the current vertex group
             bpy.ops.mesh.select_all(action='INVERT')
             bpy.ops.mesh.delete(type='VERT')
 
-            # 回到对象模式
+            # Return to object mode
             bpy.ops.object.mode_set(mode='OBJECT')
 
-            # 清理无用的顶点组（所有顶点都被删光的组）
+            # Remove unused vertex groups (groups whose vertices were all deleted)
             used_groups = set()
             for v in new_obj.data.vertices:
                 for g in v.groups:
@@ -388,7 +388,7 @@ class VertexGroupUtils:
                 if vg.index not in used_groups:
                     new_obj.vertex_groups.remove(vg)
 
-        # 恢复用户上下文
+        # Restore the user's context
         bpy.ops.object.select_all(action='DESELECT')
         for o in original_selected:
             try:
@@ -406,10 +406,10 @@ class VertexGroupUtils:
     @staticmethod
     def split_by_loose_parts_and_cluster(obj: bpy.types.Object, vg_similarity_threshold: float = 0.7, bbox_distance_threshold: float = 0.01):
         """
-        1. 按松散块儿分割物体
-        2. 对松散块儿聚类：VG 集合近似（Jaccard 相似度 >= threshold）
-           且空间邻接（质心距离 <= bbox_distance_threshold）的松散块儿合并为一个部位。
-        结果放入 '{obj.name}_SplitCluster' 集合。
+        1. Split the object by loose parts
+        2. Cluster the loose parts: loose parts with similar VG sets (Jaccard similarity >= threshold)
+           and spatial adjacency (centroid distance <= bbox_distance_threshold) are merged into one part.
+        Results are placed into the '{obj.name}_SplitCluster' collection.
         """
         import math
         from mathutils import Vector
@@ -417,7 +417,7 @@ class VertexGroupUtils:
         origin_name = obj.name
         collection_name = f"{origin_name}_SplitCluster"
 
-        # 预计算：原始物体每个顶点所属的 VG 名称集合（避免后续重复遍历）
+        # Precompute the set of VG names each vertex of the original object belongs to (avoids repeated traversal later)
         vert_vg_names: list[set[str]] = [set() for _ in range(len(obj.data.vertices))]
         for v in obj.data.vertices:
             names = vert_vg_names[v.index]
@@ -425,7 +425,7 @@ class VertexGroupUtils:
                 if g.weight > 0:
                     names.add(obj.vertex_groups[g.group].name)
 
-        # Step 1: 按松散块儿分割
+        # Step 1: Split by loose parts
         ObjUtils.split_obj_by_loose_parts_to_collection(obj=obj, collection_name=collection_name)
         new_collection = bpy.data.collections.get(collection_name)
         if not new_collection:
@@ -435,7 +435,7 @@ class VertexGroupUtils:
         if len(loose_objects) <= 1:
             return new_collection
 
-        # Step 2: 用预计算的 vert_vg_names 快速获取每个松散块儿的 VG 集合（不修改物体）
+        # Step 2: Use the precomputed vert_vg_names to quickly get the VG set of each loose part (without modifying objects)
         obj_vg_sets: dict[str, set[str]] = {}
         for lobj in loose_objects:
             vg_set: set[str] = set()
@@ -444,7 +444,7 @@ class VertexGroupUtils:
                     vg_set |= vert_vg_names[v.index]
             obj_vg_sets[lobj.name] = vg_set
 
-        # Step 3: 计算每个松散块儿的质心（顶点平均位置），用质心距离判断邻接
+        # Step 3: Compute the centroid of each loose part (average vertex position); use centroid distance to judge adjacency
         def _centroid(obj: bpy.types.Object) -> Vector:
             c = Vector((0.0, 0.0, 0.0))
             verts = obj.data.vertices
@@ -467,7 +467,7 @@ class VertexGroupUtils:
                 return 0.0
             return len(a & b) / len(union)
 
-        # 空间哈希网格：按质心位置分配格子
+        # Spatial hash grid: assign cells by centroid position
         cell_size = 2.0
         grid: dict[tuple[int, int, int], list[bpy.types.Object]] = {}
         for lobj in loose_objects:
@@ -505,7 +505,7 @@ class VertexGroupUtils:
                         adj[a.name].add(b.name)
                         adj[b.name].add(a.name)
 
-        # Step 4: 找连通分量 → 聚类
+        # Step 4: Find connected components -> clusters
         unvisited = set(o.name for o in loose_objects)
         merge_groups: list[list[bpy.types.Object]] = []
         name_to_obj = {o.name: o for o in loose_objects}
@@ -524,7 +524,7 @@ class VertexGroupUtils:
                         stack.append(neighbor)
             merge_groups.append([name_to_obj[n] for n in cluster_names])
 
-        # Step 5: 合并每个聚类中的物体，空聚类跳过
+        # Step 5: Merge the objects in each cluster, skipping empty clusters
         original_active = bpy.context.view_layer.objects.active
         original_selected = list(bpy.context.selected_objects)
 
@@ -546,7 +546,7 @@ class VertexGroupUtils:
             target.name = f"{origin_name}_Cluster{len(kept_objs)}"
             kept_objs.append(target)
 
-        # 清理最终物体的空顶点组（之前推迟了此步骤以加速）
+        # Clean the empty vertex groups of the final objects (this step was deferred earlier for speed)
         for kept_obj in kept_objs:
             used = set()
             for v in kept_obj.data.vertices:
@@ -557,7 +557,7 @@ class VertexGroupUtils:
                 if vg.index not in used:
                     kept_obj.vertex_groups.remove(vg)
 
-        # Step 6: 第二次合并 — 顶点组数量和名称完全相同的合并（无视距离）
+        # Step 6: Second merge pass - merge objects with identical vertex group counts and names (ignoring distance)
         vg_sig_groups: dict[tuple, list[bpy.types.Object]] = {}
         for kept_obj in kept_objs:
             sig = tuple(sorted(vg.name for vg in kept_obj.vertex_groups))
@@ -579,7 +579,7 @@ class VertexGroupUtils:
 
         kept_objs = final_objs
 
-        # 删除未参与合并的孤立物体（与任何其他物体都无邻接，保留原样）
+        # Delete isolated objects that did not take part in merging (objects with no adjacency to any other object were kept as-is)
         merged_names = set(o.name for o in kept_objs)
         for o in list(new_collection.objects):
             if o.name not in merged_names:
@@ -588,7 +588,7 @@ class VertexGroupUtils:
                 except Exception:
                     pass
 
-        # 恢复上下文
+        # Restore the context
         bpy.ops.object.select_all(action='DESELECT')
         for o in original_selected:
             try:
@@ -732,7 +732,7 @@ class VertexGroupUtils:
         blendindices[valid_mask] = all_groups[valid_indices]
         blendweights[valid_mask] = all_weights[valid_indices]
 
-        # XXX 必须对当前obj对象执行权重规格化，否则模型细分后会导致模型坑坑洼洼
+        # XXX The weights of the current obj must be normalized, otherwise the model becomes bumpy after subdivision
         
         blendweights = blendweights / numpy.sum(blendweights, axis=1)[:, None]
 
@@ -752,89 +752,89 @@ class VertexGroupUtils:
         mesh_loops_length = len(mesh_loops)
         mesh_vertices = mesh.vertices
         
-        # 获取循环顶点的顶点索引
+        # Get the vertex indices of the loop vertices
         loop_vertex_indices = numpy.empty(mesh_loops_length, dtype=int)
         mesh_loops.foreach_get("vertex_index", loop_vertex_indices)
         
-        # 计算每个顶点的最大组数（向上取整到最近的4的倍数）
+        # Compute the max group count per vertex (rounded up to the nearest multiple of 4)
         max_groups_per_vertex = 0
         for v in mesh_vertices:
             group_count = len(v.groups)
             if group_count > max_groups_per_vertex:
                 max_groups_per_vertex = group_count
         
-        # 将最大组数对齐到4的倍数（每个语义索引包含4个权重）
+        # Align the max group count to a multiple of 4 (each semantic index holds 4 weights)
         max_groups_per_vertex = ((max_groups_per_vertex + 3) // 4) * 4
-        num_sets = max_groups_per_vertex // 4  # 需要的语义索引数量
+        num_sets = max_groups_per_vertex // 4  # Number of semantic indices needed
 
         # print("num_sets: " + str(num_sets))
         
-        # 如果最大组数小于4，至少需要1组
+        # If the max group count is less than 4, at least 1 set is needed
         if num_sets == 0 and max_groups_per_vertex > 0:
             num_sets = 1
         
         groups_per_set = 4
         total_groups = num_sets * groups_per_set
 
-        # 提取并排序顶点组（取前 total_groups 个）
+        # Extract and sort the vertex groups (take the top total_groups)
         sorted_groups = [
             sorted(v.groups, key=lambda x: x.weight, reverse=True)[:total_groups]
             for v in mesh_vertices
         ]
 
-        # 初始化存储数组
+        # Initialize the storage arrays
         all_groups = numpy.zeros((len(mesh_vertices), total_groups), dtype=int)
         all_weights = numpy.zeros((len(mesh_vertices), total_groups), dtype=numpy.float32)
 
-        # 填充权重和索引数据
+        # Fill in the weight and index data
         for v_idx, groups in enumerate(sorted_groups):
             count = min(len(groups), total_groups)
             all_groups[v_idx, :count] = [g.group for g in groups][:count]
             all_weights[v_idx, :count] = [g.weight for g in groups][:count]
 
-        # 关键步骤：整体归一化所有权重
+        # Key step: normalize all the weights as a whole
         if normalize_weights:
-            # 计算每个顶点的权重总和
+            # Compute the total weight sum of each vertex
             weight_sums = numpy.sum(all_weights, axis=1)
-            # 避免除以零（将总和为0的顶点设置为1，这样权重保持为0）
+            # Avoid division by zero (vertices with a sum of 0 are set to 1, so their weights stay 0)
             weight_sums[weight_sums == 0] = 1
-            # 归一化权重
+            # Normalize the weights
             all_weights = all_weights / weight_sums[:, numpy.newaxis]
 
 
-        # 将数据重塑为 [顶点数, 组数, 4]
+        # Reshape the data to [vertex count, group count, 4]
         all_weights_reshaped = all_weights.reshape(len(mesh_vertices), num_sets, groups_per_set)
         all_groups_reshaped = all_groups.reshape(len(mesh_vertices), num_sets, groups_per_set)
 
-        # 初始化输出字典
+        # Initialize the output dictionaries
         blendweights_dict = {}
         blendindices_dict = {}
 
 
-        # 为每组数据创建独立数组
+        # Create a separate array for each data set
         for set_idx in range(num_sets):
-            # 初始化当前组的存储
+            # Initialize the storage of the current set
             blendweights = numpy.zeros((mesh_loops_length, groups_per_set), dtype=numpy.float32)
             blendindices = numpy.zeros((mesh_loops_length, groups_per_set), dtype=numpy.uint32)
             
-            # 创建有效索引掩码
+            # Create the valid index mask
             valid_mask = (0 <= loop_vertex_indices) & (loop_vertex_indices < len(mesh_vertices))
             valid_indices = loop_vertex_indices[valid_mask]
             
-            # 映射数据到循环顶点
+            # Map the data to the loop vertices
             blendweights[valid_mask] = all_weights_reshaped[valid_indices, set_idx, :]
             blendindices[valid_mask] = all_groups_reshaped[valid_indices, set_idx, :]
 
             
-            # 3. 关键：再把每行 4 个权重重新归一化到 1（和 v1 最后一行等价）
+            # 3. Key: re-normalize each row of 4 weights back to 1 (equivalent to the last line of v1)
             if normalize_weights:
                 row_sum = numpy.sum(blendweights, axis=1, keepdims=True)
-                # 避免 0 除
+                # Avoid division by 0
                 numpy.putmask(row_sum, row_sum == 0, 1.0)
                 blendweights = blendweights / row_sum
 
             
-            # 存储到字典（使用SemanticIndex作为键）
+            # Store into the dictionaries (using SemanticIndex as the key)
             blendweights_dict[set_idx] = blendweights
             blendindices_dict[set_idx] = blendindices
 
@@ -854,8 +854,8 @@ class VertexGroupUtils:
         compute per-vertex top-K (K = aligned_max_groups) and maps to per-loop arrays.
         Returns same shape: (blendweights_dict, blendindices_dict) with SemanticIndex 0.
 
-        目前只有鸣潮在使用，尚未在其它游戏中进行测试
-        TODO 需要测试其它游戏是否兼容。
+        Currently only used by Wuthering Waves; not yet tested on other games
+        TODO: test whether other games are compatible.
         '''
         import numpy as np
 
@@ -954,66 +954,66 @@ class VertexGroupUtils:
     @staticmethod
     def get_blendweights_blendindices_v4(mesh, normalize_weights: bool = False,blend_size = 4):
         """
-        注意这个先别删留着备用防止新的出问题，新的fast是这个的好几倍速度，所以这个弃用了。
+        Note: do not delete this yet, keep it as a fallback in case the new one breaks. The new fast version is several times faster than this one, so this one is deprecated.
         """
-        # -------------------- 基础数据 --------------------
+        # -------------------- Basic data --------------------
         mesh_loops = mesh.loops
         mesh_verts = mesh.vertices
         n_loops = len(mesh_loops)
 
-        # 提前把每条 loop 对应的顶点索引抓出来
+        # Fetch the vertex index corresponding to each loop in advance
         loop_vertex_indices = numpy.empty(n_loops, dtype=int)
         mesh_loops.foreach_get("vertex_index", loop_vertex_indices)
 
-        # -------------------- 1. 收集每个顶点的所有非零权重组 --------------------
-        # 用 Python list 先存，因为每组数量不固定
-        vert_groups_weights = []   # [[(group_id, weight), ...], ...] 长度 = 顶点数
+        # -------------------- 1. Collect all non-zero-weight groups of each vertex --------------------
+        # Use Python lists to store them first because the group count varies per vertex
+        vert_groups_weights = []   # [[(group_id, weight), ...], ...] length = number of vertices
         for v in mesh_verts:
-            # 只保留 weight > 0 的组，防止空数据
+            # Keep only groups with weight > 0 to avoid empty data
             gw = [(g.group, g.weight) for g in v.groups if g.weight > 0]
-            # 按权重从大到小排序，方便后续直接取前 N 个
+            # Sort by weight in descending order so the top N can be taken directly later
             gw.sort(key=lambda x: x[1], reverse=True)
             vert_groups_weights.append(gw)
 
-        # -------------------- 2. 计算“真实最大组数”并补齐到 4 的倍数 --------------------
-        # 先找所有顶点里真实存在的最大组数
+        # -------------------- 2. Compute the "real max group count" and pad it up to a multiple of 4 --------------------
+        # First find the real max group count across all vertices
         real_max_groups = max(len(gw) for gw in vert_groups_weights) if vert_groups_weights else 0
-        # 补齐到 4 的倍数
+        # Pad it up to a multiple of 4
         aligned_max_groups = 4 * math.ceil(real_max_groups / 4) if real_max_groups else 4
 
         if aligned_max_groups < blend_size:
             aligned_max_groups = blend_size
 
-        # -------------------- 3. 一次性申请对齐后的 ndarray --------------------
-        # 所有顶点一起存，方便后面用高级索引一次性映射到 loop
+        # -------------------- 3. Allocate the aligned ndarray in one go --------------------
+        # Store all vertices together so advanced indexing can map them to loops at once
         all_groups = numpy.zeros((len(mesh_verts), aligned_max_groups), dtype=int)
         all_weights = numpy.zeros((len(mesh_verts), aligned_max_groups), dtype=numpy.float32)
 
-        # -------------------- 4. 填充数据 & 可选归一化 --------------------
+        # -------------------- 4. Fill the data & optional normalization --------------------
         for v_idx, gw in enumerate(vert_groups_weights):
-            # 把真实数据写进去
+            # Write the real data in
             for col, (g_id, w) in enumerate(gw):
                 all_groups[v_idx, col] = g_id
                 all_weights[v_idx, col] = w
 
-            # 如果 normalize_weights=True，对该顶点权重归一化（保留 0 的位置仍为 0）
+            # If normalize_weights=True, normalize this vertex's weights (slots kept as 0 stay 0)
             weight_sum = all_weights[v_idx].sum()
             if weight_sum > 0:
                 all_weights[v_idx] /= weight_sum
 
-        # -------------------- 5. 把“逐顶点”数据映射到“逐 loop” --------------------
-        # 先检查索引合法性，防止越界
+        # -------------------- 5. Map the "per-vertex" data to "per-loop" --------------------
+        # Check index validity first to prevent out-of-bounds access
         valid_mask = (0 <= loop_vertex_indices) & (loop_vertex_indices < len(mesh_verts))
         valid_vidx = loop_vertex_indices[valid_mask]
 
         blendindices = numpy.zeros((n_loops, aligned_max_groups), dtype=numpy.uint32)
         blendweights = numpy.zeros((n_loops, aligned_max_groups), dtype=numpy.float32)
 
-        # 高级索引一次性拷贝
+        # Copy everything at once with advanced indexing
         blendindices[valid_mask] = all_groups[valid_vidx]
         blendweights[valid_mask] = all_weights[valid_vidx]
 
-        # -------------------- 6. 返回兼容旧接口的字典 --------------------
+        # -------------------- 6. Return the dicts compatible with the old interface --------------------
         return {0: blendweights}, {0: blendindices}
 
     @staticmethod
@@ -1024,25 +1024,25 @@ class VertexGroupUtils:
         submesh_unique_vg_map: dict[str, set[int]] | None = None,
     ) -> list[tuple[str, bpy.types.Object]]:
         """
-        UniComponent 核心拆分：复制+提取。
+        UniComponent core split: copy + extract.
 
-        submesh_unique_vg_map: 每个 Submesh 的独有 VG。
-            用于精确判定顶点归属：顶点归于其「独有 VG 权重最高」的那个 Submesh。
-            共享 VG（如盆骨）不计入归属判定。
+        submesh_unique_vg_map: the unique VGs of each Submesh.
+            Used to determine vertex ownership precisely: a vertex belongs to the Submesh with the highest weight on its "unique VGs".
+            Shared VGs (e.g. pelvis) do not count toward ownership determination.
         """
         if obj.type != 'MESH' or len(obj.data.vertices) == 0:
             return []
 
         import bmesh
         import time
-        print(f"\n[UniComponent] 拆分: '{obj.name}' ({len(obj.data.vertices)} 顶点, {len(obj.vertex_groups)} VG)")
+        print(f"\n[UniComponent] Splitting: '{obj.name}' ({len(obj.data.vertices)} verts, {len(obj.vertex_groups)} VG)")
 
-        # --- 预计算每个顶点的「主归属 Submesh」（基于独有 VG 的最高权重） ---
+        # --- Precompute each vertex's "primary Submesh" (based on the highest weight among unique VGs) ---
         vert_primary_sm: list[str | None] = [None] * len(obj.data.vertices)
         has_unique = submesh_unique_vg_map is not None
 
         if has_unique:
-            # 构建：独有 VG index → 归属的 Submesh
+            # Build: unique VG index -> the Submesh it belongs to
             unique_vg_sm: dict[int, str] = {}
             for sm_name, uvgs in submesh_unique_vg_map.items():
                 for vg in obj.vertex_groups:
@@ -1063,22 +1063,22 @@ class VertexGroupUtils:
                         best_w = g.weight
                 vert_primary_sm[v.index] = best_sm
 
-            # 对于没有独有 VG 的顶点（全绑在共享 VG 上），尝试用任意 VG 兜底
+            # For vertices without unique VGs (bound only to shared VGs), try any VG as a fallback
             for v in obj.data.vertices:
                 if vert_primary_sm[v.index] is not None or not v.groups:
                     continue
-                # 找权重最高的 VG，看它属于哪些 Submesh，取第一个
+                # Find the VG with the highest weight, check which Submeshes it belongs to, and take the first one
                 best_g = max(v.groups, key=lambda g: g.weight)
                 for sm_name, vg_set in submesh_vg_map.items():
                     if best_g.group in {vg.index for vg in obj.vertex_groups if int(vg.name) in vg_set}:
                         if best_g.group in unique_vg_sm:
                             vert_primary_sm[v.index] = unique_vg_sm[best_g.group]
                         else:
-                            # 共享 VG 兜底：取 VG 所属的第一个 Submesh
+                            # Shared VG fallback: take the first Submesh the VG belongs to
                             vert_primary_sm[v.index] = sm_name
                         break
 
-        # --- 对每个 Submesh 创建拆分物体 ---
+        # --- Create a split object for each Submesh ---
         results: list[tuple[str, bpy.types.Object]] = []
         src_colls = list(obj.users_collection)
         target_coll = src_colls[0] if src_colls else bpy.context.scene.collection
@@ -1094,13 +1094,13 @@ class VertexGroupUtils:
             if not sm_vg_indices:
                 continue
 
-            # 1. 复制物体
+            # 1. Copy the object
             new_obj = obj.copy()
             new_obj.data = obj.data.copy()
             new_obj.name = f"Uni_{int(time.time() * 1000) % 100000}_{sm_name.replace('.', '_')}"
             target_coll.objects.link(new_obj)
 
-            # 2. BMesh 删除不归属本 Submesh 的顶点
+            # 2. Delete vertices that do not belong to this Submesh with BMesh
             bm = bmesh.new()
             bm.from_mesh(new_obj.data)
             bm.verts.ensure_lookup_table()
@@ -1131,7 +1131,7 @@ class VertexGroupUtils:
             bm.free()
             new_obj.data.update()
 
-            # 3. 清理并重命名 VG
+            # 3. Clean up and rename the VGs
             reverse_map = submesh_reverse_vg_map.get(sm_name, {})
             vg_to_remove = []
             for vg in new_obj.vertex_groups:
@@ -1155,7 +1155,7 @@ class VertexGroupUtils:
             VertexGroupUtils.merge_vertex_groups_with_same_number_v2()
             VertexGroupUtils.fill_vertex_group_gaps()
 
-            # 去掉补零，恢复纯数字名称
+            # Strip the zero padding and restore plain numeric names
             for vg in new_obj.vertex_groups:
                 try:
                     vg.name = str(int(vg.name))
@@ -1167,12 +1167,12 @@ class VertexGroupUtils:
             remaining_verts = len(new_obj.data.vertices)
             remaining_vgs = len(new_obj.vertex_groups)
             vg_names = [vg.name for vg in new_obj.vertex_groups]
-            print(f"[UniComponent]   → '{sm_name}': {remaining_verts} 顶点, {remaining_vgs} VG {vg_names[:5]}{'...' if remaining_vgs > 5 else ''}")
+            print(f"[UniComponent]   → '{sm_name}': {remaining_verts} verts, {remaining_vgs} VG {vg_names[:5]}{'...' if remaining_vgs > 5 else ''}")
 
             if remaining_verts > 0:
                 results.append((sm_name, new_obj))
             else:
                 bpy.data.objects.remove(new_obj, do_unlink=True)
 
-        print(f"[UniComponent] 完成: {len(results)} 个部件 {[s for s, _ in results]}")
+        print(f"[UniComponent] Done: {len(results)} parts {[s for s, _ in results]}")
         return results

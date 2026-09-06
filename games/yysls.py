@@ -60,12 +60,12 @@ class ExportYYSLS:
                         category_original_slot = d3d11_game_type.CategoryExtractSlotDict[original_category_name]
                         texture_override_ib_section.append(category_original_slot + " = Resource" + draw_ib + original_category_name)
 
-            # TODO 杩欓噷娉ㄦ剰锛孻YSLS澶т笘鐣屼腑浣跨敤鐨勬槸DrawindexedInstancedIndirect
-            # 绗竴涓弬鏁版槸涓€涓笓闂ㄧ殑鍙傛暟Buffer锛屼絾鏄垜浠洰鍓嶈繕娌″彂鏋勯€犺繖涓弬鏁癇uffer锛屾墍浠ヨ鍔犱笂
-            # 绗簩涓弬鏁版槸Buffer鐨勫亸绉婚噺锛屽洜涓轰竴鑸槸涓€涓法澶х殑Buffer鍖呭惈浜嗚繖涓€甯ф墍鏈夎缁樺埗鐨勫唴瀹?
-            # 浣嗘槸瑙掕壊澶栬鐣岄潰锛屼娇鐢ㄧ殑鏄疍rawIndexed
-            # 鎵€浠ヨ繖涓兘澶熷吋瀹圭殑鏂规硶浠嶇劧闇€瑕佹懜绱紝涔熻鑳藉閫氳繃鏌愮DRAW_TYPE鏉ヨ繘琛岃繃婊わ紵
-            # emmmm锛屾€讳箣鍚庨潰娴嬭瘯鐨勬椂鍊欏湪鑰冭檻锛屾殏鏃惰褰曞湪姝?
+            # TODO note: YYSLS uses DrawindexedInstancedIndirect in its open world.
+            # The first argument is a dedicated parameter buffer, but we cannot build that parameter buffer yet, so it has to be added.
+            # The second argument is the offset into the buffer, because usually one huge buffer holds everything that will be drawn in this frame.
+            # However, the character appearance UI uses DrawIndexed.
+            # So a compatible approach still needs to be explored; maybe it can be filtered by some DRAW_TYPE?
+            # emmmm, will think about it during later testing; recorded here for now.
             for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
                 submesh_model.drawcall_model_list,
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,

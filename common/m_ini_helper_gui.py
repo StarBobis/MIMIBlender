@@ -12,48 +12,48 @@ class M_IniHelperGUI:
     @staticmethod
     def copy_files(src_dir, dst_dir):
         """
-        复制 src_dir 目录下的所有文件（不包括子目录）到 dst_dir 目录
-        :param src_dir: 源目录路径
-        :param dst_dir: 目标目录路径
+        Copy all files under src_dir (excluding subdirectories) to dst_dir.
+        :param src_dir: Source directory path
+        :param dst_dir: Destination directory path
         """
-        print("[TRACE] M_IniHelperGUI.copy_files() 入口")
+        print("[TRACE] M_IniHelperGUI.copy_files() entry")
         print("[TRACE]   src_dir: " + src_dir)
         print("[TRACE]   dst_dir: " + dst_dir)
-        print("[TRACE]   src_dir 存在: " + str(os.path.exists(src_dir)))
+        print("[TRACE]   src_dir exists: " + str(os.path.exists(src_dir)))
 
-        # 确保目标目录存在
+        # Ensure the destination directory exists
         os.makedirs(dst_dir, exist_ok=True)
-        print("[TRACE]   dst_dir 已确保存在")
+        print("[TRACE]   dst_dir ensured to exist")
 
         copied_count = 0
         skipped_not_file = 0
 
-        # 遍历源目录下的所有文件
+        # Iterate over all files under the source directory
         files_in_src = os.listdir(src_dir) if os.path.exists(src_dir) else []
-        print("[TRACE]   src_dir 内文件/目录列表(" + str(len(files_in_src)) + "个): " + str(files_in_src))
+        print("[TRACE]   file/dir list in src_dir (" + str(len(files_in_src)) + " entries): " + str(files_in_src))
 
         for filename in files_in_src:
             src_file = os.path.join(src_dir, filename)
             dst_file = os.path.join(dst_dir, filename)
 
-            # 只复制文件，忽略子目录
+            # Copy only files, ignore subdirectories
             if os.path.isfile(src_file):
-                print("[TRACE] >>> 复制资源文件: " + src_file + " -> " + dst_file)
+                print("[TRACE] >>> Copying resource file: " + src_file + " -> " + dst_file)
                 try:
-                    shutil.copy2(src_file, dst_file)  # 使用 copy2 保留元数据
-                    print("[TRACE] <<< 复制成功: " + dst_file)
+                    shutil.copy2(src_file, dst_file)  # use copy2 to preserve metadata
+                    print("[TRACE] <<< Copy succeeded: " + dst_file)
                     copied_count += 1
                 except Exception as e:
-                    print("[TRACE] <<< 复制失败! 异常: " + str(e))
+                    print("[TRACE] <<< Copy failed! Exception: " + str(e))
             else:
-                print("[TRACE]   跳过非文件: " + src_file)
+                print("[TRACE]   Skipping non-file: " + src_file)
                 skipped_not_file += 1
 
-        print("[TRACE] M_IniHelperGUI.copy_files() 汇总: 复制=" + str(copied_count) + ", 跳过非文件=" + str(skipped_not_file))
+        print("[TRACE] M_IniHelperGUI.copy_files() summary: copied=" + str(copied_count) + ", skipped non-file=" + str(skipped_not_file))
                 
     @staticmethod
     def copy_res_to_mod_folder():
-        '''将插件 resources/ 目录下的所有文件复制到生成 Mod 的 res/ 目录下。'''
+        '''Copy all files from the add-on's resources/ directory to the generated Mod's res/ directory.'''
         res_path = os.path.join(GlobalConfig.path_generate_mod_folder(), "res")
         os.makedirs(res_path, exist_ok=True)
 
@@ -64,15 +64,15 @@ class M_IniHelperGUI:
     @staticmethod
     def add_branch_mod_gui_section(ini_builder:M_IniBuilder,key_name_mkey_dict:dict[str,M_Key]):
         '''
-        声明模板化GUI面板
+        Declare a templated GUI panel.
 
-        此功能灵感来源于：https://www.caimogu.cc/post/2069456.html
-        特别感谢：タ小言
+        This feature was inspired by: https://www.caimogu.cc/post/2069456.html
+        Special thanks: Ta Xiaoyan
         ; UI Block
         ; By: Comilarex
-        ; Modifier: 夕小言
+        ; Modifier: Xi Xiaoyan
 
-        特别感谢：SinsOfSeven
+        Special thanks: SinsOfSeven
         '''
 
         if not GlobalProperties.generate_branch_mod_gui():
@@ -132,15 +132,15 @@ class M_IniHelperGUI:
         constants_section.append("global $ActiveCharacter = 0")
         constants_section.new_line()
 
-        constants_section.append("; 流光边框控制参数")
+        constants_section.append("; Flow-light border control parameters")
         constants_section.append("global persist $ui_fx_phase = 0")
         constants_section.append("global $ui_fx_speed = 0.006")
         constants_section.append("global $ui_fx_intensity = " + ("1" if GlobalProperties.generate_branch_mod_gui_flow_effect() else "0"))
         constants_section.new_line()
 
-        constants_section.append(";设置按钮总数")
+        constants_section.append(";Set total button count")
         constants_section.append("global $Button_amount = " + str(len(key_name_mkey_dict.values())))
-        constants_section.append(";设置横向最大按钮数")
+        constants_section.append(";Set max horizontal button count")
         constants_section.append("global $Button_horizontal_max = 10")
         constants_section.new_line()
 
@@ -216,7 +216,7 @@ class M_IniHelperGUI:
         present_section.append("    run = CommandListDrawUIBorderYRight")
         present_section.new_line()
 
-        present_section.append("    ;添加按钮")
+        present_section.append("    ;Add buttons")
         for mkey in key_name_mkey_dict.values():
             present_section.append("    run = CommandListAddButton")
         present_section.new_line()
@@ -232,7 +232,7 @@ class M_IniHelperGUI:
         commandlist_section = M_IniSection(M_SectionType.CommandList)
         commandlist_section.append(";MARK:ButtonSetting")
         commandlist_section.append("[CommandListSetButtonCondition]")
-        commandlist_section.append(";设置按钮功能")
+        commandlist_section.append(";Set button action")
 
         button_number = 0
         for mkey in key_name_mkey_dict.values():
@@ -253,7 +253,7 @@ class M_IniHelperGUI:
 
 
         commandlist_section.append("[CommandListSetButtonIcon]")
-        commandlist_section.append(";设置按钮图标")
+        commandlist_section.append(";Set button icon")
         button_number = 0
         for mkey in key_name_mkey_dict.values():
             if button_number == 0:
@@ -269,7 +269,7 @@ class M_IniHelperGUI:
         commandlist_section.new_line()
 
         commandlist_section.append("[CommandListSetUIShaderParamsDefault]")
-        commandlist_section.append("; 默认贴图直出")
+        commandlist_section.append("; Default: draw the texture directly")
         commandlist_section.append("x88 = 0")
         commandlist_section.append("y88 = 0")
         commandlist_section.append("x89 = 0")
@@ -277,7 +277,7 @@ class M_IniHelperGUI:
         commandlist_section.new_line()
 
         commandlist_section.append("[CommandListSetUIShaderParamsBorder]")
-        commandlist_section.append("; 唯一动态样式：统一炫彩边框")
+        commandlist_section.append("; The only dynamic style: unified rainbow border")
         commandlist_section.append("x88 = 5")
         commandlist_section.append("y88 = $ui_fx_phase")
         commandlist_section.append("x89 = $ui_fx_intensity")
@@ -563,7 +563,7 @@ class M_IniHelperGUI:
         resource_section.append("filename = .\\res\\item_shirt.png")
         resource_section.new_line()
 
-        # 测试的自定义资源
+        # Test custom resources
         button_number = 0
         for mkey in key_name_mkey_dict.values():
             resource_section.append("[ResourceButton_item_default_"+ str(button_number + 1)+ "]")

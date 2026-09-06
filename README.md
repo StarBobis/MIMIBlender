@@ -9,7 +9,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/StarBobis/MIMIBlender?style=flat&logo=github&color=red)](https://github.com/StarBobis/MIMIBlender/issues)
 [![GitHub license](https://img.shields.io/github/license/StarBobis/MIMIBlender?style=flat&color=brightgreen)](https://github.com/StarBobis/MIMIBlender/blob/main/LICENSE.txt)
 [![GitHub last commit](https://img.shields.io/github/last-commit/StarBobis/MIMIBlender?style=flat&logo=git&color=orange)](https://github.com/StarBobis/MIMIBlender/commits/main)
-[![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/StarBobis/MIMIBlender/latest/total?style=flat&logo=github&color=blue&label=最新版下载量)](https://github.com/StarBobis/MIMIBlender/releases/latest)
+[![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/StarBobis/MIMIBlender/latest/total?style=flat&logo=github&color=blue&label=Latest%20Downloads)](https://github.com/StarBobis/MIMIBlender/releases/latest)
 [![Blender](https://img.shields.io/badge/Blender-5.2%20LTS-e67e22?style=flat&logo=blender&logoColor=white)](https://www.blender.org/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![GitHub release](https://img.shields.io/github/v/release/StarBobis/MIMIBlender?style=flat-square&logo=github)](https://github.com/StarBobis/MIMIBlender/releases)
@@ -18,7 +18,7 @@
 </div>
 
 
-📦 **MIMITools的Blender插件** — Import and export SSMT4 model format directly in Blender. Built for 3Dmigoto-based game modding.
+📦 **MIMITools' Blender Add-on** — Import and export SSMT4 model format directly in Blender. Built for 3Dmigoto-based game modding.
 
 - 🔄 SSMT4 and MIMIBlender versions are almost always updated together. Please use the latest versions of both to avoid feature mismatches.
 - 🐞 **Blender 5.2 LTS** is required. Older Blender versions are not supported.
@@ -54,7 +54,7 @@
 | 🌃 **Zenless Zone Zero** | `ZZMI` | Unity |
 | 🌃 **Zenless Zone Zero DX12** | `ZZMIDX12` | Unity |
 | 🌊 **Wuthering Waves** | `WWMI` | Unreal |
-| �️ **Arknights: Endfield** (明日方舟终末地) | `EFMI` | Unity |
+| 🏗️ **Arknights: Endfield** | `EFMI` | Unity |
 
 ### ⚠️ Community / Occasional Maintenance
 
@@ -70,7 +70,7 @@
 
 | Game | ID |
 |------|----|
-| 💙 **Azur Promilia** (蓝色星原) | `APMI` |
+| 💙 **Azur Promilia** | `APMI` |
 ---
 
 ## 🚀 Quick Start

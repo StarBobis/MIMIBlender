@@ -81,7 +81,7 @@ class ExportGIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            # 节点驱动的 slot 贴图：每个 drawindexed 前单独设置槽位
+            # Node-driven slot textures: set the slot separately before each drawindexed
             def _slot_provider(obj_model):
                 return M_TextureHelper.get_slot_texture_lines_for_drawcall(obj_model)
 
@@ -141,7 +141,7 @@ class ExportGIMI:
         ini_builder.append_section(resource_vb_section)
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        # 从蓝图 Texture 节点生成 [Resource_...] 段
+        # Generate the [Resource_...] sections from the blueprint Texture nodes
         M_TextureHelper.generate_slot_texture_resource_sections(
             drawib_model=drawib_model,
             blueprint_model=self.blueprint_model,
@@ -217,7 +217,7 @@ class ExportGIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            # 节点驱动的 slot 贴图：每个 drawindexed 前单独设置槽位
+            # Node-driven slot textures: set the slot separately before each drawindexed
             M_IniHelper.append_drawindexed_with_slot_lines(
                 texture_override_ib_section,
                 submesh_model.drawcall_model_list,

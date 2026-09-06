@@ -1,5 +1,5 @@
 '''
-基础信息面板
+Basic Information Panel
 '''
 import bpy
 
@@ -7,16 +7,14 @@ from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
-from ..utils.translate_utils import iface_
-
 from .ui_func_export import SSMTGenerateSelectedBlueprintMod
 from .ui_func_import_ssmt import SSMT4ImportAllFromCurrentWorkSpaceBlueprint, SSMT4ImportRaw
 
 
 class SSMT4RefreshWorkspaceList(bpy.types.Operator):
     bl_idname = "ssmt4.refresh_workspace_list"
-    bl_label = "刷新工作空间列表"
-    bl_description = "刷新当前游戏配置下的工作空间列表"
+    bl_label = "Refresh Workspace List"
+    bl_description = "Refresh the workspace list of the current game configuration"
 
     def execute(self, context):
         GlobalConfig.read_from_main_json_ssmt4()
@@ -25,16 +23,16 @@ class SSMT4RefreshWorkspaceList(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, iface_("已刷新工作空间列表"))
+        self.report({'INFO'}, "Workspace list refreshed")
         return {'FINISHED'}
 
 
 class PanelBasicInformation(bpy.types.Panel):
     '''
-    基础信息面板
-    此面板实时刷新并读取全局配置文件中的路径
+    Basic Information Panel
+    This panel refreshes in real time and reads the paths from the global configuration file.
     '''
-    bl_label = "基础信息面板"
+    bl_label = "Basic Information Panel"
     bl_idname = "VIEW3D_PT_CATTER_Buttons_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -55,44 +53,44 @@ class PanelBasicInformation(bpy.types.Panel):
         # action buttons below. Operators/import callbacks remain responsible
         # for persisting an explicit selection.
 
-        layout.label(text=iface_("SSMT缓存文件夹路径: ") + GlobalConfig.ssmtlocation)
-        layout.label(text=iface_("当前配置名称: ") + GlobalConfig.gamename)
-        layout.label(text=iface_("当前游戏预设: ") + GlobalConfig.logic_name)
-        layout.label(text=iface_("当前工作空间: ") + GlobalConfig.get_workspace_name())
+        layout.label(text="SSMT Cache Folder: " + GlobalConfig.ssmtlocation)
+        layout.label(text="Current Config Name: " + GlobalConfig.gamename)
+        layout.label(text="Current Game Preset: " + GlobalConfig.logic_name)
+        layout.label(text="Current Workspace: " + GlobalConfig.get_workspace_name())
 
         layout.prop(global_properties, "workspace_source_mode")
         if global_properties.workspace_source_mode == "SPECIFIC":
             workspace_row = layout.row(align=True)
-            workspace_row.prop(global_properties, "specific_workspace_name", text=iface_("指定工作空间"))
+            workspace_row.prop(global_properties, "specific_workspace_name", text="Specified Workspace")
             workspace_row.operator(SSMT4RefreshWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
         elif global_properties.workspace_source_mode == "CUSTOM":
-            layout.prop(global_properties, "custom_workspace_folder_path", text=iface_("自定义目录"))
+            layout.prop(global_properties, "custom_workspace_folder_path", text="Custom Folder")
 
         # layout.prop(global_properties,"use_mirror_workflow")
         
         if len(context.selected_objects) != 0:
             obj = context.selected_objects[0]
 
-            # 获取自定义属性
+            # Read the custom properties
             gametypename = obj.get("3DMigoto:GameTypeName", "")
             recalculate_tangent = obj.get("3DMigoto:RecalculateTANGENT", False)
             recalculate_color = obj.get("3DMigoto:RecalculateCOLOR", False)
 
             row = layout.row(align=True)
-            row.label(text=iface_("数据类型: ") + gametypename)
+            row.label(text="Data Type: " + gametypename)
             row.operator("ssmt4.fix_drawib_datatype", text="", icon='TOOL_SETTINGS', emboss=False)
             row.operator("ssmt4.fix_submesh_datatype", text="", icon='TOOL_SETTINGS', emboss=False)
-            layout.label(text=iface_("重计算TANGENT: ") + str(recalculate_tangent))
-            layout.label(text=iface_("重计算COLOR: ") + str(recalculate_color))
+            layout.label(text="Recalculate TANGENT: " + str(recalculate_tangent))
+            layout.label(text="Recalculate COLOR: " + str(recalculate_color))
 
-        # 手动导入SSMT格式模型
+        # Manually import an SSMT model
         layout.operator(SSMT4ImportRaw.bl_idname,icon='IMPORT')
-        # 一键导入当前SSMT工作空间内容
+        # One-click import of the current SSMT workspace contents
         layout.operator(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_idname,icon='IMPORT')
         
-        # SSMT蓝图下拉列表
+        # SSMT blueprint dropdown list
         blueprint_row = layout.row(align=True)
-        blueprint_row.prop(global_properties, "selected_blueprint_name", text=iface_("SSMT蓝图"))
+        blueprint_row.prop(global_properties, "selected_blueprint_name", text="SSMT Blueprint")
 
         rename_blueprint_operator = blueprint_row.operator(
             "theherta3.rename_persistent_blueprint",
@@ -115,9 +113,9 @@ class PanelBasicInformation(bpy.types.Panel):
         )
         open_blueprint_operator.blueprint_name = preferred_blueprint_name
 
-        # 快速生成Mod按钮，省的去蓝图里点击了
+        # Quick Generate Mod button, to avoid opening the blueprint editor for it
         quick_generate_row = layout.row()
-        quick_generate_row.operator(SSMTGenerateSelectedBlueprintMod.bl_idname, text=iface_("生成Mod"), icon='EXPORT')
+        quick_generate_row.operator(SSMTGenerateSelectedBlueprintMod.bl_idname, text="Generate Mod", icon='EXPORT')
 
 
 
@@ -127,11 +125,11 @@ class PanelBasicInformation(bpy.types.Panel):
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
             layout.prop(global_properties,"import_skip_empty_vertex_groups")
 
-        # 决定导入时是否调用法线贴图
+        # Whether to use the normal map when importing
         layout.prop(global_properties, "use_normal_map")
 
         if GlobalConfig.logic_name == LogicName.GIMI or str(GlobalConfig.gamename).strip().casefold() in {
-            "gimi", "genshinimpact", "原神",
+            "gimi", "genshinimpact",
         }:
             layout.prop(global_properties, "align_face_on_import")
             layout.prop(global_properties, "gimi_high_fidelity_rendering")

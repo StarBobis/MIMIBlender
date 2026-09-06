@@ -1,33 +1,34 @@
 '''
-蓝图文件拖放支持：
-- 拖入 .dds/.png → 在松开鼠标的位置创建贴图节点（SSMTNode_Texture），
-  并从文件名尽量解析 Hash 与 Mark Name。
-- 拖入 .ib/.buf/.txt → 在松开鼠标的位置创建物体信息节点（SSMTNode_Object_Info），
-  并从文件名尽量解析 submesh_name（新格式 DrawIB-Component / 旧格式长名 / 带 LOD 前缀均可）。
+Blueprint file drop support:
+- Dropping a .dds/.png creates a texture node (SSMTNode_Texture) at the drop position,
+  parsing the Hash and Mark Name from the filename when possible.
+- Dropping a .ib/.buf/.txt creates an object info node (SSMTNode_Object_Info) at the drop
+  position, parsing submesh_name from the filename when possible (the new DrawIB-Component
+  format, old-format long names, and names with a LOD prefix are all handled).
 
-通过 bpy.types.FileHandler 接管操作系统拖入 Node Editor 的文件，
-仅在当前节点树为 SSMTBlueprintTreeType 时生效，不影响其它编辑器。
+Files dropped from the OS into the Node Editor are handled through bpy.types.FileHandler;
+it only takes effect while the current node tree is SSMTBlueprintTreeType and does not
+affect other editors.
 '''
 import os
 import re
 
 import bpy
 
-from ..utils.translate_utils import rpt_
 from ..workspace.ssmt_workspace import WorkSpaceModel
 
 
 TEXTURE_EXTENSIONS = {".dds", ".png"}
 MESH_EXTENSIONS = {".ib", ".buf", ".txt"}
 
-# 8位十六进制 Hash（不允许前后紧邻更多十六进制字符，避免截断更长字符串）
+# 8-digit hexadecimal Hash (extra hex characters immediately before or after are not allowed, to avoid truncating longer strings)
 HASH_PATTERN = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{8})(?![0-9a-fA-F])")
 
 DROP_STACK_OFFSET_Y = 60.0
 
 
 def is_ssmt_blueprint_context(context) -> bool:
-    '''当前上下文是否为显示 SSMT 蓝图的节点编辑器。'''
+    '''Whether the current context is a node editor showing an SSMT Blueprint.'''
     area = getattr(context, "area", None)
     if not area or area.type != 'NODE_EDITOR':
         return False
@@ -40,10 +41,10 @@ def is_ssmt_blueprint_context(context) -> bool:
 
 
 def parse_texture_filename(filepath: str):
-    '''从贴图文件名尽量解析 (texture_hash, mark_name)。
+    '''Parse (texture_hash, mark_name) from a texture filename when possible.
 
-    常见格式: <Hash>_<MarkName>.dds / <MarkName>_<Hash>.dds。
-    找不到 Hash 时仅返回 mark_name。
+    Common formats: <Hash>_<MarkName>.dds / <MarkName>_<Hash>.dds.
+    Returns only mark_name when no Hash is found.
     '''
     base_name = os.path.splitext(os.path.basename(filepath))[0]
     match = HASH_PATTERN.search(base_name)
@@ -51,7 +52,7 @@ def parse_texture_filename(filepath: str):
         return "", base_name
 
     texture_hash = match.group(1).lower()
-    # Hash 前后的剩余部分取非空的一段作为 Mark Name
+    # Use whichever non-empty part remains around the Hash as the Mark Name
     suffix = base_name[match.end():].lstrip("_-. ")
     prefix = base_name[:match.start()].rstrip("_-. ")
     mark_name = (suffix or prefix).strip()
@@ -59,10 +60,10 @@ def parse_texture_filename(filepath: str):
 
 
 def parse_mesh_filename(filepath: str) -> str:
-    '''从 .ib/.buf/.txt 文件名尽量解析 submesh_name。
+    '''Parse submesh_name from a .ib/.buf/.txt filename when possible.
 
-    识别成功时返回标准化新格式名（如 LOD0.94517393-0），
-    识别失败时回退为原始文件名（不含扩展名）。
+    Returns the normalized new-format name (e.g. LOD0.94517393-0) when
+    recognized, otherwise falls back to the raw filename (without extension).
     '''
     base_name = os.path.splitext(os.path.basename(filepath))[0]
     try:
@@ -80,13 +81,13 @@ def parse_mesh_filename(filepath: str) -> str:
 
 
 class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
-    '''拖放文件到 SSMT 蓝图，在松开鼠标的位置创建对应节点'''
+    '''Drop files onto the SSMT Blueprint, creating matching nodes at the release position'''
     bl_idname = "ssmt.blueprint_file_drop"
-    bl_label = "拖放文件到蓝图"
+    bl_label = "Drop files onto the Blueprint"
     bl_options = {'UNDO'}
 
-    # FileHandler 会把单文件写入 filepath；要接收多文件，则必须同时声明
-    # directory 与 files（名称和类型均是 Blender 约定的一部分）。
+    # FileHandler writes a single file into filepath; to receive multiple files,
+    # both directory and files must be declared (names and types are part of Blender's convention).
     filepath: bpy.props.StringProperty(  # type: ignore
         subtype='FILE_PATH',
         options={'HIDDEN', 'SKIP_SAVE'},
@@ -101,7 +102,7 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
     )
 
     def _filepaths(self):
-        '''返回本次拖放中 Blender 传入的全部文件路径。'''
+        '''Return all file paths Blender passed in for this drop.'''
         if self.directory and len(self.files) > 0:
             return [
                 os.path.join(self.directory, file_element.name)
@@ -134,15 +135,15 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
         if tree is None or getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
             return {'CANCELLED'}
 
-        # FileHandler 的 poll_drop 限定在 WINDOW region，因此这里的
-        # mouse_region_x/y 就是松开鼠标时的画布区域坐标。
+        # FileHandler's poll_drop is restricted to the WINDOW region, so the
+        # mouse_region_x/y here are the canvas area coordinates at release time.
         region = getattr(context, "region", None)
         if region is None or region.type != 'WINDOW':
             return {'CANCELLED'}
 
-        # 不直接调用 region.view2d.region_to_view：节点坐标还需要处理
-        # Blender 的 UI_SCALE_FAC。这个 SpaceNodeEditor 方法与原生
-        # NODE_OT_add_file 使用完全相同的换算流程。
+        # Do not call region.view2d.region_to_view directly: node coordinates
+        # must also account for Blender's UI_SCALE_FAC. This SpaceNodeEditor
+        # method performs the exact same conversion as the native NODE_OT_add_file.
         space.cursor_location_from_region(
             event.mouse_region_x,
             event.mouse_region_y,
@@ -178,11 +179,11 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
         tree.nodes.active = created_nodes[0]
 
         if len(created_nodes) == 1:
-            message = rpt_("已从文件创建节点: {name}").format(
+            message = "Created node from file: {name}".format(
                 name=os.path.basename(filepaths[0]),
             )
         else:
-            message = rpt_("已从文件创建 {count} 个节点").format(
+            message = "Created {count} nodes from files".format(
                 count=len(created_nodes),
             )
         self.report({'INFO'}, message)
@@ -192,9 +193,9 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
 classes = [SSMT_OT_BlueprintFileDrop]
 
 class SSMT_FH_BlueprintFileDrop(bpy.types.FileHandler):
-    '''接管操作系统拖入 SSMT 蓝图编辑器的文件'''
+    '''Handle files dropped from the OS into the SSMT Blueprint editor'''
     bl_idname = "SSMT_FH_BlueprintFileDrop"
-    bl_label = "拖放文件到SSMT蓝图"
+    bl_label = "Drop files onto the SSMT Blueprint"
     bl_import_operator = "ssmt.blueprint_file_drop"
     bl_file_extensions = ".dds;.png;.ib;.buf;.txt"
 

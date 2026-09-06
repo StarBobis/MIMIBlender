@@ -27,7 +27,7 @@ class ExportEFMI:
     def __post_init__(self):
         self.submesh_model_list = self.blueprint_model.parse_submesh_model_list()
         self.drawib_model_list = self.blueprint_model.parse_drawib_model_list(combine_ib=False)
-        print("SubMeshModel鍒楄〃鍒濆鍖栧畬鎴愶紝鍏辨湁 " + str(len(self.submesh_model_list)) + " 涓猄ubMeshModel")
+        print("SubMeshModel list initialized, total " + str(len(self.submesh_model_list)) + " SubMeshModels")
 
         for drawib_model in self.drawib_model_list:
             drawib_model.apply_drawib_alias()
@@ -36,16 +36,16 @@ class ExportEFMI:
     def generate_buffer_files(self):
         buf_output_folder = GlobalConfig.path_generatemod_buffer_folder()
 
-        # 鏂扮増EFMI鍙渶瑕佷緷娆″鍑烘瘡涓猄ubMeshModel鐨勫唴瀹癸紝鐢氳嚦鏃犻渶鍚堝苟锛岄潪甯哥畝鍗?
+        # The new EFMI just exports each SubMeshModel's contents one by one; merging is not even needed, quite simple
         for submesh_model in self.submesh_model_list:
-            print("ExportEFMI: 瀵煎嚭SubMeshModel锛孶nique鏍囪瘑: " + submesh_model.submesh_name)
+            print("ExportEFMI: exporting SubMeshModel, Unique ID: " + submesh_model.submesh_name)
 
-            # 鐢熸垚IndexBuffer
+            # Generate IndexBuffer
             ib_filename = submesh_model.display_str + "-Index.buf"
             ib_filepath = os.path.join(buf_output_folder, ib_filename)
             BufferExportHelper.write_buf_ib_r32_uint(submesh_model.ib, ib_filepath)
 
-            # 鐢熸垚CategoryBuffer
+            # Generate CategoryBuffer
             for category, category_buf in submesh_model.category_buffer_dict.items():
                 category_buf_filename = submesh_model.display_str + "-" + category + ".buf"
                 category_buf_filepath = os.path.join(buf_output_folder, category_buf_filename)
@@ -114,7 +114,7 @@ class ExportEFMI:
 
         ini_builder.append_section(texture_override_ib_section)
 
-        # ResourceBuffer閮ㄥ垎
+        # ResourceBuffer section
         resource_buffer_section = M_IniSection(M_SectionType.ResourceBuffer)
         for submesh_model in self.submesh_model_list:
             drawib_model = drawib_drawibmodel_dict.get(submesh_model.match_draw_ib)

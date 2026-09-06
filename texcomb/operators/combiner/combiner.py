@@ -52,12 +52,12 @@ class Combiner(bpy.types.Operator):
     """
 
     bl_idname = "smc.combiner"
-    bl_label = "创建图集"
-    bl_description = "将多个材质合并为纹理图集"
+    bl_label = "Create Atlas"
+    bl_description = "Combine multiple materials into a texture atlas"
     bl_options = {"UNDO", "INTERNAL"}
 
     directory: StringProperty(
-        description="图集保存目录",
+        description="Directory for saving the atlas",
         maxlen=1024,
         default="",
         subtype="FILE_PATH",
@@ -65,7 +65,7 @@ class Combiner(bpy.types.Operator):
     )
     filter_glob: StringProperty(default="", options={"HIDDEN"})
     cats: BoolProperty(
-        description="启用特殊的 Cats 工作流模式", default=False
+        description="Enable the special Cats workflow mode", default=False
     )
     data = None
     mats_uv = None
@@ -93,7 +93,7 @@ class Combiner(bpy.types.Operator):
         scn = context.scene
 
         if not self.directory:
-            return self._return_with_message("ERROR", "未选择保存目录")
+            return self._return_with_message("ERROR", "No save directory selected")
 
         scn.smc_save_path = self.directory
         sized_structure = get_size(scn, self.structure)
@@ -107,7 +107,7 @@ class Combiner(bpy.types.Operator):
         if max(atlas_size, default=0) > MAX_ATLAS_SIZE:
             self.report(
                 {"ERROR"},
-                "输出图片尺寸 {}x{}px 过大".format(
+                "Output image size {}x{}px is too large".format(
                     *atlas_size
                 ),
             )
@@ -120,7 +120,7 @@ class Combiner(bpy.types.Operator):
         assign_comb_mats(scn, self.data, comb_mats)
         clear_mats(scn, self.mats_uv)
         bpy.ops.smc.refresh_ob_data()
-        self.report({"INFO"}, "材质合并完成")
+        self.report({"INFO"}, "Materials combined successfully")
         return {"FINISHED"}
 
     def invoke(
@@ -148,7 +148,7 @@ class Combiner(bpy.types.Operator):
         validation_result = validate_ob_data(scn.smc_ob_data)
         if validation_result:
             return self._return_with_message(
-                "ERROR", "未选择有效的物体"
+                "ERROR", "No valid object selected"
             )
 
         if self.cats:
@@ -162,7 +162,7 @@ class Combiner(bpy.types.Operator):
         self.data = get_data(scn.smc_ob_data)
 
         if not self.data:
-            return self._return_with_message("ERROR", "未选择材质")
+            return self._return_with_message("ERROR", "No material selected")
 
         self.mats_uv = get_mats_uv(scn, self.data)
         clear_empty_mats(scn, self.data, self.mats_uv)
@@ -180,12 +180,12 @@ class Combiner(bpy.types.Operator):
 
         # Validate material requirements
         if total_unique_mats == 0:
-            return self._return_with_message("ERROR", "未选择材质")
+            return self._return_with_message("ERROR", "No material selected")
 
         if total_unique_mats == 1 and not has_duplicates:
             return self._return_with_message(
                 "ERROR",
-                "只有一个唯一材质被选中，无需合并",
+                "Only one unique material was selected; no merging needed",
             )
 
         if event is not None:
@@ -243,7 +243,7 @@ class Combiner(bpy.types.Operator):
             )
             self.report(
                 {"WARNING"},
-                "还有 {} 个材质会按纯色处理，请在材质设置中查看详情。".format(
+                "{} more materials will be treated as solid color; see the material settings for details.".format(
                     remaining
                 ),
             )

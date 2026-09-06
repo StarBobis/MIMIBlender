@@ -29,9 +29,9 @@ class ExportWWMI:
                 continue
             ordered_draw_ib_list.append(draw_ib)
 
-        # UniComponent 调试：打印所有 DrawCallModel 的 submesh 分配
+        # UniComponent debug: print the submesh assignment of every DrawCallModel
         if GlobalProperties.is_unico_component():
-            print("[UniComponent Export] DrawCallModel 列表:")
+            print("[UniComponent Export] DrawCallModel list:")
             for dcm in self.blueprint_model.ordered_draw_obj_data_model_list:
                 print(f"  obj='{dcm.obj_name}' submesh='{dcm.get_submesh_name()}' draw_ib='{dcm.match_draw_ib}'")
 
@@ -39,9 +39,9 @@ class ExportWWMI:
             draw_ib_model = DrawIBModelWWMI(draw_ib=draw_ib, blueprint_model=self.blueprint_model)
             self.drawib_drawibmodel_dict[draw_ib] = draw_ib_model
 
-            # UniComponent 调试：打印 submesh 分组
+            # UniComponent debug: print the submesh grouping
             if GlobalProperties.is_unico_component():
-                print(f"[UniComponent Export] DrawIB '{draw_ib}' submesh 分组:")
+                print(f"[UniComponent Export] DrawIB '{draw_ib}' submesh groups:")
                 for idx, group in enumerate(draw_ib_model.submesh_drawcall_groups):
                     names = [dcm.obj_name for dcm in group]
                     sm_name = draw_ib_model.wwmi_info.components[idx] if idx < len(draw_ib_model.wwmi_info.components) else None
@@ -323,10 +323,10 @@ class ExportWWMI:
         if not draw_ib_model.blend_remap:
             commandlist_section.append("vb4 = ResourceBlendBuffer")
         
-        # 娉ㄦ剰锛岃繖閲屽繀椤荤敤ref 鑰屼笉鏄洿鎺?= 
-        # 鍦?Dmigoto涓?Dmigoto 涓?= ResourceMergedSkeleton 鏄竴娆℃€у€兼嫹璐濓紝
-        # = ref ResourceMergedSkeleton 鎵嶆槸寮曠敤缁戝畾銆?
-        # 缂哄皯 ref 鎰忓懗鐫€鍚庣画 compute shader 鏇存柊楠ㄦ灦鏃讹紝vs-cb 涓嶄細鍚屾鏇存柊銆?
+        # Note: here we must use ref instead of a direct "=" assignment.
+        # In 3Dmigoto, "= ResourceMergedSkeleton" is a one-time value copy;
+        # "= ref ResourceMergedSkeleton" is a reference binding.
+        # Without ref, when a later compute shader updates the skeleton, vs-cb will not update in sync.
 
         if GlobalProperties.import_merged_vgmap() == 'MERGED':
             if draw_ib_model.blend_remap:
@@ -832,18 +832,18 @@ class ExportWWMI:
             self.add_resource_buffer(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
 
             print("=" * 60)
-            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - 寮€濮嬪鍒?Slot 璐村浘...")
+            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start copying Slot textures...")
             M_IniHelper.move_slot_style_textures(draw_ib_model=draw_ib_model)
-            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Slot 璐村浘澶嶅埗瀹屾垚")
+            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Slot texture copy done")
 
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
             M_IniHelper.add_branch_key_sections(ini_builder=config_ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
             M_IniHelperGUI.add_branch_mod_gui_section(ini_builder=config_ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
 
-            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - 寮€濮嬬敓鎴?Hash 璐村浘 INI...")
+            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start generating Hash texture INI...")
             M_IniHelper.generate_hash_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
             M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
-            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Hash/SharedSlot 璐村浘 INI 鐢熸垚瀹屾垚")
+            print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Hash/SharedSlot texture INI generation done")
             print("=" * 60)
 
             config_ini_builder.save_to_file_not_reorder(os.path.join(GlobalConfig.path_generate_mod_folder(), GlobalConfig.get_generated_mod_name() + "_" + draw_ib + ".ini"))

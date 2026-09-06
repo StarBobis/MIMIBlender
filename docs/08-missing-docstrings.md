@@ -1,71 +1,71 @@
-# 08 — 游戏导出器基类缺少文档
+# 08 - Game Exporter Base Classes Missing Docstrings
 
-## 严重程度
+## Severity
 
-🟡 **中等** — 5 个游戏导出器类完全没有 docstring，新人想添加新游戏时不知道协议是什么。
+🟡 **Medium** - Five game exporter classes have no docstrings at all, so a newcomer who wants to add a new game does not know what the protocol is.
 
-## 问题清单
+## Issue List
 
-### 缺少 docstring 的类
+### Classes missing docstrings
 
-| 文件 | 类名 | 行号 | 说明 |
+| File | Class | Line | Description |
 |------|------|:----:|------|
-| `games/unity.py` | `ExportUnity` | 14 | **基类**，被 GIMI/HIMI/SRMI/ZZMI 继承 |
-| `games/gimi.py` | `ExportGIMI` | 18 | Genshin Impact（原神） |
-| `games/himi.py` | `ExportHIMI` | 4 | Honkai Impact 3rd（崩坏3），`pass` 空类 |
-| `games/wwmi.py` | `ExportWWMI` | 15 | Wuthering Waves（鸣潮），最复杂的导出器 |
-| `games/ntemi.py` | `ExportNTEMI` | 39 | Neverness to Everness（异环） |
-| `games/snowbreak.py` | `ExportSnowBreak` | 12 | Snowbreak（尘白禁区） |
-| `games/identityv.py` | `ExportIdentityV` | 12 | Identity V（第五人格） |
-| `games/yysls.py` | `ExportYYSLS` | 12 | Where Winds Meet（燕云十六声） |
+| `games/unity.py` | `ExportUnity` | 14 | **Base class**, inherited by GIMI/HIMI/SRMI/ZZMI |
+| `games/gimi.py` | `ExportGIMI` | 18 | Genshin Impact |
+| `games/himi.py` | `ExportHIMI` | 4 | Honkai Impact 3rd; an empty `pass` class |
+| `games/wwmi.py` | `ExportWWMI` | 15 | Wuthering Waves; the most complex exporter |
+| `games/ntemi.py` | `ExportNTEMI` | 39 | Neverness to Everness |
+| `games/snowbreak.py` | `ExportSnowBreak` | 12 | Snowbreak |
+| `games/identityv.py` | `ExportIdentityV` | 12 | Identity V |
+| `games/yysls.py` | `ExportYYSLS` | 12 | Where Winds Meet |
 
-### 已添加文档的类（良好示例）
+### Classes that already have docstrings (good examples)
 
-| 文件 | 类名 | 说明 |
+| File | Class | Description |
 |------|------|------|
-| `games/efmi.py` | `ExportEFMI` | ✅ 已有 docstring |
-| `games/zzmi.py` | `ExportZZMI` | ✅ 已有 docstring |
-| `games/srmi.py` | `ExportSRMI` | ✅ 已有 docstring |
+| `games/efmi.py` | `ExportEFMI` | ✅ Already has a docstring |
+| `games/zzmi.py` | `ExportZZMI` | ✅ Already has a docstring |
+| `games/srmi.py` | `ExportSRMI` | ✅ Already has a docstring |
 
-## 为什么这很重要
+## Why This Matters
 
-一个新开发者想为项目添加新游戏支持。他们会：
+A new developer wants to add support for a new game to the project. They will:
 
-1. 打开 `games/` 目录
-2. 随机选一个导出器看代码
-3. 发现 `ExportUnity.__init__` 接受一个 `blueprint_model` 参数
-4. **困惑**：这个参数应该包含什么？`__init__` 里做了什么？必须重写哪些方法？
+1. Open the `games/` directory
+2. Pick an exporter at random and read its code
+3. Find that `ExportUnity.__init__` accepts a `blueprint_model` parameter
+4. **Get confused**: what should this parameter contain? What does `__init__` do? Which methods must be overridden?
 
-无文档的基类意味着新人必须**通读整个 200 行实现**才能理解协议。
+An undocumented base class means newcomers must **read through the entire 200-line implementation** to understand the protocol.
 
-## 修复方案
+## Proposed Fix
 
-### ExportUnity 基类需要说明的内容
+### What the ExportUnity base class docstring should cover
 
 ```python
 @dataclass
 class ExportUnity:
     '''
-    Unity 引擎游戏导出器基类。
+    Base class for Unity engine game exporters.
 
-    职责：
-    1. 从 BluePrintModel 解析所有 DrawIBModel 列表
-    2. 为每个 DrawIB 生成 .buf 文件和 .ini 纹理覆盖段
-    3. 应用 Submesh 别名到文件名
+    Responsibilities:
+    1. Parse the list of all DrawIBModels from the BluePrintModel
+    2. Generate a .buf file and an .ini texture override section for each DrawIB
+    3. Apply Submesh aliases to file names
 
-    子类需要重写的方法：
-    - _get_drawib_submesh_entries(drawib_model)  — 返回每个 DrawIB 的子网格条目列表
-    - _get_submesh_ib_resource_name(submesh_model) — 返回 IB 资源名（用于 INI）
-    - _build_texture_override_ini(...)              — 构建纹理覆盖 INI 段
+    Methods subclasses must override:
+    - _get_drawib_submesh_entries(drawib_model)   - return the submesh entry list for each DrawIB
+    - _get_submesh_ib_resource_name(submesh_model) - return the IB resource name (used in the INI)
+    - _build_texture_override_ini(...)             - build the texture override INI section
 
-    子类可选重写：
-    - _get_extra_ini_sections(...)  — 添加游戏特定的 INI 段
+    Optional subclass overrides:
+    - _get_extra_ini_sections(...)   - add game-specific INI sections
 
-    生命周期：
-    1. __post_init__()  → 调用 blueprint_model.parse_drawib_model_list()
-    2. generate_mod_files() → 遍历每个 DrawIB，生成资源文件 + INI
+    Lifecycle:
+    1. __post_init__()  -> calls blueprint_model.parse_drawib_model_list()
+    2. generate_mod_files() -> iterates over each DrawIB, generating resource files + INI
 
-    典型使用：
+    Typical usage:
         exporter = ExportGIMI(blueprint_model)
         exporter.generate_mod_files()
     '''
@@ -77,54 +77,54 @@ class ExportUnity:
         ...
 ```
 
-### 各子类需要的最小文档
+### Minimal docstring for each subclass
 
 ```python
 @dataclass
 class ExportGIMI(ExportUnity):
-    '''Genshin Impact（原神）Unity 引擎 3Dmigoto Mod 导出器。'''
-    # 实现细节...
+    '''Genshin Impact Unity engine 3Dmigoto Mod exporter.'''
+    # implementation details...
 
 @dataclass
 class ExportHIMI(ExportUnity):
-    '''Honkai Impact 3rd（崩坏3）导出器。继承 ExportUnity，行为与 GIMI 相同。'''
+    '''Honkai Impact 3rd exporter. Inherits ExportUnity, behaves the same as GIMI.'''
     pass
 
 @dataclass
 class ExportWWMI:
-    '''Wuthering Waves（鸣潮）Unreal 引擎导出器。
+    '''Wuthering Waves Unreal engine exporter.
 
-    与 Unity 引擎导出器的关键区别：
-    - 使用 DrawIBModelWWMI 而非 DrawIBModel
-    - 需要 WWMIInfoObject 来处理 VertexOffset/IndexOffset
-    - 支持 MergedObject 的顶点组合并和 BlendRemap
+    Key differences from the Unity engine exporters:
+    - Uses DrawIBModelWWMI instead of DrawIBModel
+    - Needs WWMIInfoObject to handle VertexOffset/IndexOffset
+    - Supports MergedObject vertex merging and BlendRemap
     '''
     ...
 ```
 
-### 文档模板
+### Docstring template
 
-每个导出器类至少应包含：
+Every exporter class should at least include:
 
 ```python
 '''
-{游戏中文名}（{游戏英文名}）{引擎名} 引擎 3Dmigoto Mod 导出器。
+{Chinese game name} ({English game name}) {engine name} engine 3Dmigoto Mod exporter.
 
-引擎类型: {Unity / Unreal / NeoX / Custom}
-特殊处理:
-  - {列出与基类的差异}
-  - {列出游戏特有的 INI 格式差异}
-  - {列出已知限制或 workaround}
+Engine type: {Unity / Unreal / NeoX / Custom}
+Special handling:
+  - {list the differences from the base class}
+  - {list game-specific INI format differences}
+  - {list known limitations or workarounds}
 
-关联 Issue: {GitHub issue 链接，如有}
+Related Issue: {GitHub issue link, if any}
 '''
 ```
 
-## 验证方法
+## Verification
 
-1. 打开每个 `games/*.py`，确认类定义后紧跟 docstring
-2. 让一个不熟悉项目的人阅读 `ExportUnity` 的 docstring，确认能否理解协议
+1. Open each `games/*.py` file and confirm that a docstring immediately follows the class definition
+2. Have someone unfamiliar with the project read the `ExportUnity` docstring and confirm they can understand the protocol
 
-## 风险
+## Risks
 
-- **零风险**：纯文档添加，不影响运行时行为
+- **Zero risk**: docstring-only addition, runtime behavior is unaffected

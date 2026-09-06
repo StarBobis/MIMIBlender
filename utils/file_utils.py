@@ -3,7 +3,7 @@ import os
 class FileUtils:
 
     def list_files(directory)->list[str]:
-        """ 列出目录下的所有文件，不包括子目录 """
+        """ List all the files in the directory, excluding subdirectories """
         file_list = []
 
         for entry in os.listdir(directory):

@@ -1,24 +1,23 @@
 
 import bpy
 
-from ..utils.translate_utils import iface_
-# ── 形态键列表项 ──
+# Shape key list item
 class SSMTShapeKeyListItem(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="", default=False) # type: ignore
-    shapekey_name: bpy.props.StringProperty(name="形态键名称", default="") # type: ignore
-    key: bpy.props.StringProperty(name="按键", default="") # type: ignore
+    shapekey_name: bpy.props.StringProperty(name="Shape Key Name", default="") # type: ignore
+    key: bpy.props.StringProperty(name="Key", default="") # type: ignore
 
 
-# ── 刷新形态键列表 ──
+# Refresh shape key list
 class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
     bl_idname = "ssmt.refresh_shapekey_list"
-    bl_label = "刷新形态键列表"
-    bl_description = "扫描蓝图中的所有物体节点，提取形态键列表"
+    bl_label = "Refresh Shape Key List"
+    bl_description = "Scans all object nodes in the blueprint and collects their shape keys"
     bl_options = {'REGISTER', 'UNDO'}
 
     @staticmethod
     def _get_shapekeys_from_object(obj):
-        """返回物体所有形态键名称（跳过第一个，即 Basis / 基型）。"""
+        """Return the names of all shape keys of the object (skipping the first one, the Basis)."""
         if not obj or obj.type != 'MESH':
             return []
         shape_keys = getattr(obj.data, 'shape_keys', None)
@@ -29,7 +28,7 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
     def execute(self, context):
         tree = context.space_data.edit_tree
         if not tree or getattr(tree, 'bl_idname', '') != 'SSMTBlueprintTreeType':
-            self.report({'WARNING'}, "请在 SSMT 蓝图编辑器中执行")
+            self.report({'WARNING'}, "Please run this inside the SSMT blueprint editor")
             return {'CANCELLED'}
 
         output_node = None
@@ -38,7 +37,7 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
                 output_node = node
                 break
         if not output_node:
-            self.report({'WARNING'}, "当前蓝图缺少「生成 Mod」输出节点")
+            self.report({'WARNING'}, "The current blueprint is missing a \"Generate Mod\" output node")
             return {'CANCELLED'}
 
         previous_items = {
@@ -61,26 +60,26 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
                 if sk_name in previous_items:
                     item.enabled, item.key = previous_items[sk_name]
 
-        self.report({'INFO'}, f"已刷新 {len(output_node.shapekey_items)} 个形态键")
+        self.report({'INFO'}, f"Refreshed {len(output_node.shapekey_items)} shape keys")
         return {'FINISHED'}
 
 
 def draw_shapekey_settings(node, layout):
-    """绘制 Generate Mod 输出节点中的形态键设置。"""
-    layout.prop(node, "enable_shapekey", text=iface_("生成形态键 Mod"), icon='SHAPEKEY_DATA')
+    """Draw the shape key settings of the Generate Mod output node."""
+    layout.prop(node, "enable_shapekey", text="Generate Shape Key Mod", icon='SHAPEKEY_DATA')
     if not node.enable_shapekey:
         return
 
     box = layout.box()
     row = box.row(align=True)
-    row.operator("ssmt.refresh_shapekey_list", text=iface_("刷新列表"), icon='FILE_REFRESH')
-    row.label(text=f"共 {len(node.shapekey_items)} 个" if node.shapekey_items else iface_("（空）"), icon='SHAPEKEY_DATA')
+    row.operator("ssmt.refresh_shapekey_list", text="Refresh List", icon='FILE_REFRESH')
+    row.label(text=f"Total: {len(node.shapekey_items)}" if node.shapekey_items else "(Empty)", icon='SHAPEKEY_DATA')
 
     for item in node.shapekey_items:
         row = box.row(align=True)
         row.prop(item, "enabled", text="")
         row.label(text=item.shapekey_name, icon='SHAPEKEY_DATA')
-        row.prop(item, "key", text="", placeholder="VK键值（可选）")
+        row.prop(item, "key", text="", placeholder="VK key value (optional)")
         op = row.operator("wm.url_open", text="", icon='HELP')
         op.url = "https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes"
 

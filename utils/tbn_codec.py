@@ -4,26 +4,26 @@ from typing import Tuple, Optional
 
 class TBNCodec:
     """
-    10-10-10-2 TBN (Tangent-Bitangent-Normal) 编解码器
-    用于 EFMI 格式的八面体法线压缩
+    10-10-10-2 TBN (Tangent-Bitangent-Normal) encoder/decoder
+    used for octahedral normal compression in the EFMI format
     
-    数据格式 (R10G10B10A2_UINT):
-    - X (10-bit): 八面体编码的法线 X 分量
-    - Y (10-bit): 八面体编码的法线 Y 分量  
-    - Z (10-bit): 编码的切线角度
-    - W (2-bit): 标志位 - bit30 为打包标志, bit31 为副切线符号
+    Data format (R10G10B10A2_UINT):
+    - X (10-bit): octahedrally encoded normal X component
+    - Y (10-bit): octahedrally encoded normal Y component  
+    - Z (10-bit): encoded tangent angle
+    - W (2-bit): flags - bit30 is the packed flag, bit31 is the bitangent sign
     """
 
     @staticmethod
     def oct_decode_vector(data: numpy.ndarray) -> numpy.ndarray:
         """
-        八面体解码: 将 2D 编码向量 (x,y) 解码为 3D 法线 (x,y,z)
+        Octahedral decode: decodes 2D encoded vectors (x,y) into 3D normals (x,y,z)
         
         Args:
-            data: shape (N, 2) 的 float32 数组, 范围约 [-1, 1]
+            data: float32 array of shape (N, 2), roughly in the range [-1, 1]
             
         Returns:
-            shape (N, 3) 的 float32 单位法线向量
+            float32 unit normal vectors of shape (N, 3)
         """
         assert data.ndim == 2 and data.shape[1] == 2, 'Array must be 2D with shape (N, 2)'
         x, y = data.T
@@ -43,13 +43,13 @@ class TBNCodec:
     @staticmethod
     def oct_encode_vector(normals: numpy.ndarray) -> numpy.ndarray:
         """
-        八面体编码: 将 3D 法线 (x,y,z) 编码为 2D 向量 (x,y)
+        Octahedral encode: encodes 3D normals (x,y,z) into 2D vectors (x,y)
         
         Args:
-            normals: shape (N, 3) 的 float32 法线向量
+            normals: float32 normal vectors of shape (N, 3)
             
         Returns:
-            shape (N, 2) 的 float32 编码向量
+            float32 encoded vectors of shape (N, 2)
         """
         # Keep behavior aligned with EFMI-Tools reference implementation.
         n = normals / numpy.linalg.norm(normals, axis=1, keepdims=True)
@@ -67,13 +67,13 @@ class TBNCodec:
     @staticmethod
     def decode_10_10_10_2(data: numpy.ndarray) -> numpy.ndarray:
         """
-        解包 10-10-10-2 编码的 uint32 数据
+        Unpacks 10-10-10-2 encoded uint32 data
         
         Args:
-            data: shape (N,) 的 uint32 数组
+            data: uint32 array of shape (N,)
             
         Returns:
-            shape (N, 5) 的 float32 数组: [x, y, z, packed_flag, sign_flag]
+            float32 array of shape (N, 5): [x, y, z, packed_flag, sign_flag]
         """
         assert data.ndim == 1, 'Array for 10-10-10-2 decoding must be 1D'
         assert data.dtype == numpy.uint32, 'Array for 10-10-10-2 decoding must have dtype uint32'
@@ -100,13 +100,13 @@ class TBNCodec:
     @staticmethod
     def encode_10_10_10_2(data: numpy.ndarray) -> numpy.ndarray:
         """
-        打包 3 个浮点数和 2 个布尔值为 10-10-10-2 编码的 uint32
+        Packs 3 floats and 2 booleans into a 10-10-10-2 encoded uint32
         
         Args:
-            data: shape (N, 5) 的 float32 数组: [x, y, z, packed_flag, sign_flag]
+            data: float32 array of shape (N, 5): [x, y, z, packed_flag, sign_flag]
             
         Returns:
-            shape (N,) 的 uint32 数组
+            uint32 array of shape (N,)
         """
         assert data.ndim == 2, 'Array for 10-10-10-2 encoding must be 2D'
         assert data.shape[1] == 5, 'Array for 10-10-10-2 encoding must be with shape (N, 5)'
@@ -130,14 +130,14 @@ class TBNCodec:
     @staticmethod
     def encode_tangents(tangents: numpy.ndarray, normals: numpy.ndarray) -> numpy.ndarray:
         """
-        将切线编码为角度值
+        Encodes tangents into angle values
         
         Args:
-            tangents: shape (N, 3) 的切线向量
-            normals: shape (N, 3) 的法线向量
+            tangents: tangent vectors of shape (N, 3)
+            normals: normal vectors of shape (N, 3)
             
         Returns:
-            shape (N,) 的 float32 角度编码值, 范围约 [-1, 1]
+            float32 angle-encoded values of shape (N,), roughly in the range [-1, 1]
         """
         R = numpy.stack([
             normals[:, 1] - normals[:, 2],
@@ -181,15 +181,15 @@ class TBNCodec:
         debug: bool = False
     ) -> numpy.ndarray:
         """
-        解码 10-10-10-2 TBN 数据为法线
+        Decodes 10-10-10-2 TBN data into normals
         
         Args:
-            data: shape (N,) 的 uint32 编码数据
-            debug: 是否返回调试信息 (法线, 编码切线, 副切线符号)
+            data: uint32 encoded data of shape (N,)
+            debug: whether to return debug information (normals, encoded tangents, bitangent signs)
             
         Returns:
-            默认返回 shape (N, 3) 的法线
-            debug=True 时返回 (normals, encoded_tangents, bitangent_signs)
+            by default returns normals of shape (N, 3)
+            when debug=True returns (normals, encoded_tangents, bitangent_signs)
         """
         assert data.ndim == 1, 'Array for 10-10-10-2 decoding must be 1D'
         assert data.dtype == numpy.uint32, 'Array must have dtype uint32'
@@ -216,15 +216,15 @@ class TBNCodec:
         bitangent_signs: numpy.ndarray
     ) -> numpy.ndarray:
         """
-        编码法线、切线和副切线符号为 10-10-10-2 格式
+        Encodes normals, tangents and bitangent signs into the 10-10-10-2 format
         
         Args:
-            normals: shape (N, 3) 的法线向量
-            tangents: shape (N, 3) 的切线向量
-            bitangent_signs: shape (N,) 的副切线符号 (-1 或 1)
+            normals: normal vectors of shape (N, 3)
+            tangents: tangent vectors of shape (N, 3)
+            bitangent_signs: bitangent signs of shape (N,) (-1 or 1)
             
         Returns:
-            shape (N,) 的 uint32 编码数据
+            uint32 encoded data of shape (N,)
         """
         assert normals.ndim == 2 and normals.shape[1] == 3, 'Normals must be shape (N, 3)'
         assert tangents.ndim == 2 and tangents.shape[1] == 3, 'Tangents must be shape (N, 3)'
@@ -261,14 +261,14 @@ class TBNCodec:
         flip_bitangent_sign: bool = True,
     ) -> numpy.ndarray:
         """
-        完整复用 EFMI-Tools 思路：将 TBN 打包为 R10G10B10A2_UINT（存入 R32_UINT）。
+        Fully reuses the EFMI-Tools approach: packs TBN into R10G10B10A2_UINT (stored into R32_UINT).
 
-        说明:
-            - XY: 八面体编码法线
-            - Z: 切线角度编码
+        Notes:
+            - XY: octahedrally encoded normal
+            - Z: tangent angle encoding
             - bit30: packed flag
             - bit31: bitangent sign
-            - 可选执行 flip_texcoord_v / flip_bitangent_sign，与 EFMI-Tools 默认行为保持一致
+            - Optionally applies flip_texcoord_v / flip_bitangent_sign to stay consistent with the EFMI-Tools default behavior
         """
         n = numpy.asarray(normals, dtype=numpy.float32)
         t = numpy.array(tangents, dtype=numpy.float32, copy=True)
@@ -291,14 +291,14 @@ class TBNCodec:
     @staticmethod
     def decode_octahedral_r32_uint(data: numpy.ndarray) -> numpy.ndarray:
         """
-        解码终末地风格的八面体 R32_UINT 格式为法线
-        (简化版,仅解码法线)
+        Decodes the Endfield-style octahedral R32_UINT format into normals
+        (simplified version, decodes normals only)
         
         Args:
-            data: shape (N,) 的 uint32 编码数据
+            data: uint32 encoded data of shape (N,)
             
         Returns:
-            shape (N, 3) 的法线向量
+            normal vectors of shape (N, 3)
         """
         raw = data.astype(numpy.uint32)
         

@@ -30,8 +30,8 @@ class MaterialListRefreshOperator(bpy.types.Operator):
     """
 
     bl_idname = "smc.refresh_ob_data"
-    bl_label = "更新材质列表"
-    bl_description = "重新扫描场景，重建可用于合并的材质列表"
+    bl_label = "Refresh Material List"
+    bl_description = "Rescan the scene and rebuild the material list available for combining"
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         """Execute the operator to refresh the object and material list.
@@ -240,10 +240,10 @@ class MaterialListToggleOperator(bpy.types.Operator):
     """
 
     bl_idname = "smc.combine_switch"
-    bl_label = "切换选择"
-    bl_description = "切换材质/物体的选中状态，控制是否参与合并"
+    bl_label = "Toggle Selection"
+    bl_description = "Toggle the selection state of materials/objects to control whether they are combined"
 
-    list_id: IntProperty(name="列表索引", default=0)
+    list_id: IntProperty(name="List Index", default=0)
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         """Main execution method for toggle operation.
@@ -330,8 +330,8 @@ class SelectAllMaterials(bpy.types.Operator):
     """
 
     bl_idname = "smc.select_all"
-    bl_label = "全选"
-    bl_description = "选中所有物体和材质"
+    bl_label = "Select All"
+    bl_description = "Select all objects and materials"
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         """Select all objects and materials in the combine list.
@@ -359,8 +359,8 @@ class SelectNoneMaterials(bpy.types.Operator):
     """
 
     bl_idname = "smc.select_none"
-    bl_label = "取消全选"
-    bl_description = "取消选中所有物体和材质"
+    bl_label = "Deselect All"
+    bl_description = "Deselect all objects and materials"
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         """Deselect all objects and materials in the combine list.

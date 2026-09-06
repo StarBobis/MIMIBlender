@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 @dataclass
 class M_Key:
     '''
-    key_name 声明的key名称，一般按照声明顺序为$swapkey + 数字
-    key_value 具体的按键VK值
-    comment 备注信息，会以注释形式生成到配置表中
+    key_name: name of the declared key, normally $swapkey + a number in declaration order
+    key_value: concrete VK value of the key
+    comment: remarks, written into the config table as a comment
     '''
 
     key_name: str = ""
@@ -15,12 +15,12 @@ class M_Key:
     value_list: list[int] = field(default_factory=list)
     
     initialize_value: int = 0
-    initialize_vk_str: str = ""  # 虚拟按键组合，遵循3Dmigoto的解析格式
+    initialize_vk_str: str = ""  # Virtual-key combination following 3Dmigoto's parsing format
 
-    # 用于chain_key_list中传递使用
+    # Used for passing data through chain_key_list
     tmp_value: int = 0
     
-    # 备注信息
+    # Remarks
     comment: str = ""
 
     def __str__(self):

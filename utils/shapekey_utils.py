@@ -15,19 +15,19 @@ class ShapeKeyUtils:
     @classmethod
     def apply_modifiers_for_object_with_shape_keys_optimized(cls, context, selected_modifiers, disable_armatures=False):
         """
-        优化版：使用 numpy 直接处理形态键数据
-        避免对每个形态键重复复制物体和应用修改器
+        Optimized version: uses numpy to process shape key data directly
+        avoids duplicating the object and re-applying modifiers for every shape key
         
-        注意：此优化版仅适用于不改变顶点位置的修改器
-        如果修改器会改变顶点位置（如 Armature, Curve, Lattice 等），
-        则回退到原始算法
+        Note: this optimized version only works with modifiers that do not change vertex positions
+        if a modifier changes vertex positions (such as Armature, Curve, Lattice, etc.),
+        it falls back to the original algorithm
         
-        算法：
-        1. 检查修改器类型，决定是否使用优化路径
-        2. 使用 numpy 提取所有形态键的顶点坐标
-        3. 删除所有形态键
-        4. 应用修改器到基础形状
-        5. 使用 numpy 直接重新创建形态键
+        Algorithm:
+        1. Check the modifier types to decide whether to use the optimized path
+        2. Use numpy to extract the vertex coordinates of all shape keys
+        3. Delete all shape keys
+        4. Apply the modifiers to the base shape
+        5. Recreate the shape keys directly with numpy
         """
         if len(selected_modifiers) == 0:
             return (True, None)
@@ -42,7 +42,7 @@ class ShapeKeyUtils:
                 break
         
         if has_transform_modifiers:
-            print(f"[ShapeKeyOptimized] 检测到会变换顶点的修改器，回退到原始算法")
+            print(f"[ShapeKeyOptimized] Modifiers that transform vertices detected, falling back to the original algorithm")
             return cls.apply_modifiers_for_object_with_shape_keys(context, selected_modifiers, disable_armatures)
         
         start_time = time.time()
@@ -76,7 +76,7 @@ class ShapeKeyUtils:
                     bpy.ops.object.modifier_apply(modifier=modifier_name)
             return (True, None)
         
-        print(f"[ShapeKeyOptimized] 开始处理 {shapes_count} 个形态键")
+        print(f"[ShapeKeyOptimized] Start processing {shapes_count} shape keys")
         
         properties_list = []
         properties = ["interpolation", "mute", "name", "relative_key", "slider_max", "slider_min", "value", "vertex_group"]
@@ -103,7 +103,7 @@ class ShapeKeyUtils:
             key_b.data.foreach_get('co', coords.ravel())
             shape_key_coords.append(coords)
         
-        print(f"[ShapeKeyOptimized] 已提取 {shapes_count} 个形态键坐标数据")
+        print(f"[ShapeKeyOptimized] Extracted coordinate data for {shapes_count} shape keys")
         
         bpy.ops.object.shape_key_remove(all=True)
         
@@ -115,9 +115,9 @@ class ShapeKeyUtils:
         if original_vert_count != new_vert_count:
             error_hint = ""
             if contains_mirror_with_merge:
-                error_hint = "\n提示: 镜像修改器启用了 'Merge' 选项可能导致问题。"
-            error_info = (f"顶点数量变化: {original_vert_count} -> {new_vert_count}！\n"
-                         f"形态键要求修改器应用后顶点数量不变。{error_hint}")
+                error_hint = "\nHint: The mirror modifier has the 'Merge' option enabled, which may cause problems."
+            error_info = (f"Vertex count changed: {original_vert_count} -> {new_vert_count}!\n"
+                         f"Shape keys require the vertex count to stay unchanged after applying the modifiers.{error_hint}")
             
             for modifier in disabled_armature_modifiers:
                 modifier.show_viewport = True
@@ -129,7 +129,7 @@ class ShapeKeyUtils:
             key_b = obj.shape_key_add(name=properties_list[i]["name"], from_mix=False)
             key_b.data.foreach_set('co', shape_key_coords[i].ravel())
         
-        print(f"[ShapeKeyOptimized] 已重新创建 {shapes_count - 1} 个形态键")
+        print(f"[ShapeKeyOptimized] Recreated {shapes_count - 1} shape keys")
         
         for i in range(shapes_count):
             key_b = obj.data.shape_keys.key_blocks[i]
@@ -152,7 +152,7 @@ class ShapeKeyUtils:
             modifier.show_viewport = True
         
         elapsed = time.time() - start_time
-        print(f"[ShapeKeyOptimized] 完成，耗时: {elapsed:.2f}秒")
+        print(f"[ShapeKeyOptimized] Done, elapsed time: {elapsed:.2f}s")
         
         return (True, None)
 
@@ -421,18 +421,18 @@ class ShapeKeyUtils:
         mesh_shapekeys = mesh.shape_keys
         
         if mesh_shapekeys is None:
-            print(f"obj: {obj.name} 不含有形态键，跳过处理")
+            print(f"obj: {obj.name} does not contain shape keys, skipping")
             TimerUtils.End("shapekey_cache")
             return None, None, None
 
-        # 构建顶点索引到全局index_id的反向映射
+        # Build the reverse mapping from vertex index to global index_id
         vertex_to_indices = {}
         for index_id, vertex_id in index_vertex_id_dict.items():
             if vertex_id not in vertex_to_indices:
                 vertex_to_indices[vertex_id] = []
             vertex_to_indices[vertex_id].append(index_id)
 
-        # 获取基础坐标
+        # Get the base coordinates
         base_data = mesh_shapekeys.key_blocks['Basis'].data
         base_coords = numpy.empty((len(mesh.vertices), 3), dtype=numpy.float32)
         base_data.foreach_get('co', base_coords.ravel())
@@ -440,48 +440,48 @@ class ShapeKeyUtils:
         shapekey_cache = {}
         shapekey_pattern = re.compile(r'.*(?:deform|custom)[_ -]*(\d+).*')
 
-        # 处理每个形态键
+        # Process each shape key
         for shapekey in mesh_shapekeys.key_blocks:
-            # 跳过基础形态键
+            # Skip the basis shape key
             if shapekey.name == 'Basis':
                 continue
             
             # print(shapekey.name)
 
-            # 提取形态键ID
+            # Extract the shape key ID
             match = shapekey_pattern.findall(shapekey.name.lower())
             if not match:
-                print(f"当前形态键名称:{shapekey.name} 不符合命名规范，跳过")
+                print(f"Shape key name: {shapekey.name} does not follow the naming convention, skipping")
                 continue
                 
             shapekey_idx = int(match[0])
             # print("process: " + str(shapekey_idx))
 
-            # 获取形态键坐标数据
+            # Get the shape key coordinate data
             sk_coords = numpy.empty((len(mesh.vertices), 3), dtype=numpy.float32)
             shapekey.data.foreach_get('co', sk_coords.ravel())
             
-            # 计算偏移量 (向量化操作)
+            # Compute the offsets (vectorized operation)
             offsets = sk_coords - base_coords
             
-            # 计算向量长度并过滤小偏移
+            # Compute vector lengths and filter out tiny offsets
             lengths = numpy.linalg.norm(offsets, axis=1)
             valid_mask = lengths >= 1e-9
             valid_vertex_ids = numpy.where(valid_mask)[0]
             
             if not valid_vertex_ids.size:
-                # 这里一般不会触发
+                # This case is generally not triggered
                 # print("valid_vertex_ids.size not, continue!")
                 continue
                 
-            # 按形态键初始化缓存
+            # Initialize the cache for this shape key
             if shapekey_idx not in shapekey_cache:
                 shapekey_cache[shapekey_idx] = {}
                 
-            # 处理有效顶点
+            # Process the valid vertices
             for v_idx in valid_vertex_ids:
                 offset_list = offsets[v_idx].tolist()
-                # 获取关联的全局index_id
+                # Get the associated global index_id
                 if v_idx in vertex_to_indices:
                     for index_id in vertex_to_indices[v_idx]:
                         shapekey_cache[shapekey_idx][index_id] = offset_list
@@ -491,9 +491,9 @@ class ShapeKeyUtils:
     @staticmethod
     def reset_shapekey_values(obj, configured_shapekey_names=None, current_shapekey_name=None):
         '''
-        把在配置列表中的非当前形态键归零，未配置的形态键保留原值
-        configured_shapekey_names: 在蓝图节点中配置的所有形态键名称列表
-        current_shapekey_name: 当前正在处理的形态键名称
+        Reset the configured shape keys that are not the current one to zero; unconfigured shape keys keep their original values
+        configured_shapekey_names: list of all shape key names configured in the blueprint nodes
+        current_shapekey_name: name of the shape key currently being processed
         '''
 
         if obj.data.shape_keys:
@@ -503,9 +503,9 @@ class ShapeKeyUtils:
                 configured_shapekey_names = set(configured_shapekey_names)
             
             for key_block in obj.data.shape_keys.key_blocks:
-                # 只处理在配置列表中的形态键
+                # Only process the shape keys that are in the configured list
                 if key_block.name in configured_shapekey_names:
-                    # 如果不是当前正在处理的形态键，则归零
+                    # If it is not the shape key currently being processed, reset it to zero
                     if key_block.name != current_shapekey_name:
                         key_block.value = 0.0
 

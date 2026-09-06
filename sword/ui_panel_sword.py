@@ -11,13 +11,11 @@ from ..utils.obj_utils import ObjUtils
 from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
 from ..common.ssmt_import_helper import SSMTImportHelper
-from ..ui.ui_func_import_ssmt import SSMT4ImportRaw
 
-from ..utils.translate_utils import iface_, rpt_
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 
-# 存储预览图集合
+# Store the preview image collection
 preview_collections = {}
 sword_reversed_workspace_items_cache = []
 
@@ -30,7 +28,7 @@ def _get_sword_reversed_workspace_items(self, context):
         reversed_root = GlobalConfig.path_mimitools_reversed_root()
         if not reversed_root or not os.path.isdir(reversed_root):
             sword_reversed_workspace_items_cache = [
-                ("", "当前没有可用逆向工作空间", "请确认 MMT / MIMITools 缓存目录下存在 Reversed 文件夹")
+                ("", "No Reversed Workspace Available", "Please make sure a Reversed folder exists under the MMT / MIMITools cache folder")
             ]
             return sword_reversed_workspace_items_cache
 
@@ -39,7 +37,7 @@ def _get_sword_reversed_workspace_items(self, context):
         )
         if not folder_names:
             sword_reversed_workspace_items_cache = [
-                ("", "当前没有可用逆向工作空间", "Reversed 文件夹下未找到子文件夹")
+                ("", "No Reversed Workspace Available", "No subfolders were found under the Reversed folder")
             ]
             return sword_reversed_workspace_items_cache
 
@@ -47,22 +45,22 @@ def _get_sword_reversed_workspace_items(self, context):
         return sword_reversed_workspace_items_cache
     except Exception:
         sword_reversed_workspace_items_cache = [
-            ("", "当前没有可用逆向工作空间", "读取 Reversed 文件夹失败")
+            ("", "No Reversed Workspace Available", "Failed to read the Reversed folder")
         ]
         return sword_reversed_workspace_items_cache
 
-# 定义图片列表项
+# Define the image list item
 class Sword_ImportTexture_ImageListItem(PropertyGroup):
-    name: StringProperty(name="图片名称") # type: ignore
-    filepath: StringProperty(name="文件路径") # type: ignore
+    name: StringProperty(name="Image Name") # type: ignore
+    filepath: StringProperty(name="File Path") # type: ignore
 
-# 自定义UI列表显示图片和缩略图
+# Custom UI list showing images and thumbnails
 class SWORD_UL_FastImportTextureList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         pcoll = preview_collections["main"]
         
         if self.layout_type in {'DEFAULT', 'Expand'}:
-            # 尝试获取预览图标
+            # Try to get the preview icon
             if item.name in pcoll:
                 layout.template_icon(icon_value=pcoll[item.name].icon_id, scale=1.0)
             else:
@@ -77,27 +75,27 @@ class SWORD_UL_FastImportTextureList(UIList):
             else:
                 layout.label(text="", icon='IMAGE_DATA')
 
-# 选择文件夹操作符
+# Folder selection operator
 class Sword_ImportTexture_WM_OT_SelectImageFolder(Operator, ImportHelper):
     bl_idname = "wm.select_image_folder"
-    bl_label = "选择预览贴图所在的文件夹位置"
+    bl_label = "Select Preview Texture Folder"
     
     directory: StringProperty(subtype='DIR_PATH') # type: ignore
     filter_folder: BoolProperty(default=True, options={'HIDDEN'}) # type: ignore
     filter_image: BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 
     def execute(self, context):
-        # 清空之前的列表
+        # Clear the previous list
         context.scene.sword_image_list.clear()
         
-        # 清空预览集合
+        # Clear the preview collection
         pcoll = preview_collections["main"]
         pcoll.clear()
         
-        # 支持的图片格式
+        # Supported image formats
         image_extensions = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tga', '.exr', '.hdr','.dds')
         
-        # 遍历文件夹，收集图片文件
+        # Walk the folder and collect image files
         image_count = 0
         for filename in os.listdir(self.directory):
             if filename.lower().endswith(image_extensions):
@@ -107,27 +105,27 @@ class Sword_ImportTexture_WM_OT_SelectImageFolder(Operator, ImportHelper):
                     item.name = filename
                     item.filepath = full_path
                     
-                    # 加载预览图
+                    # Load the preview image
                     try:
                         thumb = pcoll.load(filename, full_path, 'IMAGE')
                         image_count += 1
                     except Exception as e:
                         print(f"Could not load preview for {filename}: {e}")
         
-        self.report({'INFO'}, rpt_("已扫描 {count} 张图片。").format(count=image_count))
+        self.report({'INFO'}, f"Scanned {image_count} image(s).")
         return {'FINISHED'}
     
 
 def reload_textures_from_folder(picture_folder_path:str):
-    # 清空之前的列表和预览
+    # Clear the previous list and previews
     bpy.context.scene.sword_image_list.clear()
     pcoll = preview_collections["main"]
     pcoll.clear()
     
-    # 支持的图片格式
+    # Supported image formats
     image_extensions = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tga', '.exr', '.hdr', '.dds')
     
-    # 遍历文件夹，收集图片文件
+    # Walk the folder and collect image files
     image_count = 0
     for filename in os.listdir(picture_folder_path):
         if filename.lower().endswith(image_extensions):
@@ -137,7 +135,7 @@ def reload_textures_from_folder(picture_folder_path:str):
                 item.name = filename
                 item.filepath = full_path
                 
-                # 加载预览图
+                # Load the preview image
                 try:
                     thumb = pcoll.load(filename, full_path, 'IMAGE')
                     image_count += 1
@@ -145,22 +143,22 @@ def reload_textures_from_folder(picture_folder_path:str):
                     print(f"Could not load preview for {filename}: {e}")
 
 
-# 自动检测并设置DedupedTextures_jpg文件夹
+# Auto-detect and set the DedupedTextures_jpg folder
 class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
     bl_idname = "wm.auto_detect_texture_folder"
-    bl_label = "自动检测提取的贴图文件夹"
+    bl_label = "Auto Detect Extracted Texture Folder"
     
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, rpt_("没有选中的对象！"))
+            self.report({'ERROR'}, "No objects selected!")
             return {'CANCELLED'}
         
-        # 获取第一个选中的对象
+        # Take the first selected object
         obj = selected_objects[0]
         obj_name = obj.name 
         
-        # 构建路径
+        # Build the path
         selected_drawib_folder_path = os.path.join(GlobalConfig.path_workspace_folder(),  obj_name.split("-")[0] + "\\"  )
         
         deduped_textures_jpg_folder_path = os.path.join(selected_drawib_folder_path, "DedupedTextures_jpg\\")
@@ -172,20 +170,20 @@ class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
         deduped_textures_tga_exists = os.path.exists(deduped_textures_tga_folder_path)
 
         
-        # 检查路径是否存在
+        # Check whether the path exists
         if not deduped_textures_jpg_exists and not deduped_textures_png_exists and not deduped_textures_tga_exists:
-            self.report({'ERROR'}, rpt_("未找到当前DrawIB: {draw_ib}的DedupedTextures转换后的贴图文件夹，请确保此IB在当前工作空间中已经正常提取出来了").format(draw_ib=obj_name.split("-")[0]))
+            self.report({'ERROR'}, f"Could not find the DedupedTextures folder for DrawIB {obj_name.split('-')[0]}. Please make sure this IB has been extracted correctly in the current workspace.")
             return {'CANCELLED'}
         
-        # 清空之前的列表和预览
+        # Clear the previous list and previews
         context.scene.sword_image_list.clear()
         pcoll = preview_collections["main"]
         pcoll.clear()
         
-        # 支持的图片格式
+        # Supported image formats
         image_extensions = ('.jpg', '.jpeg', '.png', '.tiff', '.bmp', '.tga', '.exr', '.hdr','.dds')
         
-        # 遍历文件夹，收集图片文件
+        # Walk the folder and collect image files
         image_count = 0
         for filename in os.listdir(deduped_textures_jpg_folder_path):
             if filename.lower().endswith(image_extensions):
@@ -195,22 +193,22 @@ class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
                     item.name = filename
                     item.filepath = full_path
                     
-                    # 加载预览图
+                    # Load the preview image
                     try:
                         thumb = pcoll.load(filename, full_path, 'IMAGE')
                         image_count += 1
                     except Exception as e:
                         print(f"Could not load preview for {filename}: {e}")
         
-        self.report({'INFO'}, rpt_("已自动检测并从 DedupedTextures_jpg 文件夹加载 {count} 张图片。").format(count=image_count))
+        self.report({'INFO'}, f"Auto-detected and loaded {image_count} image(s) from the DedupedTextures_jpg folder.")
         return {'FINISHED'}
 
 
 
-# 应用图片到材质操作符
+# Apply the image to the materials of the selected objects
 class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
     bl_idname = "wm.apply_image_to_material"
-    bl_label = "应用贴图到选中的物体"
+    bl_label = "Apply Texture to Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
@@ -218,89 +216,78 @@ class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
         selected_index = scene.sword_image_list_index
         
         if selected_index < 0 or selected_index >= len(scene.sword_image_list):
-            self.report({'ERROR'}, rpt_("列表中未选择任何图片。"))
+            self.report({'ERROR'}, "No image selected in the list.")
             return {'CANCELLED'}
         
         selected_image = scene.sword_image_list[selected_index]
         image_path = selected_image.filepath
         
-        # 获取或创建图像数据块
+        # Get or create the image data block
         image_data = bpy.data.images.load(image_path, check_existing=True)
         
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, rpt_("没有选中的对象！"))
+            self.report({'ERROR'}, "No objects selected!")
             return {'CANCELLED'}
         
         applied_count = 0
         for obj in selected_objects:
             if obj.type != 'MESH':
-                continue  # 跳过非网格对象
+                continue  # Skip non-mesh objects
             
-            # 确保对象有材质数据块
+            # Make sure the object has a material data block
             if not obj.data.materials:
                 mat = bpy.data.materials.new(name=f"Mat_{selected_image.name}")
                 obj.data.materials.append(mat)
             else:
-                # 使用第一个材质槽
+                # Use the first material slot
                 mat = obj.data.materials[0]
 
-                # 如果第一个槽位是空的(None)，创建一个新材质并填入
+                # If the first slot is empty (None), create a new material and fill it in
                 if mat is None:
                     mat = bpy.data.materials.new(name=f"Mat_{selected_image.name}")
                     obj.data.materials[0] = mat
             
-            # 确保材质使用节点
+            # Make sure the material uses nodes
             mat.use_nodes = True
             nodes = mat.node_tree.nodes
             links = mat.node_tree.links
             
-            # 查找或创建Principled BSDF节点
+            # Find or create the Principled BSDF node
             bsdf_node = nodes.get("Principled BSDF")
             if not bsdf_node:
-                # 这里是根据名称获取，所以中英文都要添加支持
-                print("疑似英文Principled BSDF无法获取，尝试获取中文的原理化 BSDF")
-                bsdf_node = nodes.get("原理化 BSDF")
-            
-            # 3.6的原理化没有空格，他娘滴，每个版本还不一样
-            if not bsdf_node:
-                # 这里是根据名称获取，所以中英文都要添加支持
-                print("疑似英文Principled BSDF无法获取，尝试获取中文的原理化 BSDF")
-                bsdf_node = nodes.get("原理化BSDF")
-
-            if not bsdf_node:
-                print("BSDF not exists ,ready to create one.")
+                print("Principled BSDF not found, creating a new one.")
                 bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
                 bsdf_node.location = (0, 0)
                 
-                # 获取材质输出节点
+                # Get the material output node
                 output_node = nodes.get("Material Output")
                 if not output_node:
                     output_node = nodes.new(type='ShaderNodeOutputMaterial')
                     output_node.location = (400, 0)
                 
-                # 连接到输出
+                # Connect to the output
                 links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
             
-            # 创建图像纹理节点
+            # Create the image texture node
             tex_image = nodes.new('ShaderNodeTexImage')
             tex_image.image = image_data
             tex_image.location = (-300, 0)
             
-            # 将图像纹理节点的Color输出连接到BSDF的Base Color输入
+            # Connect the image texture Color output to the BSDF Base Color input
             links.new(tex_image.outputs['Color'], bsdf_node.inputs['Base Color'])
             links.new(tex_image.outputs['Alpha'], bsdf_node.inputs['Alpha'])
 
             applied_count += 1
         
-        self.report({'INFO'}, rpt_("已将 {image_name} 应用到 {count} 个物体。").format(image_name=selected_image.name, count=applied_count))
+        self.report({'INFO'}, f"Applied {selected_image.name} to {applied_count} object(s).")
         return {'FINISHED'}
 
 
 class SwordImportAllReversed(bpy.types.Operator):
     bl_idname = "ssmt.import_all_reverse"
-    bl_label = "一键导入逆向出来的全部模型"
-    bl_description = "把上一次一键逆向出来的所有模型全部导入到Blender，然后你可以手动筛选并删除错误的数据类型，流程上更加方便。支持 ib_vb_fmt 和 ssmt_fmt 两种逆向输出格式。"
+    bl_label = "Import All Reversed Models"
+    bl_description = "Import all models generated by the last one-click reverse pass into Blender, then you can manually filter and delete incorrect data types for a smoother workflow. Supports both the ib_vb_fmt and ssmt_fmt reverse output formats."
     bl_options = {'REGISTER', 'UNDO'}
 
     def _resolve_reverse_output_folder_path(self, context):
@@ -309,19 +296,19 @@ class SwordImportAllReversed(bpy.types.Operator):
         if source_mode == "SPECIFIC":
             selected_workspace_name = context.scene.sword_specific_reversed_workspace_name
             if not selected_workspace_name:
-                self.report({"ERROR"}, "当前未选择指定工作空间，请先选择 Reversed 下的子文件夹")
+                self.report({"ERROR"}, "No specific workspace selected, please select a subfolder under Reversed first")
                 return ""
             # MIMITools reverse panel reads MMT toolchain only, never the SSMT cache folder.
             reversed_root = GlobalConfig.path_mimitools_reversed_root()
             if not reversed_root:
-                self.report({"ERROR"}, "未找到 MMT 的 Reversed 目录，请先在 MMT 中运行一键逆向")
+                self.report({"ERROR"}, "MMT Reversed folder not found, please run the one-click reverse in MMT first")
                 return ""
             return os.path.join(reversed_root, selected_workspace_name)
 
         if source_mode == "CUSTOM":
             custom_folder_path = str(context.scene.sword_custom_reverse_output_folder_path).strip()
             if not custom_folder_path:
-                self.report({"ERROR"}, "自定义目录为空，请先选择目录")
+                self.report({"ERROR"}, "Custom folder is empty, please select a folder first")
                 return ""
             return custom_folder_path
 
@@ -333,13 +320,13 @@ class SwordImportAllReversed(bpy.types.Operator):
             return {'FINISHED'}
 
         if not os.path.exists(reverse_output_folder_path) or not os.path.isdir(reverse_output_folder_path):
-            self.report({"ERROR"},"当前一键逆向结果中标注的文件夹位置不存在，请重新运行一键逆向")
+            self.report({"ERROR"},"The folder recorded for the latest reverse result does not exist, please run the reverse again")
             return {'FINISHED'}
-        print("测试导入")
+        print("Test import")
 
-        # MMT 逆向成功后会写入 ReverseOutputFormat 键值（与 ReverseOutputFolder 对称）
-        # ib_vb_fmt 走旧的 .fmt 解析导入，ssmt_fmt 走 SSMT Json 导入
-        # 找不到该键值时直接视为 ib_vb_fmt 格式
+        # After a successful MMT reverse, the ReverseOutputFormat key is written (symmetric to ReverseOutputFolder)
+        # ib_vb_fmt goes through the old .fmt parsing import, ssmt_fmt goes through the SSMT Json import
+        # If the key cannot be found, it is treated as the ib_vb_fmt format
         reverse_output_format = GlobalConfig.reverse_output_format()
         if reverse_output_format == "ssmt_fmt":
             return self._import_ssmt_fmt(context, reverse_output_folder_path)
@@ -347,54 +334,55 @@ class SwordImportAllReversed(bpy.types.Operator):
 
     def _import_ssmt_fmt(self, context, reverse_output_folder_path):
         '''
-        ssmt_fmt 格式导入：
-        遍历逆向输出文件夹下的所有子文件夹，每个子文件夹内可能有多个Json文件，
-        Json文件的名称就是它的数据类型，对每个Json文件创建 drawib_数据类型名称 的集合并导入。
+        ssmt_fmt format import:
+        Walk all subfolders of the reverse output folder. Each subfolder may contain several Json files,
+        and the file name of each Json file is its data type. Create a drawib_<data type> collection
+        for each Json file and import it.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
         bpy.context.scene.collection.children.link(reverse_collection)
 
-        # 获取所有子文件夹
+        # Get all subfolders
         subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
         if not subfolder_path_list:
-            self.report({"ERROR"}, "目标目录下未找到可导入的子文件夹")
+            self.report({"ERROR"}, "No importable subfolders found in the target folder")
             return {'FINISHED'}
 
         imported_count = 0
         for subfolder_path in subfolder_path_list:
 
-            # 获取所有.json文件，Json文件的名称就是它的数据类型
+            # Get all .json files; the file name of each Json file is its data type
             json_files = []
             for file in os.listdir(subfolder_path):
                 if file.endswith('.json'):
                     json_files.append(os.path.join(subfolder_path, file))
 
             for json_filepath in json_files:
-                # 获取带后缀的文件名
+                # Get the file name including the extension
                 filename_with_extension = os.path.basename(json_filepath)
-                # 去掉后缀即为数据类型名称
+                # Remove the extension to get the data type name
                 datatype_name = os.path.splitext(filename_with_extension)[0]
 
-                # 对每个Json文件的名称创建 drawib_数据类型名称 的集合
+                # Create a drawib_<data type> collection from the name of each Json file
                 datatype_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + datatype_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
                 try:
-                    # 调用SSMT格式导入功能
+                    # Call the SSMT format import function
                     SSMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection)
                     imported_count += 1
                 except Exception as e:
-                    error_msg = f"导入失败，已跳过: {json_filepath} | 错误: {e}"
+                    error_msg = f"Import failed, skipped: {json_filepath} | Error: {e}"
                     print(error_msg)
                     self.report({'WARNING'}, error_msg)
                     continue
 
         if imported_count == 0:
-            self.report({"ERROR"}, "SSMT格式逆向结果中未成功导入任何Json文件")
+            self.report({"ERROR"}, "No Json files were imported from the ssmt_fmt reverse result")
             return {'FINISHED'}
 
-        # 随后把图片路径指定为当前路径
+        # Then point the image path to the current path
         reload_textures_from_folder(reverse_output_folder_path)
 
         return {'FINISHED'}
@@ -405,10 +393,10 @@ class SwordImportAllReversed(bpy.types.Operator):
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
         bpy.context.scene.collection.children.link(reverse_collection)
 
-        # 获取所有子文件夹
+        # Get all subfolders
         subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
         if not subfolder_path_list:
-            self.report({"ERROR"}, "目标目录下未找到可导入的子文件夹")
+            self.report({"ERROR"}, "No importable subfolders found in the target folder")
             return {'FINISHED'}
 
         for subfolder_path in subfolder_path_list:
@@ -417,35 +405,36 @@ class SwordImportAllReversed(bpy.types.Operator):
 
             datatype_collection = CollectionUtils.create_new_collection(collection_name=datatype_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
-            # 获取所有.fmt文件
+            # Get all .fmt files
             fmt_files = []
             for file in os.listdir(subfolder_path):
                 if file.endswith('.fmt'):
                     fmt_files.append(os.path.join(subfolder_path, file))
 
             for fmt_filepath in fmt_files:
-                # 获取带后缀的文件名
+                # Get the file name including the extension
                 filename_with_extension = os.path.basename(fmt_filepath)
-                # 去掉后缀
+                # Remove the extension
                 filename_without_extension = os.path.splitext(filename_with_extension)[0]
                 try:
-                    # 调用导入功能
+                    # Call the import function
                     mbf = MigotoBinaryFile(fmt_path=fmt_filepath, mesh_name=filename_without_extension)
                     MeshImportHelper.create_mesh_obj_from_mbf(mbf=mbf, import_collection=datatype_collection)
                 except Exception as e:
-                    error_msg = f"导入失败，已跳过: {fmt_filepath} | 错误: {e}"
+                    error_msg = f"Import failed, skipped: {fmt_filepath} | Error: {e}"
                     print(error_msg)
                     self.report({'WARNING'}, error_msg)
                     continue
 
                 
-                # Nico: 注意，鸣潮Mod逆向的模型导入后，可能会出现法线不正确的问题
-                # 此时不应该自动处理，而是用户手动处理，因为部分模型有部分模型没有
-                # 强行清除可能会导致法线不正确
+                # Nico: note that after reversing Wuthering Waves Mod models, normals may be incorrect.
+                # This should not be handled automatically; the user should handle it manually,
+                # since some models have the issue and others do not.
+                # Forcing a fix may make the normals incorrect.
 
 
 
-        # 随后把图片路径指定为当前路径
+        # Then point the image path to the current path
         reload_textures_from_folder(reverse_output_folder_path)
 
         return {'FINISHED'}
@@ -453,8 +442,8 @@ class SwordImportAllReversed(bpy.types.Operator):
 
 class SWORD4RefreshReversedWorkspaceList(bpy.types.Operator):
     bl_idname = "ssmt4.sword_refresh_reversed_workspace_list"
-    bl_label = "刷新逆向工作空间列表"
-    bl_description = "刷新当前 MMT / MIMITools 缓存目录下 Reversed 文件夹的子文件夹列表"
+    bl_label = "Refresh Reversed Workspace List"
+    bl_description = "Refresh the subfolder list under the Reversed folder of the current MMT / MIMITools cache folder"
 
     def execute(self, context):
         # Reversed workspace list comes from MMT settings only.
@@ -462,19 +451,19 @@ class SWORD4RefreshReversedWorkspaceList(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, iface_("已刷新逆向工作空间列表"))
+        self.report({'INFO'}, "Reversed workspace list refreshed")
         return {'FINISHED'}
 
 
 class Import3DMigotoRaw(bpy.types.Operator, ImportHelper):
     """Import raw 3DMigoto vertex and index buffers"""
     bl_idname = "import_mesh.migoto_raw_buffers_mmt"
-    bl_label = "导入.fmt .ib .vb格式模型"
-    bl_description = "导入3Dmigoto格式的 .ib .vb .fmt文件，只需选择.fmt文件即可"
+    bl_label = "Import .fmt .ib .vb Model"
+    bl_description = "Import 3Dmigoto .ib .vb .fmt files. You only need to select the .fmt file."
     bl_options = {'REGISTER','UNDO'}
 
-    # 我们只需要选择fmt文件即可，因为其它文件都是根据fmt文件的前缀来确定的。
-    # 所以可以实现一个.ib 和 .vb文件存在多个数据类型描述的.fmt文件的导入。
+    # We only need to select the fmt file, because the other files are determined by the fmt file name prefix.
+    # This allows importing .ib and .vb files that have multiple .fmt files describing different data types.
     filename_ext = '.fmt'
 
     filter_glob: bpy.props.StringProperty(
@@ -488,15 +477,15 @@ class Import3DMigotoRaw(bpy.types.Operator, ImportHelper):
     ) # type: ignore
 
     def execute(self, context):
-        # 我们需要添加到一个新建的集合里，方便后续操作
-        # 这里集合的名称需要为当前文件夹的名称
+        # Add to a newly created collection for later operations
+        # The collection name should be the name of the current folder
         dirname = os.path.dirname(self.filepath)
 
         collection_name = os.path.basename(dirname)
         collection = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(collection)
 
-        # 如果用户不选择任何fmt文件，则默认返回读取所有的fmt文件。
+        # If the user does not select any fmt file, read all fmt files by default.
         import_filename_list = []
         if len(self.files) == 1:
             if str(self.filepath).endswith(".fmt"):
@@ -509,21 +498,21 @@ class Import3DMigotoRaw(bpy.types.Operator, ImportHelper):
             for fmt_file in self.files:
                 import_filename_list.append(fmt_file.name)
 
-        # 逐个fmt文件导入
+        # Import each fmt file
         for fmt_file_name in import_filename_list:
             fmt_file_path = os.path.join(dirname, fmt_file_name)
             mbf = MigotoBinaryFile(fmt_path=fmt_file_path)
             MeshImportHelper.create_mesh_obj_from_mbf(mbf=mbf,import_collection=collection)
 
-        # Select all objects under collection (因为用户习惯了导入后就是全部选中的状态). 
+        # Select all objects under the collection (users are used to having everything selected after import).
         CollectionUtils.select_collection_objects(collection)
 
         return {'FINISHED'}
 
 
-# 面板UI布局
+# Panel UI layout
 class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
-    bl_label = "3Dmigoto-Sword面板"
+    bl_label = "Mod Reverse Panel"
     bl_idname = "VIEW3D_PT_image_material_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -537,37 +526,34 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         layout.prop(scene, "sword_reverse_source_mode")
         if scene.sword_reverse_source_mode == "SPECIFIC":
             reversed_workspace_row = layout.row(align=True)
-            reversed_workspace_row.prop(scene, "sword_specific_reversed_workspace_name", text=iface_("指定工作空间"))
+            reversed_workspace_row.prop(scene, "sword_specific_reversed_workspace_name", text="Specified Workspace")
             reversed_workspace_row.operator(SWORD4RefreshReversedWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
         elif scene.sword_reverse_source_mode == "CUSTOM":
-            layout.prop(scene, "sword_custom_reverse_output_folder_path", text=iface_("自定义目录"))
+            layout.prop(scene, "sword_custom_reverse_output_folder_path", text="Custom Folder")
 
-        # 一键导入逆向结果按钮
+        # One-click import of the reverse result button
         layout.operator("ssmt.import_all_reverse",icon='IMPORT')
         
-        # 导入 ib vb fmt格式文件
+        # Import ib vb fmt format files
         layout.operator(Import3DMigotoRaw.bl_idname,icon='IMPORT')
 
-        # 手动导入SSMT格式模型（与MIMITools面板中的按钮相同）
-        layout.operator(SSMT4ImportRaw.bl_idname,icon='IMPORT')
-
-        # 自动检测按钮
+        # Auto detect button
         row = layout.row()
 
-        # 文件夹选择按钮
+        # Folder selection button
         row = layout.row()
         row.operator("wm.select_image_folder", icon='FILE_FOLDER')
         
-        # 显示图片数量信息
+        # Show the image count
         if scene.sword_image_list:
-            layout.label(text=iface_("已找到 {count} 张图片").format(count=len(scene.sword_image_list)))
+            layout.label(text=f"Found {len(scene.sword_image_list)} image(s)")
         
-        # 显示图片列表
+        # Show the image list
         if scene.sword_image_list:
             row = layout.row()
             row.template_list(
-                "SWORD_UL_FastImportTextureList",  # 修正为正确的类名
-                iface_("图片列表"), 
+                "SWORD_UL_FastImportTextureList",  # Correct class name
+                "Image List", 
                 scene, 
                 "sword_image_list", 
                 scene, 
@@ -575,25 +561,25 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
                 rows=6
             )
         else:
-            layout.label(text=iface_("未找到图片，请先选择文件夹。"))
+            layout.label(text="No images found. Select a folder first.")
         
-        # 应用材质按钮
+        # Apply material button
         row = layout.row()
         row.operator("wm.apply_image_to_material", icon='MATERIAL_DATA')
         
-        # 显示当前选中图片的预览
+        # Show the preview of the currently selected image
         if scene.sword_image_list and scene.sword_image_list_index >= 0 and scene.sword_image_list_index < len(scene.sword_image_list):
             selected_item = scene.sword_image_list[scene.sword_image_list_index]
             pcoll = preview_collections["main"]
             
             if selected_item.name in pcoll:
                 box = layout.box()
-                box.label(text=iface_("预览:"))
+                box.label(text="Preview:")
                 box.template_icon(icon_value=pcoll[selected_item.name].icon_id, scale=10.0)
 
 
 class Sword_SplitModel_By_DrawIndexed_Panel(Panel):
-    bl_label = "手动逆向后根据DrawIndexed值分割模型"
+    bl_label = "Split Model by DrawIndexed After Manual Reverse"
     bl_idname = "VIEW3D_PT_Sword_SplitModel_By_DrawIndexed_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -612,7 +598,7 @@ class Sword_SplitModel_By_DrawIndexed_Panel(Panel):
         op.index_count = scene.submesh_count
 
 def register():
-    # 注册预览图集合
+    # Register the preview image collection
     pcoll = bpy.utils.previews.new()
     preview_collections["main"] = pcoll
 
@@ -629,23 +615,23 @@ def register():
     bpy.types.Scene.sword_image_list = CollectionProperty(type=Sword_ImportTexture_ImageListItem)
     bpy.types.Scene.sword_image_list_index = IntProperty(default=0)
     bpy.types.Scene.sword_reverse_source_mode = EnumProperty(
-        name="导入模式",
-        description="控制一键导入逆向结果时的目录来源",
+        name="Import Mode",
+        description="Controls the folder source used when importing reverse results in one click",
         items=[
-            ("LAST", "上次逆向结果", "使用全局配置中记录的上次逆向输出目录"),
-            ("SPECIFIC", "指定工作空间", "使用 MMT / MIMITools 缓存目录下 Reversed 中指定的子文件夹"),
-            ("CUSTOM", "自定义目录", "使用你手动指定的目录"),
+            ("LAST", "Latest Reverse Output", "Use the last reverse output folder recorded in the global configuration"),
+            ("SPECIFIC", "Specified Workspace", "Use the specified subfolder under Reversed in the MMT / MIMITools cache folder"),
+            ("CUSTOM", "Custom Folder", "Use the folder you specify manually"),
         ],
         default="LAST",
     )
     bpy.types.Scene.sword_specific_reversed_workspace_name = EnumProperty(
-        name="指定工作空间",
-        description="当前 MMT / MIMITools 缓存目录下 Reversed 的子文件夹列表",
+        name="Specified Workspace",
+        description="Subfolders under Reversed in the current MMT / MIMITools cache folder",
         items=_get_sword_reversed_workspace_items,
     )
     bpy.types.Scene.sword_custom_reverse_output_folder_path = StringProperty(
-        name="自定义目录",
-        description="手动指定用于一键导入逆向结果的目录",
+        name="Custom Folder",
+        description="Manually specify the folder used for the one-click import of reverse results",
         default="",
         subtype='DIR_PATH',
     )
@@ -660,7 +646,7 @@ def unregister():
     except Exception:
         pass
 
-    # 移除预览图集合
+    # Remove the preview image collection
     for pcoll in preview_collections.values():
         try:
             bpy.utils.previews.remove(pcoll)

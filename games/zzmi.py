@@ -54,7 +54,7 @@ class ExportZZMI:
                 texture_override_vb_section.append("hash = " + category_hash)
                 texture_override_vb_section.append("handling = skip")
 
-                # 无条件激活按键变量，否则部分情况下可能会不生效
+                # Activate the key variable unconditionally; otherwise it may not take effect in some cases
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                     texture_override_vb_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
                     if GlobalProperties.generate_branch_mod_gui():

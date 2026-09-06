@@ -34,7 +34,7 @@ class FormatUtils:
     @classmethod
     def get_nptype_from_format(cls,fmt):
         '''
-        解析DXGI Format字符串，返回numpy的数据类型
+        Parse a DXGI format string and return the corresponding numpy data type.
         '''
         if cls.f32_pattern.match(fmt):
             return numpy.float32
@@ -67,10 +67,10 @@ class FormatUtils:
     @classmethod
     def EncoderDecoder(cls,fmt):
         '''
-        转换效率极低，不建议使用
-        有条件还是调用numpy的astype方法
+        This conversion is extremely inefficient and not recommended.
+        When possible, use numpy's astype method instead.
 
-        奶奶滴，不经过这一层转换还不行呢，不转换数据是错的。
+        Honestly, this conversion layer cannot be skipped; without it the data would be wrong.
         '''
         if cls.f32_pattern.match(fmt):
             return (lambda data: b''.join(struct.pack('<f', x) for x in data),
@@ -117,7 +117,7 @@ class FormatUtils:
     @classmethod
     def apply_format_conversion(cls, data, fmt):
         '''
-        从指定格式导入时必须经过转换，否则丢失精度。
+        Importing from the given format requires the conversion; otherwise precision is lost.
         '''
         if cls.unorm16_pattern.match(fmt):
             decode_func = lambda x: (x / 65535.0).astype(numpy.float32)
@@ -128,47 +128,47 @@ class FormatUtils:
         elif cls.snorm8_pattern.match(fmt):
             decode_func = lambda x: (x / 127.0).astype(numpy.float32)
         else:
-            return data  # 如果格式不在这四个里面的任意一个，则直接返回原始数据
+            return data  # If the format is none of the four above, return the raw data as-is
 
-        # 对输入数据应用转换
+        # Apply the conversion to the input data
         decoded_data = decode_func(data)
         return decoded_data
 
     @classmethod
     def format_size(cls,fmt):
         '''
-        输入FORMAT返回该FORMAT的字节数
-        例如输入R32G32B32_FLOAT 返回字节数：12
+        Given a FORMAT, return its size in bytes
+        For example, given R32G32B32_FLOAT, return the size in bytes: 12
 
-        XXX 注意这里的结果并不可靠，应该在数据类型中定义正确的ByteWidth，而不是调用这里，这里仅用于兼容古董架构的fmt文件。
-        这里的东西将在未来被移除，但可能会持续存在很长一段时间。
+        XXX Note: the result here is not reliable. The correct ByteWidth should be defined in the data type rather than by calling this; this only keeps compatibility with fmt files from legacy architectures.
+        This will be removed in the future, but it may keep existing for quite a long time.
         '''
         matches = cls.components_pattern.findall(fmt)
         return sum(map(int, matches)) // 8
 
 
     '''
-    用于各种二进制数据格式转换
+    Utilities for various binary data format conversions
     '''
-    # 向量归一化
+    # Vector normalization
     @staticmethod
     def vector_normalize(v):
-        """归一化向量"""
+        """Normalize a vector"""
         length = math.sqrt(sum(x * x for x in v))
         if length == 0:
-            return v  # 避免除以零
+            return v  # Avoid division by zero
         return [x / length for x in v]
     
     @classmethod
     def add_and_normalize_vectors(cls,v1, v2):
-        """将两个向量相加并规范化(normalize)"""
-        # 相加
+        """Add two vectors and normalize the result"""
+        # Add the two vectors
         result = [a + b for a, b in zip(v1, v2)]
-        # 归一化
+        # Normalize
         normalized_result = cls.vector_normalize(result)
         return normalized_result
     
-    # 辅助函数：计算两个向量的点积
+    # Helper function: compute the dot product of two vectors
     @staticmethod
     def dot_product(v1, v2):
         return sum(a * b for a, b in zip(v1, v2))
@@ -177,19 +177,19 @@ class FormatUtils:
     @staticmethod
     def convert_2x_float32_to_r16g16_unorm(input_array):
         """
-        把 shape=(…,2) 的 float32 [0,1] 区间量
-        量化成 uint16 [0,65535] 并返回同样 shape 的 uint16 数组。
-        如果 input 是一维的，也会按元素逐个量化。
+        Quantize float32 values in [0, 1] with shape=(...,2)
+        into uint16 [0,65535] and return a uint16 array with the same shape.
+        A 1D input is also quantized element by element.
         """
-        # 先拷贝，避免原地修改
+        # Copy first to avoid modifying in place
         arr = numpy.asarray(input_array, dtype=numpy.float32)
-        # 钳位到 [0,1]
+        # Clamp to [0,1]
         numpy.clip(arr, 0.0, 1.0, out=arr)
-        # 量化：65535 是 R16G16_UNORM 的最大值
+        # Quantize: 65535 is the maximum value of R16G16_UNORM
         return numpy.round(arr * 65535).astype(numpy.uint16)
 
     '''
-    这四个UNORM和SNORM比较特殊需要这样处理，其它float类型转换直接astype就行
+    These four UNORM/SNORM formats are special and need this handling; other float types can simply be converted with astype
     '''
     # @classmethod
     # def convert_4x_float32_to_r8g8b8a8_snorm(cls, input_array):
@@ -198,15 +198,15 @@ class FormatUtils:
     @staticmethod
     def convert_4x_float32_to_r8g8b8a8_snorm(input_array):
         '''
-        这里听了DeepSeek的建议改成这样了，也许可以避免某些问题
+        Rewritten following DeepSeek's suggestion; this may avoid certain problems
         '''
         arr = numpy.asarray(input_array, dtype=numpy.float32)
-        # 1. 钳位到 [-1, 1]
+        # 1. Clamp to [-1, 1]
         numpy.clip(arr, -1.0, 1.0, out=arr)
-        # 2. 量化到 [-127, 127]
+        # 2. Quantize to [-127, 127]
         arr = numpy.round(arr * 127).astype(numpy.int8)
-        # 3. 确保不出现 -128（理论上 clip+round 后已不可能，但再保险一次）
-        #    其实可省略，因为 -1.0*-127=127, 1.0*127=127，已覆盖不到 -128
+        # 3. Ensure -128 never appears (theoretically impossible after clip+round, but keep the extra safeguard)
+        #    Actually this can be omitted, because -1.0*-127=127 and 1.0*127=127, which never reaches -128
         return arr
 
     @staticmethod
@@ -228,45 +228,45 @@ class FormatUtils:
 
     @staticmethod    
     def convert_4x_float32_to_r8g8b8a8_unorm_blendweights(input_array):
-        # 确保输入数组是浮点类型
+        # Ensure the input array is a float type
         # input_array_float = input_array.astype(numpy.float32)
     
-        # 创建结果数组
+        # Create the result array
         result = numpy.zeros_like(input_array, dtype=numpy.uint8)
         
-        # 处理NaN值
+        # Handle NaN values
         nan_mask = numpy.isnan(input_array).any(axis=1)
         valid_mask = ~nan_mask
         
-        # 只处理非NaN行
+        # Only process non-NaN rows
         valid_input = input_array[valid_mask]
         if valid_input.size == 0:
             return result
         
-        # 计算每行总和
+        # Compute the sum of each row
         row_sums = valid_input.sum(axis=1, keepdims=True)
         
-        # 处理零和行
+        # Handle rows with a zero sum
         zero_sum_mask = (row_sums[:, 0] == 0)
         non_zero_mask = ~zero_sum_mask
         
-        # 归一化权重
+        # Normalize weights
         normalized = numpy.zeros_like(valid_input)
         normalized[non_zero_mask] = valid_input[non_zero_mask] / row_sums[non_zero_mask] * 255.0
         
-        # 计算整数部分和小数部分
+        # Compute the integer part and the fractional part
         int_part = numpy.floor(normalized).astype(numpy.int32)
         fractional = normalized - int_part
         
-        # 设置小于1的权重为0
+        # Set weights smaller than 1 to 0
         small_weight_mask = (normalized < 1) & non_zero_mask[:, numpy.newaxis]
         int_part[small_weight_mask] = 0
         fractional[small_weight_mask] = 0
         
-        # 计算精度误差
+        # Compute the precision error
         precision_error = 255 - int_part.sum(axis=1)
         
-        # 计算tickets
+        # Compute tickets
         tickets = numpy.zeros_like(normalized)
         with numpy.errstate(divide='ignore', invalid='ignore'):
             tickets[non_zero_mask] = numpy.where(
@@ -275,19 +275,19 @@ class FormatUtils:
                 0
             )
         
-        # 分配精度误差
+        # Distribute the precision error
         output = int_part.copy()
         for i in range(precision_error.max()):
-            # 找出需要分配的行
+            # Find the rows that still need allocation
             need_allocation = (precision_error > 0)
             if not numpy.any(need_allocation):
                 break
             
-            # 找出当前行中ticket最大的位置
+            # Find the position with the largest ticket in the current rows
             max_ticket_mask = numpy.zeros_like(tickets, dtype=bool)
             rows = numpy.where(need_allocation)[0]
             
-            # 对于有ticket的行
+            # For rows that have tickets
             has_ticket = (tickets[rows] > 0).any(axis=1)
             if numpy.any(has_ticket):
                 ticket_rows = rows[has_ticket]
@@ -296,22 +296,22 @@ class FormatUtils:
                 max_ticket_mask[ticket_rows, col_indices] = True
                 tickets[ticket_rows, col_indices] = 0
             
-            # 对于没有ticket的行
+            # For rows without tickets
             no_ticket = ~has_ticket & need_allocation[rows]
             if numpy.any(no_ticket):
                 no_ticket_rows = rows[no_ticket]
-                # 找出当前权重最大的位置
+                # Find the position with the largest current weight
                 max_weight_mask = numpy.zeros_like(tickets, dtype=bool)
                 row_indices = no_ticket_rows[:, numpy.newaxis]
                 col_indices = output[no_ticket_rows].argmax(axis=1)
                 max_weight_mask[no_ticket_rows, col_indices] = True
                 max_ticket_mask |= max_weight_mask
             
-            # 应用分配
+            # Apply the allocation
             output[max_ticket_mask] += 1
             precision_error[need_allocation] -= 1
         
-        # 将结果存回
+        # Store the result back
         result[valid_mask] = output.astype(numpy.uint8)
         return result
     
@@ -323,8 +323,8 @@ class FormatUtils:
         for i in range(input_array.shape[0]):
             weights = input_array[i]
 
-            # 如果权重含有NaN值，则将该行的所有值设置为0。
-            # 因为权重只要是被刷过，就不会出现NaN值。
+            # If the weights contain NaN values, set all values of this row to 0.
+            # Once weights have been painted, they never contain NaN values.
             find_nan = False
             for w in weights:
                 if math.isnan(w):

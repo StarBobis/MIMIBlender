@@ -7,21 +7,23 @@ from .global_config import GlobalConfig
 
 class BufferExportHelper:
     '''
-    工具类
-    专门负责把ObjBufferModel中的数据写入到文件中
+    Utility class
+    Responsible for writing ObjBufferModel data into files.
 
-    这个类专门用在生成Mod时调用
-    我们规定生成的Mod文件夹结构如下:
+    Only used when generating a Mod.
+    The generated Mod folder layout is:
 
-    文件夹: Mod_工作空间名称
-    - 文件夹: Meshes                    存放所有二进制缓冲区文件,包括IB和VB文件
-    - 文件夹: Textures                   存放所有贴图文件
-    - 文件:   工作空间名称.ini           所有ini内容要全部写在一起,如果写在多个ini里面通过namespace关联,则可能会导致Mod开启或关闭时有一瞬间的上贴图延迟
+    Folder: Mod_<workspace name>
+    - Folder: Meshes                    stores all binary buffer files, including the IB and VB files
+    - Folder: Textures                   stores all texture files
+    - File:   <workspace name>.ini           all ini content must be written together in one file; splitting it across
+      multiple ini files linked by namespace can cause a momentary texture
+      binding delay when the Mod is toggled on or off
     '''
 
     @staticmethod
     def write_category_buffer_files(category_buffer_dict:dict, draw_ib:str):
-        # 直接遍历 OrderedCategoryNameList 进行写出，保持了顺序和筛选逻辑
+        # Write directly by iterating OrderedCategoryNameList, preserving order and filtering logic
         for category_name,category_buf in category_buffer_dict.items():
             buf_path = GlobalConfig.path_generatemod_buffer_folder() + draw_ib + "-" + category_name + ".buf"
             with open(buf_path, 'wb') as ibf:
@@ -52,9 +54,9 @@ class BufferExportHelper:
                 
     @staticmethod
     def write_buf_shapekey_vertex_offsets(shapekey_vertex_offsets,filename:str):
-        # 将列表转换为numpy数组
+        # Convert the list to a numpy array
         float_array = numpy.array(shapekey_vertex_offsets, dtype=numpy.float32)
-        # 改变数据类型为float16
+        # Change the data type to float16
         float_array = float_array.astype(numpy.float16)
         with open(GlobalConfig.path_generatemod_buffer_folder() + filename, 'wb') as file:
             float_array.tofile(file)

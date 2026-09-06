@@ -5,7 +5,7 @@ class JsonUtils:
 
     @staticmethod
     def SaveToFile(filepath:str,json_dict:dict):
-        # 将字典转换为 JSON 格式的字符串
+        # Convert the dictionary into a JSON-formatted string
         json_string = json.dumps(json_dict, ensure_ascii=False, indent=4)
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(json_string)
@@ -14,7 +14,7 @@ class JsonUtils:
     def LoadFromFile(filepath: str) -> dict:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
-                # 读取文件内容并解析为字典
+                # Read the file content and parse it into a dictionary
                 json_dict = json.load(f)
             return json_dict
         except FileNotFoundError:

@@ -18,9 +18,9 @@ from .submesh_model import SubMeshModel
 @dataclass
 class DrawIBModel:
     '''
-    - DrawIBModel是一个更高层次的模型，包含一个或多个SubMeshModel
-    - 适用于米游、Unity等需要将多个SubMesh组合成一个DrawIB进行导出的游戏
-    - 要使用DrawIBModle，必须确保每个SubMesh的数据类型是相同的，才能组合在一起
+    - DrawIBModel is a higher-level model that contains one or more SubMeshModel
+    - For games like miHoYo and Unity that must combine multiple SubMeshes into a single DrawIB for export
+    - To use DrawIBModel, every SubMesh must share the same Data Type so they can be combined
     '''
     submesh_model_list:list[SubMeshModel]
     combine_ib:bool = True
@@ -31,10 +31,10 @@ class DrawIBModel:
     vertex_count:int = field(init=False, default=0)
     index_count:int = field(init=False, default=0)
 
-    # 这里的d3d11_game_type有一个隐含条件
-    # DrawIBModel一旦创建，就默认它里面的每个SubmeshModel的d3d11_game_type都是一样的
-    # 否则不可能通过组合buffer数据来正确导出
-    # 所以这里的d3d11_game_type可以直接取submesh_model_list中第一个SubMeshModel的d3d11_game_type
+    # There is an implicit constraint on d3d11_game_type here
+    # Once a DrawIBModel is created, every SubmeshModel inside it is assumed to have the same d3d11_game_type
+    # Otherwise it is impossible to combine buffer data for a correct export
+    # So d3d11_game_type can be taken directly from the first SubMeshModel in submesh_model_list
     d3d11_game_type:D3D11GameType = field(init=False,repr=False,default=None)
 
     import_json_path:str = field(init=False,repr=False,default="")
@@ -54,7 +54,7 @@ class DrawIBModel:
 
 
     def __post_init__(self):
-        # 因为初始化时传入的SubMeshModel列表中的每个SubMeshModel的match_draw_ib都是一样的，所以直接取第一个就行了
+        # Every SubMeshModel in the list passed at init shares the same match_draw_ib, so take the first one
         self.draw_ib = self.submesh_model_list[0].match_draw_ib if len(self.submesh_model_list) > 0 else ""
         self.draw_ib_alias = self.draw_ib
         self.d3d11_game_type = self.submesh_model_list[0].d3d11_game_type if len(self.submesh_model_list) > 0 else None
@@ -82,17 +82,17 @@ class DrawIBModel:
 
     def _load_import_metadata_from_first_submesh(self):
         if not self.submesh_model_list:
-            print("DrawIBModel: submesh_model_list 为空，无法读取导入元数据")
+            print("DrawIBModel: submesh_model_list is empty, cannot read import metadata")
             return
 
         first_submesh = self.submesh_model_list[0]
         folder_name = first_submesh.submesh_name
-        print("DrawIBModel: 开始读取导出元数据，DrawIB: " + self.draw_ib + "，submesh_name: " + folder_name)
+        print("DrawIBModel: Start reading export metadata, DrawIB: " + self.draw_ib + ", submesh_name: " + folder_name)
 
         submesh_json = SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(folder_name))
         self.import_json_path = submesh_json.JsonFilePath
         self.import_json_dict = dict(submesh_json.JsonDict)
-        print("DrawIBModel: 已读取 SubmeshJson: " + self.import_json_path)
+        print("DrawIBModel: SubmeshJson read: " + self.import_json_path)
 
         if self.import_json_dict:
             self.category_hash_dict = dict(self.import_json_dict.get("CategoryHash", {}))
@@ -103,12 +103,12 @@ class DrawIBModel:
             self.cs_output_vertex_limit_hash = self.load_cs_output_vertex_limit_hash()
             self.original_vertex_count = self.import_json_dict.get("OriginalVertexCount", 0)
             print(
-                "DrawIBModel: 已使用新结构元数据，贴图标记SubMesh数量: "
+                "DrawIBModel: Used new-format metadata, Texture markup SubMesh count: "
                 + str(len(self.submesh_texturemarkinfolist_dict))
             )
             return
 
-        print("DrawIBModel: 未读取到 SubmeshJson 元数据，贴图标记信息为空，DrawIB: " + self.draw_ib)
+        print("DrawIBModel: No SubmeshJson metadata found, Texture markup info is empty, DrawIB: " + self.draw_ib)
 
     def load_cs_output_vertex_limit_hash(self) -> str:
         for submesh_model in self.submesh_model_list:
@@ -284,7 +284,7 @@ class DrawIBModel:
         return submesh_model.submesh_name
 
     def apply_drawib_alias(self):
-        '''从工作空间读取并应用当前 DrawIB 的别名。'''
+        '''Read the current DrawIB alias from the workspace and apply it.'''
         alias_name = SSMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
         if alias_name:
             self.draw_ib_alias = alias_name

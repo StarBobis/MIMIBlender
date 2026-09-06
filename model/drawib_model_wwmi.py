@@ -41,11 +41,11 @@ class BlendRemapEntry(TypedDict):
 
 @dataclass
 class DrawIBModelWWMI:
-    draw_ib: str # 当前DrawIB
-    blueprint_model: BluePrintModel # 当前DrawIBModel对应的BlueprintModel
+    draw_ib: str # Current DrawIB
+    blueprint_model: BluePrintModel # BlueprintModel corresponding to the current DrawIBModel
 
-    draw_ib_alias: str = field(init=False, default="") # 当前DrawIB的别名
-    d3d11_game_type: D3D11GameType = field(init=False, repr=False) # 当前DrawIB的数据类型，因为WWMI中每个DrawIB只可能是一个数据类型
+    draw_ib_alias: str = field(init=False, default="") # Alias of the current DrawIB
+    d3d11_game_type: D3D11GameType = field(init=False, repr=False) # Data Type of the current DrawIB, because in WWMI each DrawIB can only have one Data Type
     wwmi_info: WWMIInfoObject = field(init=False, repr=False) 
 
     ordered_drawcall_model_list: list[DrawCallModel] = field(init=False, default_factory=list, repr=False)
@@ -67,24 +67,24 @@ class DrawIBModelWWMI:
     blend_remap_vertex_vg_buffer: numpy.ndarray | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self):
-        # 从工作空间获取别名列表
+        # Get the alias name list from the workspace
         drawib_aliasname_dict: dict[str, str] = SSMTWorkSpace.get_drawib_aliasname_dict()
 
-        # 设置别名
+        # Set the alias
         self.draw_ib_alias = drawib_aliasname_dict.get(self.draw_ib, self.draw_ib)
 
-        # 获取当前DrawIB包含的DrawCallModel列表
+        # Get the list of DrawCallModels contained in the current DrawIB
         self.ordered_drawcall_model_list = ObjBufferHelper.get_ordered_obj_models_by_draw_ib(
             ordered_draw_obj_data_model_list=self.blueprint_model.ordered_draw_obj_data_model_list,
             draw_ib=self.draw_ib,
         )
 
-        # 如果一个DrawCallModel都没有，说明这个DrawIB没有可导出的对象，抛出错误
+        # If there is not a single DrawCallModel, this DrawIB has no exportable object - raise an error
         if len(self.ordered_drawcall_model_list) == 0:
-            raise ValueError("当前 DrawIB 没有可导出的 DrawCallModel")
+            raise ValueError("Current DrawIB has no exportable DrawCallModel")
 
-        # 从第一个DrawCallModel获取对应的SubmeshJson，解析出当前DrawIB的数据类型
-        # 之所以是第一个，因为对于WWMI来说，整个DrawIB的数据类型是使用共同的唯一的一个的
+        # Get the SubmeshJson of the first DrawCallModel to resolve the Data Type of the current DrawIB
+        # The first one is used because for WWMI the whole DrawIB shares one single common Data Type
         first_submesh_name = self.ordered_drawcall_model_list[0].get_submesh_name()
         first_json_path = SSMTWorkSpace.check_and_get_submesh_json_path(first_submesh_name)
         first_submesh_json = SubmeshJson(first_json_path)
@@ -92,22 +92,22 @@ class DrawIBModelWWMI:
 
         self.submesh_drawcall_groups = []
 
-        # 从工作空间获取当前 DrawIB 所有 submesh 的排序列表
+        # Get the ordered list of all submeshes of the current DrawIB from the workspace
         ordered_submesh_name_list = SSMTWorkSpace.get_ordered_submesh_name_list_by_drawib(self.draw_ib)
 
-        # 预加载 SubmeshJson 并按排序后的顺序构建分组 + wwmi_info
+        # Preload SubmeshJson and build the groups + wwmi_info in sorted order
         ordered_submesh_json_list: list[SubmeshJson] = []
         for submesh_name in ordered_submesh_name_list:
             ordered_submesh_json_list.append(SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name)))
-            # 收集当前 submesh 对应的所有 DrawCall
+            # Collect all DrawCalls that belong to the current submesh
             drawcall_group = []
             for drawcall_model in self.ordered_drawcall_model_list:
                 if drawcall_model.get_submesh_name() == submesh_name:
                     drawcall_group.append(drawcall_model)
             self.submesh_drawcall_groups.append(drawcall_group)
         
-        # 根据有序的 SubmeshJson 列表构建 WWMIInfoObject，
-        # 这个对象包含了当前 DrawIB 的所有组件信息，后续构建 MergedObject 和导出时都会用到
+        # Build the WWMIInfoObject from the ordered SubmeshJson list;
+        # it holds all component info of the current DrawIB and is used later when building MergedObject and exporting
         self.wwmi_info = WWMIInfoHelper.build_from_json_list(ordered_submesh_json_list)
         
         self.merged_object = self.build_merged_object()
@@ -128,18 +128,18 @@ class DrawIBModelWWMI:
                 updated_drawcall_model_list.append(drawcall_model)
             self.submesh_drawcall_groups[idx] = updated_drawcall_model_list
 
-        # 构建 submesh_model_list 和纹理标记字典，供 M_IniHelper 纹理导出使用
-        # 注意：需要按 match_first_index（即 ComponentIndex / FirstIndex）从小到大排序，
-        # 确保 DrawIB-0 (Component 0) 在 DrawIB-1 (Component 1) 前面，
-        # 并且同一个 submesh 只保留一个条目（去重），避免蓝图节点排列顺序影响导出结果。
+        # Build submesh_model_list and the Texture markup dict for the M_IniHelper Texture export
+        # Note: sort by match_first_index (i.e. ComponentIndex / FirstIndex) in ascending order,
+        # so that DrawIB-0 (Component 0) comes before DrawIB-1 (Component 1),
+        # and keep only one entry per submesh (dedup) so the blueprint node order cannot affect the export result.
         self.submesh_model_list = []
-        submesh_seen: dict[str, int] = {}  # submesh_name → match_first_index
+        submesh_seen: dict[str, int] = {}  # submesh_name -> match_first_index
         for drawcall_model in self.ordered_drawcall_model_list:
             submesh_name = drawcall_model.match_submesh_name
             if not submesh_name:
                 continue
             if submesh_name in submesh_seen:
-                continue  # 已处理过该 submesh
+                continue  # this submesh was already processed
             try:
                 mfi_int = int(drawcall_model.match_first_index)
             except (TypeError, ValueError):
@@ -149,7 +149,7 @@ class DrawIBModelWWMI:
         for submesh_name, mfi_int in sorted(submesh_seen.items(), key=lambda item: item[1]):
             self.submesh_model_list.append(SimpleNamespace(
                 submesh_name=submesh_name,
-                display_str=submesh_name,  # 初始等于 submesh_name，后续由 apply_alias_dict 覆盖
+                display_str=submesh_name,  # initially equals submesh_name, later overridden by apply_alias_dict
                 match_first_index=mfi_int,
                 d3d11_game_type=self.d3d11_game_type,
             ))
@@ -305,7 +305,7 @@ class DrawIBModelWWMI:
                         if "ignore" in vertex_group.name.lower() or vertex_group.index >= total_vg_count
                     ]
                 else:
-                    # PER_COMPONENT 或 UNICOMPONENT：使用组件本地 VG 范围
+                    # PER_COMPONENT or UNICOMPONENT: use the component-local VG range
                     extracted_component = self.wwmi_info.components[component_id]
                     total_vg_count = len(extracted_component.vg_map)
                     ignore_list = [
@@ -525,7 +525,7 @@ class DrawIBModelWWMI:
         return self.submesh_texturemarkinfolist_dict.get(submesh_model.submesh_name, [])
 
     def apply_drawib_alias(self):
-        """从工作空间读取并应用当前 DrawIB 的别名（WWMI 版）。"""
+        """Read the current DrawIB alias from the workspace and apply it (WWMI version)."""
         alias_name = SSMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
         if alias_name:
             self.draw_ib_alias = alias_name

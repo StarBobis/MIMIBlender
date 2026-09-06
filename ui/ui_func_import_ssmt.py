@@ -1,19 +1,18 @@
 ﻿
 '''
-导入模型配置面板
+Import model configuration panel
 '''
 import os
 import shutil
 import bpy
 import re
 
-# 用于解决 AttributeError: 'IMPORT_MESH_OT_migoto_raw_buffers_mmt' object has no attribute 'filepath'
+# Workaround for AttributeError: 'IMPORT_MESH_OT_migoto_raw_buffers_mmt' object has no attribute 'filepath'
 from bpy_extras.io_utils import ImportHelper
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
 from ..utils.timer_utils import TimerUtils
-from ..utils.translate_utils import iface_, rpt_
 
 from ..common.global_config import GlobalConfig
 from ..common.m_texture_helper import M_TextureHelper
@@ -98,7 +97,7 @@ def _apply_submesh_role_rendering(obj, role: str, json_path: str) -> None:
         return
     diffuse_paths = _get_eye_diffuse_paths(json_path)
     if not diffuse_paths:
-        print(f"[GIMI {role}] {json_path} 没有有效的 DiffuseMap 快捷元信息，跳过材质构建。")
+        print(f"[GIMI {role}] {json_path} has no valid DiffuseMap shortcut metadata; skipping material build.")
         return
     face_metadata = _get_face_shader_metadata(json_path) if role == 'Face' else None
     for slot in getattr(obj, "material_slots", ()):
@@ -109,7 +108,7 @@ def _apply_submesh_role_rendering(obj, role: str, json_path: str) -> None:
             if not GIMIHighFidelityMaterial.configure_face_sdf_material(
                 slot.material, diffuse_paths, sdf_path, sdf_channel, shadow_path,
             ):
-                print(f"[GIMI Face] {json_path} 缺少 FaceSDFMap，保留常规材质。")
+                print(f"[GIMI Face] {json_path} lacks FaceSDFMap; keeping the regular material.")
 
 
 def _yoz_vertices(obj, rotation, referenced_only=False):
@@ -172,33 +171,34 @@ def _apply_face_neck_object_alignment(imported_objects: dict) -> bool:
     return True
 
 
-# 全量导入逻辑
+# Full import logic
 
 
 def _parse_mark_slot_index(mark_slot: str) -> int:
-    """从 'ps-t3' 这类标记槽位字符串中解析 slot 索引，失败返回 0。"""
+    """Parse the slot index from a mark-slot string such as 'ps-t3'; return 0 on failure."""
     match = re.search(r"t(\d+)\s*$", str(mark_slot or "").strip().lower())
     return int(match.group(1)) if match else 0
 
 
 def _parse_format_from_deduped_filename(deduped_filename: str) -> str:
-    """从 '3a482e27_3a482e27-BC7_UNORM.dds' 中提取 'BC7_UNORM'。"""
+    """Extract 'BC7_UNORM' from a deduplicated filename like '3a482e27_3a482e27-BC7_UNORM.dds'."""
     base_name = os.path.splitext(str(deduped_filename or ""))[0]
     if "-" not in base_name:
         return ""
     format_str = base_name.rsplit("-", 1)[-1].strip()
-    # 部分工作空间写成 DXGI_FORMAT_BC7_UNORM_SRGB 形式，去掉前缀
+    # Some workspaces write formats as DXGI_FORMAT_BC7_UNORM_SRGB; strip the prefix
     if format_str.upper().startswith("DXGI_FORMAT_"):
         format_str = format_str[len("DXGI_FORMAT_"):]
     return format_str
 
 
 def _extract_texture_marks(submesh_json: dict) -> list:
-    """从 Submesh JSON 中提取贴图标记列表。
+    """Extract the texture mark list from a Submesh JSON.
 
-    SSMT4 使用扁平的 TextureMarkUpInfoList；
-    部分旧数据只有按组件分组的 ComponentTextureMarkUpInfoListDict，
-    此时把所有组件的标记拍平返回（同 Hash 会在后续去重）。
+    SSMT4 uses the flat TextureMarkUpInfoList;
+    some older data only has the per-component ComponentTextureMarkUpInfoListDict,
+    in which case the marks of every component are flattened and returned
+    (identical hashes are deduplicated later).
     """
     if not isinstance(submesh_json, dict):
         return []
@@ -217,7 +217,7 @@ def _extract_texture_marks(submesh_json: dict) -> list:
 
 
 def _get_known_texture_formats() -> set:
-    """读取 Texture 节点格式枚举中的已知 DXGI 格式标识符。"""
+    """Read the known DXGI format identifiers from the Texture node format enum."""
     try:
         enum_items = SSMTNode_Texture.bl_rna.properties['texture_format'].enum_items
         return {item.identifier for item in enum_items} - {'AUTO', 'CUSTOM'}
@@ -226,7 +226,7 @@ def _get_known_texture_formats() -> set:
 
 
 def _apply_texture_format(tex_node, format_str: str):
-    """按枚举合法性填充节点目标格式，未知格式走 CUSTOM。"""
+    """Fill the node target format only when it is a valid enum item; unknown formats use CUSTOM."""
     format_str = (format_str or "").strip()
     if not format_str:
         return
@@ -238,10 +238,11 @@ def _apply_texture_format(tex_node, format_str: str):
 
 
 def _node_world_location(node):
-    """返回节点在编辑器中的绝对坐标。
+    """Return the absolute node coordinates in the editor.
 
-    节点 parent 到 Frame 后 location 变为相对父级的值，
-    需要沿父 Frame 链累加才能还原绝对坐标。
+    Once a node is parented to a Frame its location becomes relative to the
+    parent, so the parent Frame chain must be summed to restore the
+    absolute coordinates.
     """
     x, y = node.location.x, node.location.y
     parent = node.parent
@@ -262,18 +263,21 @@ def _build_texture_nodes(
     group_frame_dict: dict = None,
     tex_home_group: dict = None,
 ):
-    """根据各 Submesh JSON 中的 TextureMarkUpInfoList 构建 Texture 节点。
+    """Build Texture nodes from the TextureMarkUpInfoList of each Submesh JSON.
 
-    只有被用户在 SSMT 中明确标记过的贴图才会生成节点；
-    风格（Hash / Slot）完全由每条标记自身的 MarkType 决定；
-    同一 Hash 的贴图对象复用同一个节点。
-    贴图节点归属于"第一次使用它"（首个 Slot 标记）的 submesh 所在的分组 Frame；
-    没有 Slot 标记的纯 Hash 贴图则归属于它第一个出现的分组 Frame。
+    Only textures explicitly marked by the user in SSMT generate nodes;
+    the style (Hash / Slot) is decided entirely by each mark's own MarkType;
+    textures sharing one hash reuse the same node.
+    A texture node belongs to the group Frame of the submesh that "first
+    uses it" (its first Slot mark); a pure Hash texture without any Slot
+    mark belongs to the group Frame where it first appears.
 
-    Hash 风格的贴图会连到一个独立的 Hash 贴图分组节点（与物体分组并列）。
+    Hash-style textures are wired to a standalone Hash texture group node
+    (placed beside the object groups).
 
-    返回 (贴图节点列表, Hash 贴图分组节点)；
-    Hash 贴图分组节点按需懒创建，没有 Hash 贴图时为 None。
+    Returns (texture node list, hash texture group node);
+    the hash group node is lazily created as needed and is None when there
+    is no hash texture.
     """
     if group_frame_dict is None:
         group_frame_dict = {}
@@ -289,7 +293,7 @@ def _build_texture_nodes(
             with open(json_path, 'r', encoding='utf-8') as f:
                 submesh_json = json.load(f)
         except Exception as e:
-            print(f"[ImportTexture] 读取 Submesh JSON 失败: {json_path}, {e}")
+            print(f"[ImportTexture] Failed to read Submesh JSON: {json_path}, {e}")
             continue
 
         mark_list = _extract_texture_marks(submesh_json)
@@ -312,18 +316,18 @@ def _build_texture_nodes(
             tex_node = texture_node_by_hash.get(mark_hash)
             if tex_node is None:
                 tex_node = tree.nodes.new('SSMTNode_Texture')
-                # 归属分组：优先"第一次使用它"（首个 Slot 标记）的 submesh 分组，
-                # 否则取它第一个出现的分组
+                # Ownership: prefer the group of the submesh that "first uses
+                # it" (its first Slot mark), otherwise the group where it first appears.
                 group_key = tex_home_group.get(mark_hash) or oldfoldername_group_dict.get(old_folder_name, ("", ""))
                 cursor = group_tex_cursors.setdefault(group_key, [0.0, 0.0])
                 tex_node.location = (cursor[0], cursor[1])
                 cursor[1] -= tex_y_gap
-                # 挂到归属分组的 Frame 里
+                # Parent it into the owning group's Frame
                 frame = group_frame_dict.get(group_key)
                 if frame is not None:
                     abs_x, abs_y = tex_node.location.x, tex_node.location.y
-                    # Frame 可能已并入 DrawIB 二级 Frame，此时 frame.location
-                    # 是相对二级 Frame 的值，必须换算回绝对坐标再计算相对位置
+                    # The Frame may have been merged into a DrawIB second-level Frame,
+                    # making frame.location relative to it; convert back to absolute coordinates.
                     frame_abs_x, frame_abs_y = _node_world_location(frame)
                     tex_node.parent = frame
                     tex_node.location = (abs_x - frame_abs_x, abs_y - frame_abs_y)
@@ -343,7 +347,7 @@ def _build_texture_nodes(
                     if os.path.isfile(candidate_path):
                         tex_node.texture_filepath = candidate_path
 
-                # 优先使用 SSMT 元数据里的格式，其次回退到解析源 DDS 文件头
+                # Prefer the format from the SSMT metadata; otherwise fall back to parsing the source DDS header
                 format_str = _parse_format_from_deduped_filename(mark_deduped_filename)
                 if not format_str and tex_node.texture_filepath:
                     format_str = M_TextureHelper.detect_dds_format(tex_node.texture_filepath)
@@ -352,18 +356,18 @@ def _build_texture_nodes(
                 texture_node_by_hash[mark_hash] = tex_node
 
             if mark_type == 'Hash':
-                # Hash 风格：连接 Hash 出口到独立的 Hash 贴图分组节点，生成独立 [TextureOverride_<hash>] 段
+                # Hash style: connect the Hash output to the standalone Hash texture group node, producing a dedicated [TextureOverride_<hash>] section
                 if tex_node.name in hash_linked_node_names:
                     continue
                 if hash_group_node is None:
                     hash_group_node = tree.nodes.new('SSMTNode_Object_Group')
                     hash_group_node.label = "Hash Texture Group"
                 if hash_group_node.inputs[-1].is_linked:
-                    hash_group_node.inputs.new('SSMTSocketObject', iface_("输入 {count}").format(count=len(hash_group_node.inputs) + 1))
+                    hash_group_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(hash_group_node.inputs) + 1))
                 tree.links.new(tex_node.outputs["Hash"], hash_group_node.inputs[-1])
                 hash_linked_node_names.add(tex_node.name)
             else:
-                # Slot / SharedSlot 风格：连接 Slot 出口到对应 Object Info 节点的槽位
+                # Slot / SharedSlot style: connect the Slot output to the corresponding Object Info node socket
                 obj_info_node = oldfoldername_node_dict.get(old_folder_name)
                 if obj_info_node is None:
                     continue
@@ -377,11 +381,11 @@ def _build_texture_nodes(
 
 
 def _link_group_to_output(tree, group_node, output_node):
-    """把分组节点连到 Result_Output 的下一个空闲输入口，没有空闲口时先补充。"""
+    """Link the group node to the next free input of Result_Output; add one when none is free."""
     if group_node is None or len(group_node.outputs) == 0:
         return
     if len(output_node.inputs) == 0 or output_node.inputs[-1].is_linked:
-        output_node.inputs.new('SSMTSocketObject', iface_("组 {count}").format(count=len(output_node.inputs) + 1))
+        output_node.inputs.new('SSMTSocketObject', "Group {count}".format(count=len(output_node.inputs) + 1))
     tree.links.new(group_node.outputs[0], output_node.inputs[-1])
 
 
@@ -417,12 +421,12 @@ def _create_face_mod_export_node(tree, oldfoldername_node_dict, oldfoldername_js
 
     export_node = tree.nodes.new('SSMTNode_Face_Mod_Export')
     export_node.location = location
-    export_node.label = "导出面部 Mod"
+    export_node.label = "Export Face Mod"
     export_node.diffuse_hash = diffuse_hash
     export_node.output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
     for object_node in face_nodes:
         if export_node.inputs[-1].is_linked:
-            export_node.inputs.new('SSMTSocketObject', f"面部组 {len(export_node.inputs) + 1}")
+            export_node.inputs.new('SSMTSocketObject', f"Face Group {len(export_node.inputs) + 1}")
         tree.links.new(object_node.outputs[0], export_node.inputs[-1])
     return export_node
 
@@ -445,33 +449,37 @@ def _exclude_marked_face_objects_from_regular_group(
             tree.links.remove(link)
 
 def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_dict, ws_model, oldfoldername_jsonpath_hint=None):
-    """创建 Object Info 节点、连接到 Group，并按 Submesh 分组布局。
+    """Create Object Info nodes, connect them to the Group and lay them out per Submesh group.
 
-    每个 Submesh（导入的 mesh）独占一个分组：占一列对，左侧贴图列
-    （留出预览空间），右侧一个 Mesh Info 节点；列对横向排列，
-    每行最多 MAX_GROUP_COLS_PER_ROW 组后换行。
+    Each Submesh (imported mesh) owns one group: one column pair, with the
+    texture column on the left (reserving preview space) and one Mesh Info
+    node on the right; column pairs run horizontally and wrap after at most
+    MAX_GROUP_COLS_PER_ROW groups per row.
 
-    Mesh Info 节点会随贴图槽位连接数量被撑高，因此换行时按预估的
-    实际高度推进，避免与下一行的节点叠在一起。
+    Mesh Info nodes grow taller as texture slots are linked, so wrapping
+    advances by the estimated actual height to avoid overlapping the nodes
+    of the next row.
 
-    每个分组同时创建一个 NodeFrame，把该 Submesh 的 Mesh Info 节点与
-    贴图节点框在一起，便于观察；贴图节点由 _build_texture_nodes 负责挂进 Frame。
-    归属于同一 IB hash 的 Submesh Frame 会再并入一个 DrawIB 级的二级 Frame。
+    Each group also gets a NodeFrame that frames that Submesh's Mesh Info
+    node together with its texture nodes for easier inspection; texture
+    nodes are parented into the Frame by _build_texture_nodes.
+    Submesh Frames sharing one IB hash are merged into a DrawIB-level
+    second Frame.
 
-    返回 (oldfoldername_node_dict, oldfoldername_group_dict, group_tex_cursors,
-          max_node_right, tex_y_gap, group_frame_dict, tex_home_group)。
+    Returns (oldfoldername_node_dict, oldfoldername_group_dict, group_tex_cursors,
+          max_node_right, tex_y_gap, group_frame_dict, tex_home_group).
     """
     if oldfoldername_jsonpath_hint is None:
         oldfoldername_jsonpath_hint = {}
-    # old_folder_name -> Object Info 节点（贴图标记的 Slot 连接目标）
+    # old_folder_name -> Object Info node (Slot link target of texture marks)
     oldfoldername_node_dict: dict[str, bpy.types.Node] = {}
-    # old_folder_name -> 分组 key（新格式 submesh 名称）
+    # old_folder_name -> group key (new-format submesh name)
     oldfoldername_group_dict: dict[str, str] = {}
     group_order: list[str] = []
     group_nodes: dict[str, list] = {}
-    # 分组 key -> NodeFrame 标签（mesh 名 + DrawIB 别名）
+    # group key -> NodeFrame label (mesh name + DrawIB alias)
     group_frame_labels: dict[str, str] = {}
-    # DrawIB 二级分组：(lod, draw_ib) -> 该 IB hash 下的 submesh 分组 key 列表
+    # DrawIB second-level grouping: (lod, draw_ib) -> submesh group keys under that IB hash
     outer_order: list[tuple] = []
     outer_groups: dict[tuple, list] = {}
 
@@ -479,14 +487,14 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         if imported_obj.type != 'MESH':
             continue
 
-        # 通过 WorkSpaceModel 解析新格式名称获取 component 编号
+        # Resolve the new-format name via WorkSpaceModel to get the component number
         parsed = ws_model.parse_new_format_name(new_submesh_name)
         component_str = str(parsed["component"]) if parsed else "0"
 
-        # 创建节点
+        # Create the node
         node = tree.nodes.new('SSMTNode_Object_Info')
 
-        # 填充属性
+        # Fill in the properties
         node.object_name = imported_obj.name
         node.original_object_name = imported_obj.name
         node.component = component_str
@@ -503,7 +511,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         if old_folder_name:
             oldfoldername_node_dict[old_folder_name] = node
 
-        # 分组粒度为 Submesh：每个 mesh 一个分组 / 一个 Frame
+        # Group granularity is the Submesh: one group / Frame per mesh
         group_key = new_submesh_name
         if group_key not in group_nodes:
             group_nodes[group_key] = []
@@ -520,32 +528,34 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             outer_order.append(outer_key)
         outer_groups[outer_key].append(group_key)
 
-        # 如果 Group 最后一个插槽已被占用，手动扩展一个
+        # Add a socket manually when the Group's last socket is already occupied
         if group_node.inputs[-1].is_linked:
             group_node.inputs.new('SSMTSocketObject', f"Input {len(group_node.inputs) + 1}")
         tree.links.new(node.outputs[0], group_node.inputs[-1])
 
-    # 分组布局
+    # Group layout
     OBJ_X_OFFSET = 560.0
     TEX_Y_GAP = 460.0
     GROUP_X_GAP = 1120.0
     ROW_Y_GAP = 320.0
     MAX_GROUP_COLS_PER_ROW = 3
-    # Mesh Info 节点高度预估：基础高度 + 每个贴图槽位连接的撑高。
-    # 节点 UI 由 socket 行（约 22px/行）与 draw_buttons 行（约 20px/行）构成，
-    # 每个已连接槽位约增加 1 行 socket + 3 行槽位配置按钮。
+    # Mesh Info node height estimate: base height plus growth per linked texture slot.
+    # The node UI is made of socket rows (about 22px per row) and draw_buttons
+    # rows (about 20px per row); each linked slot adds about 1 socket row plus
+    # 3 slot-configuration button rows.
     OBJ_BASE_HEIGHT = 220.0
     OBJ_SLOT_LINK_HEIGHT = 100.0
 
-    # 预统计每组贴图节点数量，用于估算行高（贴图列需要预览空间）
+    # Pre-count the texture nodes per group to estimate the row height (texture columns need preview space)
     group_tex_counts: dict[str, int] = {}
-    # 预统计每组 Mesh Info 节点的贴图槽位连接数（MarkType 非 Hash 的标记，
-    # 去重规则与 _build_texture_nodes 的 slot_link_done 一致），用于估算节点撑高
+    # Pre-count the linked texture slots per Mesh Info node group (marks whose
+    # MarkType is not Hash, deduplicated like the slot_link_done logic of _build_texture_nodes)
     group_slot_link_counts: dict[str, int] = {}
     seen_mark_hashes: set[str] = set()
     seen_slot_links: set[tuple] = set()
-    # 每个贴图 hash 的首个出现分组与首个 Slot 标记分组（"第一次使用它"的 submesh），
-    # 用于决定贴图节点归属哪个分组的 Frame
+    # For each texture hash: the group where it first appears and the group of
+    # its first Slot mark (the submesh that "first uses it"), used to decide
+    # which group's Frame owns the texture node
     tex_first_group: dict[str, str] = {}
     tex_first_slot_group: dict[str, str] = {}
     for old_folder_name, json_path in oldfoldername_jsonpath_hint.items():
@@ -577,8 +587,9 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
                 if mark_hash not in tex_first_slot_group:
                     tex_first_slot_group[mark_hash] = group_key
 
-    # 贴图归属分组：严格跟随"第一次使用它"（首个 Slot 标记）的 submesh；
-    # 没有 Slot 标记的纯 Hash 贴图跟随第一个出现的分组
+    # Texture ownership strictly follows the submesh of the "first use"
+    # (the first Slot mark); pure Hash textures without Slot marks follow
+    # the group where they first appear
     tex_home_group = {
         h: tex_first_slot_group.get(h) or first_group
         for h, first_group in tex_first_group.items()
@@ -593,8 +604,9 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
 
     for outer_key in outer_order:
         submesh_keys = outer_groups[outer_key]
-        # 同一 DrawIB 的 submesh 在一行内连续排列，二级 Frame 才不会罩住别组：
-        # 当前行剩余列放不下整组时先换行
+        # Submeshes of one DrawIB line up consecutively in a row so that the
+        # second-level Frame does not cover other groups: wrap first when the
+        # remaining columns of the current row cannot fit the whole group
         if 0 < col_in_row and len(submesh_keys) > MAX_GROUP_COLS_PER_ROW - col_in_row:
             col_in_row = 0
             row_start_y -= (row_max_height + ROW_Y_GAP)
@@ -615,7 +627,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
                 slot_link_count = group_slot_link_counts.get(group_key, 0)
                 y -= OBJ_BASE_HEIGHT + slot_link_count * OBJ_SLOT_LINK_HEIGHT
 
-            # Mesh Info 节点会被贴图槽位连接撑高，按预估实际高度计入行高，避免与下一行重叠
+            # Mesh Info nodes grow with linked texture slots; count the estimated height into the row height to avoid overlapping the next row
             obj_height = row_start_y - y
             tex_height = group_tex_counts.get(group_key, 0) * TEX_Y_GAP
             row_max_height = max(row_max_height, obj_height, tex_height)
@@ -623,12 +635,12 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
 
             group_tex_cursors[group_key] = [base_x, row_start_y]
             group_top_y[group_key] = row_start_y
-        # 跨行大组（超过一行宽）的二级 Frame 是覆盖多行的矩形，
-        # 其最后一行的剩余列不能再放别组，否则会被框住
+        # A group spanning several rows has a second-level Frame whose rectangle
+        # covers those rows, so no other group may use the leftover columns
         if spanned_multiple_rows:
             col_in_row = MAX_GROUP_COLS_PER_ROW
 
-    # 为每个分组创建 Frame，并把组内 Mesh Info 节点挂进去
+    # Create a Frame per group and parent the group's Mesh Info nodes into it
     FRAME_PAD = 40.0
     group_frame_dict: dict[str, bpy.types.Node] = {}
     for group_key in group_order:
@@ -645,10 +657,12 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             node.parent = frame
             node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
 
-    # 为每个 DrawIB 创建二级 Frame，把同 IB hash 的 Submesh Frame 并进去。
-    # 布局阶段已保证同组 submesh 连续排列且跨行大组独占其所有行，
-    # 因此二级 Frame 的矩形范围不会罩住其他分组。
-    # Frame 尺寸由 Blender 按子节点自动贴合，这里只需给出大致的左上角位置。
+    # Create a second-level Frame per DrawIB and merge the Submesh Frames of
+    # the same IB hash into it. The layout stage already keeps the submeshes
+    # of one group consecutive, with multi-row groups owning all of their rows,
+    # so the second-level Frame rectangle never covers other groups.
+    # Blender fits the Frame size to its children; only a rough top-left
+    # position is given here.
     OUTER_FRAME_PAD = 40.0
     for outer_key in outer_order:
         lod_name, draw_ib = outer_key
@@ -731,26 +745,26 @@ def _deselect_imported_shader_nodes(imported_objects):
 
 def ImprotFromWorkSpaceFull(self, context):
     
-    # 创建 WorkSpaceModel 统一管理所有映射
+    # Create a WorkSpaceModel to manage all the mappings
     ws_model = WorkSpaceModel()
 
-    # 这里先创建以当前工作空间为名称的集合，并且链接到scene，确保它存在
+    # First create the collection named after the current workspace and link it to the scene, ensuring it exists
     workspace_collection = SSMTWorkSpace.create_and_get_workspace_collection()
 
     if not ws_model.lod_components:
-        self.report({'ERROR'}, "当前工作空间未找到任何 LOD 目录（LOD0、LOD1…），请检查工作空间结构。")
+        self.report({'ERROR'}, "No LOD directories (LOD0, LOD1, ...) were found in the current workspace. Please check the workspace structure.")
         return
 
-    # key: 新格式 submesh_name（如 "LOD0.94517393-0"）, value: gametype_name
+    # key: new-format submesh_name (e.g. "LOD0.94517393-0"), value: gametype_name
     foldername_gametypename_dict = {}
     foldername_imported_obj_dict = {}
-    # old_folder_name -> 实际用于导入的 Submesh JSON 路径（贴图标记元数据来源）
+    # old_folder_name -> actual Submesh JSON path used for import (source of the texture-mark metadata)
     oldfoldername_jsonpath_dict = {}
     all_submesh_display_names = []
     successful_import_count = 0
 
     for lod_name in sorted(ws_model.lod_components.keys()):
-        # 为每个 LOD 创建蓝色子集合，挂在工作空间集合下面
+        # Create a blue sub-collection per LOD, linked under the workspace collection
         lod_collection = CollectionUtils.create_new_collection(
             collection_name=lod_name,
             color_tag=CollectionColor.Blue,
@@ -773,16 +787,16 @@ def ImprotFromWorkSpaceFull(self, context):
 
                 print("Import FolderName: " + folder_path)
 
-                # 获取导入的数据类型文件夹路径列表
+                # Get the ordered data-type folder path list to import from
                 final_import_folder_path_list = SSMTWorkSpace.get_ordered_gpu_cpu_import_folderpath_list(folder_path)
                 print("Final Import Folder Path List: " + str(final_import_folder_path_list))
 
-                # 接下来开始导入，尝试对当前DrawIB的每个数据类型都进行导入
+                # Now import, trying every data type of the current DrawIB
                 for import_folder_path in final_import_folder_path_list:
                     gametype_name = import_folder_path.split("TYPE_")[1]
 
                     try:
-                        print("尝试导入路径: " + import_folder_path)
+                        print("Attempting import path: " + import_folder_path)
 
                         json_file_path = os.path.join(import_folder_path, old_folder_name + ".json")
                         imported_obj = SSMTImportHelper.create_mesh_from_json(
@@ -801,37 +815,37 @@ def ImprotFromWorkSpaceFull(self, context):
 
                         foldername_gametypename_dict[new_submesh_name] = gametype_name
                         oldfoldername_jsonpath_dict[old_folder_name] = json_file_path
-                        self.report({'INFO'}, "成功导入 " + new_submesh_name + " 的数据类型: " + gametype_name)
+                        self.report({'INFO'}, "Successfully imported " + new_submesh_name + " data type: " + gametype_name)
                     except Exception as e:
                         print(f"Failed to import from {import_folder_path}: {e}")
                         continue
-                    # 直到第一个导入成功就 Break
+                    # Break after the first successful import
                     break
 
     if successful_import_count == 0:
-        self.report({'ERROR'}, "当前工作空间没有成功导入任何模型，已跳过蓝图生成。")
+        self.report({'ERROR'}, "No models were successfully imported from the current workspace; blueprint generation was skipped.")
         return
 
-    # 保存工作空间级 Import.json 选择记录（使用新格式 key）
+    # Save the workspace-level Import.json selection record (using new-format keys)
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
     JsonUtils.SaveToFile(json_dict=foldername_gametypename_dict, filepath=save_import_json_path)
     
     if getattr(context.scene.global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
-            self.report({'WARNING'}, "矫正面部需要至少一个有效的 Face 和 Neck 标记。")
+            self.report({'WARNING'}, "Face alignment requires at least one valid Face mark and one Neck mark.")
 
     _deselect_imported_objects(foldername_imported_obj_dict)
     _deselect_imported_shader_nodes(foldername_imported_obj_dict)
 
     # ==========================
-    # 自动生成蓝图节点逻辑
+    # Auto-generate blueprint node graph
     # ==========================
     try:
-        # 创建蓝图，名称为当前工作空间名称
+        # Create the blueprint, named after the current workspace
         tree_name = GlobalConfig.get_workspace_name()
         
-        # Nico: 为了防止覆盖用户修改过的蓝图，始终创建新蓝图
-        # 如果已存在同名蓝图，Blender会自动添加.001等后缀，从而保留旧蓝图
+        # Nico: always create a new blueprint to avoid overwriting user-modified ones
+        # If a blueprint with the same name exists, Blender appends a suffix like .001, preserving the old one
         try:
             tree = bpy.data.node_groups.new(name=tree_name, type='SSMTBlueprintTreeType')
         except Exception as e:
@@ -840,19 +854,19 @@ def ImprotFromWorkSpaceFull(self, context):
         tree.use_fake_user = True
         BlueprintExportHelper.set_tree_submesh_names(all_submesh_display_names, tree=tree)
         
-        # 创建 Group 节点 (并在循环中连接)
+        # Create the Group node (and link to it in the loop)
         group_node = tree.nodes.new('SSMTNode_Object_Group')
         group_node.label = "Default Group"
         
-        # 3. 创建 Object Info 节点并按 Submesh 分组布局（同 IB hash 并入二级 Frame）
+        # 3. Create Object Info nodes laid out per Submesh group (same IB hash merged into a second-level Frame)
         (oldfoldername_node_dict, oldfoldername_group_dict,
          group_tex_cursors, max_node_right, TEX_Y_GAP,
          group_frame_dict, tex_home_group) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model,
             oldfoldername_jsonpath_hint=oldfoldername_jsonpath_dict)
 
-        # 3.5 根据各 Submesh 的贴图标记元数据自动创建并连接 Texture 节点
-        # 只导入用户在 SSMT 中明确标记的贴图；风格由每条标记的 MarkType 决定
+        # 3.5 Auto-create and connect Texture nodes from each Submesh's texture-mark metadata
+        # Only textures explicitly marked by the user in SSMT are imported; the style is decided by each mark's MarkType
         _, hash_group_node = _build_texture_nodes(
             tree=tree,
             oldfoldername_node_dict=oldfoldername_node_dict,
@@ -864,12 +878,12 @@ def ImprotFromWorkSpaceFull(self, context):
             tex_home_group=tex_home_group,
         )
 
-        # 4. 放置 Group 和 Output 节点（Hash 贴图分组与物体分组并列排放）
+        # 4. Place the Group and Output nodes (the Hash texture group sits beside the object group)
         group_node.location = (max_node_right + 560.0, -200.0)
-        group_node.label = "网格体总组"
+        group_node.label = "Master Mesh Group"
         if hash_group_node is not None:
             hash_group_node.location = (max_node_right + 560.0, -1000.0)
-            hash_group_node.label = "Hash 风格贴图总组"
+            hash_group_node.label = "Master Hash Texture Group"
 
         output_node = tree.nodes.new('SSMTNode_Result_Output')
         output_node.location = (max_node_right + 1040.0, -200.0)
@@ -880,7 +894,7 @@ def ImprotFromWorkSpaceFull(self, context):
             (max_node_right + 1040.0, -760.0),
         )
         
-        # 两个并列的分组节点分别直接连到 Output
+        # Link the side-by-side group nodes directly to the Output
         _link_group_to_output(tree, face_export_node, output_node)
         _link_group_to_output(tree, group_node, output_node)
         _link_group_to_output(tree, hash_group_node, output_node)
@@ -913,17 +927,17 @@ def ImprotFromWorkSpaceFull(self, context):
 
 class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(bpy.types.Operator):
     bl_idname = "ssmt4.import_all_from_workspace"
-    bl_label = "一键导入SSMT工作空间内容"
-    bl_description = "一键导入当前工作空间文件夹下所有的内容"
+    bl_label = "Import All From SSMT Workspace"
+    bl_description = "Import everything from the current workspace folder with one click."
     bl_options = {'REGISTER','UNDO'}
 
     def execute(self, context):
         # print("Current WorkSpace: " + GlobalConfig.get_workspace_name())
         # print("Current Game: " + GlobalConfig.gamename)
         if GlobalConfig.get_workspace_name() == "":
-            self.report({"ERROR"}, rpt_("请先在SSMT中选择当前工作空间后再导入。"))
+            self.report({"ERROR"}, "Please select the current workspace in SSMT before importing.")
         elif not os.path.exists(GlobalConfig.path_workspace_folder()):
-            self.report({"ERROR"}, rpt_("工作空间文件夹不存在，请先在SSMT中创建工作空间: {path}").format(path=GlobalConfig.path_workspace_folder()))
+            self.report({"ERROR"}, "Workspace folder does not exist. Please create a workspace in SSMT first: {path}".format(path=GlobalConfig.path_workspace_folder()))
         else:
             TimerUtils.Start("ImportFromWorkSpaceBlueprint")
             ImprotFromWorkSpaceFull(self, context)
@@ -934,8 +948,8 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(bpy.types.Operator):
 
 class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
     bl_idname = "ssmt4.import_raw"
-    bl_label = "导入SSMT格式模型"
-    bl_description = "导入SSMT格式的模型文件, 只需选择.json文件即可"
+    bl_label = "Import SSMT Model"
+    bl_description = "Import an SSMT model file. You only need to select the .json file."
     bl_options = {'REGISTER','UNDO'}
 
     filter_glob: bpy.props.StringProperty(
@@ -949,15 +963,15 @@ class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
     ) # type: ignore
 
     def execute(self, context):
-        # 我们需要添加到一个新建的集合里，方便后续操作
-        # 这里集合的名称需要为当前文件夹的名称
+        # We need to add to a newly created collection for the later steps
+        # The collection must be named after the current folder
         dirname = os.path.dirname(self.filepath)
 
         collection_name = os.path.basename(dirname)
         collection = bpy.data.collections.new(collection_name)
         bpy.context.scene.collection.children.link(collection)
 
-        # 如果用户不选择任何json文件，则默认返回读取所有的json文件。
+        # If the user does not select any json file, fall back to importing every json file.
         import_filename_list = []
         if len(self.files) == 1:
             if str(self.filepath).endswith(".json"):
@@ -970,7 +984,7 @@ class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
             for json_file in self.files:
                 import_filename_list.append(json_file.name)
 
-        # 逐个json文件导入
+        # Import the json files one by one
         for json_file_name in import_filename_list:
             if os.path.isabs(json_file_name):
                 json_file_path = json_file_name
@@ -983,16 +997,16 @@ class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
         return {'FINISHED'}
 
 # =============================================================================
-# 筛选导入逻辑 — 只导入指定的 submesh 文件夹列表
+# Filtered import logic - only the listed submesh folders are imported
 # =============================================================================
 def _get_or_create_lod_collection(workspace_collection, lod_name):
-    '''查找或创建 LOD 子集合（重用已有集合，避免重复创建）。'''
+    '''Find or create the LOD sub-collection (reuse existing collections to avoid duplicates).'''
     if lod_name in workspace_collection.children:
         return workspace_collection.children[lod_name]
-    # 检查 bpy.data.collections 中是否已存在
+    # Check whether it already exists in bpy.data.collections
     if lod_name in bpy.data.collections:
         existing = bpy.data.collections[lod_name]
-        # 如果已存在但尚未挂到 workspace 下，则链接
+        # If it exists but is not linked under the workspace yet, link it
         if existing.name not in workspace_collection.children:
             workspace_collection.children.link(existing)
         return existing
@@ -1005,11 +1019,11 @@ def _get_or_create_lod_collection(workspace_collection, lod_name):
 
 
 def _get_or_create_workspace_collection():
-    '''查找或创建工作空间集合（重用已有集合，避免重复创建）。'''
+    '''Find or create the workspace collection (reuse existing collections to avoid duplicates).'''
     workspace_name = GlobalConfig.get_workspace_name()
     if workspace_name in bpy.data.collections:
         ws_coll = bpy.data.collections[workspace_name]
-        # 确保链接到 scene
+        # Make sure it is linked to the scene
         if ws_coll.name not in bpy.context.scene.collection.children:
             bpy.context.scene.collection.children.link(ws_coll)
         return ws_coll
@@ -1018,28 +1032,29 @@ def _get_or_create_workspace_collection():
 
 def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_gametype_name=None):
     '''
-    仅导入指定的 submesh 列表。
+    Import only the given list of submeshes.
     submesh_lod_info_list: [(lod_name, submesh_folder_path), ...]
-    例如: [("LOD0", r"D:\SSMTCacheFolder\WorkSpace\GF2\Default\LOD0\3ed2b2ba-2592-76086"), ...]
-    force_gametype_name: 如果指定（如 "CPU_P12_N12_TA16_C16_T4_"），
-      则强制所有 submesh 只尝试该数据类型（用于 DrawIB 统一类型场景）。
-      传入 "__AUTO__" 表示：第一个 submesh 正常尝试所有类型，
-      确定哪个类型可用，后续 submesh 全部使用同一类型。
+    e.g. [("LOD0", r"D:\SSMTCacheFolder\WorkSpace\GF2\Default\LOD0\3ed2b2ba-2592-76086"), ...]
+    force_gametype_name: when given (e.g. "CPU_P12_N12_TA16_C16_T4_"),
+      forces every submesh to try only that data type (used for the DrawIB
+      unified data-type scenario).
+      Passing "__AUTO__" makes the first submesh try all types normally,
+      then uses whichever type works for every later submesh.
     '''
     ws_model = WorkSpaceModel()
     workspace_collection = _get_or_create_workspace_collection()
 
     foldername_gametypename_dict = {}
     foldername_imported_obj_dict = {}
-    # old_folder_name -> 实际用于导入的 Submesh JSON 路径（贴图标记元数据来源）
+    # old_folder_name -> actual Submesh JSON path used for import (source of the texture-mark metadata)
     oldfoldername_jsonpath_dict = {}
     all_submesh_display_names = []
     successful_import_count = 0
 
-    # 当 force_gametype_name == "__AUTO__" 时，第一个成功后锁定该类型
+    # When force_gametype_name == "__AUTO__", lock the type after the first success
     locked_gametype = None
 
-    # 按 LOD 分组
+    # Group by LOD
     lod_submesh_map: dict[str, list[str]] = {}
     for lod_name, submesh_folder_path in submesh_lod_info_list:
         if lod_name not in lod_submesh_map:
@@ -1047,14 +1062,14 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
         lod_submesh_map[lod_name].append(submesh_folder_path)
 
     for lod_name, submesh_folder_paths in lod_submesh_map.items():
-        # 查找或创建 LOD 子集合（复用已有的）
+        # Find or create the LOD sub-collection (reuse existing ones)
         lod_collection = _get_or_create_lod_collection(workspace_collection, lod_name)
 
         for submesh_folder_path in submesh_folder_paths:
             submesh_folder_name = os.path.basename(submesh_folder_path)
             print("Re-Import FolderName: " + submesh_folder_name)
 
-            # 通过 WorkSpaceModel 获取 Component 序号和新格式名称
+            # Get the component index and the new-format name from WorkSpaceModel
             old_folder_draw_ib = submesh_folder_name.split("-")[0]
             comp_index = ws_model.get_component_index(lod_name, old_folder_draw_ib, submesh_folder_name)
             if comp_index < 0:
@@ -1063,7 +1078,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
             new_submesh_name = ws_model.get_new_submesh_name(lod_name, old_folder_draw_ib, comp_index)
             display_name = ws_model.get_display_name(lod_name, old_folder_draw_ib, comp_index)
 
-            # 确定要尝试的数据类型文件夹列表
+            # Decide the list of data-type folders to try
             if locked_gametype is not None:
                 final_import_folder_path_list = [
                     os.path.join(submesh_folder_path, "TYPE_" + locked_gametype)
@@ -1078,12 +1093,12 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
 
             for import_folder_path in final_import_folder_path_list:
                 if not os.path.isdir(import_folder_path):
-                    print(f"数据类型文件夹不存在，跳过: {import_folder_path}")
+                    print(f"Data-type folder does not exist; skipping: {import_folder_path}")
                     continue
                 gametype_name = import_folder_path.split("TYPE_")[1]
 
                 try:
-                    print("尝试导入路径: " + import_folder_path)
+                    print("Attempting import path: " + import_folder_path)
 
                     json_file_path = os.path.join(import_folder_path, submesh_folder_name + ".json")
                     imported_obj = SSMTImportHelper.create_mesh_from_json(
@@ -1102,22 +1117,22 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
 
                     foldername_gametypename_dict[new_submesh_name] = gametype_name
                     oldfoldername_jsonpath_dict[submesh_folder_name] = json_file_path
-                    self.report({'INFO'}, "成功导入 " + new_submesh_name + " 的数据类型: " + gametype_name)
+                    self.report({'INFO'}, "Successfully imported " + new_submesh_name + " data type: " + gametype_name)
 
-                    # 如果是 __AUTO__ 模式且第一次成功，锁定该类型供后续使用
+                    # In __AUTO__ mode, lock the type once the first import succeeds
                     if locked_gametype is None and force_gametype_name == "__AUTO__":
                         locked_gametype = gametype_name
-                        self.report({'INFO'}, f"DrawIB 统一类型锁定为: {locked_gametype}，后续 submesh 全部使用此类型")
+                        self.report({'INFO'}, f"DrawIB unified type locked to: {locked_gametype}; all later submeshes will use this type")
                 except Exception as e:
                     print(f"Failed to re-import from {import_folder_path}: {e}")
                     continue
                 break
 
     if successful_import_count == 0:
-        self.report({'ERROR'}, "所选 submesh 没有成功导入任何模型。")
+        self.report({'ERROR'}, "None of the selected submeshes were imported successfully.")
         return
 
-    # 更新 Import.json（保留已有记录，覆盖本次导入的）
+    # Update Import.json (keep existing records, overwrite the ones imported now)
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
     existing_import_json = {}
     if os.path.exists(save_import_json_path):
@@ -1130,32 +1145,32 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
 
     if getattr(context.scene.global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
-            self.report({'WARNING'}, "矫正面部需要至少一个有效的 Face 和 Neck 标记。")
+            self.report({'WARNING'}, "Face alignment requires at least one valid Face mark and one Neck mark.")
 
     _deselect_imported_objects(foldername_imported_obj_dict)
     _deselect_imported_shader_nodes(foldername_imported_obj_dict)
 
-    # 生成蓝图
+    # Generate the blueprint
     _generate_blueprint_for_imported_objects(context, foldername_imported_obj_dict, all_submesh_display_names, oldfoldername_jsonpath_dict)
 
 
 def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_dict, all_submesh_display_names, oldfoldername_jsonpath_dict=None):
-    '''更新已存在的蓝图节点（不新建），若没有已有蓝图则跳过。'''
+    '''Update the nodes of an existing blueprint (do not create a new one); skip when no blueprint exists.'''
     tree_name = GlobalConfig.get_workspace_name()
     if not tree_name:
         return
 
-    # 查找已有蓝图，不存在则跳过
+    # Find the existing blueprint; skip if there is none
     tree = bpy.data.node_groups.get(tree_name)
     if not tree:
-        print(f"未找到已有蓝图 '{tree_name}'，跳过蓝图更新")
+        print(f"Existing blueprint '{tree_name}' not found; skipping the blueprint update")
         return
     if not BlueprintExportHelper._is_valid_blueprint_tree(tree):
-        print(f"已有节点组 '{tree_name}' 不是有效的 SSMT 蓝图，跳过")
+        print(f"Existing node group '{tree_name}' is not a valid SSMT blueprint; skipping")
         return
 
     try:
-        # 清空所有节点和连接
+        # Clear all nodes and links
         tree.nodes.clear()
 
         tree.use_fake_user = True
@@ -1185,7 +1200,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
                 tex_home_group=tex_home_group,
             )
 
-        # Hash 贴图分组与物体分组并列排放
+        # The Hash texture group sits beside the object group
         group_node.location = (max_node_right + 560.0, -200.0)
         if hash_group_node is not None:
             hash_group_node.location = (max_node_right + 560.0, 60.0)
@@ -1228,21 +1243,21 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
 
 # =============================================================================
-# 工具函数 — 删除物体
+# Utility functions - deleting objects
 # =============================================================================
 def _delete_objects(obj_names_to_delete: list[str]):
-    '''删除 Blender 场景中指定名称列表的所有物体。'''
+    '''Delete all objects with the given names from the Blender scene.'''
     for obj_name in obj_names_to_delete:
         if obj_name in bpy.data.objects:
             obj = bpy.data.objects[obj_name]
-            # 从所有集合中移除
+            # Unlink it from all collections
             for coll in list(obj.users_collection):
                 coll.objects.unlink(obj)
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
 def _count_type_folders(submesh_folder_path: str) -> int:
-    '''统计 submesh 文件夹下 TYPE_ 开头的文件夹数量。'''
+    '''Count the TYPE_-prefixed folders inside the submesh folder.'''
     count = 0
     if not os.path.isdir(submesh_folder_path):
         return 0
@@ -1253,54 +1268,54 @@ def _count_type_folders(submesh_folder_path: str) -> int:
 
 
 def _show_last_type_warning(submesh_folder_name: str):
-    '''弹出警告对话框：该 submesh 只剩下最后一个数据类型，无法删除。'''
+    '''Show a warning popup: this submesh is down to its last data type and cannot be deleted.'''
     def draw_popup(self, context):
         self.layout.label(
-            text=f"Submesh '{submesh_folder_name}' 只剩下最后一个数据类型文件夹，"
+            text=f"Submesh '{submesh_folder_name}' is down to its last data-type folder; "
         )
         self.layout.label(
-            text="无法删除该类型。如果没有正确数据类型，请联系SSMT开发者添加。"
+            text="that type cannot be deleted. If no correct data type exists, contact the SSMT developer to add one."
         )
-    bpy.context.window_manager.popup_menu(draw_popup, title="警告", icon='ERROR')
+    bpy.context.window_manager.popup_menu(draw_popup, title="Warning", icon='ERROR')
 
 
 # =============================================================================
-# Operator — 该DrawIB数据类型不正确
+# Operator - the DrawIB data type is incorrect
 # =============================================================================
 class SSMT4FixDrawIBDataType(bpy.types.Operator):
     bl_idname = "ssmt4.fix_drawib_datatype"
-    bl_label = "修复DrawIB数据类型"
-    bl_description = "该DrawIB数据类型不正确：删除该DrawIB下所有对应数据类型的文件夹，删除相关Mesh，并重新导入"
+    bl_label = "Fix DrawIB Data Type"
+    bl_description = "The DrawIB data type is incorrect: delete all matching data-type folders under this DrawIB, delete the related meshes, and re-import"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, "请先选中一个或多个物体")
+            self.report({'ERROR'}, "Please select one or more objects first")
             return {'CANCELLED'}
 
         from ..workspace.ssmt_workspace import SSMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
-            self.report({'ERROR'}, "工作空间文件夹不存在，请先设置工作空间")
+            self.report({'ERROR'}, "Workspace folder does not exist. Please set the workspace first.")
             return {'CANCELLED'}
 
         ws_model = WorkSpaceModel()
 
-        # 1. 解析每个选中物体，收集 {lod_name: set_of_drawib}
+        # 1. Parse each selected object, collecting {lod_name: set_of_drawib}
         lod_drawib_set: dict[str, set[str]] = {}
-        # 同时记录要删除的物体名称
+        # Also record the names of the objects to delete
         all_obj_info = []  # [(obj_name, lod_name, submesh_folder_name, draw_ib, gametypename)]
         for obj in selected_objects:
             gametypename = obj.get("3DMigoto:GameTypeName", "")
             if not gametypename:
-                self.report({'WARNING'}, f"物体 '{obj.name}' 没有数据类型属性，已跳过")
+                self.report({'WARNING'}, f"Object '{obj.name}' has no data-type attribute; skipped")
                 continue
 
             parsed = ws_model.parse_any_format_name(obj.name)
             if not parsed or not parsed["lod"] or not parsed["draw_ib"]:
-                self.report({'WARNING'}, f"无法解析物体 '{obj.name}' 的名称，已跳过")
+                self.report({'WARNING'}, f"Could not parse the name of object '{obj.name}'; skipped")
                 continue
 
             submesh_folder_path = ws_model.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
@@ -1312,15 +1327,15 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
             lod_drawib_set[parsed["lod"]].add(parsed["draw_ib"])
 
         if not all_obj_info:
-            self.report({'ERROR'}, "未能从选中物体中解析出任何有效信息")
+            self.report({'ERROR'}, "Could not resolve any valid information from the selected objects.")
             return {'CANCELLED'}
 
-        # 2. 预检：收集该 DrawIB 下所有 submesh 文件夹
+        # 2. Pre-check: collect every submesh folder under this DrawIB
         all_submesh_entries: list[tuple[str, str, str]] = []  # [(lod_name, submesh_folder_name, submesh_folder_path)]
         for lod_name, draw_ib_set in lod_drawib_set.items():
             lod_folder_path = os.path.join(workspace_folder, lod_name)
             if not os.path.isdir(lod_folder_path):
-                self.report({'WARNING'}, f"LOD 目录不存在: {lod_folder_path}")
+                self.report({'WARNING'}, f"LOD directory does not exist: {lod_folder_path}")
                 continue
             for entry in os.scandir(lod_folder_path):
                 if not entry.is_dir():
@@ -1330,10 +1345,10 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                     all_submesh_entries.append((lod_name, entry.name, entry.path))
 
         if not all_submesh_entries:
-            self.report({'ERROR'}, "没有找到对应的 submesh 文件夹")
+            self.report({'ERROR'}, "No matching submesh folders were found.")
             return {'CANCELLED'}
 
-        # 3. 预检：检查是否有 submesh 只剩最后一个数据类型
+        # 3. Pre-check: see whether any submesh is down to its last data type
         for lod_name, submesh_folder_name, submesh_folder_path in all_submesh_entries:
             for _, o_lod, o_submesh, o_draw_ib, gametypename in all_obj_info:
                 if o_lod != lod_name or o_submesh != submesh_folder_name:
@@ -1341,10 +1356,10 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                 type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
                 if os.path.exists(type_folder_path) and _count_type_folders(submesh_folder_path) <= 1:
                     _show_last_type_warning(submesh_folder_name=submesh_folder_name)
-                    self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' 只剩下最后一个数据类型，已中止操作")
+                    self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' has only its last data type left; operation aborted")
                     return {'CANCELLED'}
 
-        # 4. 执行删除：删除 TYPE 文件夹
+        # 4. Delete: remove the TYPE folders
         for lod_name, submesh_folder_name, submesh_folder_path in all_submesh_entries:
             for _, o_lod, o_submesh, o_draw_ib, gametypename in all_obj_info:
                 if o_lod != lod_name or o_submesh != submesh_folder_name:
@@ -1352,9 +1367,9 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                 type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
                 if os.path.exists(type_folder_path):
                     shutil.rmtree(type_folder_path)
-                    self.report({'INFO'}, f"已删除数据类型文件夹: {type_folder_path}")
+                    self.report({'INFO'}, f"Deleted data-type folder: {type_folder_path}")
 
-        # 5. 收集需要删除的物体名称（当前工作空间集合中所有属于该 DrawIB 的物体）
+        # 5. Collect the names of the objects to delete (every object of this DrawIB in the current workspace collection)
         submesh_to_reimport = [(ln, fp) for ln, _, fp in all_submesh_entries]
         all_obj_to_delete: list[str] = []
         workspace_collection_name = GlobalConfig.get_workspace_name()
@@ -1371,84 +1386,84 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                         all_obj_to_delete.append(obj.name)
                         break
 
-        # 去重
+        # Deduplicate
         all_obj_to_delete = list(dict.fromkeys(all_obj_to_delete))
         submesh_to_reimport = list(dict.fromkeys(submesh_to_reimport))
 
-        # 6. 删除物体
+        # 6. Delete the objects
         if all_obj_to_delete:
             _delete_objects(all_obj_to_delete)
-            self.report({'INFO'}, f"已删除 {len(all_obj_to_delete)} 个物体")
+            self.report({'INFO'}, f"Deleted {len(all_obj_to_delete)} objects")
 
-        # 5. 重新导入（DrawIB 模式：自动统一类型，所有 submesh 使用同一数据类型）
+        # 5. Re-import (DrawIB mode: unify the type automatically; all submeshes use the same data type)
         if submesh_to_reimport:
             ImprotFromWorkSpaceSelected(self, context, submesh_to_reimport, force_gametype_name="__AUTO__")
-            self.report({'INFO'}, f"已重新导入 {len(submesh_to_reimport)} 个 submesh（DrawIB 统一类型）")
+            self.report({'INFO'}, f"Re-imported {len(submesh_to_reimport)} submeshes (unified DrawIB type)")
         else:
-            self.report({'WARNING'}, "没有找到需要重新导入的 submesh")
+            self.report({'WARNING'}, "No submeshes need to be re-imported.")
 
         return {'FINISHED'}
 
 
 # =============================================================================
-# Operator — 该Submesh数据类型不正确
+# Operator - the Submesh data type is incorrect
 # =============================================================================
 class SSMT4FixSubmeshDataType(bpy.types.Operator):
     bl_idname = "ssmt4.fix_submesh_datatype"
-    bl_label = "修复Submesh数据类型"
-    bl_description = "该Submesh数据类型不正确：删除对应数据类型的文件夹，删除该Mesh，并重新导入"
+    bl_label = "Fix Submesh Data Type"
+    bl_description = "The Submesh data type is incorrect: delete the matching data-type folder, delete this mesh, and re-import"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, "请先选中一个或多个物体")
+            self.report({'ERROR'}, "Please select one or more objects first")
             return {'CANCELLED'}
 
         from ..workspace.ssmt_workspace import SSMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
-            self.report({'ERROR'}, "工作空间文件夹不存在，请先设置工作空间")
+            self.report({'ERROR'}, "Workspace folder does not exist. Please set the workspace first.")
             return {'CANCELLED'}
 
         ws_model = WorkSpaceModel()
 
-        # 1. 解析每个选中物体，并预检
+        # 1. Parse each selected object and pre-check it
         submesh_entries: list[tuple[str, str, str, str]] = []  # [(obj_name, lod_name, submesh_folder_path, gametypename)]
 
         for obj in selected_objects:
             gametypename = obj.get("3DMigoto:GameTypeName", "")
             if not gametypename:
-                self.report({'WARNING'}, f"物体 '{obj.name}' 没有数据类型属性，已跳过")
+                self.report({'WARNING'}, f"Object '{obj.name}' has no data-type attribute; skipped")
                 continue
 
             parsed = ws_model.parse_any_format_name(obj.name)
             if not parsed or not parsed["lod"] or not parsed["draw_ib"]:
-                self.report({'WARNING'}, f"无法解析物体 '{obj.name}' 的名称，已跳过")
+                self.report({'WARNING'}, f"Could not parse the name of object '{obj.name}'; skipped")
                 continue
 
             submesh_folder_path = ws_model.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
             if not submesh_folder_path or not os.path.isdir(submesh_folder_path):
-                self.report({'WARNING'}, f"找不到物体 '{obj.name}' 对应的 submesh 文件夹，已跳过")
+                self.report({'WARNING'}, f"Could not find the submesh folder for object '{obj.name}'; skipped")
                 continue
 
             submesh_entries.append((obj.name, parsed["lod"], submesh_folder_path, gametypename))
 
         if not submesh_entries:
-            self.report({'ERROR'}, "未能从选中物体中解析出任何有效信息")
+            self.report({'ERROR'}, "Could not resolve any valid information from the selected objects.")
             return {'CANCELLED'}
 
-        # 2. 预检：检查是否有 submesh 只剩最后一个数据类型
+        # 2. Pre-check: see whether any submesh is down to its last data type
         for obj_name, lod_name, submesh_folder_path, gametypename in submesh_entries:
             type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
             if os.path.exists(type_folder_path) and _count_type_folders(submesh_folder_path) <= 1:
                 submesh_folder_name = os.path.basename(submesh_folder_path)
                 _show_last_type_warning(submesh_folder_name=submesh_folder_name)
-                self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' 只剩下最后一个数据类型，已中止操作")
+                self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' has only its last data type left; operation aborted")
                 return {'CANCELLED'}
 
-        # 3. 执行删除：删除 TYPE 文件夹
+        # 3. Delete: remove the TYPE folders
         submesh_to_reimport: list[tuple[str, str]] = []
         obj_names_to_delete: list[str] = []
 
@@ -1456,23 +1471,23 @@ class SSMT4FixSubmeshDataType(bpy.types.Operator):
             type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
             if os.path.exists(type_folder_path):
                 shutil.rmtree(type_folder_path)
-                self.report({'INFO'}, f"已删除数据类型文件夹: {type_folder_path}")
+                self.report({'INFO'}, f"Deleted data-type folder: {type_folder_path}")
 
             submesh_to_reimport.append((lod_name, submesh_folder_path))
             obj_names_to_delete.append(obj_name)
 
         if not submesh_to_reimport:
-            self.report({'ERROR'}, "没有找到需要处理的 submesh")
+            self.report({'ERROR'}, "No submeshes were found to process.")
             return {'CANCELLED'}
 
-        # 4. 删除物体
+        # 4. Delete the objects
         if obj_names_to_delete:
             _delete_objects(obj_names_to_delete)
-            self.report({'INFO'}, f"已删除 {len(obj_names_to_delete)} 个物体")
+            self.report({'INFO'}, f"Deleted {len(obj_names_to_delete)} objects")
 
-        # 4. 重新导入
+        # 4. Re-import
         ImprotFromWorkSpaceSelected(self, context, submesh_to_reimport)
-        self.report({'INFO'}, f"已重新导入 {len(submesh_to_reimport)} 个 submesh")
+        self.report({'INFO'}, f"Re-imported {len(submesh_to_reimport)} submeshes")
 
         return {'FINISHED'}
 

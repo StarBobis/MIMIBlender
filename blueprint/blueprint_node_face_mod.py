@@ -58,13 +58,13 @@ def _get_face_position_buffer(submesh_json: SubmeshJson):
         ]:
             return category_buffer
     raise FaceModExportError(
-        "提取数据不是 GIMI 面部所需的 40 字节 POSITION/NORMAL/TANGENT vb0 布局。"
+        "The extracted data is not the 40-byte POSITION/NORMAL/TANGENT vb0 layout required for GIMI faces."
     )
 
 
 def _read_mesh_positions(obj) -> numpy.ndarray:
     if getattr(obj, "type", "") != "MESH":
-        raise FaceModExportError(f"物体 '{obj.name}' 不是网格物体。")
+        raise FaceModExportError(f"Object '{obj.name}' is not a mesh object.")
     if getattr(obj, "mode", "") == "EDIT":
         obj.update_from_editmode()
 
@@ -93,22 +93,22 @@ def _get_workspace_face_index_hashes(submesh_json: SubmeshJson, source_path: str
 def _build_face_part(object_node) -> FaceModPart:
     obj = ObjectPersistentIdManager.resolve_node_target(object_node, allow_name_fallback=True)
     if obj is None:
-        raise FaceModExportError(f"物体节点 '{object_node.name}' 没有可用的 Blender 物体。")
+        raise FaceModExportError(f"Object node '{object_node.name}' has no usable Blender object.")
 
     # SSMT4 will eventually provide face-model classification metadata.  Use
     # it here to validate or automatically select compatible face submeshes.
     submesh_name = object_node._get_effective_parse_name()
     if not submesh_name:
-        raise FaceModExportError(f"物体 '{obj.name}' 没有关联 Submesh。")
+        raise FaceModExportError(f"Object '{obj.name}' has no associated Submesh.")
 
     source_path = SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
     submesh_json = SubmeshJson(source_path)
     index_hashes = _get_workspace_face_index_hashes(submesh_json, source_path)
     if not index_hashes:
-        raise FaceModExportError(f"Submesh '{submesh_name}' 缺少工作空间提供的 Face IndexBuffer hash。")
+        raise FaceModExportError(f"Submesh '{submesh_name}' lacks a workspace-provided Face IndexBuffer hash.")
     position_buffer = _get_face_position_buffer(submesh_json)
     if not os.path.isfile(position_buffer.FilePath):
-        raise FaceModExportError(f"找不到原始 Position 缓冲: {position_buffer.FilePath}")
+        raise FaceModExportError(f"Original position buffer not found: {position_buffer.FilePath}")
 
     base_bytes = slice_face_base_buffer(
         position_buffer.FilePath,
@@ -118,8 +118,8 @@ def _build_face_part(object_node) -> FaceModPart:
     key_bytes = build_key_bytes(_read_mesh_positions(obj))
     if len(base_bytes) != len(key_bytes):
         raise FaceModExportError(
-            f"物体 '{obj.name}' 顶点数已改变（原始 {len(base_bytes) // FACE_VERTEX_STRIDE}，"
-            f"当前 {len(key_bytes) // FACE_VERTEX_STRIDE}）。面部 Mod 只能导出不改变拓扑的编辑。"
+            f"Object '{obj.name}' vertex count has changed (originally {len(base_bytes) // FACE_VERTEX_STRIDE}, "
+            f"now {len(key_bytes) // FACE_VERTEX_STRIDE}). Face Mods can only export edits that do not change topology."
         )
 
     return FaceModPart(
@@ -132,11 +132,11 @@ def _build_face_part(object_node) -> FaceModPart:
 
 def export_face_mod_from_node(node) -> tuple[str, int]:
     if GlobalConfig.logic_name != LogicName.GIMI:
-        raise FaceModExportError("导出面部 Mod 仅支持 GIMI / 原神工作空间。")
+        raise FaceModExportError("Exporting a Face Mod is only supported in a GIMI / Genshin Impact workspace.")
 
     object_nodes = _collect_object_nodes(node)
     if not object_nodes:
-        raise FaceModExportError("请将至少一个“物体信息”节点连接到“导出面部 Mod”节点。")
+        raise FaceModExportError("Connect at least one \"Object Info\" node to the \"Export Face Mod\" node.")
 
     parts = []
     seen_submeshes = set()
@@ -158,30 +158,30 @@ def export_face_mod_from_node(node) -> tuple[str, int]:
 
 class SSMTNode_Face_Mod_Export(SSMTNodeBase):
     bl_idname = "SSMTNode_Face_Mod_Export"
-    bl_label = "导出面部 Mod"
+    bl_label = "Export Face Mod"
     bl_icon = "MOD_MASK"
 
     output_folder: bpy.props.StringProperty(
-        name="输出文件夹",
-        description="留空时输出到常规 Mod 目录下的 Face 文件夹",
+        name="Output Folder",
+        description="When empty, outputs to the Face folder under the regular Mod directory",
         default="",
         subtype="DIR_PATH",
     )  # type: ignore
     use_specific_output_folder: bpy.props.BoolProperty(
-        name="输出到指定文件夹",
-        description="开启后将面部 Mod 输出到此节点指定的文件夹；关闭时输出到默认 Mod 目录的 Face 子目录",
+        name="Output to a Specific Folder",
+        description="When enabled, the Face Mod is exported to the folder specified on this node; when disabled, it is exported to the Face subfolder of the default Mod directory",
         default=False,
     )  # type: ignore
     diffuse_hash: bpy.props.StringProperty(
         name="Diffuse Hash",
-        description="可选。仅作为角色范围限制，不会修改 diffuse 贴图",
+        description="Optional. Only acts as a character scope restriction; it does not modify the diffuse texture",
         default="",
     )  # type: ignore
-    open_folder: bpy.props.BoolProperty(name="导出后打开文件夹", default=True)  # type: ignore
+    open_folder: bpy.props.BoolProperty(name="Open Folder After Export", default=True)  # type: ignore
 
     def init(self, context):
-        self.outputs.new("SSMTSocketObject", "输出")
-        self.inputs.new("SSMTSocketObject", "面部组 1")
+        self.outputs.new("SSMTSocketObject", "Output")
+        self.inputs.new("SSMTSocketObject", "Face Group 1")
         self.width = 360
         self.use_custom_color = True
         self.color = (0.58, 0.32, 0.12)
@@ -190,15 +190,15 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
         # Existing blend files predate the output socket.  Add it lazily when
         # Blender updates the node so old blueprints become chainable too.
         if len(self.outputs) == 0:
-            self.outputs.new("SSMTSocketObject", "输出")
+            self.outputs.new("SSMTSocketObject", "Output")
         if self.inputs and self.inputs[-1].is_linked:
-            self.inputs.new("SSMTSocketObject", f"面部组 {len(self.inputs) + 1}")
+            self.inputs.new("SSMTSocketObject", f"Face Group {len(self.inputs) + 1}")
         if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
             self.inputs.remove(self.inputs[-1])
 
     def draw_buttons(self, context, layout):
         row = layout.row(align=True)
-        operator = row.operator("ssmt.export_face_mod", text="导出面部 Mod", icon="EXPORT")
+        operator = row.operator("ssmt.export_face_mod", text="Export Face Mod", icon="EXPORT")
         operator.node_name = self.name
         operator.tree_name = self.id_data.name if self.id_data else ""
 
@@ -206,7 +206,7 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
         layout.prop(self, "use_specific_output_folder")
         if self.use_specific_output_folder:
             folder_row = layout.row(align=True)
-            folder_row.prop(self, "output_folder", text="输出")
+            folder_row.prop(self, "output_folder", text="Output")
             folder_operator = folder_row.operator("ssmt.select_face_mod_export_folder", text="", icon="FILE_FOLDER")
             folder_operator.node_name = self.name
             folder_operator.tree_name = self.id_data.name if self.id_data else ""
@@ -215,8 +215,8 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
 
 class SSMT_OT_ExportFaceMod(bpy.types.Operator):
     bl_idname = "ssmt.export_face_mod"
-    bl_label = "导出面部 Mod"
-    bl_description = "从 SSMT 工作空间的 GIMI 面部 vb0 生成 position delta 面部 Mod"
+    bl_label = "Export Face Mod"
+    bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an SSMT workspace"
     bl_options = {"REGISTER"}
 
     node_name: bpy.props.StringProperty()  # type: ignore
@@ -226,7 +226,7 @@ class SSMT_OT_ExportFaceMod(bpy.types.Operator):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else BlueprintExportHelper.get_current_blueprint_tree(context=context)
         node = tree.nodes.get(self.node_name) if tree and self.node_name else None
         if node is None or getattr(node, "bl_idname", "") != SSMTNode_Face_Mod_Export.bl_idname:
-            self.report({"ERROR"}, "未找到面部 Mod 导出节点。")
+            self.report({"ERROR"}, "Face Mod export node not found.")
             return {"CANCELLED"}
 
         # Keep this node's button on the same recursive Output path as the
@@ -237,7 +237,7 @@ class SSMT_OT_ExportFaceMod(bpy.types.Operator):
 
 class SSMT_OT_SelectFaceModExportFolder(bpy.types.Operator, ImportHelper):
     bl_idname = "ssmt.select_face_mod_export_folder"
-    bl_label = "选择面部 Mod 输出文件夹"
+    bl_label = "Select Face Mod Output Folder"
     bl_options = {"INTERNAL"}
 
     directory: bpy.props.StringProperty(subtype="DIR_PATH")  # type: ignore

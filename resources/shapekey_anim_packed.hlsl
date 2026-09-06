@@ -14,7 +14,7 @@ struct VertexAttributes {
 RWStructuredBuffer<VertexAttributes> rw_buffer : register(u5);
 StructuredBuffer<VertexAttributes> base : register(t50);
 StructuredBuffer<VertexAttributes> shapekeys[MAX_SLOTS] : register(t51); 
-StructuredBuffer<int> shapekey_maps[MAX_SLOTS] : register(t75); // 映射图从 t75 开始
+StructuredBuffer<int> shapekey_maps[MAX_SLOTS] : register(t75); // maps start at t75
 
 Texture1D<float4> IniParams : register(t120);
 

@@ -53,7 +53,7 @@ class MeshCreateHelper:
         wwmi_vg_offset:int = 0,
     ):
         TimerUtils.Start("Import 3Dmigoto Raw")
-        print("导入模型: " + mesh_name)
+        print("Importing model: " + mesh_name)
 
         if vb_vertex_count == 0:
             raise Fatal("VB vertex count is zero, skip import.")
@@ -87,8 +87,8 @@ class MeshCreateHelper:
         for element in elements:
             data = vb_data[element.ElementName]
             TimerUtils.Start(f"Process Element: {element.ElementName}")
-            print("当前Element: " + element.ElementName)
-            print("当前数据转换前 Shape: " + str(data.shape))
+            print("Current Element: " + element.ElementName)
+            print("Shape before data conversion: " + str(data.shape))
 
             # Blender has no native representation for these game-specific
             # components. Keep their source bytes on vertices before conversion.
@@ -103,7 +103,7 @@ class MeshCreateHelper:
 
             
             data = FormatUtils.apply_format_conversion(data, element.Format)
-            print("当前数据转换后 Shape: " + str(data.shape))
+            print("Shape after data conversion: " + str(data.shape))
 
             if element.SemanticName == "POSITION":
                 if len(data[0]) == 4:
@@ -113,8 +113,8 @@ class MeshCreateHelper:
                 positions = [(x[0], x[1], x[2]) for x in data]
                 mesh.vertices.foreach_set('co', unpack_list(positions))
             elif element.SemanticName.startswith("COLOR"):
-                # 用 numpy 向量化构建 (num_loops, 4) 的 RGBA 数组，再用 foreach_set 批量写入。
-                # 避免逐元素 Python 循环——在 Blender 5.1 中 vertex_colors 兼容层极慢。
+                # Build the (num_loops, 4) RGBA array with vectorized numpy, then write it in bulk via foreach_set.
+                # Avoids a per-element Python loop -- the vertex_colors compatibility layer is very slow in Blender 5.1.
                 num_loops = len(mesh.loops)
                 loop_vertex_indices = numpy.empty(num_loops, dtype=numpy.int32)
                 mesh.loops.foreach_get('vertex_index', loop_vertex_indices)
@@ -126,7 +126,7 @@ class MeshCreateHelper:
                 else:
                     colors_flat[:, 0] = data[loop_vertex_indices].astype(numpy.float32)
 
-                # WWMI/EFMI 使用 FLOAT_COLOR，其他游戏使用 BYTE_COLOR。
+                # WWMI/EFMI use FLOAT_COLOR; other games use BYTE_COLOR.
                 color_type = 'FLOAT_COLOR' if logic_name in (LogicName.WWMI, LogicName.EFMI) else 'BYTE_COLOR'
                 color_attr = mesh.color_attributes.new(name=element.ElementName, type=color_type, domain='CORNER')
                 color_attr.data.foreach_set('color', colors_flat.ravel())
@@ -144,10 +144,10 @@ class MeshCreateHelper:
             elif element.SemanticName.startswith("NORMAL"):
                 use_normals = True
                 if logic_name == LogicName.YYSLS:
-                    print("燕云十六声法线处理")
+                    print("YYSLS normal processing")
                     normals = [(x[0] * 2 - 1, x[1] * 2 - 1, x[2] * 2 - 1) for x in data]
                 elif logic_name == LogicName.EFMI and element.Format == "R32_UINT":
-                    print("终末地压缩法线处理(Endfield Packed Normals) - 使用 TBNCodec")
+                    print("Endfield packed normals processing (Endfield Packed Normals) - using TBNCodec")
                     raw = data
                     if raw.dtype != numpy.uint32:
                         raw = raw.view(numpy.uint32)
@@ -156,12 +156,12 @@ class MeshCreateHelper:
 
                     from ..utils.tbn_codec import TBNCodec
                     normals = TBNCodec.decode_octahedral_r32_uint(raw).tolist()
-                    print("终末地压缩法线处理完成")
+                    print("Endfield packed normals processing completed")
                 else:
                     normals = [(x[0], x[1], x[2]) for x in data]
             elif element.SemanticName == "ENCODEDDATA":
                 if logic_name == LogicName.EFMI:
-                    print("终末地 ENCODEDDATA 处理 - 使用 TBNCodec 解码 TBN 数据")
+                    print("Endfield ENCODEDDATA processing - decoding TBN data with TBNCodec")
                     use_normals = True
 
                     raw = data
@@ -172,9 +172,9 @@ class MeshCreateHelper:
 
                     from ..utils.tbn_codec import TBNCodec
                     normals = TBNCodec.decode_octahedral_r32_uint(raw).tolist()
-                    print("终末地 ENCODEDDATA 处理完成")
+                    print("Endfield ENCODEDDATA processing completed")
                 else:
-                    print(f"警告: ENCODEDDATA 元素仅在 EFMI 格式中支持，当前游戏类型: {logic_name}")
+                    print(f"Warning: ENCODEDDATA element is only supported in EFMI format, current game type: {logic_name}")
             elif element.SemanticName == "TANGENT":
                 pass
             elif element.SemanticName == "BINORMAL":
@@ -182,10 +182,10 @@ class MeshCreateHelper:
             elif element.SemanticName == "BITANGENT":
                 pass
             elif element.SemanticName == "RAWDATA":
-                # EFMI 逆向产物中的保留区字节（input layout 未声明的 stride
-                # 间隙，EFMI-Tools fill_missing_semantics 标记；逆向端正式
-                # 命名为 RAWDATA）：读取以维持 stride 对齐与顶点数一致，
-                # 不建立任何 Blender 属性——它没有可映射的语义。
+                # Reserved-region bytes in EFMI reverse-engineered products (stride gaps not declared in the
+                # input layout, flagged by EFMI-Tools fill_missing_semantics; officially named RAWDATA on
+                # the extraction side): read to keep stride alignment and vertex count consistent,
+                # but no Blender attribute is created -- it has no mappable semantic.
                 pass
             else:
                 raise Fatal("Unknown ElementName: " + element.ElementName)
@@ -193,7 +193,7 @@ class MeshCreateHelper:
             TimerUtils.End(f"Process Element: {element.ElementName}")
 
         if len(blend_weights) == 0 and len(blend_indices) != 0:
-            print("检测到BLENDWEIGHTS为空，但是含有BLENDINDICES数据，特殊情况，默认补充1,0,0,0的BLENDWEIGHTS")
+            print("BLENDWEIGHTS is empty while BLENDINDICES data exists; special case: padding BLENDWEIGHTS with 1,0,0,0 by default")
             for semantic_index, blendindices_tuple in blend_indices.items():
                 new_list = []
                 for _indices in blendindices_tuple:
@@ -202,8 +202,8 @@ class MeshCreateHelper:
 
         MeshCreateHelper.import_uv_layers(mesh, obj, texcoords)
 
-        print("导入顶点组")
-        # Merged模式：用VGMap将local blend index重映射为global bone ID
+        print("Importing vertex groups")
+        # Merged mode: remap local blend index to global bone ID with VGMap
         if wwmi_vg_map:
             import types as _types
             _vg_component = _types.SimpleNamespace(
@@ -213,7 +213,7 @@ class MeshCreateHelper:
         else:
             _vg_component = None
         MeshCreateHelper.import_vertex_groups(mesh, obj, blend_indices, blend_weights, _vg_component)
-        print("导入顶点组完毕")
+        print("Vertex group import complete")
 
         MeshCreateHelper.import_shapekeys(mesh, obj, shapekeys)
 
@@ -241,7 +241,7 @@ class MeshCreateHelper:
             obj.rotation_euler[2] = math.radians(180)
             obj.scale = (0.01, 0.01, 0.01)
 
-        print("导入模型完成: " + logic_name)
+        print("Model import completed: " + logic_name)
         if LogicName.is_zzmi_family(logic_name) or logic_name == LogicName.Naraka:
             obj.rotation_euler[0] = 0
             obj.rotation_euler[1] = 0
@@ -262,7 +262,7 @@ class MeshCreateHelper:
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
         if GlobalProperties.use_mirror_workflow():
-            print(f"非镜像工作流：对 {obj.name} 应用镜像变换和面朝向翻转")
+            print(f"Non-mirror workflow: applying mirror transform and face direction flip to {obj.name}")
             ObjUtils.apply_mirror_workflow(obj)
 
         bpy.context.view_layer.update()
@@ -381,7 +381,7 @@ class MeshCreateHelper:
             print("num_vertex_groups: " + str(num_vertex_groups))
 
             if num_vertex_groups > 10000:
-                raise Fatal("检测到在当前导入的数据类型" + obj.get('3DMigoto:GameTypeName', "") + "描述下，BLENDINDICES顶点组数量为: " + str(num_vertex_groups) + " 基本不可能是正常情况，请更换其他数据类型重新导入")
+                raise Fatal("Under the current imported data type " + obj.get('3DMigoto:GameTypeName', "") + ", the BLENDINDICES vertex group count is: " + str(num_vertex_groups) + ". This is almost certainly not a valid situation; please switch to another data type and re-import")
 
             vertex_group_by_id = {}
             for i in range(num_vertex_groups):
@@ -454,11 +454,11 @@ class MeshCreateHelper:
     @staticmethod
     def import_shapekey_positions(mesh, obj, shapekey_position_data: dict):
         '''
-        导入 ShapeKeyPositionBufferList 形态的命名形态键。
+        Import named shape keys of the ShapeKeyPositionBufferList form.
 
-        每个条目存储的是与基础 POSITION 同一坐标空间下的绝对顶点坐标
-        （布局与 Position 分类Buffer一致），因此直接作为相对形态键的 co 写入，
-        与 Basis 的写入方式完全相同。
+        Each entry stores absolute vertex coordinates in the same coordinate space as the base
+        POSITION (layout identical to the Position category buffer), so they are written directly
+        as relative shape key co values, exactly like Basis is written.
         '''
         if not shapekey_position_data:
             return
@@ -479,14 +479,14 @@ class MeshCreateHelper:
             if co.ndim == 1:
                 co = co.reshape(-1, 3)
             elif co.ndim == 2 and co.shape[1] > 3:
-                # 与 POSITION 元素一致，仅取 xyz 分量。
+                # Same as the POSITION element, keep only the xyz components.
                 co = co[:, :3]
 
             if co.ndim != 2 or co.shape[1] != 3 or co.shape[0] != vert_count:
                 print(
-                    "ShapeKeyPosition 导入：形态键 " + str(shapekey_name)
-                    + " 顶点数据形状 " + str(co.shape) + " 与网格顶点数 " + str(vert_count)
-                    + " 不一致，已跳过"
+                    "ShapeKeyPosition import: shape key " + str(shapekey_name)
+                    + " vertex data shape " + str(co.shape) + " does not match mesh vertex count " + str(vert_count)
+                    + ", skipped"
                 )
                 continue
 
@@ -499,7 +499,7 @@ class MeshCreateHelper:
                 pass
             del new_sk
 
-        print("ShapeKeyPosition 导入完成，共导入 " + str(len(shapekey_position_data)) + " 个命名形态键")
+        print("ShapeKeyPosition import completed, imported " + str(len(shapekey_position_data)) + " named shape keys")
 
     @staticmethod
     def import_shapekeys_wwmi(mesh, obj, shapekey_buffers: dict, vertex_offset: int, vertex_count: int):
@@ -538,7 +538,7 @@ class MeshCreateHelper:
         basis.data.foreach_get('co', basis_co)
         basis_co = basis_co.reshape(-1, 3)
 
-        print(f"WWMI ShapeKey 导入：{total_entries} 个受影响顶点条目，vertex_offset={vertex_offset}")
+        print(f"WWMI ShapeKey import: {total_entries} affected vertex entries, vertex_offset={vertex_offset}")
 
         for sk_id in range(127):
             first_entry = int(offsets[sk_id])
@@ -584,7 +584,7 @@ class MeshCreateHelper:
             except Exception:
                 pass
 
-        print(f"WWMI ShapeKey 导入完成")
+        print(f"WWMI ShapeKey import completed")
 
     @staticmethod
     def get_import_texture_paths(mesh_name:str, directory:str):
@@ -641,11 +641,7 @@ class MeshCreateHelper:
         nodes = material.node_tree.nodes
         links = material.node_tree.links
 
-        bsdf = nodes.get("原理化 BSDF")
-        if not bsdf:
-            bsdf = nodes.get("原理化BSDF")
-        if not bsdf:
-            bsdf = nodes.get("Principled BSDF")
+        bsdf = nodes.get("Principled BSDF")
         if not bsdf:
             bsdf = next((node for node in nodes if node.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
         if not bsdf:
@@ -853,7 +849,7 @@ class MeshCreateHelper:
             except Exception as error:
                 # High-fidelity mode must never silently become a Principled
                 # material.  Preserve the error for the importer to report.
-                raise Fatal(f"GIMI 高拟真节点构建失败: {error}") from error
+                raise Fatal(f"GIMI high-fidelity node build failed: {error}") from error
 
         bsdf = MeshCreateHelper.get_principled_bsdf_node(material)
         MeshCreateHelper.apply_diffuse_texture(

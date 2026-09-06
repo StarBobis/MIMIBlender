@@ -13,12 +13,12 @@ from .fmt_file import FMTFile
 class MigotoBinaryFile:
 
     '''
-    3Dmigoto模型文件
+    3Dmigoto model file
 
-    暂时还没有更好的设计，暂时先沿用旧的ib vb fmt设计
+    No better design exists yet; for now, keep the old ib vb fmt design
     
-    prefix是前缀，比如Body.ib Body.vb Body.fmt 那么此时Body就是prefix
-    location_folder_path是存放这些文件的文件夹路径，比如当前工作空间中提取的对应数据类型文件夹
+    prefix is the file name prefix, e.g. with Body.ib, Body.vb and Body.fmt, Body is the prefix
+    location_folder_path is the folder path storing these files, e.g. the extracted folder of the corresponding data type in the current workspace
 
     '''
     def __init__(self, fmt_path:str, mesh_name:str = ""):
@@ -66,7 +66,7 @@ class MigotoBinaryFile:
         self.ib_polygon_count = int(self.ib_count / 3)
         self.ib_data = numpy.fromfile(self.ib_bin_path, dtype=FormatUtils.get_nptype_from_format(self.fmt_file.format), count=self.ib_count)
         
-        # 读取fmt文件，解析出后面要用的dtype
+        # Read the fmt file and parse out the dtype to use later
         fmt_dtype = self.fmt_file.get_dtype()
         vb_stride = fmt_dtype.itemsize
 
@@ -98,8 +98,8 @@ class MigotoBinaryFile:
     
     def file_sanity_check(self):
         '''
-        检查对应文件是否存在，不存在则抛出异常
-        三个文件，必须都存在，缺一不可
+        Check that the corresponding files exist, raising an exception if any is missing
+        All three files must exist; none may be missing
         '''
         if not os.path.exists(self.vb_bin_path):
             raise Fatal("Unable to find matching .vb file for : " + self.mesh_name)
@@ -110,10 +110,10 @@ class MigotoBinaryFile:
 
     def file_size_check(self) -> bool:
         '''
-        检查.ib和.vb文件是否为空，如果为空则弹出错误提醒信息，但不报错。
+        Check whether the .ib and .vb files are empty; if so, show a warning message but do not raise an error.
         '''
-        # 如果vb和ib文件不存在，则跳过导入
-        # 我们不能直接抛出异常，因为有些.ib文件是空的占位文件
+        # If the vb and ib files are empty, skip the import
+        # We cannot raise an exception directly because some .ib files are empty placeholder files
         if self.vb_file_size == 0:
             LOG.warning("Current Import " + self.vb_name +" file is empty, skip import.")
             return False

@@ -13,7 +13,7 @@ def _get_blueprint_enum_items(self, context):
         _blueprint_enum_items_cache = BlueprintExportHelper.get_blueprint_enum_items(context=context)
     except Exception:
         _blueprint_enum_items_cache = [
-            ("__NONE__", "当前没有蓝图", "当前没有可选蓝图，请先打开蓝图界面或执行一键导入"),
+            ("__NONE__", "No blueprints available", "No blueprint available. Please open the blueprint editor or run one-click import first."),
         ]
 
     return _blueprint_enum_items_cache
@@ -26,17 +26,17 @@ def _get_workspace_enum_items(self, context):
         GlobalConfig.read_from_main_json_ssmt4()
         workspace_root = GlobalConfig.path_current_game_total_workspace_folder()
         if not workspace_root or not os.path.isdir(workspace_root):
-            return [("", "当前没有工作空间", "当前游戏配置下未找到可用工作空间")]
+            return [("", "No workspace available", "No workspace found for the current game configuration")]
 
         workspace_names = sorted(
             [entry.name for entry in os.scandir(workspace_root) if entry.is_dir()]
         )
         if not workspace_names:
-            return [("", "当前没有工作空间", "当前游戏配置下未找到可用工作空间")]
+            return [("", "No workspace available", "No workspace found for the current game configuration")]
 
         return [(name, name, "") for name in workspace_names]
     except Exception:
-        return [("", "当前没有工作空间", "当前游戏配置下未找到可用工作空间")]
+        return [("", "No workspace available", "No workspace found for the current game configuration")]
 
 
 def _disable_high_fidelity_when_normal_enabled(self, _context):
@@ -51,118 +51,118 @@ def _disable_normal_when_high_fidelity_enabled(self, _context):
 
 class GlobalProperties(bpy.types.PropertyGroup):
     selected_blueprint_name: bpy.props.EnumProperty(
-        name="当前蓝图",
-        description="选择要打开或快捷生成 Mod 的蓝图",
+        name="Current Blueprint",
+        description="Select the blueprint to open or to quickly generate a Mod",
         items=_get_blueprint_enum_items,
     ) # type: ignore
 
     open_mod_folder_after_generate_mod: bpy.props.BoolProperty(
-        name="生成后打开Mod文件夹",
-        description="勾选后，在生成Mod完成后自动打开Mod文件夹",
+        name="Open Mod Folder After Generating Mod",
+        description="When enabled, the Mod folder is opened automatically once Mod generation is complete",
         default=True,
     ) # type: ignore
 
     zzz_use_slot_fix: bpy.props.BoolProperty(
-        name="槽位风格贴图使用SlotFix技术",
-        description="仅适用于槽位风格贴图，勾选后，特定名称标记的贴图将使用SlotFix风格，能一定程度上解决槽位风格贴图跨槽位的问题，跨Pixel槽位指的是在前一个DrawCall中是ps-t3但是下一个DrawCall变为ps-t5这种情况，但由于负责维护的人也在偷懒所以并不可靠",
+        name="Use SlotFix for Slot-Style Textures",
+        description="Only applies to slot-style textures. When enabled, textures marked with specific names will use the SlotFix style, which can to some extent solve the problem of slot-style textures crossing slots. Crossing a Pixel slot means a texture is ps-t3 in the previous DrawCall but becomes ps-t5 in the next DrawCall. However, since the people responsible for maintaining it are also lazy, this is not reliable",
         default=True,
     ) # type: ignore
 
     gimi_use_orfix: bpy.props.BoolProperty(
-        name="槽位风格贴图使用ORFix",
-        description="勾选后，在使用槽位风格贴图标记时，如果偷懒不想手动维护由于贴图槽位变化导致的贴图损坏问题，可以勾选此选项将问题交给ORFix维护者来解决，仅GIMI可用\n注意，如果你不懂ORFix和NNFix的原理，请不要取消勾选，取消勾选会严格按照贴图标记来执行贴图部分ini生成，默认你会在ini中自行写判断语句修复来替代实现ORFix和NNFix的功能",
+        name="Use ORFix for Slot-Style Textures",
+        description="When enabled, if you use slot-style texture markers but are too lazy to manually maintain fixes for texture corruption caused by texture slot changes, you can enable this option and let the ORFix maintainer solve the problem. GIMI only\nNote: if you do not understand how ORFix and NNFix work, do not uncheck this option, because unchecking it generates the texture part of the ini strictly according to the texture markers, and you are then expected to write conditional fix statements in the ini yourself to replace the functionality of ORFix and NNFix",
         default=True,
     ) # type: ignore
 
     generate_branch_mod_gui: bpy.props.BoolProperty(
-        name="生成分支切换Mod面板(测试版)",
-        description="生成Mod时，生成一个基于当前集合架构的分支Mod面板，可在游戏中按住Ctrl + Alt呼出，仍在测试改进中",
+        name="Generate Branch-Switch Mod Panel (Beta)",
+        description="When generating a Mod, a branch-switch Mod panel based on the current collection structure is also generated; it can be summoned in-game by holding Ctrl + Alt. Still under testing and improvement",
         default=False,
     ) # type: ignore
 
     recalculate_tangent: bpy.props.BoolProperty(
-        name="向量归一化法线存入TANGENT(全局)",
-        description="使用向量相加归一化重计算所有模型的TANGENT值，勾选此项后无法精细控制具体某个模型是否计算，是偷懒选项,在不勾选时默认使用右键菜单中标记的选项。\n用途:\n1.一般用于修复GI角色,HI3 1.0角色,HSR角色轮廓线。\n2.用于修复模型由于TANGENT不正确导致的黑色色块儿问题，比如HSR的薄裙子可能会出现此问题。",
+        name="Store Vector-Normalized Normals into TANGENT (Global)",
+        description="Recomputes the TANGENT of all models using vector-sum normalization. When enabled, you cannot precisely control whether a specific model is processed; it is the lazy option. When unchecked, the option marked in the right-click menu is used by default.\nUses:\n1. Generally used to fix outline lines on GI, HI3 1.0 and HSR characters.\n2. Used to fix black patches on models caused by incorrect TANGENT values; thin HSR skirts may show this problem, for example.",
         default=False,
     ) # type: ignore
 
     recalculate_color: bpy.props.BoolProperty(
-        name="算术平均归一化法线存入COLOR(全局)",
-        description="使用算术平均归一化重计算所有模型的COLOR值，勾选此项后无法精细控制具体某个模型是否计算，是偷懒选项,在不勾选时默认使用右键菜单中标记的选项，仅用于HI3 2.0角色修复轮廓线",
+        name="Store Arithmetic-Mean-Normalized Normals into COLOR (Global)",
+        description="Recomputes the COLOR of all models using arithmetic-mean normalization. When enabled, you cannot precisely control whether a specific model is processed; it is the lazy option. When unchecked, the option marked in the right-click menu is used by default. Only used to fix outline lines on HI3 2.0 characters",
         default=False,
     ) # type: ignore
 
     use_specific_generate_mod_folder_path: bpy.props.BoolProperty(
-        name="生成Mod到指定的文件夹中",
-        description="勾选后将生成Mod到你指定的文件夹中",
+        name="Generate Mod to Specified Folder",
+        description="When enabled, the Mod is generated into the folder you specified",
         default=False,
     ) # type: ignore
 
     generate_mod_folder_path: bpy.props.StringProperty(
-        name="生成Mod文件夹路径",
-        description="选择的生成Mod的文件夹路径",
+        name="Mod Generation Folder Path",
+        description="The selected folder path for Mod generation",
         default="",
         subtype='DIR_PATH',
     ) # type: ignore
 
     workspace_source_mode: bpy.props.EnumProperty(
-        name="工作空间模式",
-        description="控制当前使用的工作空间来源",
+        name="Workspace Mode",
+        description="Controls the source of the workspace currently in use",
         items=[
-            ("SYNC", "同步SSMT侧选项", "使用 SSMT 配置文件中当前同步的工作空间"),
-            ("SPECIFIC", "使用指定的工作空间", "从当前游戏配置下的工作空间列表中手动选择"),
-            ("CUSTOM", "使用自定义目录", "直接使用你指定的工作空间目录"),
+            ("SYNC", "Sync with SSMT Option", "Use the workspace currently synced in the SSMT configuration file"),
+            ("SPECIFIC", "Use Specified Workspace", "Manually select from the workspace list of the current game configuration"),
+            ("CUSTOM", "Use Custom Folder", "Directly use the workspace folder you specified"),
         ],
         default="SYNC",
     ) # type: ignore
 
     specific_workspace_name: bpy.props.EnumProperty(
-        name="指定工作空间",
-        description="当前游戏配置下可选的工作空间列表",
+        name="Specified Workspace",
+        description="List of selectable workspaces for the current game configuration",
         items=_get_workspace_enum_items,
     ) # type: ignore
 
     custom_workspace_folder_path: bpy.props.StringProperty(
-        name="自定义工作空间目录",
-        description="手动指定工作空间目录路径",
+        name="Custom Workspace Folder",
+        description="Manually specify the workspace folder path",
         default="",
         subtype='DIR_PATH',
     ) # type: ignore
 
     use_mirror_workflow: bpy.props.BoolProperty(
-        name="使用非镜像工作流",
-        description="默认为False, 启用后导入和导出模型将不再是镜像的，目前3Dmigoto的模型导入后是镜像存粹是由于历史遗留问题是错误的，但是当错误积累成粑粑山，人的习惯和旧的工程很难被改变，所以只有勾选后才能使用非镜像工作流",
+        name="Use Non-Mirrored Workflow",
+        description="Default is False. When enabled, imported and exported models will no longer be mirrored. Currently, 3Dmigoto models being imported mirrored is purely due to a historical legacy issue, which is wrong. However, once the mistakes have piled up into a giant mess, people's habits and old projects are hard to change, so the non-mirrored workflow is only available when this option is enabled",
         default=False,
     ) # type: ignore
 
     use_normal_map: bpy.props.BoolProperty(
-        name="自动上贴图时使用法线贴图",
-        description="启用后在导入模型时自动附加法线贴图节点, 在材质预览模式下得到略微更好的视觉效果",
+        name="Use Normal Maps During Auto Texture Assignment",
+        description="When enabled, a normal map node is automatically attached when importing models, giving a slightly better visual result in material preview mode",
         default=False,
         update=_disable_high_fidelity_when_normal_enabled,
     ) # type: ignore
 
     gimi_high_fidelity_rendering: bpy.props.BoolProperty(
-        name="原神高拟真渲染",
-        description="仅 GIMI / GenshinImpact / 原神工作空间可用。启用后导入角色会使用 LightMap、Body Ramp、MatCap 与边缘光节点组构建预览材质",
+        name="Genshin High-Fidelity Rendering",
+        description="Only available for GIMI / GenshinImpact workspaces. When enabled, imported characters get a preview material built from LightMap, Body Ramp, MatCap and edge-light node groups.",
         default=False,
         update=_disable_normal_when_high_fidelity_enabled,
     ) # type: ignore
 
     align_face_on_import: bpy.props.BoolProperty(
-        name="矫正面部",
-        description="导入时根据 SubMeshRole 的 Face/Neck 标记旋转并平移面部物体；只修改物体变换，不修改顶点",
+        name="Align Face",
+        description="On import, rotate and translate face objects according to the SubMeshRole Face/Neck marker; only object transforms are modified, vertices are not",
         default=False,
     ) # type: ignore
 
     gimi_body_outline_enabled: bpy.props.BoolProperty(
-        name="GIMI Body 黑色描边",
-        description="高拟真 GIMI Body 导入时创建反向外壳黑色描边",
+        name="GIMI Body Black Outline",
+        description="Creates a black inverted-hull outline when a high-fidelity GIMI Body is imported",
         default=True,
     ) # type: ignore
 
     gimi_body_outline_width_ratio: bpy.props.FloatProperty(
-        name="GIMI 描边相对宽度",
+        name="GIMI Outline Relative Width",
         default=0.0008,
         min=0.00001,
         max=0.01,
@@ -170,37 +170,37 @@ class GlobalProperties(bpy.types.PropertyGroup):
     ) # type: ignore
 
     import_merged_vgmap: bpy.props.EnumProperty(
-        name="顶点组模式",
-        description="Merged: 导入融合后的统一顶点组 (Unreal的合并顶点组技术会用到)，一般鸣潮Mod选这个来降低制作Mod的复杂度\nPerComponent: 按每个组件独立的顶点组导入\nUniComponent: Merged导入，导出时自动拆分回组件级顶点组",
+        name="Vertex Group Mode",
+        description="Merged: import the merged unified vertex groups (used by Unreal's merged vertex group technique). Wuthering Waves Mods generally choose this to reduce the complexity of making Mods\nPerComponent: import independent vertex groups per component\nUniComponent: merged import; automatically split back into component-level vertex groups on export",
         items=[
-            ('MERGED', 'Merged', '导入融合后的统一顶点组，导出时使用ComputeShader运行时映射'),
-            ('PER_COMPONENT', 'PerComponent', '按每个组件独立的顶点组导入'),
-            ('UNICOMPONENT', 'UniComponent', 'Merged导入，导出时自动按Submesh拆分并还原为本地顶点组'),
+            ('MERGED', 'Merged', 'Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export'),
+            ('PER_COMPONENT', 'PerComponent', 'Imports vertex groups independently per component'),
+            ('UNICOMPONENT', 'UniComponent', 'Merged import; on export, automatically splits by Submesh and restores local vertex groups'),
         ],
         default='MERGED',
     ) # type: ignore
 
     ignore_muted_shape_keys: bpy.props.BoolProperty(
-        name="忽略未启用的形态键",
-        description="勾选此项后，未勾选启用的形态键在生成Mod时会被忽略，勾选的形态键会参与生成Mod",
+        name="Ignore Disabled Shape Keys",
+        description="When enabled, shape keys that are not enabled are ignored during Mod generation; enabled shape keys are included in the Mod",
         default=True,
     ) # type: ignore
 
     apply_all_modifiers: bpy.props.BoolProperty(
-        name="应用所有修改器",
-        description="勾选此项后，生成Mod之前会自动对物体应用所有修改器",
+        name="Apply All Modifiers",
+        description="When enabled, all modifiers are automatically applied to objects before the Mod is generated",
         default=False,
     ) # type: ignore
 
     import_skip_empty_vertex_groups: bpy.props.BoolProperty(
-        name="跳过空顶点组",
-        description="勾选此项后，导入时会跳过空的顶点组",
+        name="Skip Empty Vertex Groups",
+        description="When enabled, empty vertex groups are skipped during import",
         default=True,
     ) # type: ignore
 
     export_add_missing_vertex_groups: bpy.props.BoolProperty(
-        name="导出时添加缺失顶点组",
-        description="勾选此项后，生成Mod时会自动重新排列并填补数字顶点组间的间隙空缺",
+        name="Add Missing Vertex Groups During Export",
+        description="When enabled, Mod generation automatically reorders vertex groups and fills the gaps between numbered vertex groups",
         default=True,
     ) # type: ignore
 
@@ -222,7 +222,7 @@ class GlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def forbid_auto_texture_ini(cls) -> bool:
-        """旧自动贴图流程已移除，保留该方法仅作兼容性垫片，始终返回 False。"""
+        """The old auto-texture pipeline has been removed. This method is kept only as a compatibility shim and always returns False."""
         return False
 
     @classmethod
@@ -295,7 +295,7 @@ class GlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def import_merged_vgmap(cls) -> str:
-        """返回 'MERGED' / 'PER_COMPONENT' / 'UNICOMPONENT'"""
+        """Returns 'MERGED' / 'PER_COMPONENT' / 'UNICOMPONENT'"""
         return cls._instance().import_merged_vgmap
 
     @classmethod
@@ -304,7 +304,7 @@ class GlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def is_merged_mode(cls) -> bool:
-        """MERGED 或 UNICOMPONENT 在导入时都使用 VGMap 合并"""
+        """Both MERGED and UNICOMPONENT use VGMap merging on import"""
         return cls._instance().import_merged_vgmap in ('MERGED', 'UNICOMPONENT')
 
     @classmethod

@@ -51,7 +51,7 @@ class ExportNTEMI:
         """Sanitize a name into a valid INI resource token."""
         return name.replace("-", "_").replace(" ", "_").replace(".", "_")
 
-    # ── buffer file generation ──
+    # -- buffer file generation --
 
     def generate_buffer_files(self):
         buf_output_folder = GlobalConfig.path_generatemod_buffer_folder()
@@ -199,7 +199,7 @@ class ExportNTEMI:
 
         idx_u32 = numpy.asarray(raw_indices, dtype=numpy.uint32)
         wt_u8 = numpy.asarray(raw_weights, dtype=numpy.uint32)
-        wt_fixed = wt_u8 * 257  # [0,255] 鈫?[0,65535]
+        wt_fixed = wt_u8 * 257  # [0,255] -> [0,65535]
 
         # Interleave: idx_0, wt_0, idx_1, wt_1, ...
         interleaved = numpy.empty((n_verts, n_influences * 2), dtype=numpy.uint32)
@@ -276,7 +276,7 @@ class ExportNTEMI:
         with open(filepath, 'wb') as f:
             arr.tofile(f)
 
-    # 鈹€鈹€ INI generation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- INI generation --------------------------------------------------------------------------------------------------------
 
     def generate_ini_file(self):
         lines: list[str] = []
@@ -337,7 +337,7 @@ class ExportNTEMI:
             return self.drawib_model_list[0].draw_ib
         return "shared"
 
-    # 鈹€鈹€ section builders 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- section builders ----------------------------------------------------------------------------------------------------
 
     def _append_constants(self, lines: list[str]):
         lines.extend([
@@ -712,7 +712,7 @@ class ExportNTEMI:
         lines.append("")
         return lines
 
-    # 鈹€鈹€ helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- helpers ----------------------------------------------------------------------------------------------------------------------
 
     def _get_vertex_count(self, submesh_model) -> int:
         """Get the number of vertex rows in the pre-CS buffers from the Position category stride."""
@@ -754,7 +754,7 @@ class ExportNTEMI:
         else:
             print("Skip write mod ini because sha256 is same.")
 
-    # 鈹€鈹€ iter helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    # ---- iter helpers ------------------------------------------------------------------------------------------------------------
 
     def _iter_all_submesh_models(self):
         for drawib_model in self.drawib_model_list:

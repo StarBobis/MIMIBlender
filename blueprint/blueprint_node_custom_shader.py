@@ -83,8 +83,8 @@ class SSMTNode_CustomShader(SSMTNodeBase):
 
 class SSMT_OT_EditCustomShaderBody(bpy.types.Operator):
     bl_idname = 'ssmt.edit_custom_shader_body'
-    bl_label = '编辑 CustomShader Body'
-    bl_description = '在独立 Text Editor 中编辑完整的 CustomShader INI 内容'
+    bl_label = 'Edit CustomShader Body'
+    bl_description = 'Edit the full CustomShader INI body in a separate Text Editor'
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     tree_name: bpy.props.StringProperty(options={'HIDDEN'})  # type: ignore
@@ -94,7 +94,7 @@ class SSMT_OT_EditCustomShaderBody(bpy.types.Operator):
         tree = bpy.data.node_groups.get(self.tree_name)
         node = tree.nodes.get(self.node_name) if tree else None
         if getattr(node, 'bl_idname', '') != SSMTNode_CustomShader.bl_idname:
-            self.report({'ERROR'}, '未找到 CustomShader 节点')
+            self.report({'ERROR'}, 'CustomShader node not found')
             return {'CANCELLED'}
 
         text = node.ensure_body_text()
@@ -107,7 +107,7 @@ class SSMT_OT_EditCustomShaderBody(bpy.types.Operator):
         new_windows = set(context.window_manager.windows)
         window = next(iter(new_windows - old_windows), None)
         if window is None:
-            self.report({'ERROR'}, '无法打开 Text Editor 窗口')
+            self.report({'ERROR'}, 'Could not open a Text Editor window')
             return {'CANCELLED'}
 
         area = max(window.screen.areas, key=lambda item: item.width * item.height)

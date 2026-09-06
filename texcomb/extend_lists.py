@@ -35,29 +35,29 @@ class SMC_UL_Combine_List(bpy.types.UIList):
     """
 
     filter_name: StringProperty(
-        name="筛选",
+        name="Filter",
         default="",
-        description="按名称筛选条目",
+        description="Filter entries by name",
     )
     filter_mode: EnumProperty(
-        name="筛选模式",
+        name="Filter Mode",
         items=[
-            ("MATERIAL", "材质", "按材质名称筛选"),
-            ("OBJECT", "物体", "按物体名称筛选"),
-            ("BOTH", "全部", "按材质和物体名称同时筛选"),
+            ("MATERIAL", "Material", "Filter by material name"),
+            ("OBJECT", "Object", "Filter by object name"),
+            ("BOTH", "All", "Filter by both material and object names"),
         ],
         default="BOTH",
-        description="选择筛选方式",
+        description="Select the filtering method",
     )
     use_filter_sort_reverse: BoolProperty(
-        name="反向排序",
+        name="Reverse Sort",
         default=False,
-        description="反转列表显示顺序",
+        description="Reverse the display order of the list",
     )
     filter_initialized: BoolProperty(
-        name="筛选已初始化",
+        name="Filter Initialized",
         default=False,
-        description="筛选面板是否已完成初始化",
+        description="Whether the filter panel has been initialized",
     )
 
     def draw_item(  # noqa: PLR0913
@@ -117,7 +117,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
 
         action_row = row.row(align=True)
         action_row.alignment = "RIGHT"
-        action_label = "取消全选" if item.used else "全选"
+        action_label = "Deselect All" if item.used else "Select All"
         action_row.operator(
             "smc.combine_switch", text=action_label, emboss=False
         ).list_id = index
@@ -187,24 +187,24 @@ class SMC_UL_Combine_List(bpy.types.UIList):
         """Render a compact texture status label for material rows."""
         image = get_image_from_material(item.mat)
         if not image:
-            layout.label(text="无主贴图", icon="ERROR")
+            layout.label(text="No Main Texture", icon="ERROR")
             return
 
         if get_image_pack_issue(image):
-            layout.label(text="贴图异常", icon="ERROR")
+            layout.label(text="Texture Issue", icon="ERROR")
             return
 
         alpha_issue = get_alpha_texture_issue(item.mat)
         if alpha_issue:
-            layout.label(text="Alpha异常", icon="ERROR")
+            layout.label(text="Alpha Issue", icon="ERROR")
             return
 
         if get_alpha_texture_image(item.mat):
-            layout.label(text="Alpha贴图", icon="IMAGE_DATA")
+            layout.label(text="Alpha Texture", icon="IMAGE_DATA")
             return
 
         if item.mat.smc_size:
-            layout.label(text="尺寸限制", icon="INFO")
+            layout.label(text="Size Limit", icon="INFO")
 
     @staticmethod
     def _draw_toggle_control(

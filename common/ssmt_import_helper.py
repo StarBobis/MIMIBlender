@@ -22,12 +22,12 @@ class SSMTImportHelper:
 		logic_name = submesh_json.GamePreset
 		gametypename = submesh_json.WorkGameType
 
-		# Merged / UniComponent 模式：通过VGMap将local blend index重映射为global bone ID
+		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
 		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and GlobalProperties.is_merged_mode()) else None
 
-		# 逆向产物可能携带 DrawCallSegmentList（每一条 drawindexed 一个分段）。
-		# 存在有效分段时逐段创建独立网格对象（分段创建模型，与经典 fmt 输出的
-		# 逐切片拆分语义一致）；不存在时按整条 IB 作为单一网格导入。
+		# Reverse-engineered products may carry a DrawCallSegmentList (one segment per drawindexed).
+		# When valid segments exist, create one mesh object per segment (per-segment model creation,
+		# consistent with the per-slice split semantics of classic fmt output); otherwise import the whole IB as a single mesh.
 		draw_call_segments = SSMTImportHelper.resolve_draw_call_segments(
 			submesh_json=submesh_json,
 			ib_data_list=ib_data_list,
@@ -37,11 +37,11 @@ class SSMTImportHelper:
 		)
 		if len(draw_call_segments) > 0:
 			if shapekey_buffers:
-				# WWMI 风格形态键（ShapeKeyOffset/VertexId/VertexOffset 三件套）：
-				# 缓冲是整份对象空间的，导入时按每个分段的顶点窗口
-				# [vertex_min, vertex_max] 换算（local = global - vertex_min），
-				# 与整体导入的 vertex_offset/vertex_count 语义一致。
-				print("DrawCallSegment 导入：检测到 WWMI 风格形态键Buffer，按分段顶点窗口逐段导入")
+				# WWMI-style shape keys (the ShapeKeyOffset/VertexId/VertexOffset trio):
+				# Buffers are in whole-object space; importing converts through each segment's
+				# vertex window [vertex_min, vertex_max] (local = global - vertex_min),
+				# consistent with the whole-import vertex_offset/vertex_count semantics.
+				print("DrawCallSegment import: detected WWMI-style shape key buffers, importing segment by segment via vertex windows")
 
 			imported_obj_list = []
 			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
@@ -50,8 +50,8 @@ class SSMTImportHelper:
 				else:
 					segment_mesh_name = mesh_name + "-" + str(segment_index + 1).zfill(2)
 
-				# 每个分段独立压缩顶点区间 [vertex_min, vertex_max]，
-				# VB 各元素数据与形态键数据按相同区间切片，IB 重基准到 0。
+				# Each segment compresses its own vertex range [vertex_min, vertex_max]:
+				# VB element data and shape key data are sliced by the same range, and the IB is rebased to 0.
 				segment_vb_data = {}
 				for element_name, element_data in vb_data.items():
 					segment_vb_data[element_name] = element_data[vertex_min:vertex_max + 1]
@@ -73,8 +73,8 @@ class SSMTImportHelper:
 					ib_polygon_count=int(len(segment_ib_data) / 3),
 					import_collection=import_collection,
 					shapekey_position_data=segment_shapekey_position_data if segment_shapekey_position_data else None,
-					# WWMI 形态键三件套：整份缓冲 + 分段顶点窗口
-					# （global vertex id → 本段局部 id = global - vertex_min）。
+					# WWMI shape key trio: whole buffers + per-segment vertex window
+					# (global vertex id -> local id in this segment = global - vertex_min).
 					wwmi_shapekey_buffers=shapekey_buffers if shapekey_buffers else None,
 					wwmi_vertex_offset=vertex_min,
 					wwmi_vertex_count=vertex_max - vertex_min + 1,
@@ -87,10 +87,10 @@ class SSMTImportHelper:
 				imported_obj_list.append(segment_obj)
 
 			if len(imported_obj_list) > 0:
-				print("DrawCallSegment 导入完成，共创建 " + str(len(imported_obj_list)) + " 个分段网格")
+				print("DrawCallSegment import completed, created " + str(len(imported_obj_list)) + " segment meshes")
 				return imported_obj_list[0]
 
-			print("DrawCallSegmentList 全部分段无效，回退为整体导入")
+			print("DrawCallSegmentList: all segments were invalid, falling back to whole import")
 
 		return MeshCreateHelper.create_mesh_object(
 			mesh_name=mesh_name,
@@ -118,19 +118,19 @@ class SSMTImportHelper:
 	@staticmethod
 	def resolve_draw_call_segments(submesh_json:SubmeshJson, ib_data_list:list, ib_entry_array_indices:list, ib_data_full, vb_vertex_count:int):
 		'''
-		解析 DrawCall 分段信息，返回 [(segment_ib_data, vertex_min, vertex_max, segment_info)]。
+		Resolve DrawCall segment info, returning [(segment_ib_data, vertex_min, vertex_max, segment_info)].
 
-		优先使用 DrawCallSegmentList（逆向工具输出的完整有序分段，每一条
-		drawindexed 一个分段，不做去重）。
-		缺失时回退使用 DrawCallIndexList 顺序切分——但该字段旧版按 drawNumber
-		去重，仅当其计数总和与 IB 实际索引数完全一致时才可信，否则放弃分段。
+		Prefer DrawCallSegmentList (complete ordered segments from the reverse tool,
+		one per drawindexed call, no deduplication). If missing, fall back to splitting
+		DrawCallIndexList in order -- but older versions deduplicated it by drawNumber; trust it
+		only when its count sum exactly matches the actual IB index count, otherwise abandon splitting.
 		'''
 		raw_segments = []
 
 		if len(submesh_json.DrawCallSegmentList) > 0:
 			for draw_call_segment in submesh_json.DrawCallSegmentList:
 				if draw_call_segment.IBIndex < 0 or draw_call_segment.IBIndex >= len(ib_entry_array_indices):
-					print("DrawCallSegment 导入：分段指向不存在的 IBIndex " + str(draw_call_segment.IBIndex) + "，已跳过")
+					print("DrawCallSegment import: segment references non-existent IBIndex " + str(draw_call_segment.IBIndex) + ", skipped")
 					continue
 
 				source_ib_data = ib_data_list[ib_entry_array_indices[draw_call_segment.IBIndex]]
@@ -140,10 +140,10 @@ class SSMTImportHelper:
 				segment_end = draw_call_segment.IndexOffset + draw_call_segment.IndexCount
 				if draw_call_segment.IndexOffset < 0 or segment_end > len(source_ib_data):
 					print(
-						"DrawCallSegment 导入：分段范围越界 (IBIndex=" + str(draw_call_segment.IBIndex)
+						"DrawCallSegment import: segment range out of bounds (IBIndex=" + str(draw_call_segment.IBIndex)
 						+ ", IndexOffset=" + str(draw_call_segment.IndexOffset)
 						+ ", IndexCount=" + str(draw_call_segment.IndexCount)
-						+ ", IB索引数=" + str(len(source_ib_data)) + ")，已跳过"
+						+ ", IB index count=" + str(len(source_ib_data)) + "), skipped"
 					)
 					continue
 
@@ -175,10 +175,10 @@ class SSMTImportHelper:
 						index_offset += index_count
 				else:
 					print(
-						"DrawCallIndexList 合计索引数 " + str(sum(index_count_list))
-						+ " 与 IB 实际索引数 " + str(len(ib_data_full))
-						+ " 不一致（旧版逆向工具对重复 drawNumber 做了去重），无法可靠分段，改为整体导入。"
-						+ "使用更新后的逆向工具重新逆向即可获得 DrawCallSegmentList 精确分段。"
+						"DrawCallIndexList total index count " + str(sum(index_count_list))
+						+ " does not match the actual IB index count " + str(len(ib_data_full))
+						+ " (older reverse tools deduplicated repeated drawNumber), cannot reliably split; importing as a whole. "
+						+ "Re-extracting with a newer reverse tool will produce an exact DrawCallSegmentList split."
 					)
 
 		draw_call_segments = []
@@ -190,8 +190,8 @@ class SSMTImportHelper:
 			vertex_max = int(segment_ib_data.max())
 			if vertex_min < 0 or vertex_max >= vb_vertex_count:
 				print(
-					"DrawCallSegment 导入：分段顶点范围 [" + str(vertex_min) + ", " + str(vertex_max)
-					+ "] 超出 VB 顶点数 " + str(vb_vertex_count) + "，已跳过"
+					"DrawCallSegment import: segment vertex range [" + str(vertex_min) + ", " + str(vertex_max)
+					+ "] exceeds VB vertex count " + str(vb_vertex_count) + ", skipped"
 				)
 				continue
 
@@ -202,14 +202,14 @@ class SSMTImportHelper:
 	@staticmethod
 	def parse_index_buffers(submesh_json:SubmeshJson):
 		'''
-		解析 IndexBufferList 中的全部 IB 文件。
+		Parse all IB files described in IndexBufferList.
 
-		返回 (ib_data_list, ib_entry_array_indices, ib_data_full, ib_count, ib_polygon_count)：
-		- ib_data_list：按 FileName 去重后的 IB 数组列表（保持首次出现顺序），
-		  供 DrawCallSegmentList 按 IBIndex 索引；
-		- ib_entry_array_indices：IndexBufferList 每个条目映射到 ib_data_list 的下标
-		  （旧版逆向产物中多个条目可能指向同一文件）；
-		- ib_data_full：全部唯一 IB 顺序拼接后的完整索引数据（整体导入用）。
+		Returns (ib_data_list, ib_entry_array_indices, ib_data_full, ib_count, ib_polygon_count):
+		- ib_data_list: IB arrays deduplicated by FileName (keeping first-appearance order),
+		  used by DrawCallSegmentList for indexing via IBIndex;
+		- ib_entry_array_indices: maps each IndexBufferList entry to its index in ib_data_list
+		  (older reverse-engineered products may have several entries pointing at the same file);
+		- ib_data_full: full index data, all unique IBs concatenated in order (used for whole import).
 		'''
 		if len(submesh_json.IndexBufferList) == 0:
 			raise Fatal("SubmeshJson missing IndexBufferList.")
@@ -335,18 +335,18 @@ class SSMTImportHelper:
 	@staticmethod
 	def parse_shapekey_position_buffers(submesh_json:SubmeshJson):
 		'''
-		解析 ShapeKeyPositionBufferList 中描述的形态键Buffer。
+		Parse the shape key buffers described in ShapeKeyPositionBufferList.
 
-		形态键Buffer的二进制布局与 Position 分类的 CategoryBuffer 完全一致，
-		因此直接复用 Position 分类Buffer的 D3D11ElementList 来解析，
-		并从中提取 POSITION 元素的绝对坐标数据（与基础 POSITION 同一坐标空间）。
+		A shape key buffer's binary layout is identical to the Position category's CategoryBuffer,
+		so it is parsed by directly reusing the Position category buffer's D3D11ElementList,
+		extracting the POSITION element's absolute coordinate data (same coordinate space as the base POSITION).
 		'''
 		shapekey_position_data = {}
 
 		if len(submesh_json.ShapeKeyPositionBufferList) == 0:
 			return shapekey_position_data
 
-		# 找到第一个包含 POSITION 语义元素的 CategoryBuffer 作为布局模板。
+		# Find the first CategoryBuffer containing a POSITION semantic element to serve as the layout template.
 		position_category_buffer = None
 		position_element = None
 		for category_buffer in submesh_json.CategoryBufferList:
@@ -359,7 +359,7 @@ class SSMTImportHelper:
 				break
 
 		if position_category_buffer is None or position_element is None:
-			print("ShapeKeyPosition 导入：未找到 Position 分类Buffer，跳过形态键导入。")
+			print("ShapeKeyPosition import: no Position category buffer found, skipping shape key import.")
 			return shapekey_position_data
 
 		if position_category_buffer.Stride <= 0:
@@ -370,11 +370,11 @@ class SSMTImportHelper:
 				continue
 
 			if not os.path.exists(shapekey_buffer.FilePath) or os.path.getsize(shapekey_buffer.FilePath) == 0:
-				print("ShapeKeyPosition 导入：形态键Buffer缺失或为空，已跳过: " + shapekey_buffer.FileName)
+				print("ShapeKeyPosition import: shape key buffer missing or empty, skipped: " + shapekey_buffer.FileName)
 				continue
 
 			if os.path.getsize(shapekey_buffer.FilePath) % position_category_buffer.Stride != 0:
-				print("ShapeKeyPosition 导入：形态键Buffer大小与 Position 步长不对齐，已跳过: " + shapekey_buffer.FileName)
+				print("ShapeKeyPosition import: shape key buffer size not aligned with Position stride, skipped: " + shapekey_buffer.FileName)
 				continue
 
 			shapekey_category_buffer = SubmeshCategoryBuffer(
@@ -438,7 +438,7 @@ class SSMTImportHelper:
 				vb_vertex_count=vb_vertex_count,
 			)
 
-		print("预留特殊 Buffer 解析路线, 当前 Type: " + category_buffer.Type + ", FileName: " + category_buffer.FileName)
+		print("Reserved special buffer parsing path, current Type: " + category_buffer.Type + ", FileName: " + category_buffer.FileName)
 		return [], {}, 0
 
 	@staticmethod

@@ -1,4 +1,4 @@
-"""INI 控制流写出辅助器。"""
+"""Helpers for writing conditional INI control flow."""
 
 
 class M_ControlFlow:
@@ -9,10 +9,11 @@ class M_ControlFlow:
         slot_line_provider,
         obj_name_draw_offset_dict=None,
     ):
-        """按条件写出贴图绑定和 drawindexed。
+        """Write texture bindings and drawindexed lines under conditions.
 
-        ``section`` 只需提供 ``append``，因此控制流语义可用于任何 INI
-        section，而非依赖某个特定的 section 名称前缀。
+        ``section`` only needs to provide ``append``, so the control-flow
+        semantics work with any INI section instead of relying on a specific
+        section-name prefix.
         """
         condition_str_obj_model_list_dict = {}
         for obj_model in ordered_draw_obj_model_list:

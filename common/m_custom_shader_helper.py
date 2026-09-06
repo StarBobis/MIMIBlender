@@ -56,12 +56,12 @@ class M_CustomShaderHelper:
             mark_name = str(index)
 
         if any(char in mark_name for char in '[]\r\n'):
-            raise ValueError('CustomShader MarkName 不能包含 [] 或换行符: ' + mark_name)
+            raise ValueError('CustomShader MarkName must not contain [] or newlines: ' + mark_name)
 
         section_name = 'CustomShader' + mark_name
         existing_node_key = cls._base_section_to_node.get(section_name)
         if existing_node_key is not None and existing_node_key != key:
-            raise ValueError('CustomShader MarkName 重复: ' + mark_name)
+            raise ValueError('Duplicate CustomShader MarkName: ' + mark_name)
 
         cls._node_to_base_section[key] = section_name
         cls._base_section_to_node[section_name] = key

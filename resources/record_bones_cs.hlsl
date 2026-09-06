@@ -1,9 +1,9 @@
 // =========================================================
-// record_bones_cs.hlsl (数据存储器)
+// record_bones_cs.hlsl (data storage)
 // =========================================================
 StructuredBuffer<uint4> OriginalT0 : register(t0);
 StructuredBuffer<uint4> DumpedCB1  : register(t1);
-// 💡 修改1：将 uint 改为 float，用于接收 INI 中定义的 data = xxx.0
+// Change 1: switched uint to float so it can receive data = xxx.0 defined in the INI
 Buffer<float> MyPartID             : register(t2); 
 
 RWStructuredBuffer<uint4> FakeT0_UAV : register(u1);
@@ -13,7 +13,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     uint id = tid.x;
     if (id >= 768) return; 
 
-    // 💡 修改2：删掉 GetDimensions，直接读取第0位数据并强转为 uint
+    // Change 2: removed GetDimensions, read element 0 directly and cast it to uint
     uint my_offset = (uint)MyPartID[0]; 
     
     uint offset_current = DumpedCB1[5].x;

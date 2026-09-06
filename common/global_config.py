@@ -7,20 +7,20 @@ from .global_properties import GlobalProperties
 
 
 '''
-执行逻辑名称
-在SSMT3系列中，任意游戏可以配置任意执行逻辑，根据执行逻辑决定具体游戏流程
-在SSMT4系列中，为了简化流程，降低维护成本，每个游戏都对应一个LogicName
-或者说LogicName字段本身就是和SSMT4端的GamePreset游戏预设字段一一对应
+Execution logic names.
+In the SSMT3 family, any game can be configured with any execution logic, and the execution logic determines the concrete game flow.
+In the SSMT4 family, to simplify the flow and lower maintenance cost, every game maps to exactly one LogicName.
+Put differently, the LogicName field itself maps one-to-one onto the GamePreset game preset field on the SSMT4 side.
 
-另外，不管在数据类型上理解有多么深刻，当大部分用户选择使用错误的数据类型，并形成习惯时
-例如WWMI的COLOR1还是TEXCOORD问题，此时为了降低维护成本，应该尊重大众的选择
-毕竟这个世界大部分都是普通人，普通人是不想思考的，越简单越好。
-也可以理解为一个概念若是被大部分人误解了，那么这个概念的正确理解就不重要了，
-重要的是这个概念被大部分人误解成什么样了。
-SSMT的本质是什么不重要，重要的是在大部分人眼中SSMT是什么。
+Also, no matter how deeply the data types are understood, when most users pick a wrong data type and it becomes a habit,
+as with the WWMI COLOR1 vs TEXCOORD issue, the popular choice should be respected to keep maintenance cost low.
+After all, most people in this world are ordinary, and ordinary people do not want to think; the simpler the better.
+It can also be read as: if most people misunderstand a concept, the correct understanding of that concept no longer matters;
+what matters is how most people misunderstand that concept.
+What SSMT essentially is does not matter; what matters is what SSMT looks like in most people's eyes.
 '''
 class LogicName:
-    # 高人气游戏，常驻维护
+    # Popular games, kept under ongoing maintenance
     GIMI = "GIMI"
     HIMI = "HIMI"
     SRMI = "SRMI"
@@ -29,33 +29,33 @@ class LogicName:
     WWMI = "WWMI"
     EFMI = "EFMI"
 
-    # 小众游戏，使用人数极少，有用户反馈时进行维护即可
-    # 注意，如果一个游戏有原生Mod方式，就不应该使用3Dmigoto来进行Mod制作
-    # 与主流相悖的路线只会导致维护成本过高，最终被世人遗忘
-    # 如果只给少数部分人提供服务的话，就必须要考虑维护成本问题
-    GF2 = "GF2" # 少女前线2，或者CPU-PreSkinning类型游戏，使用3Dmigoto强行修改的代表性方法
-    IdentityV = "IdentityV" # 第五人格Neox3引擎，目前留着也只是为部分抽象二创视频作者提供服务
-    AILIMIT = "AILIMIT" # 小厂小游戏，但是虹汐哥还在开设粉丝群，暂且给他的粉丝群留着
-    DOAV = "DOAV" # 古董游戏，万恶之源，就算添加了又有什么用呢，留着只是致敬
-    SnowBreak = "SnowBreak" # 尘白禁区已经有原生Mod方式了，但是呢，万一哪天失效了，3Dmigoto将成为备选
-    YYSLS = "YYSLS" # 燕云十六声，花费巨大宣发经费，但玩的人还是很少
-    Naraka = "Naraka" # 使用Mod会掉帧/封禁帐号30天/封禁永久
-    NarakaM = "NarakaM" # 使用Mod会掉帧/封禁帐号30天/封禁永久
+    # Niche games with very few users; maintain them when users provide feedback
+    # Note: if a game has a native mod method, 3Dmigoto should not be used for mod making
+    # A path against the mainstream only raises maintenance cost too high and ends up forgotten by the world
+    # If only a small minority of people are served, the maintenance cost must be considered
+    GF2 = "GF2" # Girls' Frontline 2, or a CPU-PreSkinning type game; the representative way of forcing modifications with 3Dmigoto
+    IdentityV = "IdentityV" # Identity V (Neox3 engine); kept only to serve some abstract fan-made video creators
+    AILIMIT = "AILIMIT" # A small game from a small studio, but Hongxi still runs a fan group, so keep it for his followers for now
+    DOAV = "DOAV" # An antique game, the root of all evil; even adding it serves little purpose, keeping it is just a tribute
+    SnowBreak = "SnowBreak" # Snowbreak already has a native mod method, but if it ever stops working one day, 3Dmigoto becomes the backup
+    YYSLS = "YYSLS" # Where Winds Meet: huge marketing budget, yet still very few players
+    Naraka = "Naraka" # Using mods can cause frame drops / 30-day account ban / permanent ban
+    NarakaM = "NarakaM" # Using mods can cause frame drops / 30-day account ban / permanent ban
     
-    NTEMI = "NTEMI" # 异环，仅测试
+    NTEMI = "NTEMI" # Neverness to Everness; testing only
     
-    # 预留位置
-    APMI = "APMI" # 还在内测的蓝色星原，已在测试服中测试过，完美支持3Dmigoto，预计发布就会被XXMI收录
-    NEMI = "NEMI" # 还在内测的异环，已在测试服中测试过，完美支持3Dmigoto，预计发布就会被XXMI收录
+    # Reserved slots
+    APMI = "APMI" # Azur Promilia, still in closed beta; already tested on the beta server, perfect 3Dmigoto support, expected to be adopted by XXMI when released
+    NEMI = "NEMI" # Neverness to Everness, still in closed beta; already tested on the beta server, perfect 3Dmigoto support, expected to be adopted by XXMI when released
 
     @classmethod
     def is_zzmi_family(cls, logic_name: str) -> bool:
         return logic_name in {cls.ZZMI, cls.ZZMIDX12}
 
 
-# 全局配置类，使用字段默认为全局可访问的唯一静态变量的特性，来实现全局变量
+# Global config class: fields are by default the only globally accessible static variables, implementing global state
 class GlobalConfig:
-    # 全局静态变量,任何地方访问到的值都是唯一的
+    # Global static variables: the value accessed from anywhere is always the same one
     gamename = ""
     workspacename = ""
     ssmtlocation = ""
@@ -63,9 +63,9 @@ class GlobalConfig:
     logic_name = ""
 
     '''
-    在新版的生成Mod架构中用于统计一个Mod中全局的按键索引
-    以及当前生成Mod的数量，每个DrawIB都是一个Mod。
-    使用全局变量来避免过于复杂的变量传递。
+    In the new Generate Mod architecture, tracks the global key index within a Mod
+    and the number of Mods generated so far; every DrawIB is one Mod.
+    Global variables are used to avoid overly complex variable passing.
     '''
     global_key_index: int = 0
     generated_mod_number: int = 0
@@ -137,8 +137,8 @@ class GlobalConfig:
     @staticmethod
     def path_drawib_config_json_path():
         '''
-        当前工作空间目录下的Config.json
-        存储了所有的DrawIB和别名
+        Config.json in the current workspace folder,
+        stores all DrawIBs and their aliases.
         '''
         game_config_json_path = os.path.join(GlobalConfig.path_workspace_folder(),"Config.json")
         return game_config_json_path
@@ -368,12 +368,12 @@ class GlobalConfig:
     
     @classmethod
     def path_generate_mod_folder(cls):
-        # 如果用户勾选了使用指定文件夹，那就返回指定文件夹位置，否则返回我们的默认位置。
-        # 但是这里有个问题就是SkipIB和VSCheck不会生成在指定位置。
+        # If the user enabled the "use a specified folder" option, return that folder location,
+        # otherwise return our default location. Note that SkipIB and VSCheck are not generated into the specified location.
         if GlobalProperties.use_specific_generate_mod_folder_path():
             return GlobalProperties.generate_mod_folder_path()
         else:
-            # 确保用的时候直接拿到的就是已经存在的目录
+            # Make sure the caller directly receives an already-existing directory
             ssmt_generated_mod_folder_path = os.path.join(GlobalConfig.path_mods_folder(),"SSMTGeneratedMod\\")
             generate_mod_folder_path = os.path.join(ssmt_generated_mod_folder_path, cls.get_workspace_name() + "\\")
             if not os.path.exists(generate_mod_folder_path):
@@ -399,9 +399,9 @@ class GlobalConfig:
         texture_path = os.path.join(GlobalConfig.path_generate_mod_folder(),"Textures\\")
         if not os.path.exists(texture_path):
             os.makedirs(texture_path)
-            print("GlobalConfig: 已创建贴图输出目录: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
+            print("GlobalConfig: Texture output folder created: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
         else:
-            print("GlobalConfig: 使用已有贴图输出目录: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
+            print("GlobalConfig: Using existing texture output folder: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
         return texture_path
     
     @staticmethod
@@ -413,7 +413,7 @@ class GlobalConfig:
         # SSMT5/ProjectBunny's settings.json now lives in ProjectBunnyGlobalConfigs.
         return GlobalConfig.path_project_bunny_global_configs_folder()
 
-    # 定义基础的Json文件路径
+    # Define the base JSON file paths
     @staticmethod
     def path_main_json_ssmt4():
         legacy_ssmt4 = os.path.join(GlobalConfig.path_appdata_local(), "SSMT4GlobalConfigs\\")

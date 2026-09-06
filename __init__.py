@@ -3,10 +3,9 @@ import bpy
 
 from .common import global_properties
 from .common import gimi_body_outline
-from .utils import translate_utils
 
 
-# UI界面
+# UI panels
 from .ui import ui_panel_basic
 from .ui import ui_panel_model
 from .sword import ui_panel_sword
@@ -28,19 +27,19 @@ from .blueprint import blueprint_node_highlight
 
 from .ui import ui_func_export
 
-# 自动更新功能
+# Automatic update
 from . import addon_updater_ops
 
-# 贴图合并工具 (texcomb) - 从另一个插件集成过来的材质合并功能
+# Texture combiner tool (texcomb) - material merge feature integrated from another add-on
 from . import texcomb
 
-# 开发时确保同时自动更新 addon_updater_ops
+# While developing, also keep addon_updater_ops up to date automatically
 import importlib
 importlib.reload(addon_updater_ops)
 
 bl_info = {
     "name": "MIMIBlender",
-    "description": "MIMITools的Blender插件",
+    "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
     "version": (1, 0, 2),
     "location": "View3D",
@@ -50,7 +49,7 @@ bl_info = {
 
 class UpdaterPanel(bpy.types.Panel):
     """Update Panel"""
-    bl_label = "检查版本更新"
+    bl_label = "Check for Updates"
     bl_idname = "MIMI_PT_UpdaterPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -72,7 +71,7 @@ class UpdaterPanel(bpy.types.Panel):
         col.scale_y = 0.7
         # Could also use your own custom drawing based on shared variables.
         if addon_updater_ops.updater.update_ready:
-            layout.label(text="存在可用更新！", icon="INFO")
+            layout.label(text="Update available!", icon="INFO")
 
         # Call built-in function with draw code/checks.
         # addon_updater_ops.update_notice_box_ui(self, context)
@@ -81,38 +80,38 @@ class UpdaterPanel(bpy.types.Panel):
 
 class MIMIBlenderUpdatePreference(bpy.types.AddonPreferences):
     # Addon updater preferences.
-    bl_label = "MIMIBlender 更新器"
+    bl_label = "MIMIBlender Updater"
     bl_idname = __package__
 
     
     auto_check_update: bpy.props.BoolProperty(
-        name="自动检查更新",
-        description="如启用，按设定的时间间隔自动检查更新",
+        name="Automatically Check for Updates",
+        description="If enabled, check for updates automatically at the configured interval.",
         default=True) # type: ignore
 
     updater_interval_months: bpy.props.IntProperty(
-        name='月',
-        description="自动检查更新间隔月数",
+        name='Months',
+        description="Number of months between automatic update checks.",
         default=0,
         min=0) # type: ignore
 
     updater_interval_days: bpy.props.IntProperty(
-        name='天',
-        description="自动检查更新间隔天数",
+        name='Days',
+        description="Number of days between automatic update checks.",
         default=1,
         min=0,
         max=31) # type: ignore
 
     updater_interval_hours: bpy.props.IntProperty(
-        name='小时',
-        description="自动检查更新间隔小时数",
+        name='Hours',
+        description="Number of hours between automatic update checks.",
         default=0,
         min=0,
         max=23) # type: ignore
 
     updater_interval_minutes: bpy.props.IntProperty(
-        name='分钟',
-        description="自动检查更新间隔分钟数",
+        name='Minutes',
+        description="Number of minutes between automatic update checks.",
         default=0,
         min=0,
         max=59) # type: ignore
@@ -122,9 +121,10 @@ class MIMIBlenderUpdatePreference(bpy.types.AddonPreferences):
         addon_updater_ops.update_settings_ui(self, context)
 
 def register():
-    # 逐模块容错注册：历史上曾出现单个节点类注册失败导致 register 中断、
-    # 侧栏面板全部丢失的问题；这里保证一个模块失败不影响其它模块，
-    # 失败信息打印到控制台便于排查。
+    # Fault-tolerant registration per module: in the past a single node class
+    # failing to register broke the whole register chain and made all the
+    # sidebar panels disappear. This guarantees that one failing module does
+    # not affect the others; failures are printed to the console for debugging.
     for step in _register_steps():
         try:
             step()
@@ -138,7 +138,6 @@ def _register_steps():
     # 1. Configs
     yield global_properties.register
     yield gimi_body_outline.register
-    yield translate_utils.register
 
     # 2. Addon Updater (local classes)
     def _register_updater():
@@ -156,8 +155,8 @@ def _register_steps():
     yield ui_func_import_ssmt.register
     yield ui_panel_fast_texture.register
 
-    # 蓝图系统
-    # ShapeKey PropertyGroup 必须先于引用它的 Generate Mod 节点注册。
+    # Blueprint system
+    # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
     yield blueprint_node_shapekey.register
     yield blueprint_node_obj.register
     yield ui_func_export.register
@@ -170,15 +169,16 @@ def _register_steps():
     yield blueprint_file_drop.register
     yield blueprint_node_highlight.register
 
-    # 贴图合并工具 (texcomb)
+    # Texture combiner tool (texcomb)
     yield texcomb.register
 
 
 def unregister():
-    # 按 register 的逆序注销，避免类型依赖问题
-    # 逐步容错：之前会话可能处于半注册状态（例如某类从未注册成功），
-    # 直接注销会抛 RuntimeError 并中断后续所有注销，导致下次启用时
-    # “already registered” 连锁失败、面板消失。
+    # Unregister in the reverse order of register to avoid type dependency issues.
+    # Step-by-step fault tolerance: a previous session may have left a half-registered
+    # state (for example a class that never registered successfully). Unregistering it
+    # directly would raise RuntimeError and break all later unregister steps, causing
+    # "already registered" failures and missing panels on the next enable.
     def _unregister_updater():
         bpy.utils.unregister_class(MIMIBlenderUpdatePreference)
         bpy.utils.unregister_class(UpdaterPanel)
@@ -205,7 +205,6 @@ def unregister():
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
         _unregister_updater,
-        translate_utils.unregister,
         global_properties.unregister,
     ]
     for step in steps:
@@ -215,7 +214,6 @@ def unregister():
             import traceback
             print(f"[MIMIBlender] unregister step failed: {getattr(step, '__module__', step)}")
             traceback.print_exc()
-
 
 
 

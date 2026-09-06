@@ -46,21 +46,21 @@ def get_packed_file(
 def get_image_pack_issue(image: Optional[bpy.types.Image]) -> Optional[str]:
     """Return why an image cannot provide packed pixel data, if known."""
     if not image:
-        return "未找到连接到当前材质输出的主贴图。"
+        return "No main texture connected to the current material output was found."
 
     if image.packed_file:
         return None
 
     filepath = getattr(image, "filepath", "")
     if not filepath:
-        return "贴图没有文件路径，可能是未保存或运行时生成的图像。"
+        return "The texture has no file path; it may be an unsaved or runtime-generated image."
 
     path = os.path.abspath(bpy.path.abspath(filepath))
     if path.lower().endswith((".spa", ".sph")):
-        return "当前贴图格式不参与打包: {}".format(os.path.basename(path))
+        return "This texture format is excluded from packing: {}".format(os.path.basename(path))
 
     if not os.path.isfile(path):
-        return "贴图文件不存在或路径不可访问: {}".format(path)
+        return "The texture file does not exist or its path is not accessible: {}".format(path)
 
     return None
 

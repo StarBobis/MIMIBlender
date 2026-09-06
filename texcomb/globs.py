@@ -12,7 +12,7 @@ import sys
 
 import bpy
 
-# 插件自带依赖目录：pip --target 安装到这里，避免 Blender 禁用 user site 的问题
+# Addon-bundled dependency directory: pip --target installs here, avoiding the issue of Blender disabling the user site
 _ADDON_DIR = os.path.dirname(os.path.abspath(__file__))
 PILLOW_LIB_PATH = os.path.join(_ADDON_DIR, "libs")
 
@@ -45,25 +45,25 @@ def refresh_pil_availability() -> bool:
     """
     global pil_available, pil_install_success, pil_install_error_message
 
-    # 重新检查 PIL 是否可用
+    # Re-check whether PIL is available
     try:
-        # 刷新 site 目录
+        # Refresh the site directory
         import importlib
         if 'site' in sys.modules:
             importlib.reload(sys.modules['site'])
 
-        # 确保插件自带依赖目录在路径中
+        # Ensure the addon-bundled dependency directory is on the path
         if PILLOW_LIB_PATH not in sys.path:
             sys.path.insert(0, PILLOW_LIB_PATH)
 
-        # 添加 user site packages 到路径（避免重复添加）
+        # Add user site packages to the path (avoiding duplicates)
         user_site = site.getusersitepackages()
         if user_site and user_site not in sys.path:
             sys.path.insert(0, user_site)
 
-        # 检查各个模块
+        # Check each module
         for module in ("PIL", "PIL.Image", "PIL.ImageChops"):
-            # 先清除可能已经加载的旧模块
+            # Remove any already-loaded old modules first
             if module in sys.modules:
                 del sys.modules[module]
 
@@ -72,14 +72,14 @@ def refresh_pil_availability() -> bool:
             for module in ("PIL", "PIL.Image", "PIL.ImageChops")
         )
 
-        # 如果可用，更新安装状态
+        # If available, update the installation status
         if pil_available:
             pil_install_success = True
             pil_install_error_message = ""
 
         return pil_available
     except Exception:
-        # 如果刷新过程出错，保持原样
+        # If the refresh errors out, keep the existing state
         return pil_available
 
 is_blender_legacy = False

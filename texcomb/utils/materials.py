@@ -423,17 +423,17 @@ def get_alpha_texture_issue(
 
     image_info = _get_alpha_texture_image_info(mat)
     if not image_info:
-        return "Alpha 输入已连接，但没有找到可读取的 Image Texture。"
+        return "The Alpha input is connected, but no readable Image Texture was found."
 
     image_node, _output_name = image_info
     pack_issue = get_image_pack_issue(image_node.image)
     if pack_issue:
-        return "Alpha 贴图 '{}' 无法打包：{}".format(
+        return "Alpha texture '{}' cannot be packed: {}".format(
             image_node.image.name, pack_issue
         )
 
     if validate_pack and not get_packed_file(image_node.image):
-        return "Alpha 贴图 '{}' 打包失败。".format(image_node.image.name)
+        return "Alpha texture '{}' packing failed.".format(image_node.image.name)
 
     return None
 
@@ -538,27 +538,28 @@ def _find_output_node(
 
     Returns:
         Material output node or None.
-分析整个项目，分析一下，当我在Shading里，把材质的贴图换掉之后，为什么点击update material list之后，贴图的大小变为32x32，而不是正确的大小，而且合并贴图之后，这些被替换了贴图的材质都没有合并进去，我怀疑是某种缓存问题导致了无法读取到正确的贴图
+    Background: this documents a past bug report. After a material's
+    texture was replaced in the Shading workspace, "Update Material
+    List" read the texture as 32x32, and materials with replaced
+    textures were skipped during atlas merging. The root cause was in
+    this function, not in texture caching.
 
-请你全篇查看我的代码，并且分析出可能的原因，然后进行改进，并给出错误的说明，如果找不到就算了，尽力找吧，这个不是很影响
+    Old behavior: the code returned the first ShaderNodeOutputMaterial
+    found. Node Wrangler previews (Ctrl+Shift+click) create a temporary
+    "Viewer Output" node, so a material can hold two output nodes: the
+    original one (possibly disconnected) and the Viewer one. Tracing
+    from the wrong output could reach the Viewer node's internal
+    placeholder/unrendered 32x32 image, so the extracted image was
+    invalid and the merging logic ignored the material.
 
-我分析了整个项目，找到了导致“贴图变为 32x32 且无法合并”的最可能原因。
+    Fix: prioritize outputs as follows so the currently used, correctly
+    connected material output is always read:
 
-原因分析：
-问题出在 materials.py 中的 _find_output_node 函数。
-
-逻辑缺陷：原代码只是简单地遍历节点并返回找到的第一个 ShaderNodeOutputMaterial（材质输出节点）。
-场景复现：当你使用 Node Wrangler（Ctrl+Shift+点击）预览贴图时，它会创建一个临时的“Viewer Output”节点。此时材质里会有两个输出节点：一个是原本的（可能被断开或排在后面），一个是 Viewer 的。
-为何是 32x32：如果代码错误地抓取了 Viewer Output 节点（或者抓取了被断开的原输出节点），它可能会追踪到错误的路径，或者追踪到 Viewer Node 的内部图像（通常是占位符或未渲染的 32x32 图像），导致获取到的贴图信息错误。
-结果：因为获取到的是无效或错误的 32x32 图像，合并逻辑认为该材质无效或将其忽略。
-已进行的修复：
-我修改了 materials.py 中的 _find_output_node 函数，增强了查找逻辑，优先级如下：
-
-优先：既是“活动输出”（Active Output）又有“连接”（Connected）的节点。（这是最准确的，代表你当前在视口里看到的那个）。
-次选：任何有“连接”的输出节点。（防止活动节点被误选为未连接的节点）。
-再次：活动输出节点（即使未连接）。
-最后：任意输出节点。
-这个修改能确保插件总是读取你当前正在使用、且正确连接的材质输出，从而找到正确的贴图。请重新点击 "Update Material List" 测试一下
+    1. Active and connected output node (most accurate; what the viewport shows).
+    2. Any connected output node (covers a disconnected active node).
+    3. Active output node, even if disconnected.
+    4. Any output node.
+    5. Name-based fallback.
 
 
     """

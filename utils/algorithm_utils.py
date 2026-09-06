@@ -10,26 +10,26 @@ class AlgorithmUtils:
     SupportedGame: GI,HI3,HSR,ZZZ,WWMI
     Designed For: ZZZ,WWMI
 
-    Nico：此方法不知道为什么只能近似还原TEXCOORD1中内容，猜测是缺少了加权平均？
-    缺少相关知识太多了，暂时放着
+    Nico: For unknown reasons this method can only approximately restore the content in TEXCOORD1; perhaps the weighted average is missing?
+    Too much related knowledge is missing, so this is parked for now
 
-    # 代码版权与来源：
+    # Code credit and source:
     # function 
     # https://www.bilibili.com/video/BV13G411u75s/?spm_id_from=333.999.0.0 
-    # by 给你柠檬椰果养乐多你会跟我玩吗
+    # by "Give you lemon coconut Yakult, will you play with me?" (bilibili)
 
-    # 将法线XY分量存储到UV贴图的坐标(X:法线x, Y:法线y)
-    # 灵感来自smoothtool from github 
+    # Store the XY components of the normal in the UV map coordinates (X: normal.x, Y: normal.y)
+    # Inspired by smoothtool from github
     # by dashu04
 
-    # 整合 by 失乡のKnight
-    # 拆解信息链、重构为工具类 by NicoMico
+    # Assembled by "Exiled Knight"
+    # Decomposed the info chain and refactored it into a utility class by NicoMico
     '''
     @staticmethod
     def vector_cross_product(v1,v2):
         '''
-        叉乘 (Cross Product): 两个不平行的三维向量的叉乘会生成一个新的向量，这个新向量与原来的两个向量都垂直。
-        因此，对于给定的三角形，使用其两边进行叉乘可以得到一个垂直于该三角形平面的向量，这就是所谓的法线向量。
+        Cross Product: The cross product of two non-parallel 3D vectors produces a new vector perpendicular to both of the original vectors.
+        Therefore, for a given triangle, taking the cross product of two of its edges yields a vector perpendicular to the triangle's plane; this is the so-called normal vector.
         '''
         return Vector((v1.y*v2.z-v2.y*v1.z,v1.z*v2.x-v2.z*v1.x,v1.x*v2.y-v2.x*v1.y))
     
@@ -44,9 +44,9 @@ class AlgorithmUtils:
     @classmethod
     def vector_normalize(cls,v):
         '''
-        归一化 (Normalization): 
-        之后对叉乘结果进行归一化（normalize），即调整法线向量的长度为1，这样可以确保法线向量只表示方向而不带有长度信息。
-        这一步很重要，因为光照计算通常依赖于单位长度的法线向量来保证正确性。
+        Normalization:
+        Then normalize the cross product result, i.e. adjust the normal vector's length to 1, which ensures the normal vector only represents direction without length information.
+        This step is important because lighting calculations usually rely on unit-length normal vectors for correctness.
         '''
         L = cls.vector_calc_length(v)
         if L != 0 :
@@ -56,14 +56,14 @@ class AlgorithmUtils:
     @staticmethod
     def vector_to_string(v):
         '''
-        把Vector变为string，方便放入dict
+        Convert a Vector into a string, convenient for storing in a dict
         '''
         return "x=" + str(v.x) + ",y=" + str(v.y) + ",z=" + str(v.z)
     
     @staticmethod
     def need_outline(vertex):
         '''
-        仅用于测试，实际使用中应永远返回True
+        Only for testing; in actual use it should always return True
         '''
         need = False
         for g in vertex.groups:
@@ -93,7 +93,7 @@ class AlgorithmUtils:
 
         co_str_data_dict = {}
 
-        # 开始
+        # Start
         for vertex in mesh.vertices:
             co = vertex.co
             co_str = cls.vector_to_string(co)
@@ -101,24 +101,24 @@ class AlgorithmUtils:
         print("========")
 
         for poly in mesh.polygons:
-            # 获取三角形的三个顶点
+            # Get the three vertices of the triangle
             loop_0 = mesh.loops[poly.loop_start]
             loop_1 = mesh.loops[poly.loop_start+1]
             loop_2 = mesh.loops[poly.loop_start + 2]
 
-            # 获取顶点数据
+            # Get the vertex data
             vertex_loop0 = mesh.vertices[loop_0.vertex_index]
             vertex_loop1 = mesh.vertices[loop_1.vertex_index]
             vertex_loop2 = mesh.vertices[loop_2.vertex_index]
 
-            # 顶点数据转换为字符串格式
+            # Convert the vertex data into string format
             co0_str = cls.vector_to_string(vertex_loop0.co)
             co1_str = cls.vector_to_string(vertex_loop1.co)
             co2_str = cls.vector_to_string(vertex_loop2.co)
 
-            # 使用CorssProduct计算法线
+            # Compute the normal using CorssProduct
             normal_vector = cls.vector_cross_product(vertex_loop1.co-vertex_loop0.co,vertex_loop2.co-vertex_loop0.co)
-            # 法线归一化使其长度保持为1
+            # Normalize the normal so its length stays 1
             normal_vector = cls.vector_normalize(normal_vector)
 
             if co0_str in co_str_data_dict and cls.need_outline(vertex_loop0):
@@ -131,29 +131,29 @@ class AlgorithmUtils:
                 w = cls.calculate_angle_between_vectors(vertex_loop1.co-vertex_loop2.co,vertex_loop0.co-vertex_loop2.co)
                 co_str_data_dict[co2_str].append({"n":normal_vector,"w":w,"l":loop_2})
 
-        # 存入UV
+        # Write into UV
         uv_layer = mesh.uv_layers.new(name="SmoothNormalMap")
         for poly in mesh.polygons:
             for loop_index in range(poly.loop_start,poly.loop_start+poly.loop_total):
                 vertex_index=mesh.loops[loop_index].vertex_index
                 vertex = mesh.vertices[vertex_index]
 
-                # 初始化平滑法线和平滑权重
+                # Initialize the smooth normal and the smooth weight
                 smoothnormal=Vector((0,0,0))
                 weight = 0
 
-                # 基于相邻面的法线加权平均计算平滑法线
+                # Compute the smooth normal as the weighted average of the normals of the adjacent faces
                 if cls.need_outline(vertex):
                     costr=cls.vector_to_string(vertex.co)
 
                     if costr in co_str_data_dict:
                         a = co_str_data_dict[costr]
-                        # 对于共享此顶点的所有面的数据，遍历它们
+                        # Iterate over the data of all faces that share this vertex
                         for d in a:
-                            # 分别获取面的法线和权重
+                            # Get the normal and the weight of each face
                             normal_vector=d['n']
                             w = d['w']
-                            # 累加加权法线和权重
+                            # Accumulate the weighted normals and the weights
                             smoothnormal  += normal_vector*w
                             weight  += w
                 if smoothnormal != Vector((0,0,0)):
@@ -171,14 +171,14 @@ class AlgorithmUtils:
                 normalT=Vector((tx,ty,tz))
                 # print("nor:",smoothnormal)
 
-                # 将法线XY分量存储到UV贴图的坐标 (X:法线x, Y:法线y)
-                # 需要根据实际调整，例如UE为（x,1+y）
+                # Store the XY components of the normal into the UV map coordinates (X: normal.x, Y: normal.y)
+                # May need adjusting per engine, e.g. UE uses (x, 1+y)
 
                 # uv = (normalT.x, 1 + normalT.y) 
                 uv = (normalT.x, 1 + normalT.y) 
                 uv_layer.data[loop_index].uv = uv
 
-        # 重新计算物体的UV贴图以应用更改
+        # Recalculate the object's UV map to apply the changes
         # bpy.ops.object.mode_set(mode="EDIT")
         # bpy.ops.uv.unwrap(method='ANGLE_BASED')
         # bpy.ops.object.mode_set(mode="OBJECT")

@@ -1,5 +1,5 @@
 '''
-基础数据类型
+Basic data types
 '''
 
 import json
@@ -29,7 +29,7 @@ class D3D11GameType:
     D3D11ElementList:list[D3D11Element] = field(init=False,repr=False)
     # Ordered ElementName list.
     OrderedFullElementList:list[str] = field(init=False,repr=False)
-    # 按顺序排列的CategoryName
+    # CategoryName list in declaration order
     OrderedCategoryNameList:list[str] = field(init=False,repr=False)
     # Category name and draw category name, used to decide the category should draw on which category's TextureOverrideVB.
     CategoryDrawCategoryDict:Dict[str,str] = field(init=False,repr=False)
@@ -80,7 +80,7 @@ class D3D11GameType:
             aligned_byte_offset = aligned_byte_offset + d3d11_element.ByteWidth
             self.D3D11ElementList.append(d3d11_element)
 
-            # 这俩常用
+            # These two are commonly used
             self.OrderedFullElementList.append(d3d11_element.get_indexed_semantic_name())
             if d3d11_element.Category not in self.OrderedCategoryNameList:
                 self.OrderedCategoryNameList.append(d3d11_element.Category)
@@ -127,7 +127,8 @@ class D3D11GameType:
 
     def get_blendindices_count_wwmi(self) -> int:
         """
-        Nico:注意这个方法是给WWMI准备的,其它逻辑不兼容此方法,也不需要用到此方法
+        Nico: this method is prepared for WWMI only; other logic is incompatible
+        with this method and does not need to use it
         Return the number of blend indices (VG channels) used by the game type.
 
         Historically code used a pattern like::
@@ -152,14 +153,14 @@ class D3D11GameType:
     def get_total_structured_dtype(self) -> numpy.dtype:
         total_structured_dtype:numpy.dtype = numpy.dtype([])
 
-        # 预设的权重个数，也就是每个顶点组受多少个权重影响
+        # Preset weight count, i.e. how many weights influence each Vertex Group
         for d3d11_element_name in self.OrderedFullElementList:
             d3d11_element = self.ElementNameD3D11ElementDict[d3d11_element_name]
             np_type = FormatUtils.get_nptype_from_format(d3d11_element.Format)
 
             format_len = int(d3d11_element.ByteWidth / numpy.dtype(np_type).itemsize)
                 
-            # XXX 长度为1时必须手动指定为(1,)否则会变成1维数组
+            # XXX: when the length is 1, it must be specified as (1,), otherwise it becomes a 1-D array
             if format_len == 1:
                 total_structured_dtype = numpy.dtype(total_structured_dtype.descr + [(d3d11_element_name, (np_type, (1,)))])
             else:

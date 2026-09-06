@@ -1,16 +1,16 @@
-"""D3D11 顶点缓冲区语义名常量。
+"""D3D11 vertex-buffer semantic name constants.
 
-集中管理所有 D3D11 Input Layout 中使用的语义名字符串，
-避免散落在 obj_buffer_helper.py、各类游戏导出器中。
+Centralizes all semantic-name strings used in D3D11 Input Layouts so they
+are not scattered across obj_buffer_helper.py and the various game exporters.
 
-用法:
+Usage:
     from ..common.d3d11_semantics import D3D11Semantic
     if d3d11_element_name.startswith(D3D11Semantic.COLOR):
 """
 
 
 class D3D11Semantic:
-    """D3D11 HLSL 语义名常量"""
+    """D3D11 HLSL semantic name constants"""
 
     POSITION = "POSITION"
     NORMAL = "NORMAL"
@@ -33,7 +33,7 @@ class D3D11Semantic:
 
 
 class D3D11Format:
-    """D3D11 DXGI 格式名称常量"""
+    """D3D11 DXGI format name constants"""
 
     R32G32B32A32_FLOAT = "R32G32B32A32_FLOAT"
     R32G32B32_FLOAT = "R32G32B32_FLOAT"
@@ -66,7 +66,7 @@ class D3D11Format:
 
 
 class D3D11Category:
-    """D3D11 缓冲区类别名称常量。WWMI/Unreal 引擎中用于标识缓冲区用途。"""
+    """D3D11 buffer category name constants; identify buffer purposes in the WWMI/Unreal engine."""
 
     POSITION = "Position"
     NORMAL = "Normal"

@@ -1,127 +1,128 @@
-# 05 — 被注释掉的代码块
+# 05 - Commented-Out Code Blocks
 
-## 严重程度
+## Severity
 
-🟡 **中等** — 90 行被注释掉的方法和其他零散注释块让新人困惑："这是废弃代码还是临时禁用的？该删还是该恢复？"
+🟡 **Medium** - 90 lines of commented-out method code plus assorted scattered comment blocks leave newcomers puzzled: "Is this dead code or something temporarily disabled? Should I delete it or restore it?"
 
-## 问题清单
+## Issue List
 
-### 最大问题：vertexgroup_utils.py 中 90 行注释代码
+### Biggest Issue: The 90 Lines of Commented Code in vertexgroup_utils.py
 
-**文件**：`utils/vertexgroup_utils.py`  
-**行号**：约 55-140  
-**内容**：`merge_vertex_groups_with_same_number` 方法整段被注释
+**File**: `utils/vertexgroup_utils.py`  
+**Lines**: roughly 55-140  
+**Content**: the whole `merge_vertex_groups_with_same_number` method is commented out
 
 ```python
 # def merge_vertex_groups_with_same_number(obj):
-#     '''合并同名顶点组...'''
-#     ...约 90 行实现代码...
+#     '''Merge vertex groups with the same name...'''
+#     ...about 90 lines of implementation code...
 ```
 
-**处理建议**：
-- 如果功能已废弃 → 删除
-- 如果将来可能恢复 → 从 Git 历史恢复，不保留在代码中
-- **不要**保留注释掉的代码
+**Recommended handling**:
+- If the feature is deprecated -> delete it
+- If it might be needed again in the future -> restore it from Git history; do not keep it in the code
+- **Do not** keep commented-out code
 
-### 其他注释掉的调试代码
+### Other Commented-Out Debug Code
 
-| 文件 | 行号 | 内容 |
+| File | Lines | Content |
 |------|:----:|------|
 | `utils/obj_utils.py` | 290 | `# print("Normalize All Weights For: " + obj.name)` |
 | `workspace/ssmt_workspace.py` | 805 | `# print(used_component_count_list)` |
-| `common/obj_buffer_helper.py` | 229 | `# XXX 将副切线符号乘以 -1` |
-| `common/obj_buffer_helper.py` | 382 | `# TODO 这里类型截断错了吧` |
-| `addon_updater_ops.py` | 1185-1236 | 多个注释掉的代码块（beta 标签检查、平台检测等） |
+| `common/obj_buffer_helper.py` | 229 | `# XXX Multiply the binormal sign by -1` |
+| `common/obj_buffer_helper.py` | 382 | `# TODO This type truncation looks wrong` |
+| `addon_updater_ops.py` | 1185-1236 | several commented-out code blocks (beta-label check, platform detection, etc.) |
 
-### 注释掉的 import
+### Commented-Out Imports
 
-| 文件 | 行号 | 内容 |
+| File | Lines | Content |
 |------|:----:|------|
-| `utils/collection_utils.py` | 注释行 | `# import ...` — 未使用的 import 被注释而非删除 |
+| `utils/collection_utils.py` | comment lines | `# import ...` - an unused import commented out instead of deleted |
 
-### 注释掉但未清理的旧代码路径
+### Commented-Out Legacy Code Paths Never Cleaned Up
 
-| 文件 | 行号 | 内容 |
+| File | Lines | Content |
 |------|:----:|------|
-| `sword/ui_panel_sword.py` | 注释行 | `# bpy.context.view_layer...` — 被替代的旧实现保留为注释 |
-| `common/m_ini_helper.py` | 注释行 | 多处 `# [old approach]...` 风格的旧实现注释 |
+| `sword/ui_panel_sword.py` | comment lines | `# bpy.context.view_layer...` - a superseded old implementation kept as a comment |
+| `common/m_ini_helper.py` | comment lines | several `# [old approach]...` style legacy-implementation comments |
 
-## 修复方案
+## Fix Plan
 
-### 原则
+### Principles
 
-1. **注释掉的代码在 Git 时代没有保留价值** — Git 历史可以随时找回
-2. 如果确实需要标记"这里有个已知问题"，用 `# TODO:` 或 `# FIXME:` 并说明原因
-3. 调试用的 `# print(...)` 直接删除或用 `logging.debug()` 替代
+1. **Commented-out code has no value in the Git era** - Git history can recover it at any time
+2. If you really need to flag "there is a known problem here", use `# TODO:` or `# FIXME:` and state the reason
+3. Debug `# print(...)` statements: delete them outright or replace them with `logging.debug()`
 
-### 逐项处理
+### Item-by-Item Handling
 
-#### vertexgroup_utils.py 的 90 行注释代码
+#### The 90 Commented-Out Lines in vertexgroup_utils.py
 
-**方案**：直接删除。Git 历史中永久保留。
+**Approach**: delete outright. Git history keeps them forever.
 
 ```python
-# 修复前
+# Before the fix
 # def merge_vertex_groups_with_same_number(obj):
-#     '''合并同名顶点组...'''
-#     ...约 90 行...
+#     '''Merge vertex groups with the same name...'''
+#     ...about 90 lines...
 
-# 修复后
-# （删除全部 90 行注释代码）
+# After the fix
+# (delete all 90 lines of commented code)
 ```
 
-删除后文件从 ~230 行缩减到 ~140 行，可读性大幅提升。
+After the deletion the file shrinks from ~230 lines to ~140, and readability improves substantially.
 
-#### addon_updater_ops.py 的注释块
+#### The Commented Blocks in addon_updater_ops.py
 
-**方案**：直接删除。这些来自 Blender 更新器模板的默认注释，实际未被使用。
+**Approach**: delete outright. These are default comments from the Blender updater template and are not actually used.
 
 ```python
-# 修复前（1185-1236 行）
-# 删除以下注释块：
+# Before the fix (lines 1185-1236)
+# Delete the following commented blocks:
 #     # if not updater.update_ready:
 #     #     ...
 #     # if updater.invalid_updater:
 #     #     ...
 
-# 修复后
-# （删除所有注释掉的代码块）
+# After the fix
+# (delete all commented-out code blocks)
 ```
 
-#### 注释掉的 import
+#### Commented-Out Imports
 
 ```python
-# 修复前
+# Before the fix
 # import os
 
-# 修复后
-# （删除该行）
+# After the fix
+# (delete that line)
 ```
 
-#### obj_buffer_helper.py 的 TODO 注释
+#### The TODO Comment in obj_buffer_helper.py
 
 ```python
-# 修复前
-# TODO 这里类型截断错了吧
+# Before the fix
+# TODO This type truncation looks wrong
 
-# 修复后 — 转为正确格式
-# FIXME: 浮点数类型截断可能导致精度丢失，需要确认是否需要改为 round()
+# After the fix - convert it to the proper format
+# FIXME: Float truncation may cause precision loss; need to confirm whether it
+# should be changed to round()
 ```
 
-## 验证方法
+## How to Verify
 
-1. 全局搜索注释掉的代码模式：
+1. Search the whole project for commented-out-code patterns:
 ```bash
 grep -rn "^#\s*def " --include="*.py" d:\Dev\MIMIBlender
 grep -rn "^#\s*if " --include="*.py" d:\Dev\MIMIBlender
 grep -rn "^#\s*import " --include="*.py" d:\Dev\MIMIBlender
 ```
-2. 搜索 `# print(` 注释掉的调试输出：
+2. Search for commented-out debug output with `# print(`:
 ```bash
 grep -rn "# print(" --include="*.py" d:\Dev\MIMIBlender
 ```
 
-## 风险
+## Risks
 
-- **低**：删除注释代码不影响运行时行为
-- 唯一风险：如果注释掉的代码是某人正在进行的开发工作的草稿——但这种情况应该用 Git branch，不应该用注释
+- **Low**: deleting commented code does not affect runtime behavior
+- The only risk: the commented-out code may be the draft of someone's ongoing development work - but that situation belongs on a Git branch, not in comments

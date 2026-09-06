@@ -29,34 +29,34 @@ import numpy
 
 class ObjBufferHelper:
     '''
-    工具类，由于使用了抽象数据类型
-    所以归为Helper类中
+    Helper class: since abstract data types are used,
+    it is grouped under the Helper classes.
     '''
 
     @staticmethod
     def check_and_verify_attributes(obj:bpy.types.Object, d3d11_game_type:D3D11GameType):
         '''
-        校验并补全部分元素
+        Validate and fill in missing elements
         COLOR
-        TEXCOORD、TEXCOORD1、TEXCOORD2、TEXCOORD3
+        TEXCOORD, TEXCOORD1, TEXCOORD2, TEXCOORD3
         '''
         for d3d11_element_name in d3d11_game_type.OrderedFullElementList:
             d3d11_element = d3d11_game_type.ElementNameD3D11ElementDict[d3d11_element_name]
-            # 校验并补全所有COLOR的存在
+            # Validate and fill in every missing COLOR
             if d3d11_element_name.startswith(D3D11Semantic.COLOR):
                 color_coll = obj.data.color_attributes
                 if d3d11_element_name not in color_coll:
                     obj.data.color_attributes.new(name=d3d11_element_name, type='BYTE_COLOR', domain='CORNER')
-                    print("当前obj ["+ obj.name +"] 缺少游戏渲染所需的COLOR: ["+  D3D11Semantic.COLOR + "]，已自动补全")
+                    print("Current obj ["+ obj.name +"] is missing the game-rendering COLOR: ["+  D3D11Semantic.COLOR + "], already auto-completed")
             
-            # 校验TEXCOORD是否存在
+            # Check whether the TEXCOORD exists
             if d3d11_element_name.startswith(D3D11Semantic.TEXCOORD):
                 if d3d11_element_name + ".xy" not in obj.data.uv_layers:
-                    # 此时如果只有一个UV，则自动改名为TEXCOORD.xy
+                    # If there is only one UV at this point, rename it to TEXCOORD.xy
                     if len(obj.data.uv_layers) == 1 and d3d11_element_name == D3D11Semantic.TEXCOORD:
                             obj.data.uv_layers[0].name = d3d11_element_name + ".xy"
                     else:
-                        # 否则就自动补一个UV，防止后续calc_tangents失败
+                        # Otherwise, add a UV automatically so calc_tangents won't fail later
                         obj.data.uv_layers.new(name=d3d11_element_name + ".xy")
             
             # Check if BLENDINDICES exists
@@ -67,14 +67,14 @@ class ObjBufferHelper:
     @staticmethod
     def get_ordered_obj_models_by_draw_ib(ordered_draw_obj_data_model_list:list[DrawCallModel], draw_ib:str):
         '''
-        只返回指定draw_ib的obj列表
-        这个方法存在的目的是为了兼容鸣潮的MergedObj
-        这里只是根据IB获取一下对应的obj列表,不需要额外计算其它东西,因为WWMI的逻辑是融合后计算。
+        Return only the obj list that matches the given draw_ib
+        This method exists to support the MergedObj used by Wuthering Waves
+        It merely fetches the matching obj list by IB; nothing else needs computing, since WWMI calculates after merging.
         '''
         final_ordered_draw_obj_model_list:list[DrawCallModel] = []
 
         for obj_model in ordered_draw_obj_data_model_list:
-            # 只统计给定DrawIB的数据
+            # Keep only the data of the given DrawIB
             if obj_model.match_draw_ib != draw_ib:
                 continue
 
@@ -141,7 +141,7 @@ class ObjBufferHelper:
 
     @staticmethod
     def _parse_normal(mesh_loops, mesh_loops_length, d3d11_element, has_encoded_data=False):
-        # 统一获取法线数据
+        # Fetch the normal data uniformly
         normals = numpy.empty(mesh_loops_length * 3, dtype=numpy.float32)
         mesh_loops.foreach_get('normal', normals)
 
@@ -167,7 +167,7 @@ class ObjBufferHelper:
             return result
 
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_SNORM:
-            # WWMI 这里已经确定过NORMAL没问题
+            # WWMI: NORMAL has already been confirmed good here
 
             result = numpy.ones(mesh_loops_length * 4, dtype=numpy.float32)
             result[0::4] = normals[0::3]
@@ -186,12 +186,12 @@ class ObjBufferHelper:
 
 
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_UNORM:
-            # 因为法线数据是[-1,1]如果非要导出成UNORM，那一定是进行了归一化到[0,1]
+            # Since normal data is in [-1,1], if it must be exported as UNORM it must have been normalized to [0,1]
             
             result = numpy.ones(mesh_loops_length * 4, dtype=numpy.float32)
             
 
-            # 燕云十六声的最后一位w固定为0
+            # YYSLS: the last component w is fixed to 0
             if GlobalConfig.logic_name == LogicName.YYSLS:
                 result = numpy.zeros(mesh_loops_length * 4, dtype=numpy.float32)
                 
@@ -200,7 +200,7 @@ class ObjBufferHelper:
             result[2::4] = normals[2::3]
             result = result.reshape(-1, 4)
 
-            # 归一化 (此处感谢 球球 的代码开发)
+            # Normalize (thanks to QiuQiu for developing this code)
             def DeConvert(nor):
                 return (nor + 1) * 0.5
 
@@ -212,7 +212,7 @@ class ObjBufferHelper:
             return FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm(result)
 
         elif d3d11_element.Format == "R32_UINT" and GlobalConfig.logic_name == LogicName.EFMI:
-            print("终末地法线编码 - 使用 TBNCodec")
+            print("Endfield normal encoding - using TBNCodec")
             raw_normals = normals.reshape(-1, 3)
             tangents = numpy.empty(mesh_loops_length * 3, dtype=numpy.float32)
             mesh_loops.foreach_get("tangent", tangents)
@@ -231,7 +231,7 @@ class ObjBufferHelper:
             
             return new_normals
         else:
-            # 将一维数组 reshape 成 (mesh_loops_length, 3) 形状的二维数组
+            # Reshape the 1-D array into a 2-D array of shape (mesh_loops_length, 3)
             result = normals.reshape(-1, 3)
 
             return result
@@ -240,33 +240,33 @@ class ObjBufferHelper:
     def _parse_tangent(mesh_loops, mesh_loops_length, d3d11_element):
         result = numpy.empty(mesh_loops_length * 4, dtype=numpy.float32)
 
-        # 使用 foreach_get 批量获取切线和副切线符号数据
+        # Batch-fetch tangent and bitangent sign data with foreach_get
         tangents = numpy.empty(mesh_loops_length * 3, dtype=numpy.float32)
         mesh_loops.foreach_get("tangent", tangents)
 
-        # 将切线分量放置到输出数组中
-        result[0::4] = tangents[0::3]  # x 分量
-        result[1::4] = tangents[1::3]  # y 分量
-        result[2::4] = tangents[2::3]  # z 分量
+        # Place the components into the output array
+        result[0::4] = tangents[0::3]  # x component
+        result[1::4] = tangents[1::3]  # y component
+        result[2::4] = tangents[2::3]  # z component
 
         if GlobalConfig.logic_name == LogicName.YYSLS:
-            # 燕云十六声的TANGENT.w固定为1
+            # YYSLS: TANGENT.w is fixed to 1
             tangent_w = numpy.ones(mesh_loops_length, dtype=numpy.float32)
             result[3::4] = tangent_w
         elif GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
-            # Unreal引擎中这里要填写固定的1
+            # In the Unreal engine this must be set to a fixed 1
             tangent_w = numpy.ones(mesh_loops_length, dtype=numpy.float32)
             result[3::4] = tangent_w
         else:
-            # print("其它游戏翻转TANGENT的W分量")
-            # 默认就设置BITANGENT的W翻转，大部分Unity游戏都要用到
+            # print("Other games flip TANGENT's W component")
+            # By default, flip BITANGENT's W; most Unity games need this
             bitangent_signs = numpy.empty(mesh_loops_length, dtype=numpy.float32)
             mesh_loops.foreach_get("bitangent_sign", bitangent_signs)
-            # XXX 将副切线符号乘以 -1
-            # 这里翻转（翻转指的就是 *= -1）是因为如果要确保Unity游戏中渲染正确，必须翻转TANGENT的W分量
+            # XXX Multiply the bitangent sign by -1
+            # The flip here (flip means *= -1) is required for correct rendering in Unity games: TANGENT's W must be flipped
             bitangent_signs *= -1
-            result[3::4] = bitangent_signs  # w 分量 (副切线符号)
-        # 重塑 output_tangents 成 (mesh_loops_length, 4) 形状的二维数组
+            result[3::4] = bitangent_signs  # w component (bitangent sign)
+        # Reshape output_tangents into a 2-D array of shape (mesh_loops_length, 4)
         result = result.reshape(-1, 4)
 
         if d3d11_element.Format == 'R16G16B16A16_FLOAT':
@@ -279,17 +279,17 @@ class ObjBufferHelper:
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_UNORM:
             result = FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm(result)
         
-        # 第五人格格式
+        # IdentityV format
         elif d3d11_element.Format == D3D11Format.R32G32B32_FLOAT:
             result = numpy.empty(mesh_loops_length * 3, dtype=numpy.float32)
 
-            result[0::3] = tangents[0::3]  # x 分量
-            result[1::3] = tangents[1::3]  # y 分量
-            result[2::3] = tangents[2::3]  # z 分量
+            result[0::3] = tangents[0::3]  # x component
+            result[1::3] = tangents[1::3]  # y component
+            result[2::3] = tangents[2::3]  # z component
 
             result = result.reshape(-1, 3)
         
-        # 燕云十六声格式
+        # YYSLS format
         elif d3d11_element.Format == D3D11Format.R16G16B16A16_SNORM:
             result = FormatUtils.convert_4x_float32_to_r16g16b16a16_snorm(result)
         
@@ -299,26 +299,26 @@ class ObjBufferHelper:
     def _parse_binormal(mesh_loops, mesh_loops_length, d3d11_element):
         result = numpy.empty(mesh_loops_length * 4, dtype=numpy.float32)
 
-        # 使用 foreach_get 批量获取切线和副切线符号数据
+        # Batch-fetch tangent and bitangent sign data with foreach_get
         binormals = numpy.empty(mesh_loops_length * 3, dtype=numpy.float32)
         mesh_loops.foreach_get("bitangent", binormals)
         
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
-            # 鸣潮逆向翻转：Binormal (-x, -y, z)
+            # Wuthering Waves reverse flip: Binormal (-x, -y, z)
             binormals[0::3] *= -1
             binormals[1::3] *= -1
 
-        # 将切线分量放置到输出数组中
-        # BINORMAL全部翻转即可得到和YYSLS游戏中一样的效果。
-        result[0::4] = binormals[0::3]  # x 分量
-        result[1::4] = binormals[1::3]   # y 分量
-        result[2::4] = binormals[2::3]  # z 分量
+        # Place the components into the output array
+        # Flipping BINORMAL entirely yields the same effect as in the YYSLS game.
+        result[0::4] = binormals[0::3]  # x component
+        result[1::4] = binormals[1::3]   # y component
+        result[2::4] = binormals[2::3]  # z component
         binormal_w = numpy.ones(mesh_loops_length, dtype=numpy.float32)
         result[3::4] = binormal_w
         result = result.reshape(-1, 4)
 
         if d3d11_element.Format == D3D11Format.R16G16B16A16_SNORM:
-            #  燕云十六声格式
+            #  YYSLS format
             result = FormatUtils.convert_4x_float32_to_r16g16b16a16_snorm(result)
             
         return result
@@ -332,7 +332,7 @@ class ObjBufferHelper:
             color_data = None
 
         if color_data is not None:
-            # Blender 颜色层读取接口统一返回 0-1 的 RGBA 浮点值，这里按 float32 处理中间结果。
+            # Blender's color-layer read API always returns 0-1 RGBA floats; handle the intermediate result as float32 here.
             result = numpy.zeros(mesh_loops_length, dtype=(numpy.float32, 4))
             # result = numpy.zeros((mesh_loops_length,4), dtype=(numpy.float32))
 
@@ -341,12 +341,12 @@ class ObjBufferHelper:
             if d3d11_element.Format == 'R16G16B16A16_FLOAT':
                 result = result.astype(numpy.float16)
             elif d3d11_element.Format == "R16G16_UNORM":
-                # 鸣潮的平滑法线存UV，在WWMI中的处理方式是转为R16G16_UNORM。
-                # 但是这里很可能存在转换问题。
+                # Wuthering Waves stores smooth normals in UV; WWMI converts them to R16G16_UNORM.
+                # However, there may well be a conversion issue here.
                 result = result.astype(numpy.float16)
                 result = result[:, :2]
                 result = FormatUtils.convert_2x_float32_to_r16g16_unorm(result)
-            # TODO 添加八面体压缩法线到R32_UINT的代码
+            # TODO add code for octahedral-compressed normals stored as R32_UINT
 
             elif d3d11_element.Format == "R16G16_FLOAT":
                 # 
@@ -373,7 +373,7 @@ class ObjBufferHelper:
                 if d3d11_element.Format == D3D11Format.R16G16_FLOAT:
                     uvs_array = uvs_array.astype(numpy.float16)
                 
-                # 重塑 uvs_array 成 (mesh_loops_length, 2) 形状的二维数组
+                # Reshape uvs_array into a 2-D array of shape (mesh_loops_length, 2)
                 # uvs_array = uvs_array.reshape(-1, 2)
 
                 result = uvs_array 
@@ -384,11 +384,11 @@ class ObjBufferHelper:
     def _parse_blendindices(blendindices_dict, d3d11_element):
         blendindices = blendindices_dict.get(d3d11_element.SemanticIndex,None)
         # print("blendindices: " + str(len(blendindices_dict)))
-        # 如果当前索引对应的 blendindices 为 None，则使用索引0的数据并全部置0
+        # If blendindices for the current index is None, use index 0's data and zero it all out
         if blendindices is None:
             blendindices_0 = blendindices_dict.get(0, None)
             if blendindices_0 is not None:
-                # 创建一个与 blendindices_0 形状相同的全0数组，保持相同的数据类型
+                # Create an all-zero array with the same shape as blendindices_0, keeping the same data type
                 blendindices = numpy.zeros_like(blendindices_0)
             else:
                 SSMTErrorUtils.raise_fatal("Cannot find any valid BLENDINDICES data in this model, Please check if your model's Vertex Group is correct.")
@@ -412,21 +412,21 @@ class ObjBufferHelper:
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_UNORM:
             return FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm(blendindices)
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_UINT:
-            # R8G8B8A8_UINT: 4 个 uint8 打包。
-            # 若 max_index >= 256 则保持原始 dtype，依赖 replace_remapped_blendindices
-            # 将其重映射到 0-255 后再赋值给 uint8 字段。
+            # R8G8B8A8_UINT: 4 packed uint8 values.
+            # If max_index >= 256, keep the original dtype and rely on replace_remapped_blendindices
+            # to remap them into 0-255 before assigning to the uint8 field.
             max_index = numpy.max(blendindices)
             if max_index > 255:
-                print("BLENDINDICES大于255了,最大值是：" + str(max_index) + "，保持原始类型，依赖 blend remap 重映射")
+                print("BLENDINDICES exceeds 255, max value: " + str(max_index) + "; keeping the original type, relying on blend remap to remap")
             else:
                 if blendindices.dtype != numpy.uint8:
                     blendindices = blendindices.astype(numpy.uint8)
             return blendindices
         elif d3d11_element.Format == "R8_UINT":
-            # R8_UINT: 多个独立的 uint8 值，ByteWidth 决定 VG 数量。
+            # R8_UINT: multiple independent uint8 values; ByteWidth decides the number of VGs.
             max_index = numpy.max(blendindices)
             if max_index > 255:
-                print("BLENDINDICES大于255了,最大值是：" + str(max_index) + "，保持原始类型，依赖 blend remap 重映射")
+                print("BLENDINDICES exceeds 255, max value: " + str(max_index) + "; keeping the original type, relying on blend remap to remap")
             else:
                 format_len = int(d3d11_element.ByteWidth / numpy.dtype(numpy.uint8).itemsize)
                 if blendindices.dtype != numpy.uint8:
@@ -434,26 +434,26 @@ class ObjBufferHelper:
                 else:
                     blendindices = blendindices[:, :format_len]
                 return blendindices
-            # max_index > 255, 保持原始全部列返回，让 remap 处理
+            # max_index > 255: keep and return all original columns; let remap handle it
             return blendindices
         elif d3d11_element.Format == "R16_UINT":
-            # R16_UINT: 多个独立的 uint16 值。
+            # R16_UINT: multiple independent uint16 values.
             if blendindices.dtype != numpy.uint16:
                 blendindices = blendindices.astype(numpy.uint16)
             format_len = int(d3d11_element.ByteWidth / numpy.dtype(numpy.uint16).itemsize)
             return blendindices[:, :format_len]
         else:
             # print(blendindices.shape)
-            SSMTErrorUtils.raise_fatal("未知的BLENDINDICES格式")
+            SSMTErrorUtils.raise_fatal("Unknown BLENDINDICES format")
 
     @staticmethod
     def _parse_blendweight(blendweights_dict, d3d11_element):
         blendweights = blendweights_dict.get(d3d11_element.SemanticIndex, None)
         if blendweights is None:
-            # print("遇到了为None的情况！")
+            # print("Encountered the None case!")
             blendweights_0 = blendweights_dict.get(0, None)
             if blendweights_0 is not None:
-                # 创建一个与 blendweights_0 形状相同的全0数组，保持相同的数据类型
+                # Create an all-zero array with the same shape as blendweights_0, keeping the same data type
                 blendweights = numpy.zeros_like(blendweights_0)
             else:
                 SSMTErrorUtils.raise_fatal("Cannot find any valid BLENDWEIGHT data in this model, Please check if your model's Vertex Group is correct.")
@@ -473,22 +473,22 @@ class ObjBufferHelper:
         elif d3d11_element.Format == 'R16G16B16A16_UNORM':
             return FormatUtils.convert_4x_float32_to_r16g16b16a16_unorm(blendweights)
         elif d3d11_element.Format == "R8_UNORM" and d3d11_element.ByteWidth == 8:
-            # TimerUtils.Start("WWMI BLENDWEIGHT R8_UNORM特殊处理")
+            # TimerUtils.Start("WWMI BLENDWEIGHT R8_UNORM special handling")
             blendweights = FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm_blendweights(blendweights)
             # original_elementname_data_dict[d3d11_element_name] = blendweights
-            print("WWMI R8_UNORM特殊处理")
-            # TimerUtils.End("WWMI BLENDWEIGHT R8_UNORM特殊处理")
+            print("WWMI R8_UNORM special handling")
+            # TimerUtils.End("WWMI BLENDWEIGHT R8_UNORM special handling")
             return blendweights
 
         else:
             print(blendweights.shape)
-            SSMTErrorUtils.raise_fatal("未知的BLENDWEIGHTS格式")
+            SSMTErrorUtils.raise_fatal("Unknown BLENDWEIGHTS format")
 
     @staticmethod
     def parse_elementname_data_dict(mesh:bpy.types.Mesh, d3d11_game_type:D3D11GameType):
         '''
-        - 注意这里是从mesh.loops中获取数据，而不是从mesh.vertices中获取数据
-        - 所以后续使用的时候要用mesh.loop里的索引来进行获取数据
+        - Note: data here is fetched from mesh.loops, not from mesh.vertices
+        - So later code must use the mesh.loop indices to fetch data
         '''
 
         original_elementname_data_dict: dict = {}
@@ -501,7 +501,7 @@ class ObjBufferHelper:
         loop_vertex_indices = numpy.empty(mesh_loops_length, dtype=int)
         mesh_loops.foreach_get("vertex_index", loop_vertex_indices)
 
-        # 预设的权重个数，也就是每个顶点组受多少个权重影响
+        # Preset number of weights, i.e. how many weights affect each vertex
         blend_size = 4
 
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
@@ -511,20 +511,20 @@ class ObjBufferHelper:
 
         # normalize_weights = False
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
-            # print("鸣潮专属测试版权重处理：")
+            # print("Wuthering Waves test-only weight handling:")
             blendweights_dict, blendindices_dict = VertexGroupUtils.get_blendweights_blendindices_v4_fast(mesh=mesh,normalize_weights = normalize_weights,blend_size=blend_size)
 
         elif GlobalConfig.logic_name == LogicName.SnowBreak:
-            print("尘白禁区权重处理")
+            print("SnowBreak weight processing")
             blendweights_dict, blendindices_dict = VertexGroupUtils.get_blendweights_blendindices_v4_fast(mesh=mesh,normalize_weights = normalize_weights,blend_size=blend_size)
         else:
             blendweights_dict, blendindices_dict = VertexGroupUtils.get_blendweights_blendindices_v3(mesh=mesh,normalize_weights = normalize_weights)
 
 
-        # 检查是否存在 ENCODEDDATA 元素 (用于 EFMI 格式的 TBN 编码)
+        # Check whether an ENCODEDDATA element exists (used for EFMI's TBN encoding)
         has_encoded_data = 'ENCODEDDATA' in d3d11_game_type.ElementNameD3D11ElementDict
 
-        # 对每一种Element都获取对应的数据
+        # Fetch the corresponding data for every element
         for d3d11_element_name in d3d11_game_type.OrderedFullElementList:
             d3d11_element = d3d11_game_type.ElementNameD3D11ElementDict[d3d11_element_name]
             
@@ -581,7 +581,7 @@ class ObjBufferHelper:
             #     if GlobalConfig.logic_name == LogicName.EFMI:
             #         data = ObjBufferHelper._parse_encoded_tbn(mesh_loops, mesh_loops_length, d3d11_element)
             #     else:
-            #         print(f"警告: ENCODEDDATA 元素仅在 EFMI 格式中支持，当前游戏类型: {GlobalConfig.logic_name}")
+            #         print(f"Warning: ENCODEDDATA is only supported in the EFMI format; current game type: {GlobalConfig.logic_name}")
             #         data = None
 
             if data is not None:
@@ -615,7 +615,7 @@ class ObjBufferHelper:
                 # can diagnose than to silently write zeros for an expected
                 # element (which would corrupt downstream buffers).
                 SSMTErrorUtils.raise_fatal(f"Missing element data for '{d3d11_element_name}' when packing vertex ndarray")
-            print("尝试赋值 Element: " + d3d11_element_name)
+            print("Attempting to assign Element: " + d3d11_element_name)
             element_vertex_ndarray[d3d11_element_name] = data
         
         return element_vertex_ndarray
@@ -628,10 +628,10 @@ class ObjBufferHelper:
         dtype:numpy.dtype,
         d3d11_game_type:D3D11GameType):
         '''
-        - 用 numpy 将结构化顶点视图为一行字节，避免逐顶点 bytes() 与 dict 哈希。
-        - 使用 numpy.unique(..., axis=0, return_index=True, return_inverse=True) 在 C 层完成唯一化与逆映射。
-        - 仅在构建 per-polygon IB 时使用少量 Python 切片，整体效率大幅提高。
-        - 当 structured dtype 非连续时，内部会做一次拷贝（ascontiguousarray）；通常开销小于逐顶点哈希开销。
+        - Use numpy to view the structured vertices as rows of bytes, avoiding per-vertex bytes() calls and dict hashing.
+        - numpy.unique(..., axis=0, return_index=True, return_inverse=True) deduplicates and builds the inverse mapping at the C level.
+        - Only a little Python slicing is used when building the per-polygon IB, greatly improving overall efficiency.
+        - When the structured dtype is not contiguous, one internal copy (ascontiguousarray) is made; usually cheaper than per-vertex hashing.
         '''
 
         # (1) loop -> vertex mapping
@@ -640,7 +640,7 @@ class ObjBufferHelper:
         loop_vertex_indices = numpy.empty(n_loops, dtype=int)
         loops.foreach_get("vertex_index", loop_vertex_indices)
 
-        # (2) 将 element_vertex_ndarray 保证为连续，并视为 (n_loops, row_bytes) uint8 矩阵
+        # (2) Ensure element_vertex_ndarray is contiguous and view it as an (n_loops, row_bytes) uint8 matrix
         vb = numpy.ascontiguousarray(element_vertex_ndarray)
         row_size = vb.dtype.itemsize
         try:
@@ -723,16 +723,16 @@ class ObjBufferHelper:
         # Expose for downstream use: structure-aligned unique vertex records
         # self.unique_element_vertex_ndarray = unique_element_vertex_ndarray
 
-        # 构建 index -> original vertex id（使用每个 unique 行的第一个 loop 对应的 vertex）
+        # Build index -> original vertex id (from the vertex of each unique row's first loop)
         original_vertex_ids = loop_vertex_indices[unique_first_indices_insertion]
         index_vertex_id_dict = dict(enumerate(original_vertex_ids.astype(int).tolist()))
 
-        # (4) 为每个 polygon 构建 IB（使用 inverse 映射）
+        # (4) Build the IB for every polygon (via the inverse mapping)
         # inverse is already ordered by loops; concatenating polygon slices in
         # polygon order is equivalent to taking inverse in sequence.
         flattened_ib_arr = inverse.astype(numpy.int32)
 
-        # (5) 按 category 从 unique_rows 切分 bytes 序列
+        # (5) Slice the byte stream per category from unique_rows
         category_stride_dict = d3d11_game_type.get_real_category_stride_dict()
         category_buffer_dict = {}
         stride_offset = 0
@@ -740,8 +740,8 @@ class ObjBufferHelper:
             category_buffer_dict[cname] = unique_rows[:, stride_offset:stride_offset + cstride].flatten()
             stride_offset += cstride
 
-        # (6) 翻转三角形方向（高效）
-        # 鸣潮需要翻转这一下
+        # (6) Flip triangle winding (efficient)
+        # Wuthering Waves needs this flip
         flat_arr = flattened_ib_arr
         if flat_arr.size % 3 == 0:
             flipped = flat_arr.reshape(-1, 3)[:, ::-1].flatten().tolist()
@@ -760,7 +760,7 @@ class ObjBufferHelper:
     @staticmethod
     def average_normal_color(obj,indexed_vertices,d3d11_game_type:D3D11GameType,dtype):
         '''
-        Nico: 算数平均归一化法线，HI3 2.0角色使用的方法
+        Nico: arithmetic-average normalized normals; the method used by HI3 2.0 characters
         '''
         if D3D11Semantic.COLOR not in d3d11_game_type.OrderedFullElementList:
             return indexed_vertices
@@ -772,53 +772,53 @@ class ObjBufferHelper:
         if not allow_calc:
             return indexed_vertices
 
-        # 开始重计算COLOR
+        # Start recalculating COLOR
         TimerUtils.Start("Recalculate COLOR")
 
-        # 不用担心这个转换的效率，速度非常快
+        # No need to worry about the efficiency of this conversion; it is very fast
         vb = bytearray()
         for vertex in indexed_vertices:
             vb += bytes(vertex)
         vb = numpy.frombuffer(vb, dtype = dtype)
 
-        # 首先提取所有唯一的位置，并创建一个索引映射
+        # First extract all unique positions and create an index mapping
         unique_positions, position_indices = numpy.unique(
             [tuple(val['POSITION']) for val in vb], 
             return_inverse=True, 
             axis=0
         )
 
-        # 初始化累积法线和计数器为零
+        # Initialize the accumulated normals and counters to zero
         accumulated_normals = numpy.zeros((len(unique_positions), 3), dtype=float)
         counts = numpy.zeros(len(unique_positions), dtype=int)
 
-        # 累加法线并增加计数（这里假设vb是一个list）
+        # Accumulate normals and increment the counters (vb is assumed to be a list here)
         for i, val in enumerate(vb):
             accumulated_normals[position_indices[i]] += numpy.array(val['NORMAL'], dtype=float)
             counts[position_indices[i]] += 1
 
-        # 对所有位置的法线进行一次性规范化处理
+        # Normalize the normals of all positions in one pass
         mask = counts > 0
         average_normals = numpy.zeros_like(accumulated_normals)
         average_normals[mask] = (accumulated_normals[mask] / counts[mask][:, None])
 
-        # 归一化到[0,1]，然后映射到颜色值
+        # Normalize into [0,1], then map to color values
         normalized_normals = ((average_normals + 1) / 2 * 255).astype(numpy.uint8)
 
-        # 更新颜色信息
+        # Update the color data
         new_color = []
         for i, val in enumerate(vb):
-            color = [0, 0, 0, val['COLOR'][3]]  # 保留原来的Alpha通道
+            color = [0, 0, 0, val['COLOR'][3]]  # Preserve the original Alpha channel
             
             if mask[position_indices[i]]:
                 color[:3] = normalized_normals[position_indices[i]]
 
             new_color.append(color)
 
-        # 将新的颜色列表转换为NumPy数组
+        # Convert the new color list into a NumPy array
         new_color_array = numpy.array(new_color, dtype=numpy.uint8)
 
-        # 更新vb中的颜色信息
+        # Update the color data in vb
         for i, val in enumerate(vb):
             val['COLOR'] = new_color_array[i]
 
@@ -853,9 +853,9 @@ class ObjBufferHelper:
     @staticmethod
     def average_normal_tangent(obj,indexed_vertices,d3d11_game_type,dtype):
         '''
-        Nico: 米游所有游戏都能用到这个，还有曾经的GPU-PreSkinning的GF2也会用到这个，崩坏三2.0新角色除外。
-        尽管这个可以起到相似的效果，但是仍然无法完美获取模型本身的TANGENT数据，只能做到身体轮廓线99%近似。
-        经过测试，头发轮廓线部分并不是简单的向量归一化，也不是算术平均归一化。
+        Nico: every miHoYo/HoYoverse game can use this, as can the old GPU-PreSkinning GF2; except HI3 2.0's new characters.
+        Although it can achieve a similar effect, it still cannot perfectly recover the model's own TANGENT data; body outlines only reach about 99% similarity.
+        Tests show that hair outlines are neither a simple vector normalization nor an arithmetic-average normalization.
         '''
         # TimerUtils.Start("Recalculate TANGENT")
 
@@ -870,46 +870,46 @@ class ObjBufferHelper:
         if not allow_calc:
             return indexed_vertices
         
-        # 不用担心这个转换的效率，速度非常快
+        # No need to worry about the efficiency of this conversion; it is very fast
         vb = bytearray()
         for vertex in indexed_vertices:
             vb += bytes(vertex)
         vb = numpy.frombuffer(vb, dtype = dtype)
 
-        # 开始重计算TANGENT
+        # Start recalculating TANGENT
         positions = numpy.array([val['POSITION'] for val in vb])
         normals = numpy.array([val['NORMAL'] for val in vb], dtype=float)
 
-        # 对位置进行排序，以便相同的位置会相邻
+        # Sort the positions so that identical positions end up adjacent
         sort_indices = numpy.lexsort(positions.T)
         sorted_positions = positions[sort_indices]
         sorted_normals = normals[sort_indices]
 
-        # 找出位置变化的地方，即我们需要分组的地方
+        # Find where the position changes, i.e. where we need to split groups
         group_indices = numpy.flatnonzero(numpy.any(sorted_positions[:-1] != sorted_positions[1:], axis=1))
         group_indices = numpy.r_[0, group_indices + 1, len(sorted_positions)]
 
-        # 累加法线和计算计数
+        # Accumulate normals and compute the counts
         unique_positions = sorted_positions[group_indices[:-1]]
         accumulated_normals = numpy.add.reduceat(sorted_normals, group_indices[:-1], axis=0)
         counts = numpy.diff(group_indices)
 
-        # 归一化累积法线向量
+        # Normalize the accumulated normal vectors
         normalized_normals = accumulated_normals / numpy.linalg.norm(accumulated_normals, axis=1)[:, numpy.newaxis]
-        normalized_normals[numpy.isnan(normalized_normals)] = 0  # 处理任何可能出现的零向量导致的除零错误
+        normalized_normals[numpy.isnan(normalized_normals)] = 0  # Handle division-by-zero errors that any zero vector could cause
 
-        # 构建结果字典
+        # Build the result dictionary
         position_normal_dict = dict(zip(map(tuple, unique_positions), normalized_normals))
 
         # TimerUtils.End("Recalculate TANGENT")
 
-        # 获取所有位置并转换为元组，用于查找字典
+        # Fetch all positions and convert them to tuples for dictionary lookup
         positions = [tuple(pos) for pos in vb['POSITION']]
 
-        # 从字典中获取对应的标准化法线
+        # Fetch the matching normalized normals from the dictionary
         normalized_normals = numpy.array([position_normal_dict[pos] for pos in positions])
 
-        # 计算 w 并调整 tangent 的第四个分量
+        # Compute w and adjust the tangent's fourth component
         tangent_dtype = vb['TANGENT'].dtype
         tangent_values = ObjBufferHelper._decode_normalized_field(vb['TANGENT'])
         w = numpy.where(tangent_values[:, 3] >= 0, -1.0, 1.0)
@@ -924,8 +924,8 @@ class ObjBufferHelper:
     @staticmethod
     def average_normal_tangent_xxmi(obj, indexed_vertices, flattened_ib, d3d11_game_type, dtype, rounding_precision: int = 4):
         '''
-        使用 XXMI 的角度加权 outline 思路重计算 TANGENT.xyz。
-        这里只替换 xyz，w 仍保持当前导出路径的处理习惯。
+        Recalculate TANGENT.xyz with XXMI's angle-weighted outline approach.
+        Only xyz is replaced here; w keeps the handling convention of the current export path.
         '''
         if D3D11Semantic.TANGENT not in d3d11_game_type.OrderedFullElementList:
             return indexed_vertices
@@ -1032,16 +1032,16 @@ class ObjBufferHelper:
     @staticmethod
     def calc_index_vertex_buffer_universal(element_vertex_ndarray,mesh,obj,d3d11_game_type,dtype):
         '''
-        计算IndexBuffer和CategoryBufferDict并返回
+        Compute the IndexBuffer and CategoryBufferDict and return them
 
-        这里是速度瓶颈，23万顶点情况下测试，前面的获取mesh数据只用了1.5秒
-        但是这里两个步骤加起来用了6秒，占了4/5运行时间。
-        不过暂时也够用了，先不管了。
+        This is the speed bottleneck: tested with 230k vertices, fetching the mesh data took only 1.5 s
+        but these two steps together take 6 s, about 4/5 of the total runtime.
+        It is sufficient for now, so leave it alone.
         '''
         # TimerUtils.Start("Calc IB VB")
-        # (1) 统计模型的索引和唯一顶点
+        # (1) Deduplicate the model's vertices and build the index list
         '''
-        不保持相同顶点时，仍然使用经典而又快速的方法
+        When identical vertices do not need to be preserved, still use the classic, fast approach
         '''
         # print("calc ivb universal")
         indexed_vertices = collections.OrderedDict()
@@ -1052,7 +1052,7 @@ class ObjBufferHelper:
         flattened_ib = [item for sublist in ib for item in sublist]
         # TimerUtils.End("Calc IB VB")
 
-        # 重计算TANGENT步骤
+        # Recalculate TANGENT step
         indexed_vertices = ObjBufferHelper.average_normal_tangent_xxmi(
             obj=obj,
             indexed_vertices=indexed_vertices,
@@ -1061,13 +1061,13 @@ class ObjBufferHelper:
             dtype=dtype,
         )
         
-        # 重计算COLOR步骤
+        # Recalculate COLOR step
         indexed_vertices = ObjBufferHelper.average_normal_color(obj=obj, indexed_vertices=indexed_vertices, d3d11_game_type=d3d11_game_type,dtype=dtype)
 
         # print("indexed_vertices:")
         # print(str(len(indexed_vertices)))
 
-        # (2) 转换为CategoryBufferDict
+        # (2) Convert to CategoryBufferDict
         # TimerUtils.Start("Calc CategoryBuffer")
         category_stride_dict = d3d11_game_type.get_real_category_stride_dict()
         category_buffer_dict:dict[str,list] = {}
@@ -1082,7 +1082,7 @@ class ObjBufferHelper:
 
         ib = flattened_ib
         if GlobalConfig.logic_name == LogicName.YYSLS:
-            print("导出时翻转面朝向")
+            print("Flipping face winding during export")
 
             flipped_indices = []
             # print(flattened_ib[0],flattened_ib[1],flattened_ib[2])
@@ -1109,23 +1109,23 @@ class ObjBufferHelper:
         d3d11_game_type:D3D11GameType,
         dtype:numpy.dtype):
         '''
-        [特殊模式：少前2专用] 强制索引对齐模式
+        [Special mode: Girls' Frontline 2 (GF2) only] Forced index-alignment mode
         --------------------------------------------------
-        核心逻辑：
-        - 强制保持 "游戏引擎顶点数" == "Blender顶点数"。
-        - 忽略硬边、UV缝隙导致的数据分裂，强制合并。
+        Core logic:
+        - Force "game engine vertex count" == "Blender vertex count".
+        - Ignore splits caused by hard edges and UV seams; merge them forcibly.
         
-        适用场景：
-        - 少前2等特殊渲染管线，或者模型已经预先处理过（所有硬边/UV缝隙确实就是物理断开的顶点）。
-        - 这种模式下生成 ShapeKey 极其简单，因为索引是一一对应的。
+        Use cases:
+        - GF2's special render pipeline, or models that are already preprocessed (where every hard edge/UV seam truly is a physically split vertex).
+        - Generating ShapeKeys is extremely simple in this mode, since indices are one-to-one.
         
-        缺点：
-        - 如果模型存在硬边或UV接缝，数据会被覆盖（合并），可能导致渲染错误（如法线平滑过度、UV错乱）。
+        Drawbacks:
+        - If the model has hard edges or UV seams, data is overwritten (merged), which may cause rendering errors (e.g. over-smoothed normals, broken UVs).
         
-        1. Blender 的“顶点数”= mesh.vertices 长度，只要位置不同就算一个。
-        2. 我们预分配同样长度的盒子列表，盒子下标 == 顶点下标，保证一一对应。
-        3. 遍历 loop 时，把真实数据写进对应盒子；没人引用的盒子留 dummy（坐标填对，其余 0）。
-        4. 最后按盒子顺序打包成字节数组，长度必然与 mesh.vertices 相同，导出数就能和 Blender 状态栏完全一致。
+        1. Blender's "vertex count" = len(mesh.vertices); any position difference counts as a separate vertex.
+        2. Pre-allocate a slot list of the same length; slot index == vertex index, guaranteeing a one-to-one mapping.
+        3. While iterating loops, write the real data into the matching slot; slots no loop references keep a dummy (coordinates set correctly, everything else 0).
+        4. Finally, pack the slots in order into a byte array; its length necessarily equals len(mesh.vertices), so the exported count matches Blender's status bar exactly.
         '''
         print("calc ivb gf2")
 
@@ -1134,20 +1134,20 @@ class ObjBufferHelper:
         loop_vidx = numpy.empty(len(loops), dtype=int)
         loops.foreach_get("vertex_index", loop_vidx)
 
-        # 1. 预分配：每条 Blender 顶点一条记录，先填“空”
+        # 1. Pre-allocate one record per Blender vertex, starting with an "empty" record
         dummy = numpy.zeros(1, dtype=element_vertex_ndarray.dtype)
         vertex_buffer = [dummy.copy() for _ in range(v_cnt)]   # list[ndarray]
-        # 2. 标记哪些顶点被 loop 真正用到
+        # 2. Mark which vertices are actually referenced by loops
         used_mask = numpy.zeros(v_cnt, dtype=bool)
         used_mask[loop_vidx] = True
 
-        # 3. 共享 TANGENT 字典
+        # 3. Shared TANGENT dictionary
         pos_normal_key = {}   # (position_tuple, normal_tuple) -> tangent
 
-        # 4. 先给“被用到”的顶点填真实数据
+        # 4. First fill the "used" vertices with real data
         for lp in loops:
             v_idx = lp.vertex_index
-            if used_mask[v_idx]:          # 其实恒为 True，留着可读性
+            if used_mask[v_idx]:          # always True in practice; kept for readability
                 data = element_vertex_ndarray[lp.index].copy()
                 pn_key = (tuple(data['POSITION']), tuple(data['NORMAL']))
                 if pn_key in pos_normal_key:
@@ -1156,16 +1156,16 @@ class ObjBufferHelper:
                     pos_normal_key[pn_key] = data['TANGENT']
                 vertex_buffer[v_idx] = data
 
-        # 5. 给“死顶点”也填上 dummy，但位置必须对
+        # 5. Give "dead" vertices a dummy as well, but their positions must be right
         for v_idx in range(v_cnt):
             if not used_mask[v_idx]:
                 vertex_buffer[v_idx]['POSITION'] = mesh.vertices[v_idx].co
-                # 其余字段保持 0
+                # Keep the remaining fields at 0
 
-        # 6. 现在 vertex_buffer 长度 == v_cnt，直接转 bytes 即可
+        # 6. Now vertex_buffer's length == v_cnt; just convert it to bytes
         indexed_vertices = [arr.tobytes() for arr in vertex_buffer]
 
-        # 7. 重建索引缓冲（IB）
+        # 7. Rebuild the index buffer (IB)
         ib = []
         for poly in mesh.polygons:
             ib.append([v_idx for lp in loops[poly.loop_start:poly.loop_start + poly.loop_total]
@@ -1173,7 +1173,7 @@ class ObjBufferHelper:
 
         flattened_ib = [i for sub in ib for i in sub]
 
-        # 8. 拆 CategoryBuffer
+        # 8. Split into CategoryBuffers
         category_stride_dict = d3d11_game_type.get_real_category_stride_dict()
         category_buffer_dict = {name: [] for name in d3d11_game_type.CategoryStrideDict}
         data_matrix = numpy.array([numpy.frombuffer(b, dtype=numpy.uint8) for b in indexed_vertices])
@@ -1182,7 +1182,7 @@ class ObjBufferHelper:
             category_buffer_dict[name] = data_matrix[:, stride_offset:stride_offset + stride].flatten()
             stride_offset += stride
 
-        # print("长度：", v_cnt)          
+        # print("length:", v_cnt)          
         ib = flattened_ib
         index_vertex_id_dict = None
 
@@ -1198,34 +1198,34 @@ class ObjBufferHelper:
         d3d11_game_type:D3D11GameType,
         dtype:numpy.dtype):
         '''
-        [通用模式] 标准图形学导出逻辑
+        [Universal mode] Standard graphics export logic
         --------------------------------------------------
-        核心逻辑：
-        - 以 "(数据内容 + Blender原始顶点索引)" 作为唯一标识。
-        - 自动处理硬边、UV缝隙：如果同一个顶点在不同 Loop 上的法线/UV不同，会自动分裂成多个游戏顶点。
-        - 自动处理 ShapeKey 安全：即使两个点坐标重合，只要 Blender 索引不同，就不会合并。
+        Core logic:
+        - Treat "(data content + Blender original vertex index)" as the unique key.
+        - Handle hard edges and UV seams automatically: if a vertex's normals/UVs differ across loops, it is automatically split into multiple game vertices.
+        - Handle ShapeKey safety automatically: even if two points share coordinates, they are never merged as long as their Blender indices differ.
         
-        适用场景：
-        - 绝大多数现代游戏的标准导出流程。
-        - 保证渲染正确性（法线、UV、顶点色）。
+        Use cases:
+        - The standard export pipeline of the vast majority of modern games.
+        - Guarantees rendering correctness (normals, UVs, vertex colors).
         
-        代价：
-        - 导出的顶点数通常多于 Blender 顶点数（因为分裂）。
-        - 需要返回 index_vertex_id_dict 映射表，以便后续生成 ShapeKey Buffer 时能找回原始对应关系。
+        Cost:
+        - The exported vertex count usually exceeds Blender's vertex count (because of splitting).
+        - An index_vertex_id_dict mapping is returned so the original correspondence can be recovered when generating the ShapeKey Buffer later.
 
-        计算IndexBuffer和CategoryBufferDict并返回
-        如果模型具有形态键，那么形态键盘的值为0到1的任何值应用后，都不会造成由于顶点合并导致的顶点数改变。
+        Compute the IndexBuffer and CategoryBufferDict and return them
+        If the model has Shape Keys, applying any Shape Key value between 0 and 1 never changes the vertex count due to vertex merging.
         '''
         # TimerUtils.Start("Calc IB VB")
         
-        # 统一逻辑：始终将 (数据 + 顶点索引) 作为唯一标识
-        # 1. 彻底解决 ShapeKey 问题：防止 Basis 中重合但在 Morph 中分离的顶点被错误合并。
-        # 2. 保持拓扑结构：确保 Blender 中不同的点导出后依然是不同的点。
+        # Unified logic: always treat (data + vertex index) as the unique key
+        # 1. Fully solve the ShapeKey problem: prevent vertices that coincide in the Basis but separate in Morphs from being wrongly merged.
+        # 2. Keep the topology: ensure points that differ in Blender still differ after export.
         unique_map = collections.OrderedDict()
         
         # KEY: unique_vertex_index (buffer index), VALUE: first_loop_index
-        # 记录每一个生成的 Buffer 顶点对应的是哪一个原始 Loop
-        # 这对于 Shape Key 的法线导出至关重要，因为法线是存储在 Loop 上的
+        # Record which original Loop each generated Buffer vertex maps to
+        # This is critical for Shape Key normal export, since normals are stored on Loops
         unique_loop_map = {} 
 
         ib = []
@@ -1235,8 +1235,8 @@ class ObjBufferHelper:
                 loop = mesh.loops[loop_index]
                 data = element_vertex_ndarray[loop.index].tobytes()
                 
-                # 核心：Key 始终包含 vertex_index (data, index)
-                # 这样只有当 "数据完全一致" 且 "是同一个顶点(仅因硬边/UV断开)" 时才会共用索引
+                # Core: the Key always includes the vertex_index (data, index)
+                # Thus an index is shared only when "the data is fully identical" and "it is the same vertex (split only by hard edges/UVs)"
                 key = (data, loop.vertex_index)
                 
                 if key in unique_map:
@@ -1249,12 +1249,12 @@ class ObjBufferHelper:
                 poly_indices.append(idx)
             ib.append(poly_indices)
         
-        # 提取 vertex buffer 需要的数据 (也就是 key 中的 data 部分)
+        # Extract the data the vertex buffer needs (i.e. the data part of each key)
         # vertex_data_list = [k[0] for k in unique_map.keys()]
 
-        # 同时构建 index -> blender_loop_index 的映射
-        # 这对于后续生成 ShapeKey Buffer 至关重要，因为我们需要知道当前生成的第 i 个点对应 Blender 的哪个 Loop
-        # Loop Index 可进一步转换为 Vertex Index，但 Vertex Index 无法反推唯一的 Loop Index (Split Normals)
+        # Also build the index -> blender_loop_index mapping
+        # This is critical for generating the ShapeKey Buffer later: we must know which Blender Loop the i-th generated point corresponds to
+        # Loop Index can be converted to Vertex Index, but Vertex Index cannot be reversed into a unique Loop Index (Split Normals)
         vertex_data_list = []
         for i, (data_bytes, blender_v_idx) in enumerate(unique_map.keys()):
             vertex_data_list.append(data_bytes)
@@ -1264,7 +1264,7 @@ class ObjBufferHelper:
         flattened_ib = [item for sublist in ib for item in sublist]
         # TimerUtils.End("Calc IB VB")
 
-        # 重计算TANGENT步骤
+        # Recalculate TANGENT step
         indexed_vertices = ObjBufferHelper.average_normal_tangent_xxmi(
             obj=obj,
             indexed_vertices=vertex_data_list,
@@ -1273,10 +1273,10 @@ class ObjBufferHelper:
             dtype=dtype,
         )
         
-        # 重计算COLOR步骤
+        # Recalculate COLOR step
         indexed_vertices = ObjBufferHelper.average_normal_color(obj=obj, indexed_vertices=indexed_vertices, d3d11_game_type=d3d11_game_type,dtype=dtype)
 
-        # (2) 转换为CategoryBufferDict
+        # (2) Convert to CategoryBufferDict
         # TimerUtils.Start("Calc CategoryBuffer")
         category_stride_dict = d3d11_game_type.get_real_category_stride_dict()
         category_buffer_dict:dict[str,list] = {}
@@ -1289,9 +1289,9 @@ class ObjBufferHelper:
             category_buffer_dict[categoryname] = data_matrix[:,stride_offset:stride_offset + category_stride].flatten()
             stride_offset += category_stride
 
-        # 设置ib，准备返回
+        # Set ib and get ready to return
         ib = flattened_ib
-        # YYSLS/SnowBreak 需要在导出时翻转面朝向
+        # YYSLS/SnowBreak need the face winding flipped during export
         if GlobalConfig.logic_name == LogicName.YYSLS or GlobalConfig.logic_name == LogicName.SnowBreak:
             flipped_indices = []
             # print(flattened_ib[0],flattened_ib[1],flattened_ib[2])

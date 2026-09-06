@@ -7,7 +7,6 @@ import bpy
 
 from ..utils.timer_utils import TimerUtils
 from ..utils.command_utils import CommandUtils
-from ..utils.translate_utils import rpt_
 
 from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
@@ -63,7 +62,7 @@ def _export_blueprint_model(blueprint_model):
     }:
         ExportUnity(blueprint_model=blueprint_model).export()
     else:
-        raise ValueError("当前游戏预设暂不支持生成Mod")
+        raise ValueError("The current game preset does not yet support generating Mods")
 
 
 def _safe_output_config_name(node, index, used_names):
@@ -148,7 +147,7 @@ def _export_regular_output(tree, context, output_node, config_name):
         generated = [os.path.join(output_folder, stem + ".ini")]
     generated = [path for path in generated if os.path.isfile(path)]
     if not generated:
-        raise ValueError(f"输出节点 '{output_node.name}' 未生成 INI 文件")
+        raise ValueError(f"Output node '{output_node.name}' did not generate an INI file")
     return generated
 
 
@@ -160,7 +159,7 @@ def _generate_output_node(tree, context, output_node, state, *, is_root=False):
     includes A, never C including A directly.
     """
     if output_node in state["active"]:
-        raise ValueError("生成 Mod 输出节点之间存在循环连接")
+        raise ValueError("Circular connection detected between Generate Mod output nodes")
     if output_node in state["generated"]:
         return state["generated"][output_node]
 
@@ -206,7 +205,7 @@ def _generate_output_node(tree, context, output_node, state, *, is_root=False):
 
 def generate_mod_from_output_node(tree, context, output_node, report_callback):
     if getattr(output_node, "bl_idname", "") not in _OUTPUT_NODE_IDS:
-        report_callback({'ERROR'}, "请选择有效的 Output 节点")
+        report_callback({'ERROR'}, "Please select a valid Output node")
         return {'CANCELLED'}
 
     TimerUtils.Start("GenerateMod Mod")
@@ -215,7 +214,7 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
     BlueprintExportHelper.set_runtime_blueprint_tree(tree)
     refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(tree=tree, source="export")
     if refresh_summary["missing_count"] > 0:
-        report_callback({'WARNING'}, f"导出前有 {refresh_summary['missing_count']} 个物体节点未找到对应物体")
+        report_callback({'WARNING'}, f"Before export, {refresh_summary['missing_count']} object nodes found no matching object")
 
     state = {
         "active": set(), "generated": {}, "used_names": set(), "output_index": 0,
@@ -230,21 +229,21 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
         return {'CANCELLED'}
 
     TimerUtils.End("GenerateMod Mod")
-    report_callback({'INFO'}, rpt_("生成Mod成功！"))
+    report_callback({'INFO'}, "Generate Mod Success!")
     CommandUtils.OpenGeneratedModFolder()
     return {'FINISHED'}
 
 
 def generate_mod_from_tree(tree, context, report_callback):
     if not tree:
-        report_callback({'ERROR'}, "未找到有效的蓝图")
+        report_callback({'ERROR'}, "No valid blueprint found")
         return {'CANCELLED'}
     output_nodes = [
         node for node in tree.nodes
         if getattr(node, "bl_idname", "") in _OUTPUT_NODE_IDS
     ]
     if not output_nodes:
-        report_callback({'ERROR'}, "当前蓝图缺少 Generate Mod 输出节点")
+        report_callback({'ERROR'}, "The current blueprint is missing a Generate Mod output node")
         return {'CANCELLED'}
 
     # The toolbar shortcut has no node identity.  Prefer the sole terminal
@@ -259,13 +258,13 @@ def generate_mod_from_tree(tree, context, report_callback):
         ):
             terminal_nodes.append(node)
     if len(terminal_nodes) != 1:
-        report_callback({'ERROR'}, "存在多个独立 Output；请在要生成的 Output 节点上点击“生成 Mod”")
+        report_callback({'ERROR'}, "Multiple independent Outputs exist; click \"Generate Mod\" on the Output node you want to export")
         return {'CANCELLED'}
     return generate_mod_from_output_node(tree, context, terminal_nodes[0], report_callback)
 
 
 def _cleanup_unico_temp_objects(blueprint_model: BluePrintModel):
-    """清理 UniComponent 拆分产生的临时物体"""
+    """Clean up temporary objects created by UniComponent splitting"""
     temp_objects = getattr(blueprint_model, '_unico_temp_objects', None)
     if not temp_objects:
         return
@@ -274,14 +273,14 @@ def _cleanup_unico_temp_objects(blueprint_model: BluePrintModel):
             if temp_obj and temp_obj.name in bpy.data.objects:
                 bpy.data.objects.remove(temp_obj, do_unlink=True)
         except Exception as e:
-            print(f"[UniComponent] 清理临时物体时出错: {e}")
-    print(f"[UniComponent] 已清理 {len(temp_objects)} 个临时拆分物体")
+            print(f"[UniComponent] Error cleaning up temporary objects: {e}")
+    print(f"[UniComponent] Cleaned up {len(temp_objects)} temporary split objects")
 
 
 class SSMTGenerateModBlueprint(bpy.types.Operator):
     bl_idname = "ssmt.generate_mod_blueprint"
-    bl_label = "生成Mod"
-    bl_description = "根据当前工作空间对应的蓝图架构生成对应的Mod文件"
+    bl_label = "Generate Mod"
+    bl_description = "Generate the Mod files from the blueprint architecture for the current workspace"
     bl_options = {'REGISTER','UNDO'}
 
     node_name: bpy.props.StringProperty()  # type: ignore
@@ -291,12 +290,12 @@ class SSMTGenerateModBlueprint(bpy.types.Operator):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
         tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not tree:
-            self.report({'ERROR'}, "未找到当前蓝图，请在蓝图编辑器中点击“生成Mod”")
+            self.report({'ERROR'}, "No current blueprint found; click \"Generate Mod\" in the blueprint editor")
             return {'CANCELLED'}
         if self.node_name:
             output_node = tree.nodes.get(self.node_name)
             if output_node is None:
-                self.report({'ERROR'}, "未找到此 Output 节点")
+                self.report({'ERROR'}, "Output node not found")
                 return {'CANCELLED'}
             return generate_mod_from_output_node(tree, context, output_node, self.report)
         return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
@@ -304,8 +303,8 @@ class SSMTGenerateModBlueprint(bpy.types.Operator):
 
 class SSMTGenerateSelectedBlueprintMod(bpy.types.Operator):
     bl_idname = "ssmt.generate_selected_blueprint_mod"
-    bl_label = "生成Mod"
-    bl_description = "根据当前选中的蓝图快捷生成对应的Mod文件"
+    bl_label = "Generate Mod"
+    bl_description = "Quickly generate the Mod files from the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -317,7 +316,7 @@ class SSMTGenerateSelectedBlueprintMod(bpy.types.Operator):
             context=context,
         )
         if not tree:
-            self.report({'ERROR'}, "请选择有效的蓝图")
+            self.report({'ERROR'}, "Please select a valid blueprint")
             return {'CANCELLED'}
 
         if global_properties and global_properties.selected_blueprint_name != tree.name:

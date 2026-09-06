@@ -25,7 +25,7 @@ class FMTFile:
         for line in lines:
             parts = line.strip().split(":")
             if len(parts) < 2:
-                continue  # 跳过格式不正确的行
+                continue  # Skip lines with an invalid format
 
             key, value = parts[0].strip(), ":".join(parts[1:]).strip()
             if key == "stride" or key.endswith(" stride"):
@@ -43,7 +43,7 @@ class FMTFile:
 
 
             elif key.startswith("element"):
-                # 处理element块
+                # Handle an element block
                 if "SemanticName" in element_info:
                     aligned_byte_offset = int(element_info["AlignedByteOffset"]) if "AlignedByteOffset" in element_info else -1
                     append_d3delement = D3D11Element(
@@ -53,21 +53,21 @@ class FMTFile:
                         ExtractSlot="0",ExtractTechnique="",Category="")
                     
                     if "ByteWidth" in element_info:
-                        # print("读取到ByteWidth存在: " + element_info["ByteWidth"])
+                        # print("ByteWidth present: " + element_info["ByteWidth"])
                         append_d3delement.ByteWidth = int(element_info["ByteWidth"])
                     else:
                         append_d3delement.ByteWidth = FormatUtils.format_size(append_d3delement.Format)
                     
-                    # 如果已经有一个element信息，则先添加到列表中
+                    # If element info is already present, append it to the list first
                     self.elements.append(append_d3delement)
-                    element_info.clear()  # 清空当前element信息
+                    element_info.clear()  # Clear the current element info
 
-                # 将新的element属性添加到element_info字典中
+                # Add the new element attribute to the element_info dict
                 element_info[key.split()[0]] = value
             elif key in ["SemanticName", "SemanticIndex", "Format","ByteWidth", "InputSlot", "AlignedByteOffset", "InputSlotClass", "InstanceDataStepRate"]:
                 element_info[key] = value
 
-        # 添加最后一个element
+        # Append the last element
         if "SemanticName" in element_info:
             aligned_byte_offset = int(element_info["AlignedByteOffset"]) if "AlignedByteOffset" in element_info else -1
             append_d3delement = D3D11Element(
@@ -78,7 +78,7 @@ class FMTFile:
             )
 
             if "ByteWidth" in element_info:
-                # print("读取到ByteWidth存在: " + element_info["ByteWidth"])
+                # print("ByteWidth present: " + element_info["ByteWidth"])
                 append_d3delement.ByteWidth = int(element_info["ByteWidth"])
             else:
                 append_d3delement.ByteWidth = FormatUtils.format_size(append_d3delement.Format)
@@ -96,11 +96,11 @@ class FMTFile:
         offsets = []
         use_aligned_offsets = True
         for elemnt in self.elements:
-            # Numpy类型由Format决定，此时即使是WWMI的特殊R8_UINT也能得到正确的numpy.uint8
+            # The numpy type is determined by Format, so even WWMI's special R8_UINT yields the correct numpy.uint8
             numpy_type = FormatUtils.get_nptype_from_format(elemnt.Format)
             
-            # 这里我们用ByteWidth / numpy_type.itemsize 得到总的维度数量，也就是列数
-            # XXX 注意这里计算出正常Size的前提是numpy_type确定是对应真实的字节数，且ByteWidth正确，也就是数据类型必须完全正确。
+            # Here we use ByteWidth / numpy_type.itemsize to get the total number of dimensions, i.e. the number of columns
+            # XXX Note: computing a correct Size requires numpy_type to truly match the real byte count and ByteWidth to be correct - the data type must be exactly right.
             size = int( elemnt.ByteWidth / numpy.dtype(numpy_type).itemsize)
 
             # print("element: "+ elemnt.ElementName)

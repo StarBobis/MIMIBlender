@@ -21,10 +21,10 @@ import os
 
 @dataclass
 class SubMeshModel:
-    # 初始化时需要填入此属性
+    # This attribute must be filled in at initialization
     drawcall_model_list:list[DrawCallModel] = field(default_factory=list)
 
-    # post_init中计算得到这些属性
+    # These attributes are computed in post_init
     match_draw_ib:str = field(init=False, default="")
     match_first_index:int = field(init=False, default=-1)
     match_index_count:int = field(init=False, default=-1)
@@ -32,16 +32,16 @@ class SubMeshModel:
     match_uav_bytes:int = field(init=False, default=0)
     submesh_name:str = field(init=False, default="")
 
-    # 调用组合obj并计算ib和vb得到这些属性
+    # These attributes result from merging the objs and computing ib and vb
     vertex_count:int = field(init=False, default=0)
     index_count:int = field(init=False, default=0)
 
-    # 读取工作空间中的 Import.json 选择数据类型目录，再从对应的 SubmeshJson 获取 d3d11GameType
+    # Pick the data type directory from the workspace's Import.json, then take d3d11GameType from the matching SubmeshJson
     d3d11_game_type:D3D11GameType = field(init=False,repr=False,default=None)
 
-    # 用于文件名生成（别名应用后）。
-    # 默认等于 submesh_name；如果用户在「自定义Submesh名称」节点中设置了别名，
-    # 由 DrawIBModel.apply_alias_dict() 在导出前更新为 "{lod_prefix}.{alias}"。
+    # Used for file name generation (after aliases are applied).
+    # Defaults to submesh_name; when the user sets an alias on the Custom Submesh Name node,
+    # DrawIBModel.apply_alias_dict() updates it to "{lod_prefix}.{alias}" before export.
     display_str:str = field(init=False, default="")
 
     ib:list = field(init=False,repr=False,default_factory=list)
@@ -51,10 +51,10 @@ class SubMeshModel:
     ntemi_bone_palette:list = field(init=False,repr=False,default_factory=list)
 
     def get_slot_texture_node_list(self) -> list[tuple]:
-        """聚合该 SubMesh 下所有 DrawCallModel 的 slot texture 节点。
+        """Aggregate the slot texture nodes of all DrawCallModels under this SubMesh.
 
-        返回列表元素为 (slot_item, texture_node)，其中 slot_item 是
-        SSMTTextureSlotItem 的引用，可通过 effective_slot_key 获取生成键名。
+        Each returned element is a (slot_item, texture_node) pair, where slot_item is
+        an SSMTTextureSlotItem reference whose effective_slot_key yields the generated key name.
         """
         result = []
         seen = set()
@@ -70,11 +70,11 @@ class SubMeshModel:
 
     def __post_init__(self):
 
-        # 因为列表里的每个DrawCallModel的draw_ib,first_index,index_count都是一样的，所以直接取第一个就行了
+        # Every DrawCallModel in the list shares the same draw_ib, first_index and index_count, so just take the first one
         if len(self.drawcall_model_list) > 0:
             first_model = self.drawcall_model_list[0]
             self.match_draw_ib = first_model.match_draw_ib
-            # 新格式下 match_index_count 可能为空字符串 → 先设 0，后续由 WorkSpaceModel 修正
+            # In the new format match_index_count can be an empty string -> set 0 first; WorkSpaceModel corrects it later
             try:
                 self.match_first_index = int(first_model.match_first_index) if first_model.match_first_index else -1
             except (ValueError, TypeError):
@@ -85,33 +85,33 @@ class SubMeshModel:
                 self.match_index_count = -1
             self.submesh_name = first_model.get_submesh_name()
         
-        # display_str 默认等于 submesh_name，导出前可被 apply_alias_dict 覆盖
+        # display_str defaults to submesh_name; apply_alias_dict can override it before export
         self.display_str = self.submesh_name
         
         self.calc_buffer()
 
     def fix_indices_from_workspace(self, workspace_model):
         '''
-        使用 WorkSpaceModel 修正 match_index_count 和 match_first_index。
-        适用于新格式名称（submesh_name 为 "LOD0.94517393-0" 之类）的场景，
-        此时 match_index_count 初始为 -1，需要从 WorkSpaceModel 的旧文件夹名解析真实值。
-        旧格式名称已自带正确值，此方法不会覆盖。
+        Fix match_index_count and match_first_index using WorkSpaceModel for
+        new-format names (submesh_name like "LOD0.94517393-0"), where values
+        start at -1 and are parsed from WorkSpaceModel's legacy folder name.
+        Old-format names already carry correct values, so never overwritten.
         '''
         from ..workspace.ssmt_workspace import WorkSpaceModel
 
-        # 如果 match_index_count 已经 >= 0，说明是旧格式，无需修正
+        # If match_index_count is already >= 0, this is an old-format name that needs no fix
         if self.match_index_count >= 0 and self.match_first_index >= 0:
             return
 
         if not self.submesh_name or not self.match_draw_ib:
             return
 
-        # 尝试解析 submesh_name
+        # Try to parse submesh_name
         parsed = workspace_model.parse_new_format_name(self.submesh_name)
         if parsed is None:
             return
 
-        # 从 WorkSpaceModel 获取真实值
+        # Get the true values from WorkSpaceModel
         _, ic, fi = workspace_model.resolve_component_info(
             parsed["lod"], parsed["draw_ib"], parsed["component"]
         )
@@ -120,7 +120,7 @@ class SubMeshModel:
             self.match_first_index = fi
 
     def calc_buffer(self):
-        # 对每个obj都创建一个临时对象进行处理，这样不影响原本的对象
+        # Process each obj through its own temporary object so the original ones stay untouched
 
         submesh_json_path = SSMTWorkSpace.check_and_get_submesh_json_path(self.submesh_name)
         submesh_json = SubmeshJson(submesh_json_path)
@@ -134,7 +134,7 @@ class SubMeshModel:
         submesh_temp_obj_list = []
         temp_collection_list = []
         for draw_call_model in self.drawcall_model_list:
-            # 获取到原本的obj
+            # Fetch the original obj
             source_obj = ObjUtils.get_obj_by_name(draw_call_model.obj_name)
 
             temp_collection = CollectionUtils.create_new_collection("TEMP_SUBMESH_COLLECTION_" + self.submesh_name)
@@ -142,7 +142,7 @@ class SubMeshModel:
             temp_collection_list.append(temp_collection)
 
 
-            # 创建一个新的obj
+            # Create a new obj
             temp_obj = ObjUtils.copy_object(
                 context=bpy.context,
                 obj=source_obj,
@@ -153,51 +153,51 @@ class SubMeshModel:
 
             self._normalize_temp_obj_for_export(temp_obj)
 
-            # 因为导入时根据LogicName进行了翻转，所以导出时对临时对象进行翻转才能得到游戏原本坐标系
+            # Import flipped the object per LogicName, so flipping the temp object back at export restores the game's original coordinate system
             self._apply_export_rotation_for_logic(temp_obj)
 
-            # 三角化obj
+            # Triangulate the obj
             ObjUtils.triangulate_object(bpy.context, temp_obj)
 
-            # 计算其额外属性，因为for里拿到的是引用，所以原地修改即可
+            # Compute the extra attributes; the loop holds references, so modifying them in place is enough
             draw_call_model.vertex_count = len(temp_obj.data.vertices)
-            # 因为三角化了，所以每个面都是3个索引，所以 *3 就没问题
-            # 所以上面那一步三角化是必须的，否则概率报错
+            # After triangulation each face has exactly 3 indices, so *3 is safe
+            # This is why the triangulation step above is mandatory, otherwise errors are likely
             draw_call_model.index_count = len(temp_obj.data.polygons) * 3
             draw_call_model.index_offset = index_offset
 
             index_offset += draw_call_model.index_count
 
-            # 这里赋值的意义在于，后续可能会合并到DrawIB级别
-            # 这里就可以直接复用了
+            # Accumulate here so the values can be reused directly
+            # if everything is merged up to the DrawIB level later
             self.vertex_count += draw_call_model.vertex_count
             self.index_count += draw_call_model.index_count
 
-            # 临时对象放到列表里，后续进行合并
+            # Collect the temp objects in the list for the merge that follows
             submesh_temp_obj_list.append(temp_obj)
 
-        # 接下来合并obj，合并的意义在于可以减少IB和VB的计算次数，在大批量导出时节省很多时间
-        # 确保选中第一个，否则join_objects会报错
+        # Merge the objs next; merging cuts the number of IB and VB computations, saving much time on batch exports
+        # Make sure the first one is selected, otherwise join_objects will fail
         if submesh_temp_obj_list:
-            # 取消选中所有物体
+            # Deselect all objects
             bpy.ops.object.select_all(action='DESELECT')
 
-            # 选中第一个物体并设置为活动物体
+            # Select the first object and set it as the active object
             target_active = submesh_temp_obj_list[0]
             target_active.select_set(True)
             bpy.context.view_layer.objects.active = target_active
 
-        # 执行物体合并
+        # Merge the objects
         ObjUtils.join_objects(bpy.context, submesh_temp_obj_list)
         
-        # 因为合并到第一个obj上了，所以这里直接拿到这个obj
+        # The merge lands on the first obj, so grab that obj directly
         submesh_merged_obj = submesh_temp_obj_list[0]
 
-        # 重命名为指定名称，等待后续操作
+        # Rename it to the expected name for the steps that follow
         merged_obj_name = "TEMP_SUBMESH_MERGED_" + self.submesh_name
         ObjUtils.rename_object(submesh_merged_obj, merged_obj_name)
 
-        # 检查并校验是否有缺少的元素
+        # Check and verify that no attributes are missing
         ObjBufferHelper.check_and_verify_attributes(obj=submesh_merged_obj, d3d11_game_type=self.d3d11_game_type)
 
         obj_buffer_result = ExportUtils.build_unity_obj_buffer_result(
@@ -212,17 +212,17 @@ class SubMeshModel:
         if GlobalConfig.logic_name == LogicName.NTEMI:
             self.ntemi_bone_palette = [int(vg.name) for vg in submesh_merged_obj.vertex_groups]
 
-        # 4.计算完成后，删除临时obj
+        # 4. Once the computation is done, delete the temporary obj
         bpy.data.objects.remove(submesh_merged_obj, do_unlink=True)
 
-        # 顺便把刚才创建的临时集合也删掉
+        # Also delete the temporary collections created earlier
         for temp_collection in temp_collection_list:
             if temp_collection.name in bpy.data.collections:
                 if temp_collection.name in bpy.context.scene.collection.children:
                     bpy.context.scene.collection.children.unlink(temp_collection)
                 bpy.data.collections.remove(temp_collection)
 
-        print("SubMeshModel: " + self.submesh_name + " 计算完成，临时对象已删除")
+        print("SubMeshModel: " + self.submesh_name + " computation finished, temp objects deleted")
 
     def _normalize_temp_obj_for_export(self, temp_obj: bpy.types.Object):
         if self.d3d11_game_type is None:

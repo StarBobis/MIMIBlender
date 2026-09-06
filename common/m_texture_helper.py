@@ -1,6 +1,6 @@
 '''
-Texture 节点相关的导出辅助函数。
-所有贴图 INI 段落与文件复制均从蓝图 SSMTNode_Texture 节点驱动。
+Export helper functions for Texture nodes.
+All texture INI sections and file copies are driven by the blueprint SSMTNode_Texture node.
 '''
 import os
 import stat
@@ -26,7 +26,7 @@ from .texture_naming import (
 
 @dataclass
 class HashTextureBinding:
-    """Hash 贴图节点在蓝图中的一次引用及其生效条件。"""
+    """A single reference to a Hash texture node inside the blueprint plus the conditions for it to take effect."""
 
     texture_node: object
     work_key_list: list = field(default_factory=list)
@@ -39,9 +39,9 @@ class HashTextureBinding:
 
 
 class M_TextureHelper:
-    """负责把蓝图中的 Texture 节点转换成 3Dmigoto INI 段并复制贴图文件。"""
+    """Convert blueprint Texture nodes into 3Dmigoto INI sections and copy texture files."""
 
-    # 常见 DXGI 格式 -> 可作为 texconv -f 参数的字符串
+    # Common DXGI formats -> strings usable as texconv -f arguments
     _KNOWN_FORMATS = {
         'BC7_UNORM', 'BC7_UNORM_SRGB', 'R8G8B8A8_UNORM', 'R8G8B8A8_UNORM_SRGB',
         'R10G10B10A2_UNORM', 'R11G11B10_FLOAT', 'BC5_UNORM', 'BC5_SNORM',
@@ -121,14 +121,14 @@ class M_TextureHelper:
 
     @classmethod
     def _get_texconv_path(cls) -> str:
-        """查找内置 texconv.exe 路径。"""
-        # 优先 MIMIBlender 自身 resources
+        """Find the bundled texconv.exe path."""
+        # Prefer MIMIBlender's own resources
         addon_dir = Path(__file__).parent.parent.resolve()
         candidates = [
             addon_dir / 'resources' / 'texconv.exe',
             addon_dir / '..' / 'resources' / 'texconv.exe',
         ]
-        # 其次 SSMT5/ProjectBunny 工作空间常见位置
+        # Then the usual SSMT5/ProjectBunny workspace locations
         ssmt_candidates = [
             Path('D:/Dev/SSMT5/src-tauri/resources/texconv.exe'),
             Path('D:/Dev/SSMT5/src-tauri/target/debug/resources/texconv.exe'),
@@ -136,7 +136,7 @@ class M_TextureHelper:
         for p in candidates + ssmt_candidates:
             if p.exists():
                 return str(p)
-        # 最后尝试 PATH
+        # Finally, fall back to PATH
         for path_env in os.environ.get('PATH', '').split(os.pathsep):
             p = Path(path_env) / 'texconv.exe'
             if p.exists():
@@ -220,12 +220,12 @@ class M_TextureHelper:
             }
             return format_map.get(dxgi_format, f'DXGI_FORMAT_{dxgi_format}')
         except Exception as e:
-            print(f"[M_TextureHelper] 解析 DDS 格式失败: {dds_path}, {e}")
+            print(f"[M_TextureHelper] failed to parse DDS format: {dds_path}, {e}")
             return ''
 
     @classmethod
     def convert_texture_with_texconv(cls, source_path: str, target_path: str, target_format: str) -> bool:
-        """调用 texconv 将源贴图转换为目标格式。成功返回 True。"""
+        """Convert the source texture to the target format with texconv; returns True on success."""
         target_format = cls._FORMAT_ALIASES.get(
             target_format.strip().upper(), target_format.strip().upper()
         )
@@ -233,13 +233,13 @@ class M_TextureHelper:
             return False
         texconv = cls._get_texconv_path()
         if not texconv:
-            print("[M_TextureHelper] 未找到 texconv.exe，跳过格式转换")
+            print("[M_TextureHelper] texconv.exe not found; skipping format conversion")
             return False
         if not os.path.exists(source_path):
             return False
 
         try:
-            print(f"[M_TextureHelper] 转换贴图: {source_path} -> {target_format}")
+            print(f"[M_TextureHelper] converting texture: {source_path} -> {target_format}")
             target_dir = os.path.dirname(target_path)
             os.makedirs(target_dir, exist_ok=True)
             with tempfile.TemporaryDirectory(prefix="mimiblender_texconv_") as temp_dir:
@@ -252,18 +252,18 @@ class M_TextureHelper:
                     text=True, check=False,
                 )
                 if result.returncode != 0:
-                    details = (result.stderr or result.stdout or "未知错误").strip()
-                    raise RuntimeError(f"texconv 返回 {result.returncode}: {details}")
+                    details = (result.stderr or result.stdout or "unknown error").strip()
+                    raise RuntimeError(f"texconv returned {result.returncode}: {details}")
 
                 converted_path = os.path.join(
                     temp_dir, os.path.splitext(os.path.basename(source_path))[0] + '.dds'
                 )
                 if not os.path.isfile(converted_path):
-                    raise RuntimeError("texconv 未生成预期的 DDS 文件")
+                    raise RuntimeError("texconv did not produce the expected DDS file")
                 actual_format = cls.detect_dds_format(converted_path)
                 if actual_format != target_format:
                     raise RuntimeError(
-                        f"转换结果格式不正确，期望 {target_format}，实际 {actual_format or '无法识别'}"
+                        f"Converted result has the wrong format: expected {target_format}, got {actual_format or 'unrecognized'}"
                     )
                 # A previous export may have left a read-only DDS (for
                 # example after unpacking an archive).  Windows refuses to
@@ -274,7 +274,7 @@ class M_TextureHelper:
                 os.replace(converted_path, target_path)
             return True
         except Exception as e:
-            print(f"[M_TextureHelper] texconv 调用异常: {e}")
+            print(f"[M_TextureHelper] texconv call raised an exception: {e}")
             return False
 
     @staticmethod
@@ -315,7 +315,7 @@ class M_TextureHelper:
 
     @staticmethod
     def _normalize_hash_texture_binding(binding) -> HashTextureBinding:
-        """兼容旧的纯节点列表，统一为带条件的 Hash 贴图引用。"""
+        """Accept legacy plain node lists, normalizing them to conditional Hash texture bindings."""
         if isinstance(binding, HashTextureBinding):
             return binding
         if isinstance(binding, tuple) and len(binding) == 2:
@@ -353,7 +353,7 @@ class M_TextureHelper:
                 normalized_filename = normalized_filename[len("Textures/"):]
             if previous is not None and normalized_previous != normalized_filename:
                 raise ValueError(
-                    f"贴图资源名 '{resource_name}' 指向了多个文件: {previous}, {filename}"
+                    f"Texture resource name '{resource_name}' points to multiple files: {previous}, {filename}"
                 )
         return existing
 
@@ -366,7 +366,7 @@ class M_TextureHelper:
 
     @classmethod
     def _node_target_format(cls, texture_node) -> str:
-        """获取节点上配置的目标格式，优先使用 effective_texture_format 属性。"""
+        """Return the target format configured on the node, preferring the effective_texture_format property."""
         if hasattr(texture_node, "effective_texture_format"):
             fmt = str(texture_node.effective_texture_format or "").strip()
             if fmt:
@@ -378,7 +378,7 @@ class M_TextureHelper:
 
     @classmethod
     def copy_texture_files(cls, texture_node_list, output_texture_folder):
-        """把 Texture 节点指定的源文件拷贝/转换到生成目录的 Textures 文件夹。"""
+        """Copy/convert the source file given by each Texture node into the Textures folder of the output directory."""
         texture_node_list = list(texture_node_list)
         cls.prepare_texture_names(texture_node_list)
         if not os.path.exists(output_texture_folder):
@@ -387,7 +387,7 @@ class M_TextureHelper:
         for texture_node in texture_node_list:
             source_path = cls._node_source_path(texture_node)
             if not source_path or not os.path.exists(source_path):
-                print(f"[M_TextureHelper] 源贴图文件不存在，跳过: {source_path}")
+                print(f"[M_TextureHelper] source texture file missing; skipping: {source_path}")
                 continue
 
             target_filename = cls._node_texture_filename(texture_node)
@@ -407,30 +407,32 @@ class M_TextureHelper:
             )
             if conversion_required and not target_format:
                 raise RuntimeError(
-                    f"贴图 '{source_path}' 不是 DDS，请在贴图节点中选择目标 DDS 格式"
+                    f"Texture '{source_path}' is not DDS; choose a target DDS format on the texture node"
                 )
             if conversion_required:
                 converted = cls.convert_texture_with_texconv(source_path, target_path, target_format)
                 if not converted:
                     raise RuntimeError(
-                        f"贴图转换失败: {source_path} -> {target_path} ({target_format})"
+                        f"Texture conversion failed: {source_path} -> {target_path} ({target_format})"
                     )
 
             if not converted:
                 try:
                     shutil.copy2(source_path, target_path)
-                    print(f"[M_TextureHelper] 复制贴图: {source_path} -> {target_path}")
+                    print(f"[M_TextureHelper] copying texture: {source_path} -> {target_path}")
                 except Exception as e:
                     raise RuntimeError(
-                        f"贴图复制失败: {source_path} -> {target_path}: {e}"
+                        f"Texture copy failed: {source_path} -> {target_path}: {e}"
                     ) from e
 
     @classmethod
     def generate_hash_texture_sections(cls, texture_node_list, ini_builder: M_IniBuilder):
-        """为 Hash 出口生成资源和带蓝图条件的 TextureOverride 绑定。
+        """Generate resources and blueprint-conditioned TextureOverride bindings for Hash outlets.
 
-        资源声明本身不受分支影响，以便所有分支都能引用它；``this`` 则在
-        每条蓝图条件下写入。这样同一个 Hash 可以在不同分支绑定到不同资源。
+        The resource declaration itself is not affected by branches so every
+        branch can reference it; ``this`` is written under each blueprint
+        condition. The same Hash can therefore bind different resources in
+        different branches.
         """
         texture_node_list = list(texture_node_list)
         hash_nodes = [
@@ -484,7 +486,8 @@ class M_TextureHelper:
             section.append(f"hash = {tex_hash}")
             section.append("match_priority = 0")
 
-            # 无条件绑定是默认值，须在分支绑定之前写入，才能被命中的分支覆盖。
+            # The unconditional binding is the default; write it before branch
+            # bindings so a matching branch can override it.
             ordered_bindings = sorted(bindings, key=lambda item: bool(item[0].get_condition_str()))
             for binding, resource_name in ordered_bindings:
                 condition_str = binding.get_condition_str()
@@ -501,7 +504,7 @@ class M_TextureHelper:
 
     @classmethod
     def get_slot_texture_lines_for_submesh(cls, submesh_model) -> list[str]:
-        """返回该 SubMesh 下所有 slot texture 节点对应的 INI 行（聚合去重）。"""
+        """Return the INI lines for all slot texture nodes of this SubMesh (aggregated and deduplicated)."""
         lines = []
         seen_keys = set()
         for slot_item, texture_node in submesh_model.get_slot_texture_node_list():
@@ -522,7 +525,7 @@ class M_TextureHelper:
 
     @classmethod
     def collect_all_texture_nodes(cls, blueprint_model, drawib_model_list) -> list:
-        """收集当前生成范围内所有被引用的 Texture 节点（Hash + Slot），按 id 去重。"""
+        """Collect all referenced Texture nodes (Hash + Slot) in the current export scope, deduplicated by id."""
         seen_ids = set()
         result = []
         for raw_binding in getattr(blueprint_model, "hash_texture_node_list", []):
@@ -544,7 +547,7 @@ class M_TextureHelper:
 
     @classmethod
     def generate_slot_texture_resource_sections(cls, drawib_model, blueprint_model, ini_builder: M_IniBuilder):
-        """为所有被 Slot 方式引用的 Texture 节点生成 [Resource_...] 段。"""
+        """Generate [Resource_...] sections for all Texture nodes referenced through a Slot."""
         section = M_IniSection(M_SectionType.ResourceTexture)
         resource_definitions = {}
 
@@ -556,7 +559,7 @@ class M_TextureHelper:
         if any(cls._resolved_texture_nodes.get(id(node)) is not node for node in slot_nodes):
             cls.prepare_texture_names(slot_nodes)
 
-        # 从所有 SubMesh 的 slot texture 节点中收集
+        # Collect from the slot texture nodes of all SubMeshes
         for submesh_model in drawib_model.submesh_model_list:
             for slot_item, texture_node in submesh_model.get_slot_texture_node_list():
                 tex_hash = cls._node_hash(texture_node)
@@ -571,8 +574,9 @@ class M_TextureHelper:
                 resource_definitions[resource_name] = filename
 
 
-        # Hash 出口的 Texture 节点由 generate_hash_texture_sections 统一生成 [Resource_...] 与 [TextureOverride_...]，
-        # 这里只负责 Slot 方式的资源段，避免重复。
+        # Hash-outlet Texture nodes get their [Resource_...] and
+        # [TextureOverride_...] sections from generate_hash_texture_sections;
+        # only Slot-mode resource sections are emitted here to avoid duplicates.
 
         existing_resources = cls._validate_resource_definitions(ini_builder, resource_definitions)
         for resource_name, filename in resource_definitions.items():
@@ -587,9 +591,9 @@ class M_TextureHelper:
 
     @classmethod
     def get_slot_texture_lines_for_drawcall(cls, drawcall_model) -> list[str]:
-        """返回单个 DrawCallModel 对应的 slot texture INI 行。
+        """Return the slot texture INI lines for a single DrawCallModel.
 
-        用于在每次 drawindexed 调用前单独设置槽位。
+        Used to set the slots individually before each drawindexed call.
         """
         lines = []
         seen_keys = set()
@@ -611,9 +615,10 @@ class M_TextureHelper:
 
     @classmethod
     def drawcall_has_normal_map(cls, drawcall_model) -> bool:
-        """判断 DrawCall 的 Slot 贴图是否包含 NormalMap 语义。
+        """Return whether the DrawCall's Slot textures include a NormalMap semantic.
 
-        不能依赖生成后的资源名：用户可以把 NormalMap 资源重命名为任意字符串。
+        The generated resource name cannot be relied on: users can rename a
+        NormalMap resource to any string.
         """
         for slot_item, texture_node in getattr(drawcall_model, "slot_texture_node_list", []):
             slot_key = str(getattr(slot_item, "effective_slot_key", "") or "").lower()

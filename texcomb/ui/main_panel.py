@@ -12,8 +12,8 @@ from .. import globs
 
 _DISCORD_CONTACT_URL = "https://discordapp.com/users/275608234595713024"
 _INSTALL_HELP_TEXT = (
-    "点击“安装 Pillow”后，插件会使用 Blender 自带的 pip 把 Pillow "
-    "安装到插件自身的 libs 目录，不需要管理员权限。"
+    "After clicking \"Install Pillow\", the addon uses Blender's built-in pip to "
+    "install Pillow into the addon's own libs directory; no administrator privileges are required."
 )
 
 
@@ -26,7 +26,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
     installation status.
     """
 
-    bl_label = "贴图合并"
+    bl_label = "Texture Combiner"
     bl_idname = "SMC_PT_Main_Panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI" if globs.is_blender_modern else "TOOLS"
@@ -86,7 +86,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
         scene = context.scene
         list_column = layout.column(align=True)
 
-        list_column.label(text="待合并的材质:")
+        list_column.label(text="Materials to Combine:")
 
         list_box = list_column.box()
         list_box.template_list(
@@ -102,9 +102,9 @@ class MaterialCombinerPanel(bpy.types.Panel):
         refresh_row = list_column.row(align=True)
         refresh_row.scale_y = 1.2
         action_text = (
-            "更新材质列表"
+            "Refresh Material List"
             if scene.smc_ob_data
-            else "生成材质列表"
+            else "Generate Material List"
         )
         refresh_row.operator(
             "smc.refresh_ob_data",
@@ -134,13 +134,13 @@ class MaterialCombinerPanel(bpy.types.Panel):
             scene: The current scene containing property values.
         """
         uniform_row = layout.row()
-        uniform_row.prop(scene, "smc_uniform_size", text="统一贴图尺寸")
+        uniform_row.prop(scene, "smc_uniform_size", text="Uniform Texture Size")
         if scene.smc_uniform_size:
             uniform_row.prop(scene, "smc_uniform_size_value", text="")
-        layout.prop(scene, "smc_crop", text="根据UV边界裁剪")
-        layout.prop(scene, "smc_pixel_art", text="禁用抗锯齿缩放")
+        layout.prop(scene, "smc_crop", text="Crop to UV Bounds")
+        layout.prop(scene, "smc_pixel_art", text="Disable Anti-Aliasing Scaling")
         if globs.is_blender_modern:
-            layout.prop(scene, "smc_include_extra_textures", text="图集PBR贴图")
+            layout.prop(scene, "smc_include_extra_textures", text="Atlas PBR Textures")
 
     def _add_packing_section(
         self, layout: bpy.types.UILayout, scene: bpy.types.Scene
@@ -151,16 +151,16 @@ class MaterialCombinerPanel(bpy.types.Panel):
             layout: The layout to draw into.
             scene: The current scene containing property values.
         """
-        self._create_property_row(layout, scene, "smc_diffuse_size", "纯色纹理尺寸:")
-        self._create_property_row(layout, scene, "smc_gaps", "纹理间距:")
-        layout.prop(scene, "smc_size", text="图集尺寸")
+        self._create_property_row(layout, scene, "smc_diffuse_size", "Solid Texture Size:")
+        self._create_property_row(layout, scene, "smc_gaps", "Texture Gap:")
+        layout.prop(scene, "smc_size", text="Atlas Size")
         if scene.smc_size in {"CUST", "STRICTCUST"}:
             size_col = layout.column(align=True)
             size_col.scale_y = 1.2
-            size_col.prop(scene, "smc_size_width", text="宽度")
-            size_col.prop(scene, "smc_size_height", text="高度")
-        layout.prop(scene, "smc_packer_type", text="打包算法")
-        layout.prop(scene, "smc_image_format", text="输出格式")
+            size_col.prop(scene, "smc_size_width", text="Width")
+            size_col.prop(scene, "smc_size_height", text="Height")
+        layout.prop(scene, "smc_packer_type", text="Packing Algorithm")
+        layout.prop(scene, "smc_image_format", text="Output Format")
 
     @staticmethod
     def _create_property_row(
@@ -203,7 +203,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
         col.scale_y = 1.5
         col.operator(
             "smc.combiner",
-            text="合并贴图",
+            text="Combine Textures",
             icon="EXPORT",
         ).cats = False
 
@@ -235,7 +235,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
             layout: The layout to draw into.
         """
         col = layout.column(align=True)
-        col.label(text="需要安装 Python Imaging Library (Pillow)", icon="ERROR")
+        col.label(text="Python Imaging Library (Pillow) is required", icon="ERROR")
         col.separator()
 
     @staticmethod
@@ -247,7 +247,7 @@ class MaterialCombinerPanel(bpy.types.Panel):
         """
         row = layout.row()
         row.scale_y = 1.5
-        row.operator("smc.get_pillow", text="安装 Pillow", icon="IMPORT")
+        row.operator("smc.get_pillow", text="Install Pillow", icon="IMPORT")
 
     @staticmethod
     def _render_install_troubleshooting(
@@ -280,9 +280,9 @@ class MaterialCombinerPanel(bpy.types.Panel):
             layout: The layout to draw into.
         """
         box = layout.box().column()
-        box.label(text="安装完成", icon="CHECKMARK")
+        box.label(text="Installation Complete", icon="CHECKMARK")
         box.label(
-            text="Pillow 已安装，请重启 Blender 后使用", icon="FILE_TICK"
+            text="Pillow has been installed, restart Blender to use it", icon="FILE_TICK"
         )
 
     @staticmethod
@@ -296,33 +296,33 @@ class MaterialCombinerPanel(bpy.types.Panel):
             layout: The layout to draw into.
         """
         box = layout.box().column()
-        box.label(text="安装失败", icon="ERROR")
+        box.label(text="Installation failed", icon="ERROR")
         box.separator()
 
-        # 显示错误信息
+        # Display the error message
         if globs.pil_install_error_message:
             error_box = box.box()
             error_col = error_box.column()
-            error_col.label(text="错误详情:", icon="INFO")
-            # 把错误信息分段显示
+            error_col.label(text="Error details:", icon="INFO")
+            # Display the error message in wrapped lines
             error_msg = globs.pil_install_error_message
-            # 每80个字符左右换行
+            # Wrap after roughly 60 characters per line
             import textwrap
             for line in textwrap.wrap(error_msg, width=60):
                 error_col.label(text=line)
             box.separator()
 
-        # 显示帮助信息
+        # Display help information
         help_col = box.column()
-        help_col.label(text="可能的解决方案:", icon="HELP")
-        help_col.label(text="1. 重试安装（默认使用清华镜像，失败后自动切换官方源）")
-        help_col.label(text="2. 检查网络连接与防火墙设置")
-        help_col.label(text="3. 如需手动安装，在命令行执行:")
+        help_col.label(text="Possible solutions:", icon="HELP")
+        help_col.label(text="1. Retry the installation (Tsinghua mirror by default, falls back to the official source on failure)")
+        help_col.label(text="2. Check the network connection and firewall settings")
+        help_col.label(text="3. To install manually, run the following in a command line:")
         help_col.label(text="   python -m pip install --target \"{}\" Pillow -i https://pypi.tuna.tsinghua.edu.cn/simple".format(globs.PILLOW_LIB_PATH))
         box.separator()
 
-        # 按钮行
+        # Button row
         row = box.row(align=True)
         row.scale_y = 1.2
-        row.operator("smc.get_pillow", text="重试安装", icon="FILE_REFRESH")
-        row.operator("smc.check_pillow", text="检查安装", icon="FILE_TICK")
+        row.operator("smc.get_pillow", text="Retry Installation", icon="FILE_REFRESH")
+        row.operator("smc.check_pillow", text="Check Installation", icon="FILE_TICK")

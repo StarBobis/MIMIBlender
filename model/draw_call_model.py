@@ -9,23 +9,23 @@ class DrawCallModel:
     obj_name:str
     submesh_name:str = ""
 
-    # 传入obj_name后，解析出这些属性，方便后续使用
-    match_draw_ib:str = field(init=False,repr=False,default="") # 用于匹配的DrawIB
-    match_index_count:str = field(init=False,repr=False,default="") # 用于匹配的IndexCount
-    match_first_index:str = field(init=False,repr=False,default="") # 用于匹配的FirstIndex
-    match_submesh_name:str = field(init=False,repr=False,default="") # 用于工作空间目录匹配的submesh标识
-    comment_alias_name:str = field(init=False,repr=False,default="") # 用于显示在注释中的自定义名称
+    # After obj_name is passed in, resolve these attributes for later use
+    match_draw_ib:str = field(init=False,repr=False,default="") # DrawIB used for matching
+    match_index_count:str = field(init=False,repr=False,default="") # IndexCount used for matching
+    match_first_index:str = field(init=False,repr=False,default="") # FirstIndex used for matching
+    match_submesh_name:str = field(init=False,repr=False,default="") # Submesh identifier used for workspace directory matching
+    comment_alias_name:str = field(init=False,repr=False,default="") # Custom name displayed in the comment
 
-    # 生效条件，在BlueprintModel解析的时候得到
+    # Effective conditions, resolved when BlueprintModel is parsed
     work_key_list:list[M_Key] = field(init=False,repr=False,default_factory=list)
 
-    # 通过蓝图 Texture 节点的 Slot 出口连接上来的贴图
+    # Textures connected via the Slot outputs of blueprint Texture nodes
     slot_texture_node_list:list = field(init=False,repr=False,default_factory=list)
 
-    # 通过 Object Info 的 CustomShader 输入连接上来的自定义命令列表
+    # Custom command list connected via the CustomShader input of Object Info
     custom_shader_node_list:list = field(init=False,repr=False,default_factory=list)
 
-    # 在SubMeshModel层级计算得到这些属性，用于ini写出
+    # These attributes are computed at the SubMeshModel level and used for ini output
     index_count:int = field(init=False,repr=False,default=0)
     vertex_count:int = field(init=False,repr=False,default=0)
     index_offset:int = field(init=False,repr=False,default=0)
@@ -33,10 +33,10 @@ class DrawCallModel:
 
     def __post_init__(self) -> None:
         objname_parse_error_tips = (
-            "Obj名称规则（新格式）: DrawIB-ComponentIndex.AliasName, "
-            "例如[94517393-0.头发]第一个.前面的内容要符合规则,后面出现的内容是可以自定义的\n"
-            "Obj名称规则（旧格式）: DrawIB-IndexCount-FirstIndex.AliasName, "
-            "例如[67f829fc-2653-0.头发]"
+            "Obj naming rule (new format): DrawIB-ComponentIndex.AliasName, "
+            "e.g. [94517393-0.Hair] Content before the first . must follow the rule; content after it can be customized\n"
+            "Obj naming rule (old format): DrawIB-IndexCount-FirstIndex.AliasName, "
+            "e.g. [67f829fc-2653-0.Hair]"
         )
 
         submesh_parse_result = self._try_parse_name(self.submesh_name)
@@ -44,7 +44,7 @@ class DrawCallModel:
             self.match_draw_ib, self.match_index_count, self.match_first_index, self.match_submesh_name, self.comment_alias_name = submesh_parse_result
             return
 
-        # submesh_name 解析失败，退而解析 obj_name
+        # submesh_name parsing failed, fall back to parsing obj_name
         obj_name_parse_result = self._try_parse_name(self.obj_name)
         if obj_name_parse_result is not None:
             self.match_draw_ib, self.match_index_count, self.match_first_index, self.match_submesh_name, self.comment_alias_name = obj_name_parse_result
@@ -54,28 +54,28 @@ class DrawCallModel:
         self.comment_alias_name = ".".join(obj_name_total_split[1:]) if len(obj_name_total_split) > 1 else ""
 
         if "." not in self.obj_name:
-            SSMTErrorUtils.raise_fatal("Obj名称解析错误: " + self.obj_name + "  不包含'.'分隔符\n" + objname_parse_error_tips)
+            SSMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
 
         obj_name_total_split = self.obj_name.split(".")
         obj_name_split = obj_name_total_split[0].split("-")
 
         if len(obj_name_total_split) < 2:
-            SSMTErrorUtils.raise_fatal("Obj名称解析错误: " + self.obj_name + "  不包含'.'分隔符\n" + objname_parse_error_tips)
+            SSMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
         if len(obj_name_split) < 2:
             SSMTErrorUtils.raise_fatal(
-                "Obj名称解析错误: " + self.obj_name + "  '-'分隔符数量不足，至少需要1个\n" + objname_parse_error_tips
+                "Object name parsing error: " + self.obj_name + "  '-' separator count is insufficient, at least 1 is required\n" + objname_parse_error_tips
             )
 
         self.match_draw_ib = obj_name_split[0]
 
         if len(obj_name_split) == 2:
-            # 新格式: DrawIB-ComponentIndex（2 段）
-            # match_index_count 为空，match_first_index 暂存 Component 序号
-            # 后续由 WorkSpaceModel 修正 match_index_count / match_first_index
+            # New format: DrawIB-ComponentIndex (2 segments)
+            # match_index_count stays empty; match_first_index temporarily stores the Component index
+            # match_index_count / match_first_index are corrected later by WorkSpaceModel
             self.match_index_count = ""
             self.match_first_index = obj_name_split[1]
         else:
-            # 旧格式: DrawIB-IndexCount-FirstIndex（>=3 段）
+            # Old format: DrawIB-IndexCount-FirstIndex (>= 3 segments)
             self.match_index_count = obj_name_split[1]
             self.match_first_index = obj_name_split[2]
 
@@ -86,7 +86,7 @@ class DrawCallModel:
         if not normalized_name:
             return None
 
-        # 检测并剥离 LOD 前缀（如 "LOD0."）
+        # Detect and strip the LOD prefix (e.g. "LOD0.")
         lod_prefix = ""
         temp = normalized_name
         if temp.upper().startswith("LOD") and "." in temp:
@@ -94,7 +94,7 @@ class DrawCallModel:
             potential_lod = temp[:dot_idx]
             if potential_lod[3:].isdigit():
                 lod_prefix = potential_lod + "."
-                temp = temp[dot_idx + 1:]  # 去掉 LOD0. 前缀后的部分
+                temp = temp[dot_idx + 1:]  # part after removing the LOD0. prefix
 
         name_prefix, _, alias_suffix = temp.partition(".")
         name_split = name_prefix.split("-")
@@ -105,17 +105,17 @@ class DrawCallModel:
         lod_submesh_name = lod_prefix + name_prefix if lod_prefix else name_prefix
 
         if len(name_split) == 2:
-            # 新格式: DrawIB-ComponentIndex（2 段）
-            # match_index_count 为空，match_first_index 暂存 Component 序号
+            # New format: DrawIB-ComponentIndex (2 segments)
+            # match_index_count stays empty; match_first_index temporarily stores the Component index
             return name_split[0], "", name_split[1], lod_submesh_name, alias_suffix
         elif len(name_split) >= 3:
-            # 旧格式: DrawIB-IndexCount-FirstIndex（>=3 段）
+            # Old format: DrawIB-IndexCount-FirstIndex (>= 3 segments)
             return name_split[0], name_split[1], name_split[2], lod_submesh_name, alias_suffix
 
         return None
     
     def get_submesh_name(self) -> str:
-        # 返回这个 DrawCall 所属 submesh 的名称
+        # Return the name of the submesh that this DrawCall belongs to
         return self.match_submesh_name
 
     def get_condition_str(self) -> str:

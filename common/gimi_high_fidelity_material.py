@@ -23,7 +23,7 @@ class GIMIHighFidelityMaterial:
     GROUP_PREFIX = "SSMT GIMI v12 "
     SHADER_SCHEMA_VERSION = 12
     PREVIEW_COLLECTION_NAME = "SSMT GIMI Preview"
-    VIRTUAL_SUN_NAME = "虚拟日光"
+    VIRTUAL_SUN_NAME = "SSMT GIMI Virtual Sun"
     PREVIEW_CAMERA_NAME = "SSMT GIMI Preview Camera"
 
     @staticmethod
@@ -33,7 +33,7 @@ class GIMIHighFidelityMaterial:
         game_name = str(game_name if game_name is not None else GlobalConfig.gamename).strip()
         normalized_game_name = game_name.casefold().replace(" ", "").replace("_", "")
         return logic_name.casefold() == LogicName.GIMI.casefold() or normalized_game_name in {
-            "gimi", "genshinimpact", "原神",
+            "gimi", "genshinimpact",
         }
 
     @staticmethod
@@ -301,7 +301,7 @@ class GIMIHighFidelityMaterial:
     @classmethod
     def _virtual_sun_group(cls):
         group = cls._group(
-            "NT虚拟日光",
+            "NT Virtual Sun",
             [
                 ('NodeSocketVector', 'Surface Normal'), ('NodeSocketFloat', 'Light Gain'),
                 ('NodeSocketVector', 'Sun Rotation'),
@@ -359,12 +359,12 @@ class GIMIHighFidelityMaterial:
 
     @classmethod
     def _grade_base_group(cls):
-        group = cls._group("NT调色", [('NodeSocketColor', 'Base Color')], [('NodeSocketColor', 'Graded Color')])
+        group = cls._group("NT Color Grade", [('NodeSocketColor', 'Base Color')], [('NodeSocketColor', 'Graded Color')])
         if len(group.nodes) > 2:
             return group
         nodes, links = group.nodes, group.links
         curve = cls._node(group, 'ShaderNodeRGBCurve', 'CurveMap.BaseColor.Combined', (-180, 0))
-        curve.label = 'CurveMap | NT调色 | Combined point (0.457726, 0.298387)'
+        curve.label = 'CurveMap | NT Color Grade | Combined point (0.457726, 0.298387)'
         curve.mapping.initialize()
         curve.mapping.curves[3].points.new(0.457726, 0.298387)
         curve.mapping.update()
@@ -475,7 +475,7 @@ class GIMIHighFidelityMaterial:
     @classmethod
     def _metal_matcap_group(cls):
         group = cls._group(
-            "NT金属",
+            "NT Metal",
             [
                 ('NodeSocketColor', 'Base Color'), ('NodeSocketColor', 'LightMap'),
                 ('NodeSocketColor', 'MatCap Color'), ('NodeSocketVector', 'Surface Normal'),
@@ -538,7 +538,7 @@ class GIMIHighFidelityMaterial:
     @classmethod
     def _special_emission_group(cls):
         group = cls._group(
-            "NT神之眼颜色",
+            "NT Vision Color",
             [('NodeSocketColor', 'Graded Base'), ('NodeSocketFloat', 'Frame'), ('NodeSocketColor', 'Element Color')],
             [('NodeSocketColor', 'Emission Color')],
         )
@@ -574,7 +574,7 @@ class GIMIHighFidelityMaterial:
 
     @classmethod
     def _edge_light_group(cls):
-        group = cls._group("NT屏幕空间边缘光", [('NodeSocketColor', 'Color')], [('NodeSocketColor', 'Edge Lit Color')])
+        group = cls._group("NT Screen Space Edge Light", [('NodeSocketColor', 'Color')], [('NodeSocketColor', 'Edge Lit Color')])
         if len(group.nodes) > 2:
             return group
         nodes, links = group.nodes, group.links
@@ -946,7 +946,7 @@ class GIMIHighFidelityMaterial:
         # branch is visibly desaturated/darker than the neighbouring body.
         grade = nodes.new('ShaderNodeGroup')
         grade.name = 'grade_face_base_color'
-        grade.label = 'NT调色（与身体一致）'
+        grade.label = 'NT Color Grade (matching Body)'
         grade.node_tree = cls._grade_base_group()
         grade.location = (-780, 270)
         links.new(diffuse_color, grade.inputs['Base Color'])
@@ -1137,26 +1137,26 @@ class GIMIHighFidelityMaterial:
         ramp.extension = 'REPEAT'
         ramp.projection = 'FLAT'
         if diffuse.image is None:
-            print('[GIMI Material] WARNING: DiffuseMap 缺失，使用洋红纯色占位图。')
+            print('[GIMI Material] WARNING: DiffuseMap missing; using a solid magenta placeholder.')
             diffuse.image = cls._default_lookup_image(
                 cls.GROUP_PREFIX + 'Missing DiffuseMap', (1.0, 0.0, 1.0, 0.0)
             )
         if lightmap.image is None:
-            print('[GIMI Material] WARNING: LightMap 缺失，使用纯色占位图 (0, 1, 0, 0)。')
+            print('[GIMI Material] WARNING: LightMap missing; using a solid placeholder (0, 1, 0, 0).')
             lightmap.image = cls._default_lookup_image(
                 cls.GROUP_PREFIX + 'Missing LightMap', (0.0, 1.0, 0.0, 0.0)
             )
         if normal.image is None:
-            print('[GIMI Material] WARNING: NormalMap 缺失，使用 #8080FFFF 纯色图。')
+            print('[GIMI Material] WARNING: NormalMap missing; using a solid #8080FFFF image.')
             normal.image = cls._default_lookup_image(
                 cls.GROUP_PREFIX + 'Default NormalMap #8080FFFF',
                 (128.0 / 255.0, 128.0 / 255.0, 1.0, 1.0),
             )
         if ramp.image is None:
-            print('[GIMI Material] WARNING: DisplayRampMap.dds 不可用，使用纯色后备图。')
+            print('[GIMI Material] WARNING: DisplayRampMap.dds unavailable; using a solid fallback image.')
             ramp.image = cls._default_lookup_image(cls.GROUP_PREFIX + 'Default Body Ramp', (0.72, 0.62, 0.58, 1.0))
         if matcap.image is None:
-            print('[GIMI Material] WARNING: DisplayMatalMap.dds 不可用，使用纯色后备图。')
+            print('[GIMI Material] WARNING: DisplayMatalMap.dds unavailable; using a solid fallback image.')
             matcap.image = cls._default_lookup_image(cls.GROUP_PREFIX + 'Default Metal Map', (0.75, 0.75, 0.75, 1.0))
         for data_texture in (normal, lightmap, matcap):
             try:
@@ -1193,13 +1193,13 @@ class GIMIHighFidelityMaterial:
         if cls._image_has_alpha(diffuse.image):
             links.new(diffuse.outputs['Alpha'], master.inputs['Diffuse Alpha'])
         else:
-            print('[GIMI Material] WARNING: DiffuseMap 不含 Alpha，禁用特殊发光区域遮罩。')
+            print('[GIMI Material] WARNING: DiffuseMap has no alpha; disabling the special emission region mask.')
             master.inputs['Diffuse Alpha'].default_value = 0.0
         if cls._image_has_alpha(lightmap.image):
             links.new(lightmap.outputs['Alpha'], master.inputs['LightMap Alpha'])
             links.new(lightmap.outputs['Alpha'], coordinates.inputs['LightMap Alpha'])
         else:
-            print('[GIMI Material] WARNING: LightMap 不含 Alpha，Ramp 材质行使用 0.0。')
+            print('[GIMI Material] WARNING: LightMap has no alpha; the Ramp material row uses 0.0.')
             master.inputs['LightMap Alpha'].default_value = 0.0
             coordinates.inputs['LightMap Alpha'].default_value = 0.0
         links.new(coordinates.outputs['Ramp UV'], ramp.inputs['Vector'])

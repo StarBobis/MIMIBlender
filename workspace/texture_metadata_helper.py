@@ -1,4 +1,4 @@
-﻿import os
+import os
 from dataclasses import dataclass, field
 
 from .submesh_json import SubmeshJson
@@ -24,7 +24,7 @@ class TextureMetadataResolver:
     @staticmethod
     def find_texture(texture_prefix, texture_suffix, directory):
         '''
-        查找目标目录下，满足指定后缀和前缀的贴图文件
+        Finds a texture file in the target directory that matches the given suffix and prefix
         '''
         normalized_prefix = str(texture_prefix).casefold()
         normalized_suffix = str(texture_suffix).casefold()
@@ -113,13 +113,13 @@ class TextureMetadataResolver:
         try:
             submesh_json = SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
         except Exception as ex:
-            print("TextureMetadataResolver: 跳过贴图标记读取，无法解析 SubmeshJson: " + submesh_name + "，错误: " + str(ex))
+            print("TextureMetadataResolver: Skipping texture markup reading; failed to parse SubmeshJson: " + submesh_name + ", error: " + str(ex))
             return submesh_name, []
 
         print(
-            "TextureMetadataResolver: 读取贴图标记，submesh_name: "
+            "TextureMetadataResolver: Reading texture markup, submesh_name: "
             + submesh_name
-            + "，submesh_json: "
+            + ", submesh_json: "
             + submesh_json.JsonFilePath
         )
 
@@ -129,14 +129,14 @@ class TextureMetadataResolver:
         texture_markup_info_list = TextureMetadataResolver._dedupe_texture_markup_info_list(texture_markup_info_list)
 
         if not texture_markup_info_list:
-            print("TextureMetadataResolver: 当前 submesh 没有贴图标记: " + submesh_name)
+            print("TextureMetadataResolver: Current submesh has no texture markup: " + submesh_name)
             return submesh_name, []
 
         if texture_markup_info_list:
             print(
-                "TextureMetadataResolver: 当前 submesh 已匹配到贴图标记，submesh_name: "
+                "TextureMetadataResolver: Current submesh matched texture markup, submesh_name: "
                 + submesh_name
-                + "，数量: "
+                + ", count: "
                 + str(len(texture_markup_info_list))
             )
 
@@ -173,9 +173,9 @@ class TextureMetadataResolver:
                 merged_texture_markup_info_dict.get(part_name, []) + texture_markup_info_list
             )
             print(
-                "TextureMetadataResolver: 已合并贴图标记到 Part "
+                "TextureMetadataResolver: Merged texture markup into Part "
                 + part_name
-                + "，数量: "
+                + ", count: "
                 + str(len(merged_texture_markup_info_dict[part_name]))
             )
 

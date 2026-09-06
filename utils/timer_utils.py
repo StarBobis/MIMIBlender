@@ -10,12 +10,12 @@ class TimerUtils:
 
     @classmethod
     def Start(cls,func_name:str):
-        # 清空run_start和run_end，并将run_start设为当前时间
+        # Clear run_start and run_end, and set run_start to the current time
         cls.run_start = datetime.now()
         cls.run_end = None
         cls.methodname_runstart_dict[func_name] = cls.run_start
         # LOG.newline()
-        # print("[" + func_name + f"] 开始于: {cls.run_start} ")
+        # print("[" + func_name + f"] started at: {cls.run_start} ")
         # LOG.newline()
 
     @classmethod
@@ -24,22 +24,22 @@ class TimerUtils:
             print("Timer has not been started. Call Start() first.")
             return
         
-        # 将run_end设为当前时间
+        # Set run_end to the current time
         cls.run_end = datetime.now()
 
         # LOG.newline()
         if func_name == "":
-            # 计算时间差
+            # Calculate the time difference
             time_diff = cls.run_end - cls.run_start
             
-            # 打印时间差
+            # Print the time difference
             print(f"last function time elapsed: {time_diff} ")
         else:
             time_diff = cls.run_end - cls.methodname_runstart_dict.get(func_name,0)
 
-            # 打印时间差
-            print("[" + func_name + f"]已完成,总耗时: {time_diff} ")
+            # Print the time difference
+            print("[" + func_name + f"] completed, total time elapsed: {time_diff} ")
         # LOG.newline()
-        # 将run_start更新为当前时间
+        # Update run_start to the current time
         cls.run_start = cls.run_end
         # print(f"Timer updated start to: {cls.run_start}")

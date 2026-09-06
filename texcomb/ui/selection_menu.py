@@ -14,7 +14,7 @@ class SMC_MT_SelectionMenu(bpy.types.Menu):
     select or deselect all materials in the Material Combiner UI.
     """
 
-    bl_label = "选择操作"
+    bl_label = "Selection Operations"
     bl_idname = "SMC_MT_SelectionMenu"
 
     def draw(self, context):
@@ -24,5 +24,5 @@ class SMC_MT_SelectionMenu(bpy.types.Menu):
             context: The current Blender context.
         """
         layout = self.layout
-        layout.operator("smc.select_all", text="全选")
-        layout.operator("smc.select_none", text="取消全选")
+        layout.operator("smc.select_all", text="Select All")
+        layout.operator("smc.select_none", text="Deselect All")

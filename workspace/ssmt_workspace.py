@@ -1,4 +1,4 @@
-﻿from ..common.global_config import GlobalConfig
+from ..common.global_config import GlobalConfig
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
@@ -19,37 +19,37 @@ class DedupedTextureInfo:
 @dataclass
 class WorkSpaceModel:
     '''
-    工作空间数据模型 —— 从磁盘目录结构统一解析所有 LOD、DrawIB、Submesh 的映射关系。
+    Workspace data model - uniformly resolves the mapping relations of all LOD, DrawIB and Submesh from the on-disk directory structure.
 
-    扫描工作空间目录后构建以下映射:
+    After scanning the workspace directory, the following mappings are built:
     - lod_components[lod_name][draw_ib][component_index] = old_folder_name
-      例: {"LOD0": {"94517393": {0: "94517393-16884-0", 1: "94517393-25830-16884"}}}
+      e.g. {"LOD0": {"94517393": {0: "94517393-16884-0", 1: "94517393-25830-16884"}}}
     - lod_reverse[lod_name][draw_ib][old_folder_name] = component_index
     - lod_component_info[lod_name][draw_ib][component_index] = (index_count, first_index)
-      从旧格式文件夹名中解析的数值，供游戏导出器使用
+      Values parsed from old-format folder names, provided to the game exporter
 
-    命名规则:
-    - 新格式（短名）: {DrawIB}-{ComponentIndex}  例: 94517393-0
-    - 旧格式（长名）: {DrawIB}-{IndexCount}-{FirstIndex}  例: 94517393-16884-0
-    - 带 LOD 前缀的新名: LOD0.94517393-0
-    - 带 LOD 前缀的旧名: LOD0.94517393-16884-0
+    Naming rules:
+    - New format (short name): {DrawIB}-{ComponentIndex}  e.g. 94517393-0
+    - Old format (long name): {DrawIB}-{IndexCount}-{FirstIndex}  e.g. 94517393-16884-0
+    - New name with LOD prefix: LOD0.94517393-0
+    - Old name with LOD prefix: LOD0.94517393-16884-0
     '''
 
     workspace_path: str = field(default="")
 
-    # 三层映射: lod -> drawib -> component_index -> old_folder_name
+    # Three-level mapping: lod -> drawib -> component_index -> old_folder_name
     lod_components: Dict[str, Dict[str, Dict[int, str]]] = field(default_factory=dict)
 
-    # 反向映射: lod -> drawib -> old_folder_name -> component_index
+    # Reverse mapping: lod -> drawib -> old_folder_name -> component_index
     lod_reverse: Dict[str, Dict[str, Dict[str, int]]] = field(default_factory=dict)
 
-    # 数值信息: lod -> drawib -> component_index -> (index_count, first_index)
+    # Numeric info: lod -> drawib -> component_index -> (index_count, first_index)
     lod_component_info: Dict[str, Dict[str, Dict[int, tuple]]] = field(default_factory=dict)
 
-    # DrawIB 别名: draw_ib -> alias_name (从各 LOD 的 Config.json 读取)
+    # DrawIB alias: draw_ib -> alias_name (read from each LOD's Config.json)
     drawib_aliases: Dict[str, str] = field(default_factory=dict)
 
-    # 所有 submesh 的显示名称列表（新格式，带 LOD 前缀和别名），供蓝图下拉列表使用
+    # Display-name list of all submeshes (new format, with LOD prefix and alias), for Blueprint dropdown lists
     all_display_names: List[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -59,9 +59,9 @@ class WorkSpaceModel:
 
     def _parse_old_folder_name(self, folder_name: str):
         '''
-        从旧格式文件夹名中解析 (draw_ib, index_count, first_index)。
+        Parses (draw_ib, index_count, first_index) from an old-format folder name.
         "94517393-16884-0" -> ("94517393", 16884, 0)
-        不符合旧格式（< 3 段）返回 None。
+        Returns None if the name does not match the old format (fewer than 3 segments).
         '''
         parts = folder_name.split("-")
         if len(parts) < 3:
@@ -75,8 +75,8 @@ class WorkSpaceModel:
             return None
 
     def _read_config_json(self, folder_path: str) -> Dict[str, str]:
-        '''读取某个目录下的别名映射，返回 {draw_ib: alias_name} 字典。
-        优先读取 Config.json（旧格式），若不存在则尝试 Config\Tabs\*.json（新格式）。'''
+        '''Reads the alias mapping in a given folder, returning a {draw_ib: alias_name} dict.
+        Prefers Config.json (old format); if absent, tries Config\Tabs\*.json (new format).'''
         result = {}
         config_path = os.path.join(folder_path, "Config.json")
         if os.path.exists(config_path):
@@ -94,7 +94,7 @@ class WorkSpaceModel:
                 pass
             return result
 
-        # 新格式: Config\Tabs\*.json -> modelRows[].aliasName
+        # New format: Config\Tabs\*.json -> modelRows[].aliasName
         tabs_dir = os.path.join(folder_path, "Config", "Tabs")
         if os.path.isdir(tabs_dir):
             for filename in os.listdir(tabs_dir):
@@ -117,7 +117,7 @@ class WorkSpaceModel:
         return result
 
     def _scan(self):
-        '''扫描工作空间目录，构建所有映射。'''
+        '''Scans the workspace directory and builds all mappings.'''
         self.lod_components.clear()
         self.lod_reverse.clear()
         self.lod_component_info.clear()
@@ -127,7 +127,7 @@ class WorkSpaceModel:
         if not self.workspace_path or not os.path.isdir(self.workspace_path):
             return
 
-        # 收集 LOD 文件夹
+        # Collect LOD folders
         lod_folders: List[tuple[str, str]] = []  # [(lod_name, lod_path)]
         for entry in os.scandir(self.workspace_path):
             if not entry.is_dir():
@@ -138,15 +138,15 @@ class WorkSpaceModel:
         lod_folders.sort(key=lambda x: int(x[0][3:]))
 
         if not lod_folders:
-            # 兼容旧版无 LOD 结构
+            # Backward compatibility with the old layout that has no LOD folders
             lod_folders = [("", self.workspace_path)]
 
         for lod_name, lod_path in lod_folders:
-            # 读取该 LOD 的 Config.json
+            # Read this LOD's Config.json
             if lod_name:
                 self.drawib_aliases.update(self._read_config_json(lod_path))
 
-            # 收集该 LOD 下所有旧格式子文件夹
+            # Collect all old-format subfolders under this LOD
             raw_entries: Dict[str, list] = {}  # drawib -> [(folder_name, first_index)]
             for entry in os.scandir(lod_path):
                 if not entry.is_dir():
@@ -159,13 +159,13 @@ class WorkSpaceModel:
                     raw_entries[draw_ib] = []
                 raw_entries[draw_ib].append((entry.name, first_index))
 
-            # 按 FirstIndex 排序并分配 Component 序号
+            # Sort by FirstIndex and assign Component indices
             self.lod_components[lod_name] = {}
             self.lod_reverse[lod_name] = {}
             self.lod_component_info[lod_name] = {}
 
             for draw_ib, entries in raw_entries.items():
-                entries.sort(key=lambda x: x[1])  # 按 FirstIndex 升序
+                entries.sort(key=lambda x: x[1])  # ascending by FirstIndex
 
                 comp_map: Dict[int, str] = {}
                 reverse_map: Dict[str, int] = {}
@@ -174,7 +174,7 @@ class WorkSpaceModel:
                 for comp_index, (folder_name, _) in enumerate(entries):
                     comp_map[comp_index] = folder_name
                     reverse_map[folder_name] = comp_index
-                    # 重新解析以获取 index_count
+                    # Re-parse to obtain index_count
                     parsed = self._parse_old_folder_name(folder_name)
                     if parsed:
                         info_map[comp_index] = (parsed[1], parsed[2])
@@ -183,7 +183,7 @@ class WorkSpaceModel:
                 self.lod_reverse[lod_name][draw_ib] = reverse_map
                 self.lod_component_info[lod_name][draw_ib] = info_map
 
-            # 构建该 LOD 的显示名称列表
+            # Build the display-name list for this LOD
             for draw_ib in sorted(self.lod_components[lod_name].keys()):
                 alias = self.drawib_aliases.get(draw_ib, "")
                 for comp in sorted(self.lod_components[lod_name][draw_ib].keys()):
@@ -196,13 +196,13 @@ class WorkSpaceModel:
                         full_name += f".{alias}"
                     self.all_display_names.append(full_name)
 
-        # 读取根目录 Config.json（兼容旧版无 LOD 结构时的别名）
+        # Read the root Config.json (aliases for the old layout without LOD folders)
         root_aliases = self._read_config_json(self.workspace_path)
         for k, v in root_aliases.items():
             if k not in self.drawib_aliases:
                 self.drawib_aliases[k] = v
 
-    # ---- 查询方法 ----
+    # ---- Query methods ----
 
     def has_lod(self, lod_name: str) -> bool:
         return lod_name in self.lod_components
@@ -214,11 +214,11 @@ class WorkSpaceModel:
         return self.has_drawib(lod_name, draw_ib) and component in self.lod_components[lod_name][draw_ib]
 
     def get_old_folder_name(self, lod_name: str, draw_ib: str, component: int) -> str:
-        '''返回旧格式文件夹名: "94517393-16884-0"'''
+        '''Returns the old-format folder name: "94517393-16884-0"'''
         return self.lod_components.get(lod_name, {}).get(draw_ib, {}).get(component, "")
 
     def get_component_index(self, lod_name: str, draw_ib: str, old_folder_name: str) -> int:
-        '''从旧格式文件夹名反向查 Component 序号。'''
+        '''Looks up the Component index in reverse from an old-format folder name.'''
         return self.lod_reverse.get(lod_name, {}).get(draw_ib, {}).get(old_folder_name, -1)
 
     def get_index_count(self, lod_name: str, draw_ib: str, component: int) -> int:
@@ -230,12 +230,12 @@ class WorkSpaceModel:
         return info[1] if info else 0
 
     def get_index_count_first_index(self, lod_name: str, draw_ib: str, component: int) -> tuple:
-        '''返回 (index_count, first_index) 元组。'''
+        '''Returns the (index_count, first_index) tuple.'''
         info = self.lod_component_info.get(lod_name, {}).get(draw_ib, {}).get(component)
         return info if info else (0, 0)
 
     def resolve_component_info(self, lod_name: str, draw_ib: str, component: int):
-        '''返回 (old_folder_name, index_count, first_index) 三元组。'''
+        '''Returns the (old_folder_name, index_count, first_index) triple.'''
         old_name = self.get_old_folder_name(lod_name, draw_ib, component)
         if not old_name:
             return "", 0, 0
@@ -243,19 +243,19 @@ class WorkSpaceModel:
         return old_name, ic, fi
 
     def get_new_submesh_name(self, lod_name: str, draw_ib: str, component: int) -> str:
-        '''返回新格式 submesh 名（带 LOD 前缀）: "LOD0.94517393-0"'''
+        '''Returns the new-format submesh name (with LOD prefix): "LOD0.94517393-0"'''
         short = f"{draw_ib}-{component}"
         return f"{lod_name}.{short}" if lod_name else short
 
     def get_old_lod_submesh_name(self, lod_name: str, draw_ib: str, component: int) -> str:
-        '''返回旧格式 submesh 名（带 LOD 前缀）: "LOD0.94517393-16884-0"'''
+        '''Returns the old-format submesh name (with LOD prefix): "LOD0.94517393-16884-0"'''
         old_folder = self.get_old_folder_name(lod_name, draw_ib, component)
         if not old_folder:
             return ""
         return f"{lod_name}.{old_folder}" if lod_name else old_folder
 
     def get_display_name(self, lod_name: str, draw_ib: str, component: int) -> str:
-        '''返回用于物体命名的显示名称，如果有别名则附上。'''
+        '''Returns the display name used for Object naming, appending the alias when present.'''
         new_name = self.get_new_submesh_name(lod_name, draw_ib, component)
         alias = self.drawib_aliases.get(draw_ib, "")
         if alias:
@@ -263,7 +263,7 @@ class WorkSpaceModel:
         return new_name
 
     def get_folder_path(self, lod_name: str, draw_ib: str, component: int) -> str:
-        '''返回实际子文件夹的完整路径。'''
+        '''Returns the full path of the actual subfolder.'''
         old_folder = self.get_old_folder_name(lod_name, draw_ib, component)
         if not old_folder:
             return ""
@@ -273,15 +273,15 @@ class WorkSpaceModel:
 
     def get_submesh_folder_path_for_name(self, submesh_name: str) -> str:
         '''
-        根据 submesh_name（新格式或旧格式）返回实际文件夹路径。
-        新格式: "LOD0.94517393-0" 或 "94517393-0"
-        旧格式: "LOD0.94517393-16884-0" 或 "94517393-16884-0"
+        Returns the actual folder path for submesh_name (new format or old format).
+        New format: "LOD0.94517393-0" or "94517393-0"
+        Old format: "LOD0.94517393-16884-0" or "94517393-16884-0"
         '''
         parsed = self.parse_new_format_name(submesh_name)
         if parsed is not None:
             return self.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
 
-        # 回退: 当作旧格式处理，直接拼接路径
+        # Fallback: treat as old format and build the path directly
         lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
         if lod_name:
             return os.path.join(self.workspace_path, lod_name, bare_name)
@@ -289,11 +289,11 @@ class WorkSpaceModel:
 
     def parse_new_format_name(self, name: str):
         '''
-        尝试按新格式解析名称字符串。
-        新格式: [LOD前缀.]DrawIB-ComponentIndex[.别名]
-        例: "LOD0.94517393-0.身体" -> {"lod": "LOD0", "draw_ib": "94517393", "component": 0, "alias": "身体"}
-        例: "94517393-1" -> {"lod": "", "draw_ib": "94517393", "component": 1, "alias": ""}
-        无法识别为新格式时返回 None。
+        Attempts to parse a name string in the new format.
+        New format: [LOD prefix.]DrawIB-ComponentIndex[.alias]
+        e.g. "LOD0.94517393-0.Body" -> {"lod": "LOD0", "draw_ib": "94517393", "component": 0, "alias": "Body"}
+        e.g. "94517393-1" -> {"lod": "", "draw_ib": "94517393", "component": 1, "alias": ""}
+        Returns None when the name cannot be recognized as new format.
         '''
         if not name:
             return None
@@ -301,7 +301,7 @@ class WorkSpaceModel:
         lod_name = ""
         bare = name
 
-        # 剥离 LOD 前缀
+        # Strip the LOD prefix
         if name.upper().startswith("LOD") and "." in name:
             dot_idx = name.index(".")
             potential_lod = name[:dot_idx]
@@ -310,14 +310,14 @@ class WorkSpaceModel:
                 lod_name = potential_lod
                 bare = name[dot_idx + 1:]
 
-        # 分离别名
+        # Split off the alias
         alias = ""
         if "." in bare:
             name_part, _, alias = bare.partition(".")
         else:
             name_part = bare
 
-        # 新格式: DrawIB-ComponentIndex（恰好 2 段，第二段是纯数字）
+        # New format: DrawIB-ComponentIndex (exactly 2 segments; the second is purely numeric)
         parts = name_part.split("-")
         if len(parts) == 2:
             try:
@@ -335,39 +335,39 @@ class WorkSpaceModel:
 
     def parse_any_format_name(self, name: str):
         '''
-        尝试解析任意格式的名称（新格式或旧格式）。
-        优先按新格式解析，失败则回退到旧格式并查表转换为新格式信息。
-        始终返回标准化结果: {"lod", "draw_ib", "component", "alias", "old_folder_name"}
-        识别不了时返回 None。
+        Attempts to parse a name in any format (new format or old format).
+        Tries the new format first; on failure falls back to the old format and converts via lookup tables to new-format info.
+        Always returns a normalized result: {"lod", "draw_ib", "component", "alias", "old_folder_name"}
+        Returns None when the name cannot be recognized.
         '''
         if not name:
             return None
 
-        # 先试新格式
+        # Try the new format first
         result = self.parse_new_format_name(name)
         if result is not None:
             old_folder = self.get_old_folder_name(result["lod"], result["draw_ib"], result["component"])
             result["old_folder_name"] = old_folder
             return result
 
-        # 回退旧格式: 通过 parse_object_name_to_folder_info 解析后查表
+        # Fall back to old format: parse via parse_object_name_to_folder_info and look it up
         lod, folder_name, draw_ib = SSMTWorkSpace.parse_object_name_to_folder_info(name)
         if not draw_ib:
             return None
 
-        # 分离别名
+        # Split off the alias
         alias = ""
         if "." in name:
             _, _, alias = name.partition(".")
         if "." in alias:
-            # 去掉 LOD 前缀后取别名
+            # Strip the LOD prefix before extracting the alias
             parts = alias.split(".")
             alias = parts[-1] if len(parts) > 1 else alias
 
         comp = self.get_component_index(lod, draw_ib, folder_name)
         if comp < 0:
-            # 查表失败，尝试从旧文件夹名解析 component
-            # 如果新格式名不存在，可能还没有 component 映射
+            # Lookup failed; try parsing component from the old folder name
+            # If no new-format name exists, the component mapping may not be built yet
             return None
 
         return {
@@ -379,7 +379,7 @@ class WorkSpaceModel:
         }
 
     def get_all_new_format_names(self) -> List[str]:
-        '''返回所有新格式 submesh 名称（带 LOD 前缀，不含别名）。'''
+        '''Returns all new-format submesh names (with LOD prefix, without alias).'''
         names = []
         for lod_name in sorted(self.lod_components.keys()):
             for draw_ib in sorted(self.lod_components[lod_name].keys()):
@@ -388,13 +388,13 @@ class WorkSpaceModel:
         return names
 
     def get_all_display_names(self) -> List[str]:
-        '''返回所有带别名的显示名称列表。'''
+        '''Returns the list of all display names, including aliases.'''
         return list(self.all_display_names)
 
     def get_ordered_submesh_name_list_by_drawib(self, draw_ib: str) -> List[str]:
         '''
-        返回某个 DrawIB 下所有 Component 的新格式 submesh_name 列表，
-        按 Component 序号升序排列，带 LOD 前缀。
+        Returns the new-format submesh_name list of all Components under the given DrawIB,
+        sorted ascending by Component index and prefixed with the LOD name.
         '''
         result = []
         for lod_name in sorted(self.lod_components.keys()):
@@ -418,16 +418,16 @@ class SSMTWorkSpace:
         folder_prefix, _, folder_alias = normalized_folder_name.partition(".")
         draw_ib = folder_prefix.split("-")[0]
 
-        # 优先使用 Config.json 里显式配置的别名。
+        # Prefer the alias explicitly configured in Config.json.
         configured_alias = str(drawib_aliasname_dict.get(draw_ib, "")).strip()
         if configured_alias:
             return configured_alias
 
-        # 如果名称里已经带了别名后缀，则沿用它。
+        # If the name already carries an alias suffix, keep using it.
         if folder_alias.strip():
             return folder_alias.strip()
 
-        # 无别名时回退为原始对象名称，避免写入“自定义名称”。
+        # Without an alias, fall back to the raw Object name instead of writing a "custom name".
         return folder_prefix
 
     @staticmethod
@@ -448,7 +448,7 @@ class SSMTWorkSpace:
 
     @staticmethod
     def get_ordered_gpu_cpu_import_folderpath_list(submesh_folderpath:str)-> List[str]:
-        # 导入时，要按照先GPU类型，再CPU类型进行排序
+        # During import, sort by GPU types first, then CPU types
         gpu_import_folder_path_list = []
         cpu_import_folder_path_list = []
 
@@ -473,9 +473,9 @@ class SSMTWorkSpace:
     @staticmethod
     def parse_lod_submesh_name(submesh_name: str):
         '''
-        解析 submesh_name，返回 (lod_name, bare_name)。
-        如果有 LOD 前缀（如 "LOD0.67f829fc-2653-0"），返回 ("LOD0", "67f829fc-2653-0")；
-        否则返回 ("", submesh_name)。
+        Parses submesh_name and returns (lod_name, bare_name).
+        If there is an LOD prefix (e.g. "LOD0.67f829fc-2653-0"), returns ("LOD0", "67f829fc-2653-0");
+        Otherwise returns ("", submesh_name).
         '''
         if submesh_name and submesh_name.upper().startswith("LOD") and "." in submesh_name:
             dot_idx = submesh_name.index(".")
@@ -488,16 +488,16 @@ class SSMTWorkSpace:
     @staticmethod
     def parse_object_name_to_folder_info(object_name: str):
         '''
-        解析导入后的物体名称，返回 (lod_name, submesh_folder_name, draw_ib)。
-        物体格式: LOD0.{submesh_folder_name}[.{alias}]
-        例如: "LOD0.3ed2b2ba-2592-76086.身体"
+        Parses an imported Object name and returns (lod_name, submesh_folder_name, draw_ib).
+        Object format: LOD0.{submesh_folder_name}[.{alias}]
+        e.g. "LOD0.3ed2b2ba-2592-76086.Body"
           → ("LOD0", "3ed2b2ba-2592-76086", "3ed2b2ba")
-        submesh_folder_name 的特征是包含至少 2 个 '-'（即 split('-') 长度 >= 3）。
+        submesh_folder_name is characterized by containing at least 2 '-' (i.e. split('-') length >= 3).
         '''
         lod_name = ""
         bare_name = ""
 
-        # 1. 去掉 LOD 前缀
+        # 1. Strip the LOD prefix
         if object_name and object_name.upper().startswith("LOD") and "." in object_name:
             dot_idx = object_name.index(".")
             potential_lod = object_name[:dot_idx]
@@ -506,14 +506,14 @@ class SSMTWorkSpace:
                 lod_name = potential_lod
                 bare_name = object_name[dot_idx + 1:]
             else:
-                # 没有 LOD 前缀，整体当作 bare_name
+                # No LOD prefix; treat the whole name as bare_name
                 bare_name = object_name
         else:
             bare_name = object_name
 
-        # 2. 从 bare_name 中分离 submesh_folder_name
-        #    bare_name 可能是 "3ed2b2ba-2592-76086.身体" 或 "3ed2b2ba-2592-76086"
-        #    submesh_folder_name 的特征是包含 >= 2 个 '-'
+        # 2. Split submesh_folder_name out of bare_name
+        #    bare_name may be "3ed2b2ba-2592-76086.Body" or "3ed2b2ba-2592-76086"
+        #    submesh_folder_name contains >= 2 '-' characters
         parts = bare_name.split(".")
         submesh_folder_name = ""
         for i, part in enumerate(parts):
@@ -522,11 +522,11 @@ class SSMTWorkSpace:
                 break
 
         if not submesh_folder_name:
-            # fallback: 如果找不到符合特征的段，说明要么 bare_name 本身既是 folder name
-            # 要么解析失败；直接整体返回，由调用方判断
+            # fallback: if no matching segment is found, bare_name itself is either the folder name
+            # or parsing failed; return the whole name and let the caller decide
             submesh_folder_name = bare_name
 
-        # 3. 提取 DrawIB（第一个 '-' 之前的部分）
+        # 3. Extract the DrawIB (the part before the first '-')
         draw_ib = submesh_folder_name.split("-")[0] if submesh_folder_name else ""
 
         return lod_name, submesh_folder_name, draw_ib
@@ -534,13 +534,13 @@ class SSMTWorkSpace:
     @staticmethod
     def get_submesh_folder_path(submesh_name: str) -> str:
         '''
-        根据 submesh_name（可带 LOD 前缀）返回工作空间内实际的 submesh 文件夹路径。
-        支持新格式: LOD0.94517393-0  → workspace/LOD0/94517393-16884-0/
-        支持旧格式: LOD0.67f829fc-2653-0 → workspace/LOD0/67f829fc-2653-0/
+        Returns the actual submesh folder path within the workspace for submesh_name (an LOD prefix is allowed).
+        Supports new format: LOD0.94517393-0  → workspace/LOD0/94517393-16884-0/
+        Supports old format: LOD0.67f829fc-2653-0 → workspace/LOD0/67f829fc-2653-0/
         '''
         workspace_folder = GlobalConfig.path_workspace_folder()
 
-        # 先尝试新格式解析
+        # Try new-format parsing first
         ws_model = WorkSpaceModel(workspace_path=workspace_folder)
         parsed = ws_model.parse_new_format_name(submesh_name)
         if parsed is not None and parsed["draw_ib"] and parsed["lod"]:
@@ -548,7 +548,7 @@ class SSMTWorkSpace:
             if folder_path and os.path.isdir(folder_path):
                 return folder_path
 
-        # 回退旧格式
+        # Fall back to old format
         lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
         if lod_name:
             return os.path.join(workspace_folder, lod_name, bare_name)
@@ -556,7 +556,7 @@ class SSMTWorkSpace:
 
     @staticmethod
     def create_and_get_workspace_collection() -> bpy.types.Collection:
-        # 这里先创建以当前工作空间为名称的集合，并且链接到scene，确保它存在
+        # Create a Collection named after the current workspace and link it to the scene so it is guaranteed to exist
         workspace_collection = CollectionUtils.create_new_collection(collection_name=GlobalConfig.get_workspace_name(),color_tag=CollectionColor.Red)
         bpy.context.scene.collection.children.link(workspace_collection)
         return workspace_collection
@@ -564,7 +564,7 @@ class SSMTWorkSpace:
     @staticmethod
     def _get_submesh_folderpath_list_from(base_folder: str) -> List[str]:
         '''
-        从指定目录中获取所有 SubMesh 文件夹（名字包含至少两个 '-' 的目录）。
+        Gets all SubMesh folders from the given directory (folders whose names contain at least two '-').
         '''
         result = []
         if not os.path.isdir(base_folder):
@@ -579,7 +579,7 @@ class SSMTWorkSpace:
     @staticmethod
     def get_lod_folderpath_list() -> List[str]:
         '''
-        获取当前工作空间目录下所有以 "LOD" 开头（后接数字）的目录，按名称排序。
+        Gets all directories under the current workspace that start with "LOD" followed by digits, sorted by name.
         '''
         lod_folders = []
         workspace_folder = GlobalConfig.path_workspace_folder()
@@ -597,7 +597,7 @@ class SSMTWorkSpace:
     @staticmethod
     def get_lod_submesh_folderpath_dict() -> Dict[str, List[str]]:
         '''
-        返回 {lod_name: [submesh_folder_path, ...]} 字典，按 LOD 排序。
+        Returns a {lod_name: [submesh_folder_path, ...]} dict, sorted by LOD.
         '''
         result: Dict[str, List[str]] = {}
         for lod_folder_path in SSMTWorkSpace.get_lod_folderpath_list():
@@ -608,8 +608,8 @@ class SSMTWorkSpace:
     @staticmethod
     def get_submesh_folderpath_list() -> List[str]:
         '''
-        获取当前工作空间文件夹下面的所有SubMesh文件夹（兼容旧版无LOD结构）。
-        新版工作空间请使用 get_lod_submesh_folderpath_dict()。
+        Gets all SubMesh folders under the current workspace folder (compatible with the old layout without LOD folders).
+        For new-format workspaces, use get_lod_submesh_folderpath_dict().
         '''
         submesh_folderpath_list = []
         for f in os.scandir(GlobalConfig.path_workspace_folder()):
@@ -624,12 +624,12 @@ class SSMTWorkSpace:
     @staticmethod
     def get_drawib_aliasname_dict_for_path(folder_path: str) -> Dict[str, str]:
         '''
-        从指定目录下读取 DrawIB 和别名的对应关系。
-        优先读取 Config.json（旧格式），若不存在则尝试 Config\Tabs\*.json（新格式）。
+        Reads the DrawIB-to-alias mapping from the given directory.
+        Prefers Config.json (old format); if absent, tries Config\Tabs\*.json (new format).
         '''
         drawib_aliasname_dict = {}
 
-        # 策略1: 读取 Config.json（旧格式）
+        # Strategy 1: read Config.json (old format)
         config_json_path = os.path.join(folder_path, "Config.json")
         if os.path.exists(config_json_path):
             config_json = JsonUtils.LoadFromFile(config_json_path)
@@ -643,7 +643,7 @@ class SSMTWorkSpace:
                         drawib_aliasname_dict[draw_ib] = alias_name
             return drawib_aliasname_dict
 
-        # 策略2: 从 Config\Tabs\*.json 中读取（新格式）
+        # Strategy 2: read from Config\Tabs\*.json (new format)
         tabs_dir = os.path.join(folder_path, "Config", "Tabs")
         if os.path.isdir(tabs_dir):
             for filename in os.listdir(tabs_dir):
@@ -669,14 +669,14 @@ class SSMTWorkSpace:
     @staticmethod
     def get_drawib_aliasname_dict() -> Dict[str,str]:
         '''
-        从当前工作空间目录下读取DrawIB和别名的对应关系。
-        按优先级: Config.json > Config\\Tabs\\*.json > LOD子目录的Config.json
+        Reads the DrawIB-to-alias mapping from the current workspace directory.
+        Priority: Config.json > Config\\Tabs\\*.json > Config.json under LOD subfolders
         '''
         drawib_aliasname_dict = {}
 
         workspace_folder = GlobalConfig.path_workspace_folder()
 
-        # 策略1: 读取工作空间根目录的 Config.json（旧格式）
+        # Strategy 1: read the Config.json at the workspace root (old format)
         config_json_path = os.path.join(workspace_folder, "Config.json")
         if os.path.exists(config_json_path):
             config_json = JsonUtils.LoadFromFile(config_json_path)
@@ -691,7 +691,7 @@ class SSMTWorkSpace:
             if drawib_aliasname_dict:
                 return drawib_aliasname_dict
 
-        # 策略2: 从 Config\\Tabs\\*.json 中读取（SSMT4 新格式）
+        # Strategy 2: read from Config\\Tabs\\*.json (SSMT4 new format)
         tabs_dir = os.path.join(workspace_folder, "Config", "Tabs")
         if os.path.isdir(tabs_dir):
             for filename in os.listdir(tabs_dir):
@@ -714,7 +714,7 @@ class SSMTWorkSpace:
             if drawib_aliasname_dict:
                 return drawib_aliasname_dict
 
-        # 策略3: 扫描 LOD 子目录的 Config.json
+        # Strategy 3: scan the Config.json under LOD subfolders
         for entry in os.scandir(workspace_folder):
             if not entry.is_dir():
                 continue
@@ -740,13 +740,13 @@ class SSMTWorkSpace:
     @staticmethod
     def check_and_get_submesh_json_path(submesh_name: str) -> str:
         """
-        根据 submesh_name 查找对应的 SubmeshJson 文件路径。
-        支持新格式（DrawIB-ComponentIndex）和旧格式（DrawIB-IndexCount-FirstIndex）。
-        找到返回路径，找不到抛出 SSMTErrorUtils 错误。
+        Finds the SubmeshJson file path corresponding to submesh_name.
+        Supports both the new format (DrawIB-ComponentIndex) and the old format (DrawIB-IndexCount-FirstIndex).
+        Returns the path when found; raises an SSMTErrorUtils error otherwise.
         """
         workspace_folder = GlobalConfig.path_workspace_folder()
 
-        # 尝试新格式解析，获取实际文件夹路径和 bare_name
+        # Try new-format parsing to obtain the actual folder path and bare_name
         ws_model = WorkSpaceModel(workspace_path=workspace_folder)
         parsed = ws_model.parse_new_format_name(submesh_name)
         if parsed is not None and parsed["draw_ib"]:
@@ -756,26 +756,26 @@ class SSMTWorkSpace:
                 submesh_folder = ws_model.get_folder_path(lod_name, parsed["draw_ib"], parsed["component"])
                 bare_name = old_folder_name
             else:
-                # 新格式解析成功但查表失败，回退旧逻辑
+                # New-format parsing succeeded but the lookup failed; fall back to the old logic
                 lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
                 submesh_folder = SSMTWorkSpace.get_submesh_folder_path(submesh_name)
         else:
-            # 旧格式
+            # Old format
             lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
             submesh_folder = SSMTWorkSpace.get_submesh_folder_path(submesh_name)
 
         if not os.path.exists(submesh_folder):
             SSMTErrorUtils.raise_fatal(
-                f"submesh_name '{submesh_name}' 没有找到对应的提取数据。\n"
-                + "请确保已从游戏中提取模型并执行「一键导入当前工作空间内容」操作。"
+                f"submesh_name '{submesh_name}' has no corresponding extracted data.\n"
+                + "Please make sure the model has been extracted from the game and run the \"One-Click Import Current Workspace Content\" operation."
             )
 
         workspace_import_json_path = os.path.join(workspace_folder, "Import.json")
         workspace_import_json = JsonUtils.LoadFromFile(workspace_import_json_path) if os.path.exists(workspace_import_json_path) else {}
-        # Import.json 的 key 可能是新格式或旧格式，两种都试试
+        # The Import.json key may be in new format or old format; try both
         gametype_name = workspace_import_json.get(submesh_name, "")
         if not gametype_name and parsed is not None and old_folder_name:
-            # 用旧格式 key 再试一次
+            # Retry with the old-format key
             old_full = f"{lod_name}.{old_folder_name}" if lod_name else old_folder_name
             gametype_name = workspace_import_json.get(old_full, "")
 
@@ -800,21 +800,21 @@ class SSMTWorkSpace:
 
         if len(found_type_paths) > 1:
             SSMTErrorUtils.raise_fatal(
-                f"submesh_name '{submesh_name}' 找到以下数据类型但没有在 Import.json 中记录: {', '.join(found_types)}\n"
-                + "请尝试重新执行「一键导入当前工作空间内容」操作。"
+                f"submesh_name '{submesh_name}' found the following Data Types but they were not recorded in Import.json: {', '.join(found_types)}\n"
+                + "Please try running the \"One-Click Import Current Workspace Content\" operation again."
             )
 
         SSMTErrorUtils.raise_fatal(
-            f"submesh_name '{submesh_name}' 没有找到对应的 SubmeshJson。\n"
-            + "请确保已从游戏中提取模型并执行「一键导入当前工作空间内容」操作。"
+            f"submesh_name '{submesh_name}' has no corresponding SubmeshJson.\n"
+            + "Please make sure the model has been extracted from the game and run the \"One-Click Import Current Workspace Content\" operation."
         )
 
     @staticmethod
     def get_ordered_submesh_name_list_by_drawib(draw_ib: str) -> list[str]:
         """
-        根据 DrawIB 在工作空间中查找对应的 Submesh 文件夹，
-        按 FirstIndex 升序排序后返回 submesh_name 列表（新格式）。
-        新格式: LOD0.94517393-0, LOD0.94517393-1, ...
+        Finds the Submesh folders corresponding to the DrawIB in the workspace,
+        sorts them ascending by FirstIndex and returns the submesh_name list (new format).
+        New format: LOD0.94517393-0, LOD0.94517393-1, ...
         """
         ws_model = WorkSpaceModel()
         return ws_model.get_ordered_submesh_name_list_by_drawib(draw_ib)
@@ -823,7 +823,7 @@ class SSMTWorkSpace:
     def get_hash_deduped_texture_info_dict(submesh_folder_name:str) -> Dict[str,DedupedTextureInfo]:
 
         draw_ib_folder_path = os.path.dirname(SSMTWorkSpace.get_submesh_folder_path(submesh_folder_name)) + "\\"
-        # 接下来计算ComponentList，也就是当前DrawIB使用到这个贴图的所有Component的Count，从1开始
+        # Next compute the ComponentList: the counts of all Components of the current DrawIB that use this texture, starting from 1
         component_name__drawcall_indexlist_json_path = os.path.join(draw_ib_folder_path,"ComponentName_DrawCallIndexList.json")
         trianglelist_deduped_filename_json_path = os.path.join(draw_ib_folder_path,"TrianglelistDedupedFileName.json")
 
@@ -858,12 +858,12 @@ class SSMTWorkSpace:
             original_hash = filename_parts[0] if len(filename_parts) > 0 else ""
             render_hash = filename_parts[1].split("-")[0] if len(filename_parts) > 1 else ""
 
-            # 从类似于 "b7ff7a6e_03d46264-R8G8B8A8_UNORM_SRGB.dds" 的文件名中
-            # 提取出 "R8G8B8A8_UNORM_SRGB" 部分：
-            # - 去掉扩展名
-            # - 找到第一个下划线 `_` 的位置
-            # - 从该下划线之后查找第一个连字符 `-`，并取其后到文件名末尾的子串
-            # - 如果找不到上述模式，则退回到以最后一个 `-` 分割并取最后一段的策略
+            # From a file name such as "b7ff7a6e_03d46264-R8G8B8A8_UNORM_SRGB.dds",
+            # extract the "R8G8B8A8_UNORM_SRGB" portion:
+            # - Drop the extension
+            # - Locate the first underscore `_`
+            # - After that underscore, find the first hyphen `-` and take the substring from it to the end of the file name
+            # - If no such pattern is found, fall back to splitting at the last `-` and taking the last segment
             base_name = os.path.splitext(deduped_filename)[0]
             fmt = ""
             try:

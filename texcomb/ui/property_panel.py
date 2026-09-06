@@ -31,9 +31,9 @@ class PropertyMenu(bpy.types.Operator):
     are processed during atlas generation.
     """
 
-    bl_label = "材质设置"
+    bl_label = "Material Settings"
     bl_idname = "smc.material_properties"
-    bl_description = "显示此材质的设置"
+    bl_description = "Displays the settings for this material"
     bl_options = {"UNDO", "INTERNAL"}
 
     list_id: IntProperty(default=0)
@@ -102,15 +102,15 @@ class PropertyMenu(bpy.types.Operator):
             self._show_size_settings(box_col, item)
         else:
             self._show_size_row(
-                box_col, "仅纯色", 0, (scn.smc_diffuse_size,) * 2
+                box_col, "Solid only", 0, (scn.smc_diffuse_size,) * 2
             )
             self._show_warning(
                 box_col,
-                "未找到连接到当前材质输出的主贴图，合并时会按纯色材质处理。",
+                "No main texture connected to the current material output was found; it will be combined as a solid-color material.",
             )
             self._show_warning(
                 box_col,
-                "请检查 Image Texture 是否连接到 Base Color/Color，且 Material Output 是否为当前输出。",
+                "Check that an Image Texture is connected to Base Color/Color and that this Material Output is the active output.",
             )
             self._show_alpha_status(box_col, item.mat)
             box_col.separator()
@@ -119,7 +119,7 @@ class PropertyMenu(bpy.types.Operator):
         if hasattr(col, "template_popup_confirm"):
             col.separator()
             col.template_popup_confirm(
-                "", cancel_text="确定", cancel_default=True
+                "", cancel_text="OK", cancel_default=True
             )
 
     @staticmethod
@@ -193,7 +193,7 @@ class PropertyMenu(bpy.types.Operator):
 
         size_col = row.column(align=True)
         size_col.alignment = "RIGHT"
-        size_col.label(text="尺寸: {}x{}px".format(*size))
+        size_col.label(text="Size: {}x{}px".format(*size))
 
     def _show_image_warnings(
         self,
@@ -203,7 +203,7 @@ class PropertyMenu(bpy.types.Operator):
     ) -> None:
         """Show warnings for images that will not be used at their raw size."""
         col.label(
-            text="主贴图会以 RGBA 写入图集；若图片含 Alpha 会保留。",
+            text="The main texture is written to the atlas in RGBA; any alpha in the image is preserved.",
             icon="INFO",
         )
 
@@ -211,7 +211,7 @@ class PropertyMenu(bpy.types.Operator):
         if pack_issue:
             self._show_warning(
                 col,
-                "贴图无法读取/打包，合并时会按纯色材质处理。",
+                "The texture cannot be read/packed; it will be combined as a solid-color material.",
             )
             self._show_warning(col, pack_issue)
 
@@ -223,7 +223,7 @@ class PropertyMenu(bpy.types.Operator):
             if limited_size != tuple(image.size):
                 self._show_warning(
                     col,
-                    "已启用材质自定义尺寸，合并时会限制为 {}x{}px。".format(
+                    "A custom material size is enabled; the combine will be limited to {}x{}px.".format(
                         *limited_size
                     ),
                 )
@@ -238,14 +238,14 @@ class PropertyMenu(bpy.types.Operator):
         if alpha_issue:
             self._show_warning(
                 col,
-                "Alpha 通道不会参与合并: {}".format(alpha_issue),
+                "The Alpha channel is not included in the combine: {}".format(alpha_issue),
             )
             return
 
         alpha_image = get_alpha_texture_image(mat)
         if alpha_image:
             col.label(
-                text="Alpha 贴图: {}".format(alpha_image.name),
+                text="Alpha texture: {}".format(alpha_image.name),
                 icon="IMAGE_DATA",
             )
 

@@ -27,11 +27,11 @@ class ExportSRMI:
 
     def generate_buffer_files(self):
         buf_output_folder = GlobalConfig.path_generatemod_buffer_folder()
-        print("ExportSRMI: 寮€濮嬬敓鎴愮紦鍐插尯鏂囦欢锛岃緭鍑鸿矾寰? " + buf_output_folder)
+        print("ExportSRMI: start generating buffer files, output path: " + buf_output_folder)
 
         for drawib_model in self.drawib_model_list:
             draw_ib = drawib_model.draw_ib
-            print("ExportSRMI: 姝ｅ湪鐢熸垚DrawIB " + draw_ib + " 鐨勭紦鍐插尯鏂囦欢...")
+            print("ExportSRMI: generating buffer files of DrawIB " + draw_ib + " ...")
             if drawib_model.combine_ib:
                 ib_filename = draw_ib + "-Index.buf"
                 ib_filepath = os.path.join(buf_output_folder, ib_filename)
@@ -43,7 +43,7 @@ class ExportSRMI:
                     ib_filepath = os.path.join(buf_output_folder, ib_filename)
                     BufferExportHelper.write_buf_ib_r32_uint(ib, ib_filepath)
             
-            # 鐢熸垚VB鏂囦欢
+            # Generate VB files
             for category, category_buf in drawib_model.category_buffer_dict.items():
                 category_buf_filename = draw_ib + "-" + category + ".buf"
                 category_buf_filepath = os.path.join(buf_output_folder, category_buf_filename)
@@ -58,12 +58,12 @@ class ExportSRMI:
 
     def copy_texture_files(self):
         if GlobalProperties.forbid_auto_texture_ini():
-            print("ExportSRMI: 宸茬鐢ㄨ嚜鍔ㄨ创鍥炬祦绋嬶紝璺宠繃璐村浘澶嶅埗")
+            print("ExportSRMI: auto texture flow is disabled, skipping texture copying")
             return
 
-        print("ExportSRMI: 寮€濮嬫墽琛岃创鍥惧鍒舵祦绋嬶紝DrawIB 鏁伴噺: " + str(len(self.drawib_model_list)))
+        print("ExportSRMI: start texture copying flow, DrawIB count: " + str(len(self.drawib_model_list)))
         for drawib_model in self.drawib_model_list:
-            print("ExportSRMI: 姝ｅ湪澶嶅埗DrawIB " + drawib_model.draw_ib + " 鐨勮创鍥炬枃浠?..")
+            print("ExportSRMI: copying texture files of DrawIB " + drawib_model.draw_ib + " ...")
             M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
             
     def generate_ini_file(self):
@@ -85,7 +85,7 @@ class ExportSRMI:
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
-        print("ExportSRMI: 宸插畬鎴?Hash 椋庢牸璐村浘閰嶇疆鐢熸垚")
+        print("ExportSRMI: Hash style texture config generation done")
 
         for drawib_model in self.drawib_model_list:
             draw_ib = drawib_model.draw_ib

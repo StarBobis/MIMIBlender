@@ -1,28 +1,28 @@
-# 10 — 过长方法（Long Methods）
+# 10 - Long Methods
 
-## 严重程度
+## Severity
 
-🟢 **低** — 几个 100+ 行的方法可以拆分，提高可测试性和可读性。
+🟢 **Low** - A few methods over 100 lines could be split up to improve testability and readability.
 
-## 问题清单
+## Issue List
 
-### blueprint_node_menu.py — SSMT_OT_BatchConnectNodes（~200 行）
+### blueprint/blueprint_node_menu.py - SSMT_OT_BatchConnectNodes (~200 lines)
 
-**文件**：`blueprint/blueprint_node_menu.py`  
-**行号**：约 550-750  
-**内容**：批量连接节点的操作符，包含连接方向推断逻辑。
+**File**: `blueprint/blueprint_node_menu.py`  
+**Lines**: approximately 550-750  
+**Content**: an operator that batch-connects nodes, including the connection direction inference logic.
 
 ```python
 class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
     def execute(self, context):
-        # 获取选中的节点...
-        # 分离输入/输出节点...
-        # 推断连接方向（7 个分支）...
-        # 执行连接...
-        # 刷新 UI...
+        # gather the selected nodes...
+        # separate input/output nodes...
+        # infer the connection direction (7 branches)...
+        # perform the connections...
+        # refresh the UI...
 ```
 
-**可拆分方向**：
+**How to split it**:
 
 ```python
 class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
@@ -37,31 +37,31 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
 
     @staticmethod
     def _classify_nodes(nodes):
-        """将节点分为有输入插槽的（输入节点）和有输出插槽的（输出节点）。"""
+        """Split the nodes into those with input sockets (input nodes) and those with output sockets (output nodes)."""
         ...
 
     @staticmethod
     def _infer_connect_direction(input_nodes, output_nodes):
-        """根据节点数量推断连接方向（一对一、多对一、一对多）。"""
+        """Infer the connection direction from the node counts (one-to-one, many-to-one, one-to-many)."""
         ...
-    
+
     @staticmethod
     def _perform_connection(input_nodes, output_nodes, direction):
-        """根据方向执行实际连线操作。"""
+        """Perform the actual link operation according to the direction."""
         ...
 ```
 
-### common/m_ini_helper.py — generate_hash_style_texture_ini（~100 行）
+### common/m_ini_helper.py - generate_hash_style_texture_ini (~100 lines)
 
-**文件**：`common/m_ini_helper.py`  
-**内容**：生成"hash 风格"纹理 INI 段。与方法 `generate_shared_slot_style_texture_ini` 结构几乎相同。
+**File**: `common/m_ini_helper.py`  
+**Content**: generates the "hash style" texture INI section. Its structure is almost identical to the method `generate_shared_slot_style_texture_ini`.
 
-**重构建议**：提取公共逻辑到辅助方法：
+**Refactoring suggestion**: extract the shared logic into a helper method:
 
 ```python
 @classmethod
 def _iterate_drawib_textures(cls, draw_ib_model_list, texture_filter=None):
-    """遍历所有 DrawIB 的贴图，生成 (submesh, texture_info, output_path) 三元组。"""
+    """Iterate over the textures of all DrawIBs, yielding (submesh, texture_info, output_path) triples."""
     for draw_ib_model in draw_ib_model_list:
         for submesh_model in draw_ib_model.submesh_model_list:
             for texture_info in draw_ib_model.get_submesh_texture_markup_info_list(submesh_model):
@@ -72,35 +72,35 @@ def _iterate_drawib_textures(cls, draw_ib_model_list, texture_filter=None):
 @classmethod
 def generate_hash_style_texture_ini(cls, ...):
     for submesh, tex_info, path in cls._iterate_drawib_textures(draw_ib_model_list):
-        ...  # hash-style 特有逻辑
+        ...  # hash-style specific logic
 
 @classmethod
 def generate_shared_slot_style_texture_ini(cls, ...):
     for submesh, tex_info, path in cls._iterate_drawib_textures(draw_ib_model_list):
-        ...  # shared-slot 特有逻辑
+        ...  # shared-slot specific logic
 ```
 
-### common/m_ini_helper.py — add_shapekey_ini_sections（~100+ 行）
+### common/m_ini_helper.py - add_shapekey_ini_sections (~100+ lines)
 
-**文件**：`common/m_ini_helper.py`  
-**内容**：添加形态键相关的 INI 段，处理 constants、present、custom shader、resource、key sections 五种情况。
+**File**: `common/m_ini_helper.py`  
+**Content**: adds the shape-key-related INI sections, covering five cases: constants, present, custom shader, resource and key sections.
 
 ```python
 @classmethod
 def add_shapekey_ini_sections(cls, ...):
-    # 1. 写入 [Constants] 段
+    # 1. write the [Constants] section
     ...
-    # 2. 写入 [Present] 段
+    # 2. write the [Present] section
     ...
-    # 3. 写入自定义 Shader 段
+    # 3. write the custom Shader section
     ...
-    # 4. 写入 [Resource] 段
+    # 4. write the [Resource] section
     ...
-    # 5. 写入按键映射段
+    # 5. write the key mapping sections
     ...
 ```
 
-**重构建议**：每个段独立为一个私有方法：
+**Refactoring suggestion**: give each section its own private method:
 
 ```python
 @classmethod
@@ -112,16 +112,16 @@ def add_shapekey_ini_sections(cls, ...):
     cls._write_shapekey_key_sections(builder, ...)
 ```
 
-### common/obj_buffer_helper.py — 格式编码 if/elif 链（~80 行）
+### common/obj_buffer_helper.py - format-encoding if/elif chain (~80 lines)
 
-**文件**：`common/obj_buffer_helper.py`  
-**行号**：约 200-280  
-**内容**：一个很长的 `if/elif` 链处理不同 D3D11 格式的法线编码。
+**File**: `common/obj_buffer_helper.py`  
+**Lines**: approximately 200-280  
+**Content**: a very long `if/elif` chain handles the normal encoding for the different D3D11 formats.
 
-**重构建议**：使用字典映射代替 if/elif 链：
+**Refactoring suggestion**: replace the if/elif chain with a dictionary mapping:
 
 ```python
-# 修复前
+# Before
 if format == 'R8G8B8A8_SNORM':
     normal_x = int(x * 127 + 127.5)
     normal_y = int(y * 127 + 127.5)
@@ -130,7 +130,7 @@ elif format == 'R16G16_FLOAT':
     normal_x = struct.pack('<H', ...)
     ...
 
-# 修复后
+# After
 NORMAL_ENCODERS = {
     'R8G8B8A8_SNORM': lambda x, y, z: (...),
     'R16G16_FLOAT': lambda x, y, z: (...),
@@ -143,16 +143,16 @@ else:
     raise ValueError(f"Unknown normal format: {format}")
 ```
 
-## 修复优先级
+## Fix Priority
 
-| 优先级 | 方法 | 原因 |
+| Priority | Method | Reason |
 |:------:|------|------|
-| **中** | `generate_hash_style_texture_ini` 与 `generate_shared_slot_style_texture_ini` | 两个 100 行方法有 ~70% 代码重复 |
-| **低** | `SSMT_OT_BatchConnectNodes.execute` | 200 行但有清晰的内部函数，拆分收益一般 |
-| **低** | `add_shapekey_ini_sections` | 5 个独立段，拆分自然但当前可接受 |
-| **低** | 格式编码 if/elif 链 | 80 行但逻辑简单，维护成本低 |
+| **Medium** | `generate_hash_style_texture_ini` and `generate_shared_slot_style_texture_ini` | The two 100-line methods share ~70% duplicated code |
+| **Low** | `SSMT_OT_BatchConnectNodes.execute` | 200 lines but with clear internal functions; splitting yields limited benefit |
+| **Low** | `add_shapekey_ini_sections` | 5 independent sections; splitting is natural but the current state is acceptable |
+| **Low** | Format-encoding if/elif chain | 80 lines but the logic is simple; low maintenance cost |
 
-## 验证方法
+## Verification
 
-1. 拆分后逐段运行，确认行为不变
-2. 对比拆分前后的 INI 输出文件（diff）
+1. After splitting, run each part to confirm behavior is unchanged
+2. Compare the INI output files before and after the split (diff)
