@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 import shutil
 
@@ -74,13 +74,14 @@ class ExportWWMI:
 
     @staticmethod
     def copy_wwmi_shapekey_shaders_to_mod_folder():
-        res_path = os.path.join(GlobalConfig.path_generate_mod_folder(), "res")
-        os.makedirs(res_path, exist_ok=True)
+        # Flat layout: shaders are copied next to the generated INI, no res subfolder
+        mod_path = GlobalConfig.path_generate_mod_folder()
+        os.makedirs(mod_path, exist_ok=True)
 
         addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         for filename in ("ShapesWWMIPosition.hlsl", "ShapesWWMIVector.hlsl"):
             src = os.path.join(addon_root, "resources", filename)
-            shutil.copy2(src, os.path.join(res_path, filename))
+            shutil.copy2(src, os.path.join(mod_path, filename))
 
     def add_constants_section(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
         constants_section = M_IniSection(M_SectionType.Constants)
@@ -408,7 +409,7 @@ class ExportWWMI:
         resource_mod_info_section.append("; data = \"Empty Mod Link\"")
         resource_mod_info_section.new_line()
         resource_mod_info_section.append("[ResourceModLogo]")
-        resource_mod_info_section.append("; filename = Textures/Logo.dds")
+        resource_mod_info_section.append("; filename = Logo.dds")
         resource_mod_info_section.new_line()
         ini_builder.append_section(resource_mod_info_section)
 
@@ -636,7 +637,7 @@ class ExportWWMI:
         commandlist_section.new_line()
 
         commandlist_section.append("[CustomShaderComputeWWMIShapeKeyPosition]")
-        commandlist_section.append("cs = .\\res\\ShapesWWMIPosition.hlsl")
+        commandlist_section.append("cs = ShapesWWMIPosition.hlsl")
         commandlist_section.append("vs = null")
         commandlist_section.append("ps = null")
         commandlist_section.append("hs = null")
@@ -662,7 +663,7 @@ class ExportWWMI:
         commandlist_section.new_line()
 
         commandlist_section.append("[CustomShaderComputeWWMIShapeKeyVector]")
-        commandlist_section.append("cs = .\\res\\ShapesWWMIVector.hlsl")
+        commandlist_section.append("cs = ShapesWWMIVector.hlsl")
         commandlist_section.append("vs = null")
         commandlist_section.append("ps = null")
         commandlist_section.append("hs = null")
@@ -681,7 +682,7 @@ class ExportWWMI:
         resource_section.append("[ResourcePositionBufferFloat]")
         resource_section.append("type = Buffer")
         resource_section.append("format = R32_FLOAT")
-        resource_section.append("filename = Meshes/" + draw_ib_model.draw_ib + "-Position.buf")
+        resource_section.append("filename = " + draw_ib_model.draw_ib + "-Position.buf")
         resource_section.new_line()
         resource_section.append("[ResourcePositionBufferShapeKeyVB]")
         resource_section.append("type = Buffer")
@@ -695,7 +696,7 @@ class ExportWWMI:
         resource_section.append("[ResourceVectorBufferInt]")
         resource_section.append("type = Buffer")
         resource_section.append("format = R8_SINT")
-        resource_section.append("filename = Meshes/" + draw_ib_model.draw_ib + "-Vector.buf")
+        resource_section.append("filename = " + draw_ib_model.draw_ib + "-Vector.buf")
         resource_section.new_line()
         resource_section.append("[ResourceVectorBufferShapeKeyVB]")
         resource_section.append("type = Buffer")
@@ -705,12 +706,12 @@ class ExportWWMI:
             resource_section.append("[ResourceShapeKeyPosition_" + safe_name + "]")
             resource_section.append("type = Buffer")
             resource_section.append("format = R32_FLOAT")
-            resource_section.append("filename = Meshes/" + draw_ib_model.draw_ib + "-Position." + safe_name + ".buf")
+            resource_section.append("filename = " + draw_ib_model.draw_ib + "-Position." + safe_name + ".buf")
             resource_section.new_line()
             resource_section.append("[ResourceShapeKeyVector_" + safe_name + "]")
             resource_section.append("type = Buffer")
             resource_section.append("format = R8_SINT")
-            resource_section.append("filename = Meshes/" + draw_ib_model.draw_ib + "-Vector." + safe_name + ".buf")
+            resource_section.append("filename = " + draw_ib_model.draw_ib + "-Vector." + safe_name + ".buf")
             resource_section.new_line()
         ini_builder.append_section(resource_section)
 
@@ -732,14 +733,14 @@ class ExportWWMI:
         ini_builder.append_section(resource_skeleton_section)
 
     def add_resource_buffer(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+        # Flat layout: buffer files sit next to the generated INI
         resource_buffer_section = M_IniSection(M_SectionType.ResourceBuffer)
-        buffer_folder_name = "Meshes"
 
         resource_buffer_section.append("[ResourceIndexBuffer]")
         resource_buffer_section.append("type = Buffer")
         resource_buffer_section.append("format = DXGI_FORMAT_R32_UINT")
         resource_buffer_section.append("stride = 12")
-        resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-Component1.buf")
+        resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-Component1.buf")
         resource_buffer_section.new_line()
 
         for category_name, category_stride in draw_ib_model.d3d11_game_type.CategoryStrideDict.items():
@@ -756,54 +757,54 @@ class ExportWWMI:
             elif category_name == D3D11Category.TEXCOORD:
                 resource_buffer_section.append("format = DXGI_FORMAT_R16G16_FLOAT")
             resource_buffer_section.append("stride = " + str(category_stride))
-            resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-" + category_name + ".buf")
+            resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-" + category_name + ".buf")
             resource_buffer_section.new_line()
 
             if category_name == D3D11Category.BLEND and draw_ib_model.blend_remap:
                 resource_buffer_section.append("[ResourceBlendBufferNoStride]")
                 resource_buffer_section.append("type = Buffer")
                 resource_buffer_section.append("format = DXGI_FORMAT_R8_UINT")
-                resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-" + category_name + ".buf")
+                resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-" + category_name + ".buf")
                 resource_buffer_section.new_line()
 
         if draw_ib_model.blend_remap:
             resource_buffer_section.append("[ResourceBlendRemapVertexVGBuffer]")
             resource_buffer_section.append("type = Buffer")
             resource_buffer_section.append("format = DXGI_FORMAT_R16_UINT")
-            resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-BlendRemapVertexVG.buf")
+            resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-BlendRemapVertexVG.buf")
             resource_buffer_section.new_line()
 
             resource_buffer_section.append("[ResourceBlendRemapForwardBuffer]")
             resource_buffer_section.append("type = Buffer")
             resource_buffer_section.append("format = DXGI_FORMAT_R16_UINT")
-            resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-BlendRemapForward.buf")
+            resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-BlendRemapForward.buf")
             resource_buffer_section.new_line()
 
             resource_buffer_section.append("[ResourceBlendRemapReverseBuffer]")
             resource_buffer_section.append("type = Buffer")
             resource_buffer_section.append("format = DXGI_FORMAT_R16_UINT")
-            resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-BlendRemapReverse.buf")
+            resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-BlendRemapReverse.buf")
             resource_buffer_section.new_line()
 
         resource_buffer_section.append("[ResourceShapeKeyOffsetBuffer]")
         resource_buffer_section.append("type = Buffer")
         resource_buffer_section.append("format = DXGI_FORMAT_R32G32B32A32_UINT")
         resource_buffer_section.append("stride = 16")
-        resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-ShapeKeyOffset.buf")
+        resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-ShapeKeyOffset.buf")
         resource_buffer_section.new_line()
 
         resource_buffer_section.append("[ResourceShapeKeyVertexIdBuffer]")
         resource_buffer_section.append("type = Buffer")
         resource_buffer_section.append("format = DXGI_FORMAT_R32_UINT")
         resource_buffer_section.append("stride = 4")
-        resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-ShapeKeyVertexId.buf")
+        resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-ShapeKeyVertexId.buf")
         resource_buffer_section.new_line()
 
         resource_buffer_section.append("[ResourceShapeKeyVertexOffsetBuffer]")
         resource_buffer_section.append("type = Buffer")
         resource_buffer_section.append("format = DXGI_FORMAT_R16_FLOAT")
         resource_buffer_section.append("stride = 2")
-        resource_buffer_section.append("filename = " + buffer_folder_name + "/" + draw_ib_model.draw_ib + "-ShapeKeyVertexOffset.buf")
+        resource_buffer_section.append("filename = " + draw_ib_model.draw_ib + "-ShapeKeyVertexOffset.buf")
         resource_buffer_section.new_line()
 
         ini_builder.append_section(resource_buffer_section)

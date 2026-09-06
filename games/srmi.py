@@ -126,7 +126,7 @@ class ExportSRMI:
                         appended_resource_names.add(resource_name)
                         slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
                         resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
-                        resource_texture_section.append("filename = Textures/" + slot_filename)
+                        resource_texture_section.append("filename = " + slot_filename)
                         resource_texture_section.new_line()
                 ini_builder.append_section(resource_texture_section)
 
@@ -229,7 +229,7 @@ class ExportSRMI:
                 resource_buffer_section.append("[Resource" + draw_ib + category_name + "]")
                 resource_buffer_section.append("type = Buffer")
                 resource_buffer_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict.get(category_name, 0)))
-                resource_buffer_section.append("filename = Meshes\\" + drawib_model.get_category_buffer_filename(category_name))
+                resource_buffer_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
                 resource_buffer_section.new_line()
 
             for category_name in d3d11_game_type.OrderedCategoryNameList:
@@ -237,7 +237,7 @@ class ExportSRMI:
                     resource_buffer_section.append("[Resource" + draw_ib + category_name + "CS]")
                     resource_buffer_section.append("type = StructuredBuffer")
                     resource_buffer_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict.get(category_name, 0)))
-                    resource_buffer_section.append("filename = Meshes\\" + drawib_model.get_category_buffer_filename(category_name))
+                    resource_buffer_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
                     resource_buffer_section.new_line()
 
             for submesh_model in drawib_model.submesh_model_list:
@@ -245,7 +245,7 @@ class ExportSRMI:
                 resource_buffer_section.append("[" + ib_resource_name + "]")
                 resource_buffer_section.append("type = Buffer")
                 resource_buffer_section.append("format = DXGI_FORMAT_R32_UINT")
-                resource_buffer_section.append("filename = Meshes\\" + submesh_model.display_str + "-Index.buf")
+                resource_buffer_section.append("filename = " + submesh_model.display_str + "-Index.buf")
                 resource_buffer_section.new_line()
 
             ini_builder.append_section(resource_buffer_section)

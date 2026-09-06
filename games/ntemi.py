@@ -1,4 +1,4 @@
-﻿import os
+import os
 import numpy
 import hashlib
 
@@ -395,7 +395,7 @@ class ExportNTEMI:
                     f"[ResourcePalette_{token}]",
                     "type = Buffer",
                     "format = R32_UINT",
-                    f"filename = Meshes\\{palette_filename}",
+                    f"filename = {palette_filename}",
                     "",
                     f"[ResourcePart_{token}_RuntimeSkinnedPosition_UAV]",
                     f"dynamic_slots = {_DEFAULT_DYNAMIC_SLOTS}",
@@ -436,42 +436,42 @@ class ExportNTEMI:
                     f"[ResourcePart_{token}_IB]",
                     "type = Buffer",
                     f"format = {ib_format}",
-                    f"filename = Meshes\\{buffers['ib']}",
+                    f"filename = {buffers['ib']}",
                     "",
                     f"[ResourcePart_{token}_Position]",
                     "type = Buffer",
                     "format = R32_FLOAT",
-                    f"filename = Meshes\\{buffers['position']}",
+                    f"filename = {buffers['position']}",
                     "",
                     f"[ResourcePart_{token}_PositionVB]",
                     "type = Buffer",
                     "stride = 12",
-                    f"filename = Meshes\\{buffers['position']}",
+                    f"filename = {buffers['position']}",
                     "",
                     f"[ResourcePart_{token}_Blend]",
                     "type = StructuredBuffer",
                     "stride = 8",
-                    f"filename = Meshes\\{buffers['blend']}",
+                    f"filename = {buffers['blend']}",
                     "",
                     f"[ResourcePart_{token}_BlendTyped]",
                     "type = Buffer",
                     "format = R32_UINT",
-                    f"filename = Meshes\\{buffers['blend']}",
+                    f"filename = {buffers['blend']}",
                     "",
                     f"[ResourcePart_{token}_Normal]",
                     "type = Buffer",
                     "format = R8G8B8A8_SNORM",
-                    f"filename = Meshes\\{buffers['normal']}",
+                    f"filename = {buffers['normal']}",
                     "",
                     f"[ResourcePart_{token}_Texcoord]",
                     "type = Buffer",
                     "format = R16G16_FLOAT",
-                    f"filename = Meshes\\{buffers['texcoord']}",
+                    f"filename = {buffers['texcoord']}",
                     "",
                     f"[ResourcePart_{token}_OutlineParam]",
                     "type = Buffer",
                     "format = R8G8B8A8_UNORM",
-                    f"filename = Meshes\\{buffers['outline']}",
+                    f"filename = {buffers['outline']}",
                     "",
                 ])
 
@@ -685,7 +685,7 @@ class ExportNTEMI:
                     slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, tmi)
                     tex_lines.extend([
                         f"[{rn}]",
-                        f"filename = Textures\\{slot_filename}",
+                        f"filename = {slot_filename}",
                         "",
                     ])
 

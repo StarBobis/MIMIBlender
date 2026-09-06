@@ -181,13 +181,12 @@ class ExportZZMI:
 
     def add_unity_vs_resource_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
         resource_vb_section = M_IniSection(M_SectionType.ResourceBuffer)
-        buffer_folder_name = "Meshes"
-
+        # Flat layout: buffers and textures sit next to the generated INI
         for category_name in drawib_model.d3d11_game_type.OrderedCategoryNameList:
             resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
             resource_vb_section.append("type = Buffer")
             resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.get_category_buffer_filename(category_name))
+            resource_vb_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
             resource_vb_section.new_line()
 
         for submesh_model in drawib_model.submesh_model_list:
@@ -195,7 +194,7 @@ class ExportZZMI:
             resource_vb_section.append("[" + ib_resource_name + "]")
             resource_vb_section.append("type = Buffer")
             resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + submesh_model.display_str + "-Index.buf")
+            resource_vb_section.append("filename = " + submesh_model.display_str + "-Index.buf")
             resource_vb_section.new_line()
 
         ini_builder.append_section(resource_vb_section)
@@ -215,7 +214,7 @@ class ExportZZMI:
                     appended_resource_names.add(resource_name)
                     slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
                     resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
-                    resource_texture_section.append("filename = Textures/" + slot_filename)
+                    resource_texture_section.append("filename = " + slot_filename)
                     resource_texture_section.new_line()
 
         ini_builder.append_section(resource_texture_section)
@@ -315,8 +314,7 @@ class ExportZZMI:
 
     def add_unity_cs_resource_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
         resource_vb_section = M_IniSection(M_SectionType.ResourceBuffer)
-        buffer_folder_name = "Meshes"
-
+        # Flat layout: buffers and textures sit next to the generated INI
         for category_name in drawib_model.d3d11_game_type.OrderedCategoryNameList:
             resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
             if drawib_model.d3d11_game_type.GPU_PreSkinning and (category_name == "Position" or category_name == "Blend"):
@@ -325,7 +323,7 @@ class ExportZZMI:
                 resource_vb_section.append("type = Buffer")
 
             resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + drawib_model.get_category_buffer_filename(category_name))
+            resource_vb_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
             resource_vb_section.new_line()
 
         for submesh_model in drawib_model.submesh_model_list:
@@ -333,7 +331,7 @@ class ExportZZMI:
             resource_vb_section.append("[" + ib_resource_name + "]")
             resource_vb_section.append("type = Buffer")
             resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
-            resource_vb_section.append("filename = " + buffer_folder_name + "/" + submesh_model.display_str + "-Index.buf")
+            resource_vb_section.append("filename = " + submesh_model.display_str + "-Index.buf")
             resource_vb_section.new_line()
 
         ini_builder.append_section(resource_vb_section)

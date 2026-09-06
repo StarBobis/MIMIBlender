@@ -341,7 +341,7 @@ class M_IniHelper:
                         "[" + hash_style_resource_name + "]",
                     )
                     resource_texture_section.append(
-                        "filename = Textures/" + hash_style_texture_filename,
+                        "filename = " + hash_style_texture_filename,
                     )
                     resource_texture_section.new_line()
                     resource_texture_section.append(
@@ -468,7 +468,7 @@ class M_IniHelper:
                     if resource_name not in appended_resource_names:
                         appended_resource_names.add(resource_name)
                         shared_slot_resource_section.append("[" + resource_name + "]")
-                        shared_slot_resource_section.append("filename = Textures/" + hash_style_texture_filename)
+                        shared_slot_resource_section.append("filename = " + hash_style_texture_filename)
                         shared_slot_resource_section.new_line()
 
             if has_shared_slot:
@@ -578,7 +578,8 @@ class M_IniHelper:
         import shutil
         addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         src = os.path.join(addon_root, "resources", "Shapes.hlsl")
-        dst_dir = os.path.join(GlobalConfig.path_generate_mod_folder(), "res")
+        # Flat layout: shaders are copied next to the generated INI, no res subfolder
+        dst_dir = GlobalConfig.path_generate_mod_folder()
         os.makedirs(dst_dir, exist_ok=True)
         shutil.copy2(src, os.path.join(dst_dir, "Shapes.hlsl"))
 
@@ -645,7 +646,7 @@ class M_IniHelper:
                 continue
 
             customshader_section.append("[CustomShaderComputeShapes" + str(ib_number) + "]")
-            customshader_section.append("cs = ./res/Shapes.hlsl")
+            customshader_section.append("cs = Shapes.hlsl")
             customshader_section.append("cs-u5 = copy " + "Resource" + drawib + "Position.1")
             customshader_section.new_line()
 
@@ -689,7 +690,7 @@ class M_IniHelper:
             resource_section.append("[Resource" + drawib + "Position.1]")
             resource_section.append("type = buffer")
             resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
-            resource_section.append("filename = Meshes\\" + drawib_model.get_category_buffer_filename("Position"))
+            resource_section.append("filename = " + drawib_model.get_category_buffer_filename("Position"))
             resource_section.new_line()
 
             # Buffers for each shape key
@@ -703,7 +704,7 @@ class M_IniHelper:
                 resource_section.append("[Resource" + drawib + "Position." + shapekey_name + "]")
                 resource_section.append("type = buffer")
                 resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
-                resource_section.append("filename = Meshes\\" + drawib + "-" + "Position." + shapekey_name + ".buf")
+                resource_section.append("filename = " + drawib + "-" + "Position." + shapekey_name + ".buf")
                 resource_section.new_line()
 
             ib_number += 1

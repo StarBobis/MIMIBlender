@@ -53,13 +53,14 @@ class M_IniHelperGUI:
                 
     @staticmethod
     def copy_res_to_mod_folder():
-        '''Copy all files from the add-on's resources/ directory to the generated Mod's res/ directory.'''
-        res_path = os.path.join(GlobalConfig.path_generate_mod_folder(), "res")
-        os.makedirs(res_path, exist_ok=True)
+        '''Copy all files from the add-on's resources/ directory next to the generated Mod INI.'''
+        # Flat layout: GUI resources are copied next to the generated INI, no res subfolder
+        mod_path = GlobalConfig.path_generate_mod_folder()
+        os.makedirs(mod_path, exist_ok=True)
 
         addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         res_source_path = os.path.join(addon_root, "resources")
-        M_IniHelperGUI.copy_files(res_source_path, res_path)
+        M_IniHelperGUI.copy_files(res_source_path, mod_path)
 
     @staticmethod
     def add_branch_mod_gui_section(ini_builder:M_IniBuilder,key_name_mkey_dict:dict[str,M_Key]):
@@ -518,8 +519,8 @@ class M_IniHelperGUI:
         commandlist_section.append("gs = null")
         commandlist_section.append("cs = null")
         commandlist_section.append("run = BuiltInCommandListUnbindAllRenderTargets")
-        commandlist_section.append("vs = .\\res\\draw_2d.hlsl")
-        commandlist_section.append("ps = .\\res\\draw_2d.hlsl")
+        commandlist_section.append("vs = draw_2d.hlsl")
+        commandlist_section.append("ps = draw_2d.hlsl")
         commandlist_section.append("blend = ADD SRC_ALPHA INV_SRC_ALPHA")
         commandlist_section.append("cull = none")
         commandlist_section.append("topology = triangle_strip")
@@ -532,42 +533,42 @@ class M_IniHelperGUI:
         resource_section = M_IniSection(M_SectionType.ResourceTexture)
 
         resource_section.append("[ResourceUIColorBorder]")
-        resource_section.append("filename = .\\res\\Border.png")
+        resource_section.append("filename = Border.png")
         resource_section.new_line()
         
         resource_section.append("[ResourceUIBackground]")
-        resource_section.append("filename = .\\res\\Background.png")
+        resource_section.append("filename = Background.png")
         resource_section.new_line()
 
         resource_section.append("[ResourceUIButtonSelect]")
-        resource_section.append("filename = .\\res\\Selected.png")
+        resource_section.append("filename = Selected.png")
         resource_section.new_line()
         
         resource_section.append("[ResourceOutlineButton]")
-        resource_section.append("filename = .\\res\\Button.png")
+        resource_section.append("filename = Button.png")
         resource_section.new_line()
 
         resource_section.append("[ResourceButtonPush]")
-        resource_section.append("filename = .\\res\\Push.png")
+        resource_section.append("filename = Push.png")
         resource_section.new_line()
 
         resource_section.append("[ResourceUITitle]")
-        resource_section.append("filename = .\\res\\Title.png")
+        resource_section.append("filename = Title.png")
         resource_section.new_line()
 
         resource_section.append("[ResourceUICredit]")
-        resource_section.append("filename = .\\res\\Credits.png")
+        resource_section.append("filename = Credits.png")
         resource_section.new_line()
 
         resource_section.append("[ResourceButton_item_default]")
-        resource_section.append("filename = .\\res\\item_shirt.png")
+        resource_section.append("filename = item_shirt.png")
         resource_section.new_line()
 
         # Test custom resources
         button_number = 0
         for mkey in key_name_mkey_dict.values():
             resource_section.append("[ResourceButton_item_default_"+ str(button_number + 1)+ "]")
-            resource_section.append("filename = .\\res\\item_shirt.png")
+            resource_section.append("filename = item_shirt.png")
             resource_section.new_line()
             button_number = button_number + 1
 

@@ -386,23 +386,23 @@ class GlobalConfig:
     
     @staticmethod
     def path_generatemod_buffer_folder():
-       
-        buffer_folder_name = "Meshes"
-        buffer_path = os.path.join(GlobalConfig.path_generate_mod_folder(), buffer_folder_name + "\\")
+        # Flat layout: buffer files are written next to the generated INI, no Meshes subfolder
+        buffer_path = GlobalConfig.path_generate_mod_folder()
         if not os.path.exists(buffer_path):
             os.makedirs(buffer_path)
-        return buffer_path
-    
+        return os.path.join(buffer_path, "")
+
     @staticmethod
     def path_generatemod_texture_folder(draw_ib:str):
 
-        texture_path = os.path.join(GlobalConfig.path_generate_mod_folder(),"Textures\\")
+        # Flat layout: texture files are written next to the generated INI, no Textures subfolder
+        texture_path = GlobalConfig.path_generate_mod_folder()
         if not os.path.exists(texture_path):
             os.makedirs(texture_path)
             print("GlobalConfig: Texture output folder created: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
         else:
             print("GlobalConfig: Using existing texture output folder: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
-        return texture_path
+        return os.path.join(texture_path, "")
     
     @staticmethod
     def path_appdata_local():

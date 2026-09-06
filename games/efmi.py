@@ -1,4 +1,4 @@
-﻿from ..model.blueprint_model import BluePrintModel
+from ..model.blueprint_model import BluePrintModel
 from ..model.draw_call_model import DrawCallModel
 from ..model.submesh_model import SubMeshModel
 from ..model.drawib_model import DrawIBModel
@@ -124,7 +124,7 @@ class ExportEFMI:
             resource_buffer_section.append("[" + ib_resource_name + "]")
             resource_buffer_section.append("type = Buffer")
             resource_buffer_section.append("format = DXGI_FORMAT_R32_UINT")
-            resource_buffer_section.append("filename = Meshes\\" + submesh_model.display_str + "-Index.buf")
+            resource_buffer_section.append("filename = " + submesh_model.display_str + "-Index.buf")
             resource_buffer_section.new_line()
 
             for category in submesh_model.category_buffer_dict.keys():
@@ -133,7 +133,7 @@ class ExportEFMI:
                 resource_buffer_section.append("[" + category_resource_name + "]")
                 resource_buffer_section.append("type = Buffer")
                 resource_buffer_section.append("stride = " + str(stride))
-                resource_buffer_section.append("filename = Meshes\\" + submesh_model.display_str + "-" + category + ".buf")
+                resource_buffer_section.append("filename = " + submesh_model.display_str + "-" + category + ".buf")
                 resource_buffer_section.new_line()
 
         if not GlobalProperties.forbid_auto_texture_ini():
@@ -150,7 +150,7 @@ class ExportEFMI:
                         appended_resource_names.add(resource_name)
                         slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
                         resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
-                        resource_texture_section.append("filename = Textures/" + slot_filename)
+                        resource_texture_section.append("filename = " + slot_filename)
                         resource_texture_section.new_line()
             ini_builder.append_section(resource_texture_section)
 

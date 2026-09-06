@@ -11,11 +11,11 @@ class BufferExportHelper:
     Responsible for writing ObjBufferModel data into files.
 
     Only used when generating a Mod.
-    The generated Mod folder layout is:
+    Flat Mod folder layout - everything is written next to the INI:
 
     Folder: Mod_<workspace name>
-    - Folder: Meshes                    stores all binary buffer files, including the IB and VB files
-    - Folder: Textures                   stores all texture files
+    - File:   *.buf                          binary buffer files (IB and VB/CategoryBuffer files)
+    - File:   *.dds / *.png                  texture files
     - File:   <workspace name>.ini           all ini content must be written together in one file; splitting it across
       multiple ini files linked by namespace can cause a momentary texture
       binding delay when the Mod is toggled on or off
