@@ -1,4 +1,6 @@
-import bpy
+'''
+MIMIBlender - Blender add-on for MIMITools (3Dmigoto modding).
+'''
 
 
 from .common import global_properties
@@ -26,15 +28,8 @@ from .blueprint import blueprint_node_highlight
 
 from .ui import ui_func_export
 
-# Automatic update
-from . import addon_updater_ops
-
 # Texture combiner tool (texcomb) - material merge feature integrated from another add-on
 from . import texcomb
-
-# While developing, also keep addon_updater_ops up to date automatically
-import importlib
-importlib.reload(addon_updater_ops)
 
 bl_info = {
     "name": "MIMIBlender",
@@ -45,79 +40,6 @@ bl_info = {
     "category": "Generic"
 }
 
-
-class UpdaterPanel(bpy.types.Panel):
-    """Update Panel"""
-    bl_label = "Check for Updates"
-    bl_idname = "MIMI_PT_UpdaterPanel"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_context = "objectmode"
-    bl_category = "MIMITools"
-    bl_order = 99
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw(self, context):
-        layout = self.layout
-        
-        # Call to check for update in background.
-        # Note: built-in checks ensure it runs at most once, and will run in
-        # the background thread, not blocking or hanging blender.
-        # Internally also checks to see if auto-check enabled and if the time
-        # interval has passed.
-        # addon_updater_ops.check_for_update_background()
-        col = layout.column()
-        col.scale_y = 0.7
-        # Could also use your own custom drawing based on shared variables.
-        if addon_updater_ops.updater.update_ready:
-            layout.label(text="Update available!", icon="INFO")
-
-        # Call built-in function with draw code/checks.
-        # addon_updater_ops.update_notice_box_ui(self, context)
-        addon_updater_ops.update_settings_ui(self, context)
-
-
-class MIMIBlenderUpdatePreference(bpy.types.AddonPreferences):
-    # Addon updater preferences.
-    bl_label = "MIMIBlender Updater"
-    bl_idname = __package__
-
-    
-    auto_check_update: bpy.props.BoolProperty(
-        name="Automatically Check for Updates",
-        description="If enabled, check for updates automatically at the configured interval.",
-        default=True) # type: ignore
-
-    updater_interval_months: bpy.props.IntProperty(
-        name='Months',
-        description="Number of months between automatic update checks.",
-        default=0,
-        min=0) # type: ignore
-
-    updater_interval_days: bpy.props.IntProperty(
-        name='Days',
-        description="Number of days between automatic update checks.",
-        default=1,
-        min=0,
-        max=31) # type: ignore
-
-    updater_interval_hours: bpy.props.IntProperty(
-        name='Hours',
-        description="Number of hours between automatic update checks.",
-        default=0,
-        min=0,
-        max=23) # type: ignore
-
-    updater_interval_minutes: bpy.props.IntProperty(
-        name='Minutes',
-        description="Number of minutes between automatic update checks.",
-        default=0,
-        min=0,
-        max=59) # type: ignore
-    def draw(self, context):
-        layout = self.layout
-        layout.prop(self, "auto_check_update")
-        addon_updater_ops.update_settings_ui(self, context)
 
 def register():
     # Fault-tolerant registration per module: in the past a single node class
@@ -138,14 +60,7 @@ def _register_steps():
     yield global_properties.register
     yield gimi_body_outline.register
 
-    # 2. Addon Updater (local classes)
-    def _register_updater():
-        addon_updater_ops.register(bl_info)
-        bpy.utils.register_class(UpdaterPanel)
-        bpy.utils.register_class(MIMIBlenderUpdatePreference)
-    yield _register_updater
-
-    # 3. UI Panels & Logic
+    # 2. UI Panels & Logic
     yield blueprint_node_base.register
     yield blueprint_node_group.register
     yield ui_panel_basic.register
@@ -177,11 +92,6 @@ def unregister():
     # state (for example a class that never registered successfully). Unregistering it
     # directly would raise RuntimeError and break all later unregister steps, causing
     # "already registered" failures and missing panels on the next enable.
-    def _unregister_updater():
-        bpy.utils.unregister_class(MIMIBlenderUpdatePreference)
-        bpy.utils.unregister_class(UpdaterPanel)
-        addon_updater_ops.unregister()
-
     steps = [
         gimi_body_outline.unregister,
         texcomb.unregister,
@@ -201,7 +111,6 @@ def unregister():
         ui_panel_model.unregister,
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
-        _unregister_updater,
         global_properties.unregister,
     ]
     for step in steps:
@@ -211,6 +120,5 @@ def unregister():
             import traceback
             print(f"[MIMIBlender] unregister step failed: {getattr(step, '__module__', step)}")
             traceback.print_exc()
-
 
 

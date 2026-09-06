@@ -9,9 +9,3 @@ tmp/
 tests/
 TheHerta4.zip
 MIMIBlender.zip
-
-# Auto Update 
-herta-blender_updater/
-theherta4_updater/
-mimiblender_plugin_updater/
-mimiblender_updater/
