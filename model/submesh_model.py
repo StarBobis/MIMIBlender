@@ -50,24 +50,6 @@ class SubMeshModel:
     shape_key_buffer_dict:dict = field(init=False,repr=False,default_factory=dict)
     ntemi_bone_palette:list = field(init=False,repr=False,default_factory=list)
 
-    def get_slot_texture_node_list(self) -> list[tuple]:
-        """Aggregate the slot texture nodes of all DrawCallModels under this SubMesh.
-
-        Each returned element is a (slot_item, texture_node) pair, where slot_item is
-        an SSMTTextureSlotItem reference whose effective_slot_key yields the generated key name.
-        """
-        result = []
-        seen = set()
-        for drawcall_model in self.drawcall_model_list:
-            for slot_item, texture_node in getattr(drawcall_model, "slot_texture_node_list", []):
-                key = (id(slot_item), id(texture_node))
-                if key in seen:
-                    continue
-                seen.add(key)
-                result.append((slot_item, texture_node))
-        return result
-
-
     def __post_init__(self):
 
         # Every DrawCallModel in the list shares the same draw_ib, first_index and index_count, so just take the first one

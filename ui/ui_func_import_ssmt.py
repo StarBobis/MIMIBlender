@@ -5,7 +5,6 @@ Import model configuration panel
 import os
 import shutil
 import bpy
-import re
 
 # Workaround for the AttributeError raised when a file-picker operator does not inherit
 # ImportHelper: the 'filepath' attribute would be missing.
@@ -16,14 +15,10 @@ from ..utils.collection_utils import CollectionUtils, CollectionColor
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
-from ..common.m_texture_helper import M_TextureHelper
-from ..common.texture_naming import normalize_texture_filename, normalize_texture_resource_name
 from ..common.ssmt_import_helper import SSMTImportHelper
 from ..common.gimi_high_fidelity_material import GIMIHighFidelityMaterial
 from ..workspace.ssmt_workspace import SSMTWorkSpace, WorkSpaceModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
-from ..blueprint.blueprint_node_texture import SSMTNode_Texture
-import json
 from math import pi
 from mathutils import Quaternion, Vector
 
@@ -175,24 +170,6 @@ def _apply_face_neck_object_alignment(imported_objects: dict) -> bool:
 # Full import logic
 
 
-def _parse_mark_slot_index(mark_slot: str) -> int:
-    """Parse the slot index from a mark-slot string such as 'ps-t3'; return 0 on failure."""
-    match = re.search(r"t(\d+)\s*$", str(mark_slot or "").strip().lower())
-    return int(match.group(1)) if match else 0
-
-
-def _parse_format_from_deduped_filename(deduped_filename: str) -> str:
-    """Extract 'BC7_UNORM' from a deduplicated filename like '3a482e27_3a482e27-BC7_UNORM.dds'."""
-    base_name = os.path.splitext(str(deduped_filename or ""))[0]
-    if "-" not in base_name:
-        return ""
-    format_str = base_name.rsplit("-", 1)[-1].strip()
-    # Some workspaces write formats as DXGI_FORMAT_BC7_UNORM_SRGB; strip the prefix
-    if format_str.upper().startswith("DXGI_FORMAT_"):
-        format_str = format_str[len("DXGI_FORMAT_"):]
-    return format_str
-
-
 def _extract_texture_marks(submesh_json: dict) -> list:
     """Extract the texture mark list from a Submesh JSON.
 
@@ -215,170 +192,6 @@ def _extract_texture_marks(submesh_json: dict) -> list:
                 flattened.extend(component_marks)
         return flattened
     return mark_list if isinstance(mark_list, list) else []
-
-
-def _get_known_texture_formats() -> set:
-    """Read the known DXGI format identifiers from the Texture node format enum."""
-    try:
-        enum_items = SSMTNode_Texture.bl_rna.properties['texture_format'].enum_items
-        return {item.identifier for item in enum_items} - {'AUTO', 'CUSTOM'}
-    except Exception:
-        return set()
-
-
-def _apply_texture_format(tex_node, format_str: str):
-    """Fill the node target format only when it is a valid enum item; unknown formats use CUSTOM."""
-    format_str = (format_str or "").strip()
-    if not format_str:
-        return
-    if format_str in _get_known_texture_formats():
-        tex_node.texture_format = format_str
-    else:
-        tex_node.texture_format = 'CUSTOM'
-        tex_node.texture_format_custom = format_str
-
-
-def _node_world_location(node):
-    """Return the absolute node coordinates in the editor.
-
-    Once a node is parented to a Frame its location becomes relative to the
-    parent, so the parent Frame chain must be summed to restore the
-    absolute coordinates.
-    """
-    x, y = node.location.x, node.location.y
-    parent = node.parent
-    while parent is not None:
-        x += parent.location.x
-        y += parent.location.y
-        parent = parent.parent
-    return x, y
-
-
-def _build_texture_nodes(
-    tree,
-    oldfoldername_node_dict: dict,
-    oldfoldername_jsonpath_dict: dict,
-    oldfoldername_group_dict: dict,
-    group_tex_cursors: dict,
-    tex_y_gap: float,
-    group_frame_dict: dict = None,
-    tex_home_group: dict = None,
-):
-    """Build Texture nodes from the TextureMarkUpInfoList of each Submesh JSON.
-
-    Only textures explicitly marked by the user in SSMT generate nodes;
-    the style (Hash / Slot) is decided entirely by each mark's own MarkType;
-    textures sharing one hash reuse the same node.
-    A texture node belongs to the group Frame of the submesh that "first
-    uses it" (its first Slot mark); a pure Hash texture without any Slot
-    mark belongs to the group Frame where it first appears.
-
-    Hash-style textures are wired to a standalone Hash texture group node
-    (placed beside the object groups).
-
-    Returns (texture node list, hash texture group node);
-    the hash group node is lazily created as needed and is None when there
-    is no hash texture.
-    """
-    if group_frame_dict is None:
-        group_frame_dict = {}
-    if tex_home_group is None:
-        tex_home_group = {}
-    hash_group_node = None
-    texture_node_by_hash: dict[str, bpy.types.Node] = {}
-    hash_linked_node_names: set[str] = set()
-    slot_link_done: set[tuple] = set()
-
-    for old_folder_name, json_path in oldfoldername_jsonpath_dict.items():
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                submesh_json = json.load(f)
-        except Exception as e:
-            print(f"[ImportTexture] Failed to read Submesh JSON: {json_path}, {e}")
-            continue
-
-        mark_list = _extract_texture_marks(submesh_json)
-        if not mark_list:
-            continue
-
-        for mark in mark_list:
-            if not isinstance(mark, dict):
-                continue
-            mark_hash = str(mark.get("MarkHash", "") or "").strip()
-            if not mark_hash:
-                continue
-            mark_name = str(mark.get("MarkName", "") or "").strip()
-            mark_type = str(mark.get("MarkType", "") or "").strip()
-            mark_slot = str(mark.get("MarkSlot", "") or "").strip()
-            mark_filename = str(mark.get("MarkFileName", "") or "").strip()
-            resource_name = str(mark.get("ResourceName", mark.get("resource_name", "")) or "").strip()
-            mark_deduped_filename = str(mark.get("MarkDedupedFileName", "") or "").strip()
-
-            tex_node = texture_node_by_hash.get(mark_hash)
-            if tex_node is None:
-                tex_node = tree.nodes.new('SSMTNode_Texture')
-                # Ownership: prefer the group of the submesh that "first uses
-                # it" (its first Slot mark), otherwise the group where it first appears.
-                group_key = tex_home_group.get(mark_hash) or oldfoldername_group_dict.get(old_folder_name, ("", ""))
-                cursor = group_tex_cursors.setdefault(group_key, [0.0, 0.0])
-                tex_node.location = (cursor[0], cursor[1])
-                cursor[1] -= tex_y_gap
-                # Parent it into the owning group's Frame
-                frame = group_frame_dict.get(group_key)
-                if frame is not None:
-                    abs_x, abs_y = tex_node.location.x, tex_node.location.y
-                    # The Frame may have been merged into a DrawIB second-level Frame,
-                    # making frame.location relative to it; convert back to absolute coordinates.
-                    frame_abs_x, frame_abs_y = _node_world_location(frame)
-                    tex_node.parent = frame
-                    tex_node.location = (abs_x - frame_abs_x, abs_y - frame_abs_y)
-                tex_node.texture_hash = mark_hash
-                tex_node.mark_name = mark_name
-                if resource_name:
-                    tex_node.resource_name = normalize_texture_resource_name(resource_name)
-                if mark_filename:
-                    # Generated texture assets are always DDS, even when older
-                    # metadata omitted the extension.
-                    tex_node.texture_filename = normalize_texture_filename(mark_filename)
-                    candidate_path = os.path.join(os.path.dirname(json_path), tex_node.texture_filename)
-                    if not os.path.isfile(candidate_path):
-                        # Preserve compatibility with metadata that points to a
-                        # real non-DDS source while exporting it as DDS.
-                        candidate_path = os.path.join(os.path.dirname(json_path), mark_filename)
-                    if os.path.isfile(candidate_path):
-                        tex_node.texture_filepath = candidate_path
-
-                # Prefer the format from the SSMT metadata; otherwise fall back to parsing the source DDS header
-                format_str = _parse_format_from_deduped_filename(mark_deduped_filename)
-                if not format_str and tex_node.texture_filepath:
-                    format_str = M_TextureHelper.detect_dds_format(tex_node.texture_filepath)
-                _apply_texture_format(tex_node, format_str)
-
-                texture_node_by_hash[mark_hash] = tex_node
-
-            if mark_type == 'Hash':
-                # Hash style: connect the Hash output to the standalone Hash texture group node, producing a dedicated [TextureOverride_<hash>] section
-                if tex_node.name in hash_linked_node_names:
-                    continue
-                if hash_group_node is None:
-                    hash_group_node = tree.nodes.new('SSMTNode_Object_Group')
-                    hash_group_node.label = "Hash Texture Group"
-                if hash_group_node.inputs[-1].is_linked:
-                    hash_group_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(hash_group_node.inputs) + 1))
-                tree.links.new(tex_node.outputs["Hash"], hash_group_node.inputs[-1])
-                hash_linked_node_names.add(tex_node.name)
-            else:
-                # Slot / SharedSlot style: connect the Slot output to the corresponding Object Info node socket
-                obj_info_node = oldfoldername_node_dict.get(old_folder_name)
-                if obj_info_node is None:
-                    continue
-                link_key = (old_folder_name, mark_hash, mark_slot)
-                if link_key in slot_link_done:
-                    continue
-                slot_link_done.add(link_key)
-                obj_info_node.link_texture_node(tex_node, _parse_mark_slot_index(mark_slot))
-
-    return list(texture_node_by_hash.values()), hash_group_node
 
 
 def _link_group_to_output(tree, group_node, output_node):
@@ -449,30 +262,20 @@ def _exclude_marked_face_objects_from_regular_group(
         if link.from_node.name in face_nodes and link.to_node.name == group_node.name:
             tree.links.remove(link)
 
-def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_dict, ws_model, oldfoldername_jsonpath_hint=None):
+def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_dict, ws_model):
     """Create Object Info nodes, connect them to the Group and lay them out per Submesh group.
 
-    Each Submesh (imported mesh) owns one group: one column pair, with the
-    texture column on the left (reserving preview space) and one Mesh Info
-    node on the right; column pairs run horizontally and wrap after at most
+    Each imported Submesh (mesh) owns one group: its Object Info node stands in
+    its own column, and columns run horizontally and wrap after at most
     MAX_GROUP_COLS_PER_ROW groups per row.
 
-    Mesh Info nodes grow taller as texture slots are linked, so wrapping
-    advances by the estimated actual height to avoid overlapping the nodes
-    of the next row.
+    Each group also gets a NodeFrame that frames that Submesh's Object Info
+    node for easier inspection. Submesh Frames sharing one IB hash are merged
+    into a DrawIB-level second Frame.
 
-    Each group also gets a NodeFrame that frames that Submesh's Mesh Info
-    node together with its texture nodes for easier inspection; texture
-    nodes are parented into the Frame by _build_texture_nodes.
-    Submesh Frames sharing one IB hash are merged into a DrawIB-level
-    second Frame.
-
-    Returns (oldfoldername_node_dict, oldfoldername_group_dict, group_tex_cursors,
-          max_node_right, tex_y_gap, group_frame_dict, tex_home_group).
+    Returns (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right).
     """
-    if oldfoldername_jsonpath_hint is None:
-        oldfoldername_jsonpath_hint = {}
-    # old_folder_name -> Object Info node (Slot link target of texture marks)
+    # old_folder_name -> Object Info node
     oldfoldername_node_dict: dict[str, bpy.types.Node] = {}
     # old_folder_name -> group key (new-format submesh name)
     oldfoldername_group_dict: dict[str, str] = {}
@@ -535,68 +338,14 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         tree.links.new(node.outputs[0], group_node.inputs[-1])
 
     # Group layout
-    OBJ_X_OFFSET = 560.0
-    TEX_Y_GAP = 460.0
-    GROUP_X_GAP = 1120.0
-    ROW_Y_GAP = 320.0
+    OBJ_X_OFFSET = 40.0
+    GROUP_X_GAP = 620.0
+    ROW_Y_GAP = 120.0
     MAX_GROUP_COLS_PER_ROW = 3
-    # Mesh Info node height estimate: base height plus growth per linked texture slot.
-    # The node UI is made of socket rows (about 22px per row) and draw_buttons
-    # rows (about 20px per row); each linked slot adds about 1 socket row plus
-    # 3 slot-configuration button rows.
-    OBJ_BASE_HEIGHT = 220.0
-    OBJ_SLOT_LINK_HEIGHT = 100.0
+    # Estimated height of a single Object Info node
+    OBJ_BASE_HEIGHT = 260.0
 
-    # Pre-count the texture nodes per group to estimate the row height (texture columns need preview space)
-    group_tex_counts: dict[str, int] = {}
-    # Pre-count the linked texture slots per Mesh Info node group (marks whose
-    # MarkType is not Hash, deduplicated like the slot_link_done logic of _build_texture_nodes)
-    group_slot_link_counts: dict[str, int] = {}
-    seen_mark_hashes: set[str] = set()
-    seen_slot_links: set[tuple] = set()
-    # For each texture hash: the group where it first appears and the group of
-    # its first Slot mark (the submesh that "first uses it"), used to decide
-    # which group's Frame owns the texture node
-    tex_first_group: dict[str, str] = {}
-    tex_first_slot_group: dict[str, str] = {}
-    for old_folder_name, json_path in oldfoldername_jsonpath_hint.items():
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                submesh_json = json.load(f)
-        except Exception:
-            continue
-        mark_list = _extract_texture_marks(submesh_json)
-        group_key = oldfoldername_group_dict.get(old_folder_name, ("", ""))
-        for mark in mark_list:
-            if not isinstance(mark, dict):
-                continue
-            mark_hash = str(mark.get("MarkHash", "") or "").strip()
-            if not mark_hash:
-                continue
-            if mark_hash not in tex_first_group:
-                tex_first_group[mark_hash] = group_key
-            if mark_hash not in seen_mark_hashes:
-                seen_mark_hashes.add(mark_hash)
-                group_tex_counts[group_key] = group_tex_counts.get(group_key, 0) + 1
-            mark_type = str(mark.get("MarkType", "") or "").strip()
-            if mark_type != 'Hash':
-                mark_slot = str(mark.get("MarkSlot", "") or "").strip()
-                link_key = (old_folder_name, mark_hash, mark_slot)
-                if link_key not in seen_slot_links:
-                    seen_slot_links.add(link_key)
-                    group_slot_link_counts[group_key] = group_slot_link_counts.get(group_key, 0) + 1
-                if mark_hash not in tex_first_slot_group:
-                    tex_first_slot_group[mark_hash] = group_key
-
-    # Texture ownership strictly follows the submesh of the "first use"
-    # (the first Slot mark); pure Hash textures without Slot marks follow
-    # the group where they first appear
-    tex_home_group = {
-        h: tex_first_slot_group.get(h) or first_group
-        for h, first_group in tex_first_group.items()
-    }
-
-    group_tex_cursors: dict[str, list] = {}
+    group_base_xy: dict[str, list] = {}
     group_top_y: dict[str, float] = {}
     max_node_right = 0.0
     row_start_y = 0.0
@@ -625,23 +374,21 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             y = row_start_y
             for node in group_nodes[group_key]:
                 node.location = (base_x + OBJ_X_OFFSET, y)
-                slot_link_count = group_slot_link_counts.get(group_key, 0)
-                y -= OBJ_BASE_HEIGHT + slot_link_count * OBJ_SLOT_LINK_HEIGHT
+                y -= OBJ_BASE_HEIGHT
 
-            # Mesh Info nodes grow with linked texture slots; count the estimated height into the row height to avoid overlapping the next row
+            # Count the node column height into the row height to avoid overlapping the next row
             obj_height = row_start_y - y
-            tex_height = group_tex_counts.get(group_key, 0) * TEX_Y_GAP
-            row_max_height = max(row_max_height, obj_height, tex_height)
+            row_max_height = max(row_max_height, obj_height)
             max_node_right = max(max_node_right, base_x + OBJ_X_OFFSET)
 
-            group_tex_cursors[group_key] = [base_x, row_start_y]
+            group_base_xy[group_key] = [base_x, row_start_y]
             group_top_y[group_key] = row_start_y
         # A group spanning several rows has a second-level Frame whose rectangle
         # covers those rows, so no other group may use the leftover columns
         if spanned_multiple_rows:
             col_in_row = MAX_GROUP_COLS_PER_ROW
 
-    # Create a Frame per group and parent the group's Mesh Info nodes into it
+    # Create a Frame per group and parent the group's Object Info nodes into it
     FRAME_PAD = 40.0
     group_frame_dict: dict[str, bpy.types.Node] = {}
     for group_key in group_order:
@@ -649,7 +396,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         frame_label = group_frame_labels.get(group_key, "") or str(group_key) or "Ungrouped"
         frame.label = frame_label
         frame.name = "Frame_" + (frame_label.replace(" ", "_") or "Ungrouped")
-        frame.location = (group_tex_cursors[group_key][0] - FRAME_PAD,
+        frame.location = (group_base_xy[group_key][0] - FRAME_PAD,
                           group_top_y[group_key] + FRAME_PAD)
         group_frame_dict[group_key] = frame
 
@@ -676,7 +423,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         outer_frame.label = outer_label
         outer_frame.name = "Frame_" + (outer_label.replace(" ", "_") or "Ungrouped")
         first_key = outer_groups[outer_key][0]
-        outer_frame.location = (group_tex_cursors[first_key][0] - FRAME_PAD - OUTER_FRAME_PAD,
+        outer_frame.location = (group_base_xy[first_key][0] - FRAME_PAD - OUTER_FRAME_PAD,
                                 group_top_y[first_key] + FRAME_PAD + OUTER_FRAME_PAD)
         for group_key in outer_groups[outer_key]:
             inner_frame = group_frame_dict[group_key]
@@ -684,8 +431,8 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             inner_frame.parent = outer_frame
             inner_frame.location = (abs_x - outer_frame.location.x, abs_y - outer_frame.location.y)
 
-    return (oldfoldername_node_dict, oldfoldername_group_dict, group_tex_cursors,
-            max_node_right, TEX_Y_GAP, group_frame_dict, tex_home_group)
+    return (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right)
+
 
 
 def _clear_blueprint_node_selection(tree):
@@ -860,31 +607,12 @@ def ImprotFromWorkSpaceFull(self, context):
         group_node.label = "Default Group"
         
         # 3. Create Object Info nodes laid out per Submesh group (same IB hash merged into a second-level Frame)
-        (oldfoldername_node_dict, oldfoldername_group_dict,
-         group_tex_cursors, max_node_right, TEX_Y_GAP,
-         group_frame_dict, tex_home_group) = _create_and_layout_obj_info_nodes(
-            tree, group_node, foldername_imported_obj_dict, ws_model,
-            oldfoldername_jsonpath_hint=oldfoldername_jsonpath_dict)
+        (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
+            tree, group_node, foldername_imported_obj_dict, ws_model)
 
-        # 3.5 Auto-create and connect Texture nodes from each Submesh's texture-mark metadata
-        # Only textures explicitly marked by the user in SSMT are imported; the style is decided by each mark's MarkType
-        _, hash_group_node = _build_texture_nodes(
-            tree=tree,
-            oldfoldername_node_dict=oldfoldername_node_dict,
-            oldfoldername_jsonpath_dict=oldfoldername_jsonpath_dict,
-            oldfoldername_group_dict=oldfoldername_group_dict,
-            group_tex_cursors=group_tex_cursors,
-            tex_y_gap=TEX_Y_GAP,
-            group_frame_dict=group_frame_dict,
-            tex_home_group=tex_home_group,
-        )
-
-        # 4. Place the Group and Output nodes (the Hash texture group sits beside the object group)
+        # 4. Place the Group and Output nodes
         group_node.location = (max_node_right + 560.0, -200.0)
         group_node.label = "Master Mesh Group"
-        if hash_group_node is not None:
-            hash_group_node.location = (max_node_right + 560.0, -1000.0)
-            hash_group_node.label = "Master Hash Texture Group"
 
         output_node = tree.nodes.new('SSMTNode_Result_Output')
         output_node.location = (max_node_right + 1040.0, -200.0)
@@ -898,12 +626,9 @@ def ImprotFromWorkSpaceFull(self, context):
         # Link the side-by-side group nodes directly to the Output
         _link_group_to_output(tree, face_export_node, output_node)
         _link_group_to_output(tree, group_node, output_node)
-        _link_group_to_output(tree, hash_group_node, output_node)
 
         if hasattr(group_node, "update"):
             group_node.update()
-        if hash_group_node is not None and hasattr(hash_group_node, "update"):
-            hash_group_node.update()
         _exclude_marked_face_objects_from_regular_group(
             tree, group_node, oldfoldername_node_dict, oldfoldername_jsonpath_dict,
         )
@@ -1182,29 +907,10 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
         ws_model = WorkSpaceModel()
 
-        (oldfoldername_node_dict, oldfoldername_group_dict,
-         group_tex_cursors, max_node_right, TEX_Y_GAP,
-         group_frame_dict, tex_home_group) = _create_and_layout_obj_info_nodes(
-            tree, group_node, foldername_imported_obj_dict, ws_model,
-            oldfoldername_jsonpath_hint=oldfoldername_jsonpath_dict)
+        (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
+            tree, group_node, foldername_imported_obj_dict, ws_model)
 
-        hash_group_node = None
-        if oldfoldername_jsonpath_dict:
-            _, hash_group_node = _build_texture_nodes(
-                tree=tree,
-                oldfoldername_node_dict=oldfoldername_node_dict,
-                oldfoldername_jsonpath_dict=oldfoldername_jsonpath_dict,
-                oldfoldername_group_dict=oldfoldername_group_dict,
-                group_tex_cursors=group_tex_cursors,
-                tex_y_gap=TEX_Y_GAP,
-                group_frame_dict=group_frame_dict,
-                tex_home_group=tex_home_group,
-            )
-
-        # The Hash texture group sits beside the object group
         group_node.location = (max_node_right + 560.0, -200.0)
-        if hash_group_node is not None:
-            hash_group_node.location = (max_node_right + 560.0, 60.0)
 
         output_node = tree.nodes.new('SSMTNode_Result_Output')
         output_node.location = (max_node_right + 1040.0, -200.0)
@@ -1217,12 +923,9 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
         _link_group_to_output(tree, face_export_node, output_node)
         _link_group_to_output(tree, group_node, output_node)
-        _link_group_to_output(tree, hash_group_node, output_node)
 
         if hasattr(group_node, "update"):
             group_node.update()
-        if hash_group_node is not None and hasattr(hash_group_node, "update"):
-            hash_group_node.update()
         _exclude_marked_face_objects_from_regular_group(
             tree, group_node, oldfoldername_node_dict, oldfoldername_jsonpath_dict or {},
         )

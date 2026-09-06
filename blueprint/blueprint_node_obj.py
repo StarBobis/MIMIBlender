@@ -311,54 +311,6 @@ def draw_view3d_header(self, context):
         self.layout.label(text="Please click an object in the 3D View...", icon='EYEDROPPER')
 
 
-class SSMTTextureSlotItem(bpy.types.PropertyGroup):
-    """Configuration item for each texture slot input on the Object Info node"""
-    slot_index: bpy.props.IntProperty(
-        name="Slot Index",
-        description="Texture slot number",
-        default=0,
-        min=0,
-        max=127,
-    )  # type: ignore
-
-    # Slot output type: ps-t by default; also supports toolkit-managed forms (e.g. ZZMI) or custom.
-    slot_type: bpy.props.EnumProperty(
-        name="Slot Type",
-        description="Key name form used by this slot when generating INI",
-        items=[
-            ('PS_T', 'ps-t', 'Regular 3Dmigoto pixel shader slot (ps-t0, ps-t1...)'),
-            ('ZZMI_DIFFUSE', 'ZZMI Diffuse', 'Resource\\ZZMI\\Diffuse'),
-            ('ZZMI_NORMALMAP', 'ZZMI NormalMap', 'Resource\\ZZMI\\NormalMap'),
-            ('ZZMI_LIGHTMAP', 'ZZMI LightMap', 'Resource\\ZZMI\\LightMap'),
-            ('ZZMI_MATERIALMAP', 'ZZMI MaterialMap', 'Resource\\ZZMI\\MaterialMap'),
-            ('RABBITFX_FXMAP', 'RabbitFX FXMap', 'Resource\\RabbitFX\\FXMap'),
-            ('CUSTOM', 'Custom', 'Manually enter the slot key name'),
-        ],
-        default='PS_T',
-    )  # type: ignore
-
-    custom_slot_key: bpy.props.StringProperty(
-        name="Custom Key",
-        description="Full key name used when Slot Type is Custom, e.g. ps-t3 or Resource\\MyTool\\Diffuse",
-        default="",
-    )  # type: ignore
-
-    @property
-    def effective_slot_key(self) -> str:
-        """Return the key name used when generating INI, based on slot_type."""
-        type_map = {
-            'PS_T': f"ps-t{self.slot_index}",
-            'ZZMI_DIFFUSE': r"Resource\ZZMI\Diffuse",
-            'ZZMI_NORMALMAP': r"Resource\ZZMI\NormalMap",
-            'ZZMI_LIGHTMAP': r"Resource\ZZMI\LightMap",
-            'ZZMI_MATERIALMAP': r"Resource\ZZMI\MaterialMap",
-            'RABBITFX_FXMAP': r"Resource\RabbitFX\FXMap",
-        }
-        if self.slot_type == 'CUSTOM':
-            return self.custom_slot_key.strip() or f"ps-t{self.slot_index}"
-        return type_map.get(self.slot_type, f"ps-t{self.slot_index}")
-
-
 class SSMTNode_Object_Info(SSMTNodeBase):
     '''Object Info Node'''
     bl_idname = 'SSMTNode_Object_Info'
@@ -437,21 +389,9 @@ class SSMTNode_Object_Info(SSMTNodeBase):
     index_count_display: bpy.props.StringProperty(name="IndexCount", default="") #type: ignore
     first_index_display: bpy.props.StringProperty(name="FirstIndex", default="") #type: ignore
 
-    texture_slot_items: bpy.props.CollectionProperty(type=SSMTTextureSlotItem)  # type: ignore
-
     def init(self, context):
         self.outputs.new('SSMTSocketObject', "Object")
-        self._add_texture_slot(slot_index=0)
         self._add_custom_shader_socket()
-
-    def _get_texture_sockets(self):
-        return [sock for sock in self.inputs if getattr(sock, "bl_idname", "") == 'SSMTSocketTexture']
-
-    def _get_texture_socket_by_item_index(self, item_index):
-        texture_sockets = self._get_texture_sockets()
-        if 0 <= item_index < len(texture_sockets):
-            return texture_sockets[item_index]
-        return None
 
     def _get_custom_shader_sockets(self):
         return [
@@ -459,64 +399,14 @@ class SSMTNode_Object_Info(SSMTNodeBase):
             if getattr(sock, 'bl_idname', '') == 'SSMTSocketCustomShader'
         ]
 
-    def _group_dynamic_input_sockets(self):
-        """Keep Texture and CustomShader inputs in two contiguous groups.
-
-        Blender appends new sockets, which otherwise makes an Object Info node
-        alternate between Texture and CustomShader sockets as each group grows.
-        Moving sockets preserves their links and their relative order.
-        """
-        texture_count = len(self._get_texture_sockets())
-        # Stable partition: repeatedly move the next Texture socket into the
-        # Texture block. Looking sockets up again after every move avoids stale
-        # RNA wrappers in Blender 5.2.
-        for target_index in range(texture_count):
-            current_index = next(
-                index
-                for index, socket in enumerate(self.inputs)
-                if index >= target_index
-                and getattr(socket, "bl_idname", "") == 'SSMTSocketTexture'
-            )
-            if current_index != target_index:
-                self.inputs.move(current_index, target_index)
-
     def _add_custom_shader_socket(self):
         self.inputs.new('SSMTSocketCustomShader', 'CustomShader')
-        self._group_dynamic_input_sockets()
 
     def ensure_custom_shader_socket(self):
         if not self._get_custom_shader_sockets():
             self._add_custom_shader_socket()
 
-    def _get_next_texture_slot_index(self):
-        existing = {item.slot_index for item in self.texture_slot_items}
-        idx = 0
-        while idx in existing:
-            idx += 1
-        return idx
-
-    def _add_texture_slot(self, slot_index=None):
-        if slot_index is None:
-            slot_index = self._get_next_texture_slot_index()
-        # Sockets use neutral names: slot semantics are only determined by the matching slot item once linked
-        self.inputs.new('SSMTSocketTexture', "Texture")
-        self._group_dynamic_input_sockets()
-        item = self.texture_slot_items.add()
-        item.slot_index = slot_index
-
-
     def update(self):
-        self._group_dynamic_input_sockets()
-        # Texture slots are entirely link-driven: always keep exactly one unlinked empty slot at the end
-        texture_sockets = self._get_texture_sockets()
-        if texture_sockets and texture_sockets[-1].is_linked:
-            self._add_texture_slot()
-            texture_sockets = self._get_texture_sockets()
-        while len(texture_sockets) > 1 and not texture_sockets[-1].is_linked and not texture_sockets[-2].is_linked:
-            self.inputs.remove(texture_sockets[-1])
-            texture_sockets = self._get_texture_sockets()
-        self._sync_texture_slot_items()
-
         self.ensure_custom_shader_socket()
         custom_shader_sockets = self._get_custom_shader_sockets()
         if custom_shader_sockets and custom_shader_sockets[-1].is_linked:
@@ -529,37 +419,6 @@ class SSMTNode_Object_Info(SSMTNodeBase):
         ):
             self.inputs.remove(custom_shader_sockets[-1])
             custom_shader_sockets = self._get_custom_shader_sockets()
-        self._group_dynamic_input_sockets()
-
-    def _sync_texture_slot_items(self):
-        """Keep texture_slot_items in one-to-one correspondence with the texture input sockets."""
-        socket_count = len(self._get_texture_sockets())
-        while len(self.texture_slot_items) < socket_count:
-            item = self.texture_slot_items.add()
-            item.slot_index = self._get_next_texture_slot_index()
-        while len(self.texture_slot_items) > socket_count:
-            self.texture_slot_items.remove(len(self.texture_slot_items) - 1)
-
-    def link_texture_node(self, texture_node, slot_index: int):
-        """Link the Texture node's Slot output to the first free texture input and record the slot number."""
-        self._sync_texture_slot_items()
-        texture_sockets = self._get_texture_sockets()
-        target_socket = None
-        target_item_index = -1
-        for idx, socket in enumerate(texture_sockets):
-            if not socket.is_linked:
-                target_socket = socket
-                target_item_index = idx
-                break
-        if target_socket is None:
-            self._add_texture_slot()
-            texture_sockets = self._get_texture_sockets()
-            target_socket = texture_sockets[-1]
-            target_item_index = len(texture_sockets) - 1
-        item = self.texture_slot_items[target_item_index]
-        item.slot_index = slot_index
-        self.id_data.links.new(texture_node.outputs["Slot"], target_socket)
-        return item
 
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'SSMTBlueprintTreeType' else None
@@ -585,28 +444,6 @@ class SSMTNode_Object_Info(SSMTNodeBase):
 
             if self.submesh_name and self.submesh_name not in BlueprintExportHelper.get_tree_submesh_names(tree=tree):
                 layout.label(text="Current Submesh is not in the list; export will fall back to object name resolution", icon='ERROR')
-
-        # Texture slot configuration only matters once textures are linked, so only linked slots are shown
-        texture_sockets = self._get_texture_sockets()
-        box = None
-        for idx, item in enumerate(self.texture_slot_items):
-            socket = texture_sockets[idx] if idx < len(texture_sockets) else None
-            if socket is None or not socket.is_linked:
-                continue
-            if box is None:
-                box = layout.box()
-                box.label(text="Texture Slot", icon='IMAGE_DATA')
-            col = box.column(align=True)
-            row = col.row(align=True)
-            linked_node = socket.links[0].from_node if socket.links else None
-            linked_label = str(getattr(linked_node, "texture_hash", "") or getattr(linked_node, "label", "") or "")
-            row.label(text=linked_label, icon='IMAGE_DATA')
-            row.prop(item, "slot_type", text="")
-            if item.slot_type == 'PS_T':
-                row.prop(item, "slot_index", text="")
-            if item.slot_type == 'CUSTOM':
-                col.prop(item, "custom_slot_key", text="Custom Key")
-            col.label(text="Effective Key Name: " + item.effective_slot_key)
 
         for socket in self._get_custom_shader_sockets():
             if not socket.is_linked:
@@ -994,7 +831,6 @@ classes = (
     SSMT_OT_StartPickObject,
     SSMT_OT_PickObjectModal,
     SSMT_OT_View_Group_Objects,
-    SSMTTextureSlotItem,
     SSMTNode_Object_Info,
     SSMTNode_Object_Group,
     SSMTNode_Result_Output,

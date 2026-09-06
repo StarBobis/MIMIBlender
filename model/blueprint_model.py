@@ -17,7 +17,6 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import SSMTNode_Object_Group, SSMTNode_SwitchKey, SSMTNode_Object_Info, SSMTNode_Result_Output
 
-from ..blueprint.blueprint_node_texture import SSMTNode_Texture
 from ..blueprint.blueprint_node_custom_shader import SSMTNode_CustomShader
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
@@ -25,7 +24,6 @@ from ..blueprint.blueprint_node_group import (
     GROUP_OUTPUT_IDNAME,
     _group_socket_for_interface,
 )
-from ..common.m_texture_helper import HashTextureBinding
 from ..common.m_custom_shader_helper import M_CustomShaderHelper
 
 
@@ -40,9 +38,6 @@ class BluePrintModel:
 
         # Global obj_model list; each obj_model stores the active condition of its obj.
         self.ordered_draw_obj_data_model_list:list[DrawCallModel] = [] 
-
-        # Texture nodes that join the blueprint chain through the Hash output
-        self.hash_texture_node_list:list[HashTextureBinding] = []
 
         # Temporary objects created by UniComponent splitting; must be cleaned up after export
         self._unico_temp_objects: list[bpy.types.Object] = []
@@ -268,17 +263,6 @@ class BluePrintModel:
 
                 obj_model.work_key_list = copy.deepcopy(chain_key_list)
 
-                # Collect Texture nodes linked in through Slot outputs
-                for idx, item in enumerate(getattr(unknown_node, 'texture_slot_items', [])):
-                    socket = unknown_node._get_texture_socket_by_item_index(idx)
-                    if socket is None or not socket.is_linked:
-                        continue
-                    for link in socket.links:
-                        texture_node = link.from_node
-                        if getattr(texture_node, "bl_idname", "") == SSMTNode_Texture.bl_idname:
-                            # Keep the slot item so the key name can be derived from effective_slot_key at export time
-                            obj_model.slot_texture_node_list.append((item, texture_node))
-
                 obj_model.custom_shader_node_list.extend(custom_shader_nodes)
                 
                 self.ordered_draw_obj_data_model_list.append(obj_model)
@@ -295,22 +279,6 @@ class BluePrintModel:
             # [Include]; parsing its mesh inputs here would duplicate them in
             # the regular output layer.
             return
-
-        elif unknown_node.bl_idname == SSMTNode_Texture.bl_idname:
-            # Texture node: the Hash output propagates along the blueprint chain, so the current branch condition must be kept as well.
-            hash_socket = unknown_node.outputs.get("Hash")
-            if hash_socket and hash_socket.is_linked:
-                hash_binding = HashTextureBinding(
-                    texture_node=unknown_node,
-                    work_key_list=copy.deepcopy(chain_key_list),
-                )
-                condition_str = hash_binding.get_condition_str()
-                if not any(
-                    item.texture_node is unknown_node
-                    and item.get_condition_str() == condition_str
-                    for item in self.hash_texture_node_list
-                ):
-                    self.hash_texture_node_list.append(hash_binding)
 
     def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):
         """Expand an SSMT group through its Group Output nodes."""

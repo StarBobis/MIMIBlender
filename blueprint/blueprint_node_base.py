@@ -29,18 +29,6 @@ class SSMTSocketObject(NodeSocket):
 # 1. Define the custom node tree type
 
 
-class SSMTSocketTexture(NodeSocket):
-    '''Custom Socket for Texture Slot'''
-    bl_idname = 'SSMTSocketTexture'
-    bl_label = 'Texture Socket'
-
-    def draw_color(self, context, node):
-        return (0.8, 0.4, 0.9, 1.0)  # Purple/Magenta
-
-    def draw(self, context, layout, node, text):
-        layout.label(text=text)
-
-
 class SSMTSocketCustomShader(NodeSocket):
     '''Custom Shader command list socket.'''
     bl_idname = 'SSMTSocketCustomShader'
@@ -458,7 +446,6 @@ def register():
     bpy.utils.register_class(SSMTSubmeshListItem)
     bpy.utils.register_class(SSMTBlueprintTree)
     bpy.utils.register_class(SSMTSocketObject)
-    bpy.utils.register_class(SSMTSocketTexture)
     bpy.utils.register_class(SSMTSocketCustomShader)
     bpy.utils.register_class(THEHERTA3_OT_OpenPersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_DeletePersistentBlueprint)
@@ -480,7 +467,6 @@ def unregister():
     bpy.utils.unregister_class(THEHERTA3_OT_RenamePersistentBlueprint)
     bpy.utils.unregister_class(THEHERTA3_OT_DeletePersistentBlueprint)
     bpy.utils.unregister_class(SSMTSocketObject)
-    bpy.utils.unregister_class(SSMTSocketTexture)
     bpy.utils.unregister_class(THEHERTA3_OT_OpenPersistentBlueprint)
     bpy.utils.unregister_class(SSMTBlueprintTree)
     bpy.utils.unregister_class(SSMTSubmeshListItem)

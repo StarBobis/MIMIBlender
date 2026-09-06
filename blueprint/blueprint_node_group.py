@@ -262,17 +262,6 @@ def _clone_node(source, target_tree):
     target["ssmt_uuid"] = uuid.uuid4().hex
 
     # Dynamic SSMT nodes need their collections/socket count established first.
-    if hasattr(source, "texture_slot_items") and hasattr(target, "texture_slot_items"):
-        try:
-            while len(target.texture_slot_items) < len(source.texture_slot_items):
-                target._add_texture_slot()
-            for index, item in enumerate(source.texture_slot_items):
-                if index < len(target.texture_slot_items):
-                    for attr in ("slot_index", "slot_type", "custom_slot_key"):
-                        if hasattr(item, attr) and hasattr(target.texture_slot_items[index], attr):
-                            setattr(target.texture_slot_items[index], attr, getattr(item, attr))
-        except Exception:
-            pass
     if len(getattr(source, "inputs", ())) > len(getattr(target, "inputs", ())):
         for sock in list(source.inputs)[len(target.inputs):]:
             try:

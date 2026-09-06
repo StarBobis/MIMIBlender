@@ -760,7 +760,6 @@ def draw_node_add_menu(self, context):
     
     layout = self.layout
     layout.operator("node.add_node", text="Object Info", icon='OBJECT_DATAMODE').type = "SSMTNode_Object_Info"
-    layout.operator("node.add_node", text="Texture", icon='IMAGE_DATA').type = "SSMTNode_Texture"
     layout.operator("node.add_node", text="CustomShader", icon='NODE_COMPOSITING').type = "SSMTNode_CustomShader"
     layout.operator("node.add_node", text="Group", icon='GROUP').type = "SSMTNode_Object_Group"
     layout.operator("node.add_node", text="Generate Mod", icon='EXPORT').type = "SSMTNode_Result_Output"

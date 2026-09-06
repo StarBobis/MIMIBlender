@@ -1,4 +1,4 @@
-﻿from ..utils.ssmt_error_utils import SSMTErrorUtils
+from ..utils.ssmt_error_utils import SSMTErrorUtils
 from ..common.m_key import M_Key
 
 from dataclasses import dataclass, field
@@ -18,9 +18,6 @@ class DrawCallModel:
 
     # Effective conditions, resolved when BlueprintModel is parsed
     work_key_list:list[M_Key] = field(init=False,repr=False,default_factory=list)
-
-    # Textures connected via the Slot outputs of blueprint Texture nodes
-    slot_texture_node_list:list = field(init=False,repr=False,default_factory=list)
 
     # Custom command list connected via the CustomShader input of Object Info
     custom_shader_node_list:list = field(init=False,repr=False,default_factory=list)

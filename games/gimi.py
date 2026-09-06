@@ -7,13 +7,59 @@ from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_helper_gui import M_IniHelperGUI
 
-from ..common.m_texture_helper import M_TextureHelper
+
+def _slot_texture_lines(drawib_model, submesh_model) -> list[str]:
+    """Return the automatic ps-t slot assignment lines for one SubMesh.
+
+    Slot style textures are generated from the Submesh texture marks, so the
+    blueprint does not need Texture nodes anymore.
+    """
+    lines = []
+    seen_keys = set()
+    for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
+        mark_type = str(getattr(texture_markup_info, "mark_type", "") or "")
+        if mark_type not in ("Slot", "SharedSlot"):
+            continue
+        resource_name = texture_markup_info.get_resource_name()
+        key = (texture_markup_info.mark_slot, resource_name)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        lines.append(texture_markup_info.mark_slot + " = " + resource_name)
+    return lines
 
 
-class GIMITextureMarkName:
-    DiffuseMap = "DiffuseMap"
-    NormalMap = "NormalMap"
-    LightMap = "LightMap"
+def _slot_texture_has_normal_map(drawib_model, submesh_model) -> bool:
+    """Return whether any Slot texture of this SubMesh carries a normal map semantic."""
+    for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
+        mark_type = str(getattr(texture_markup_info, "mark_type", "") or "")
+        if mark_type not in ("Slot", "SharedSlot"):
+            continue
+        values = (
+            str(getattr(texture_markup_info, "mark_slot", "") or ""),
+            str(getattr(texture_markup_info, "mark_name", "") or ""),
+            str(getattr(texture_markup_info, "mark_filename", "") or ""),
+            str(texture_markup_info.get_resource_name() or ""),
+        )
+        if any("normal" in value.casefold() for value in values):
+            return True
+    return False
+
+
+def _append_slot_texture_lines(section, drawib_model, submesh_model):
+    """Append the automatic slot texture lines plus the ORFix/NNFix command when enabled."""
+    if GlobalProperties.forbid_auto_texture_ini():
+        return
+    slot_lines = _slot_texture_lines(drawib_model, submesh_model)
+    if not slot_lines:
+        return
+    for line in slot_lines:
+        section.append(line)
+    if GlobalProperties.gimi_use_orfix():
+        if _slot_texture_has_normal_map(drawib_model, submesh_model):
+            section.append(r"run = CommandList\global\ORFix\ORFix")
+        else:
+            section.append(r"run = CommandList\global\ORFix\NNFix")
 
 
 class ExportGIMI:
@@ -81,25 +127,14 @@ class ExportGIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            # Node-driven slot textures: set the slot separately before each drawindexed
-            def _slot_provider(obj_model):
-                return M_TextureHelper.get_slot_texture_lines_for_drawcall(obj_model)
+            # Automatic slot textures from the Submesh texture marks
+            _append_slot_texture_lines(texture_override_ib_section, drawib_model, submesh_model)
 
-            def _slot_provider_with_orfix(obj_model):
-                lines = _slot_provider(obj_model)
-                if GlobalProperties.gimi_use_orfix() and lines:
-                    if M_TextureHelper.drawcall_has_normal_map(obj_model):
-                        lines.append(r"run = CommandList\global\ORFix\ORFix")
-                    else:
-                        lines.append(r"run = CommandList\global\ORFix\NNFix")
-                return lines
-
-            M_IniHelper.append_drawindexed_with_slot_lines(
-                texture_override_ib_section,
+            for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
                 submesh_model.drawcall_model_list,
-                _slot_provider_with_orfix,
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,
-            )
+            ):
+                texture_override_ib_section.append(drawindexed_str)
 
         ini_builder.append_section(texture_override_ib_section)
 
@@ -141,12 +176,26 @@ class ExportGIMI:
         ini_builder.append_section(resource_vb_section)
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        # Generate the [Resource_...] sections from the blueprint Texture nodes
-        M_TextureHelper.generate_slot_texture_resource_sections(
-            drawib_model=drawib_model,
-            blueprint_model=self.blueprint_model,
-            ini_builder=ini_builder,
-        )
+        # Generate the [Resource_...] sections of the automatic Slot textures
+        if GlobalProperties.forbid_auto_texture_ini():
+            return
+
+        resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
+        appended_resource_names = set()
+        for idx, submesh_model in enumerate(drawib_model.submesh_model_list):
+            for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
+                if texture_markup_info.mark_type != "Slot":
+                    continue
+                resource_name = texture_markup_info.get_resource_name()
+                if resource_name in appended_resource_names:
+                    continue
+                appended_resource_names.add(resource_name)
+                slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
+                resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
+                resource_texture_section.append("filename = Textures/" + slot_filename)
+                resource_texture_section.new_line()
+
+        ini_builder.append_section(resource_texture_section)
 
     def add_unity_cs_texture_override_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
         d3d11_game_type = drawib_model.d3d11_game_type
@@ -217,13 +266,14 @@ class ExportGIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            # Node-driven slot textures: set the slot separately before each drawindexed
-            M_IniHelper.append_drawindexed_with_slot_lines(
-                texture_override_ib_section,
+            # Automatic slot textures from the Submesh texture marks
+            _append_slot_texture_lines(texture_override_ib_section, drawib_model, submesh_model)
+
+            for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
                 submesh_model.drawcall_model_list,
-                lambda obj_model: M_TextureHelper.get_slot_texture_lines_for_drawcall(obj_model),
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,
-            )
+            ):
+                texture_override_ib_section.append(drawindexed_str)
 
             if not d3d11_game_type.GPU_PreSkinning:
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
@@ -275,11 +325,9 @@ class ExportGIMI:
         ini_builder = M_IniBuilder()
         drawib_drawibmodel_dict = {drawib_model.draw_ib: drawib_model for drawib_model in self.drawib_model_list}
 
-        all_texture_nodes = M_TextureHelper.collect_all_texture_nodes(self.blueprint_model, self.drawib_model_list)
-        M_TextureHelper.copy_texture_files(
-            all_texture_nodes,
-            os.path.join(GlobalConfig.path_generate_mod_folder(), "Textures"),
-        )
+        # Automatic Hash / SharedSlot texture INI and file copies from the Submesh texture marks
+        M_IniHelper.generate_hash_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
+        M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
 
         for drawib_model in self.drawib_model_list:
             if GlobalConfig.logic_name != LogicName.SRMI:
@@ -289,12 +337,8 @@ class ExportGIMI:
             self.add_unity_cs_resource_vertexlimit(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_unity_cs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+            M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
-
-        M_TextureHelper.generate_hash_texture_sections(
-            getattr(self.blueprint_model, "hash_texture_node_list", []),
-            ini_builder=ini_builder,
-        )
 
         M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
@@ -306,11 +350,9 @@ class ExportGIMI:
         ini_builder = M_IniBuilder()
         drawib_drawibmodel_dict = {drawib_model.draw_ib: drawib_model for drawib_model in self.drawib_model_list}
 
-        all_texture_nodes = M_TextureHelper.collect_all_texture_nodes(self.blueprint_model, self.drawib_model_list)
-        M_TextureHelper.copy_texture_files(
-            all_texture_nodes,
-            os.path.join(GlobalConfig.path_generate_mod_folder(), "Textures"),
-        )
+        # Automatic Hash / SharedSlot texture INI and file copies from the Submesh texture marks
+        M_IniHelper.generate_hash_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
+        M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
 
         for drawib_model in self.drawib_model_list:
             self.add_unity_vs_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model)
@@ -318,12 +360,8 @@ class ExportGIMI:
             self.add_unity_vs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_unity_vs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+            M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
-
-        M_TextureHelper.generate_hash_texture_sections(
-            getattr(self.blueprint_model, "hash_texture_node_list", []),
-            ini_builder=ini_builder,
-        )
 
         M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
@@ -336,23 +374,18 @@ class ExportGIMI:
         ini_builder = M_IniBuilder()
         drawib_drawibmodel_dict = {drawib_model.draw_ib: drawib_model for drawib_model in self.drawib_model_list}
 
-        all_texture_nodes = M_TextureHelper.collect_all_texture_nodes(self.blueprint_model, self.drawib_model_list)
-        M_TextureHelper.copy_texture_files(
-            all_texture_nodes,
-            os.path.join(GlobalConfig.path_generate_mod_folder(), "Textures"),
-        )
+        # Automatic Hash / SharedSlot texture INI and file copies from the Submesh texture marks
+        M_IniHelper.generate_hash_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
+        M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
+
         for drawib_model in self.drawib_model_list:
             self.add_unity_vs_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_unity_vs_texture_override_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_unity_vs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_unity_vs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+            M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
-
-        M_TextureHelper.generate_hash_texture_sections(
-            getattr(self.blueprint_model, "hash_texture_node_list", []),
-            ini_builder=ini_builder,
-        )
 
         M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)

@@ -1,7 +1,5 @@
 '''
 Blueprint file drop support:
-- Dropping a .dds/.png creates a texture node (SSMTNode_Texture) at the drop position,
-  parsing the Hash and Mark Name from the filename when possible.
 - Dropping a .ib/.buf/.txt creates an object info node (SSMTNode_Object_Info) at the drop
   position, parsing submesh_name from the filename when possible (the new DrawIB-Component
   format, old-format long names, and names with a LOD prefix are all handled).
@@ -11,18 +9,13 @@ it only takes effect while the current node tree is SSMTBlueprintTreeType and do
 affect other editors.
 '''
 import os
-import re
 
 import bpy
 
 from ..workspace.ssmt_workspace import WorkSpaceModel
 
 
-TEXTURE_EXTENSIONS = {".dds", ".png"}
 MESH_EXTENSIONS = {".ib", ".buf", ".txt"}
-
-# 8-digit hexadecimal Hash (extra hex characters immediately before or after are not allowed, to avoid truncating longer strings)
-HASH_PATTERN = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{8})(?![0-9a-fA-F])")
 
 DROP_STACK_OFFSET_Y = 60.0
 
@@ -38,25 +31,6 @@ def is_ssmt_blueprint_context(context) -> bool:
     space = getattr(context, "space_data", None)
     tree = getattr(space, "node_tree", None) if space else None
     return bool(tree) and getattr(tree, "bl_idname", "") == 'SSMTBlueprintTreeType'
-
-
-def parse_texture_filename(filepath: str):
-    '''Parse (texture_hash, mark_name) from a texture filename when possible.
-
-    Common formats: <Hash>_<MarkName>.dds / <MarkName>_<Hash>.dds.
-    Returns only mark_name when no Hash is found.
-    '''
-    base_name = os.path.splitext(os.path.basename(filepath))[0]
-    match = HASH_PATTERN.search(base_name)
-    if not match:
-        return "", base_name
-
-    texture_hash = match.group(1).lower()
-    # Use whichever non-empty part remains around the Hash as the Mark Name
-    suffix = base_name[match.end():].lstrip("_-. ")
-    prefix = base_name[:match.start()].rstrip("_-. ")
-    mark_name = (suffix or prefix).strip()
-    return texture_hash, mark_name
 
 
 def parse_mesh_filename(filepath: str) -> str:
@@ -83,7 +57,7 @@ def parse_mesh_filename(filepath: str) -> str:
 class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
     '''Drop files onto the SSMT Blueprint, creating matching nodes at the release position'''
     bl_idname = "ssmt.blueprint_file_drop"
-    bl_label = "Drop files onto the Blueprint"
+    bl_label = "Drop Files onto the SSMT Blueprint"
     bl_options = {'UNDO'}
 
     # FileHandler writes a single file into filepath; to receive multiple files,
@@ -110,18 +84,6 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
                 if file_element.name
             ]
         return [self.filepath] if self.filepath else []
-
-    def _create_texture_node(self, tree, location, filepath):
-        node = tree.nodes.new(type='SSMTNode_Texture')
-        node.location = location
-        texture_hash, mark_name = parse_texture_filename(filepath)
-        if texture_hash:
-            node.texture_hash = texture_hash
-        if mark_name:
-            node.mark_name = mark_name
-        node.texture_filepath = filepath
-        node.texture_filename = os.path.basename(filepath)
-        return node
 
     def _create_mesh_info_node(self, tree, location, filepath):
         node = tree.nodes.new(type='SSMTNode_Object_Info')
@@ -164,12 +126,9 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
                 base_location[1] - stack_index * DROP_STACK_OFFSET_Y,
             )
             extension = os.path.splitext(filepath)[1].lower()
-            if extension in TEXTURE_EXTENSIONS:
-                node = self._create_texture_node(tree, location, filepath)
-            elif extension in MESH_EXTENSIONS:
-                node = self._create_mesh_info_node(tree, location, filepath)
-            else:
+            if extension not in MESH_EXTENSIONS:
                 continue
+            node = self._create_mesh_info_node(tree, location, filepath)
             node.select = True
             created_nodes.append(node)
 
@@ -195,9 +154,9 @@ classes = [SSMT_OT_BlueprintFileDrop]
 class SSMT_FH_BlueprintFileDrop(bpy.types.FileHandler):
     '''Handle files dropped from the OS into the SSMT Blueprint editor'''
     bl_idname = "SSMT_FH_BlueprintFileDrop"
-    bl_label = "Drop files onto the SSMT Blueprint"
+    bl_label = "Drop Files onto the SSMT Blueprint"
     bl_import_operator = "ssmt.blueprint_file_drop"
-    bl_file_extensions = ".dds;.png;.ib;.buf;.txt"
+    bl_file_extensions = ".ib;.buf;.txt"
 
     @classmethod
     def poll_drop(cls, context):
