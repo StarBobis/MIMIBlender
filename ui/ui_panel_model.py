@@ -2,13 +2,14 @@ import bpy
 import bmesh
 import numpy
 
-from bpy.props import BoolProperty,  CollectionProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, StringProperty
 
 from ..utils.obj_utils import ObjUtils
 from ..utils.collection_utils import CollectionUtils
 from ..utils.vertexgroup_utils import VertexGroupUtils
 from ..utils.shapekey_utils import ShapeKeyUtils
 from ..utils.algorithm_utils import AlgorithmUtils
+from ..utils.mesh_mirror_utils import MeshMirrorUtils
 
 def keep_one_triangle_in_mesh_object(obj):
     if obj.type != 'MESH':
@@ -764,6 +765,125 @@ class ExtractSubmeshOperator(bpy.types.Operator):
         
         return {'FINISHED'}
 
+class MirrorMeshOperator(bpy.types.Operator):
+    bl_idname = "mimiblender.mirror_mesh"
+    bl_label = "Mirror Mesh (Perfect)"
+    bl_description = ("Mirrors selected mesh objects by baking the flip into the real geometry. "
+                      "Unlike setting scale.x = -1 it keeps normals correct, resets the object scale "
+                      "to (1, 1, 1), follows shape keys, and can swap L/R vertex group names. "
+                      "Mode / axis / UV options are in the redo panel (F9).")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    mode: EnumProperty(
+        name="Mode",
+        description="What to do with every selected mesh object",
+        default="COPY",
+        items=[
+            ("COPY", "Mirrored Copy",
+             "Keep every selected object and create a clean mirrored copy next to it"),
+            ("FLIP", "Flip In Place",
+             "Mirror every selected object in place; click again to swap the side back"),
+            ("BAKE", "Bake & Fix",
+             "Fix an old object that was already mirrored with a negative scale: bake the scale "
+             "into the mesh, repair the normals, reset the scale to 1, but keep the current look"),
+        ],
+    ) # type: ignore
+
+    axis: EnumProperty(
+        name="Mirror Axis",
+        description="The mirror plane is the axis plane through the object origin "
+                    "(the same plane a negative scale on that axis would use)",
+        default="X",
+        items=[
+            ("X", "X Axis", "Mirror left / right"),
+            ("Y", "Y Axis", "Mirror front / back"),
+            ("Z", "Z Axis", "Mirror top / bottom"),
+        ],
+    ) # type: ignore
+
+    recalc_normals: BoolProperty(
+        name="Recalculate Normals (Outward)",
+        description="Also recalculate all normals to point outside, which repairs faces "
+                    "that were already inside-out before the mirror (Blender Ctrl+N behavior)",
+        default=True,
+    ) # type: ignore
+
+    mirror_uv: EnumProperty(
+        name="Mirror UV",
+        description="Mirror the UV maps around the middle of the UV tile. Default (None) gives "
+                    "the usual mirror image look. Use U for an X mirror or V for a Z mirror when "
+                    "the mirrored copy must keep the texture reading direction of the original",
+        default="NONE",
+        items=[
+            ("NONE", "None", "Keep UV maps as they are (mirror image look)"),
+            ("U", "Flip U", "u becomes 1 - u, texture direction is kept readable"),
+            ("V", "Flip V", "v becomes 1 - v, texture direction is kept readable"),
+        ],
+    ) # type: ignore
+
+    swap_side_groups: BoolProperty(
+        name="Swap L/R Vertex Group Names",
+        description="Rename mirrored vertex groups so symmetric rigs deform the copy correctly "
+                    "(for example arm.L becomes arm.R and arm.R becomes arm.L). Only affects "
+                    "groups whose names end with a recognized L/R suffix; disable it when the "
+                    "vertex groups do not follow symmetric naming",
+        default=True,
+    ) # type: ignore
+
+    copy_suffix: StringProperty(
+        name="Copy Name Suffix",
+        description="Name suffix of the created mirrored copies (only used in Mirrored Copy mode)",
+        default="_mirror",
+    ) # type: ignore
+
+    def execute(self, context):
+        # The mirror works on the mesh data, so it needs object mode.
+        if context.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+
+        # Only mesh objects can be mirrored by this operator.
+        mesh_objects = [
+            obj for obj in context.selected_objects if obj.type == "MESH"
+        ]
+        if len(mesh_objects) == 0:
+            self.report({'ERROR'}, "Select at least one mesh object to mirror.")
+            return {'CANCELLED'}
+
+        mirrored_objects = []
+        errors = []
+        for obj in mesh_objects:
+            try:
+                result = MeshMirrorUtils.mirror_mesh_object(
+                    obj,
+                    mode=self.mode,
+                    axis=self.axis,
+                    recalc_normals=self.recalc_normals,
+                    mirror_uv=self.mirror_uv,
+                    swap_side_groups=self.swap_side_groups,
+                    copy_suffix=self.copy_suffix,
+                )
+                mirrored_objects.append(result)
+            except Exception as exc:
+                # One broken object must not stop the others.
+                errors.append(f"{obj.name}: {exc}")
+
+        if self.mode == "COPY" and len(mirrored_objects) > 0:
+            # Keep the originals selected and add the new copies, so the
+            # user sees right away what was created.
+            for mirrored_obj in mirrored_objects:
+                mirrored_obj.select_set(True)
+            context.view_layer.objects.active = mirrored_objects[-1]
+
+        for error in errors:
+            self.report({'WARNING'}, f"Mirror skipped - {error}")
+
+        if len(mirrored_objects) > 0:
+            self.report({'INFO'}, f"Mirror success: {len(mirrored_objects)} object(s).")
+            return {'FINISHED'}
+        self.report({'ERROR'}, "Nothing was mirrored.")
+        return {'CANCELLED'}
+
+
 class PanelModelProcess(bpy.types.Panel):
     '''
     Having a copy here matters because beginners have no idea the right-click menu can trigger these features; unless it is handed to them on a plate, beginners will not discover them.
@@ -778,6 +898,7 @@ class PanelModelProcess(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        layout.operator(MirrorMeshOperator.bl_idname)
         layout.operator(ModelResetLocation.bl_idname)
         layout.operator(MMTResetRotation.bl_idname)
         layout.operator(ModelDeleteLoosePoint.bl_idname)
@@ -830,6 +951,7 @@ class CatterRightClickMenu(bpy.types.Menu):
     
     def draw(self, context):
         layout = self.layout
+        layout.operator(MirrorMeshOperator.bl_idname)
         layout.operator(ModelResetLocation.bl_idname)
         layout.operator(MMTResetRotation.bl_idname)
         layout.operator(ModelDeleteLoosePoint.bl_idname)
@@ -901,6 +1023,7 @@ def register():
     bpy.utils.register_class(ModelSortVertexGroupByName)
     bpy.utils.register_class(ModelVertexGroupRenameByLocation)
     bpy.utils.register_class(ExtractSubmeshOperator)
+    bpy.utils.register_class(MirrorMeshOperator)
     bpy.utils.register_class(PanelModelProcess)
 
     bpy.types.VIEW3D_MT_object_context_menu.append(menu_func_migoto_right_click)
@@ -923,6 +1046,7 @@ def unregister():
     bpy.types.VIEW3D_MT_object_context_menu.remove(menu_func_migoto_right_click)
 
     bpy.utils.unregister_class(PanelModelProcess)
+    bpy.utils.unregister_class(MirrorMeshOperator)
     bpy.utils.unregister_class(ExtractSubmeshOperator)
     bpy.utils.unregister_class(ModelVertexGroupRenameByLocation)
     bpy.utils.unregister_class(ModelSortVertexGroupByName)
