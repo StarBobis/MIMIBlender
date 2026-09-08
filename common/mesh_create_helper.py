@@ -90,16 +90,19 @@ class MeshCreateHelper:
             print("Current Element: " + element.ElementName)
             print("Shape before data conversion: " + str(data.shape))
 
+            # Only the GIMI preset preserves these raw vertex payload bytes.
             # Blender has no native representation for these game-specific
-            # components. Keep their source bytes on vertices before conversion.
-            if element.SemanticName == "TANGENT":
-                store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
-            elif data.ndim > 1 and data.shape[1] >= 4:
-                component_width = element.ByteWidth // data.shape[1]
-                if element.SemanticName.startswith("NORMAL"):
-                    store_raw_bytes(mesh, RAW_NORMAL_W_ATTRIBUTE_PREFIX, data[:, 3:4], component_width)
-                elif element.SemanticName.startswith("COLOR"):
-                    store_raw_bytes(mesh, RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX + ":" + element.ElementName, data[:, 3:4], component_width)
+            # components, but every other game preset must keep the legacy
+            # import behavior unchanged (no extra mesh attributes created).
+            if logic_name == LogicName.GIMI:
+                if element.SemanticName == "TANGENT":
+                    store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
+                elif data.ndim > 1 and data.shape[1] >= 4:
+                    component_width = element.ByteWidth // data.shape[1]
+                    if element.SemanticName.startswith("NORMAL"):
+                        store_raw_bytes(mesh, RAW_NORMAL_W_ATTRIBUTE_PREFIX, data[:, 3:4], component_width)
+                    elif element.SemanticName.startswith("COLOR"):
+                        store_raw_bytes(mesh, RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX + ":" + element.ElementName, data[:, 3:4], component_width)
 
             
             data = FormatUtils.apply_format_conversion(data, element.Format)
