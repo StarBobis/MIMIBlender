@@ -10,6 +10,7 @@ from ..common.global_config import GlobalConfig
 from ..common.ssmt_import_helper import SSMTImportHelper
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
+from ..utils.material_texture_utils import apply_image_texture_to_material
 
 # Store the preview image collection
 preview_collections = {}
@@ -244,35 +245,10 @@ class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
                     mat = bpy.data.materials.new(name=f"Mat_{selected_image.name}")
                     obj.data.materials[0] = mat
             
-            # Make sure the material uses nodes
-            mat.use_nodes = True
-            nodes = mat.node_tree.nodes
-            links = mat.node_tree.links
-            
-            # Find or create the Principled BSDF node
-            bsdf_node = nodes.get("Principled BSDF")
-            if not bsdf_node:
-                print("Principled BSDF not found, creating a new one.")
-                bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
-                bsdf_node.location = (0, 0)
-                
-                # Get the material output node
-                output_node = nodes.get("Material Output")
-                if not output_node:
-                    output_node = nodes.new(type='ShaderNodeOutputMaterial')
-                    output_node.location = (400, 0)
-                
-                # Connect to the output
-                links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
-            
-            # Create the image texture node
-            tex_image = nodes.new('ShaderNodeTexImage')
-            tex_image.image = image_data
-            tex_image.location = (-300, 0)
-            
-            # Connect the image texture Color output to the BSDF Base Color input
-            links.new(tex_image.outputs['Color'], bsdf_node.inputs['Base Color'])
-            links.new(tex_image.outputs['Alpha'], bsdf_node.inputs['Alpha'])
+            # Reuse the existing shader nodes and wire the picked image in.
+            # The shared helper finds nodes by bl_idname (never by the
+            # localised name), so it works in every interface language.
+            apply_image_texture_to_material(mat, image_data)
 
             applied_count += 1
         
