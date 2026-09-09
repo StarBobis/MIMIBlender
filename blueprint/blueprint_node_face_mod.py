@@ -30,9 +30,8 @@ def _collect_object_nodes(node, visited=None, *, is_root=True):
     if getattr(node, "bl_idname", "") == "SSMTNode_Object_Info":
         return [node]
 
-    # Output nodes are composition boundaries.  They can be connected here so
-    # their INI is included, but their object graph must not silently become a
-    # part of this face export as well.
+    # Output nodes are composition boundaries.  Their object graph must not
+    # silently become a part of this face export as well.
     if not is_root and getattr(node, "bl_idname", "") in {
         "SSMTNode_Result_Output", "SSMTNode_Face_Mod_Export",
     }:
@@ -151,8 +150,8 @@ def export_face_mod_from_node(node) -> tuple[str, int]:
     if not getattr(node, "use_specific_output_folder", False) or not output_folder:
         output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
     write_face_mod(output_folder, parts, diffuse_hash=node.diffuse_hash)
-    # ``write_face_mod`` returns the directory, while the Output composition
-    # layer needs the actual configuration file to build its [Include].
+    # ``write_face_mod`` returns the directory; report the actual Face.ini
+    # path so callers can locate the generated configuration file.
     return os.path.join(output_folder, "Face.ini"), len(parts)
 
 
@@ -180,17 +179,12 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
     open_folder: bpy.props.BoolProperty(name="Open Folder After Export", default=True)  # type: ignore
 
     def init(self, context):
-        self.outputs.new("SSMTSocketObject", "Output")
         self.inputs.new("SSMTSocketObject", "Face Group 1")
         self.width = 360
         self.use_custom_color = True
         self.color = (0.58, 0.32, 0.12)
 
     def update(self):
-        # Existing blend files predate the output socket.  Add it lazily when
-        # Blender updates the node so old blueprints become chainable too.
-        if len(self.outputs) == 0:
-            self.outputs.new("SSMTSocketObject", "Output")
         if self.inputs and self.inputs[-1].is_linked:
             self.inputs.new("SSMTSocketObject", f"Face Group {len(self.inputs) + 1}")
         if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
@@ -229,7 +223,7 @@ class SSMT_OT_ExportFaceMod(bpy.types.Operator):
             self.report({"ERROR"}, "Face Mod export node not found.")
             return {"CANCELLED"}
 
-        # Keep this node's button on the same recursive Output path as the
+        # Keep this node's button on the same Output export path as the
         # regular Generate Mod node.  Import locally to avoid a module cycle.
         from ..ui.ui_func_export import generate_mod_from_output_node
         return generate_mod_from_output_node(tree, context, node, self.report)

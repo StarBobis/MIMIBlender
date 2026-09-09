@@ -261,16 +261,15 @@ class BluePrintModel:
                 self.ordered_draw_obj_data_model_list.append(obj_model)
 
         elif unknown_node.bl_idname == SSMTNode_Result_Output.bl_idname:
-            # Result Output nodes are pass-through nodes when chained.  The
-            # selected output is handled as the root by __init__; upstream
-            # output nodes are intentionally boundaries for that INI layer.
+            # Result Output nodes are composition boundaries.  The selected
+            # output is handled as the root by __init__; any other output node
+            # found upstream is never parsed into this INI layer.
             return
 
         elif unknown_node.bl_idname == "SSMTNode_Face_Mod_Export":
-            # Face Output is an INI composition boundary, just like the
-            # regular Result Output.  Its generated Face.ini is linked through
-            # [Include]; parsing its mesh inputs here would duplicate them in
-            # the regular output layer.
+            # Face Output is a composition boundary, just like the regular
+            # Result Output.  Parsing its mesh inputs here would duplicate
+            # them in the regular output layer.
             return
 
     def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):

@@ -543,14 +543,7 @@ class SSMTNode_Result_Output(SSMTNodeBase):
     ) # type: ignore
     shapekey_items: bpy.props.CollectionProperty(type=SSMTShapeKeyListItem) # type: ignore
 
-    ini_filename: bpy.props.StringProperty(
-        name="Child INI File Name",
-        description="Sub-config name used when chaining outputs; written as .cfg to avoid duplicate recursive loading",
-        default="",
-    )  # type: ignore
-
     def init(self, context):
-        self.outputs.new('SSMTSocketObject', "Output")
         self.inputs.new('SSMTSocketObject', "Group 1")
         self.width = 400
 
@@ -558,7 +551,6 @@ class SSMTNode_Result_Output(SSMTNodeBase):
         operator = layout.operator("ssmt.generate_mod_blueprint", text="Generate Mod", icon='EXPORT')
         operator.node_name = self.name
         operator.tree_name = self.id_data.name if self.id_data else ""
-        layout.prop(self, "ini_filename", text="Child INI File Name")
 
         from .blueprint_node_shapekey import draw_shapekey_settings
         draw_shapekey_settings(self, layout)
@@ -594,8 +586,6 @@ class SSMTNode_Result_Output(SSMTNodeBase):
             layout.operator("ssmt.select_generate_mod_folder", icon='FILE_FOLDER')
 
     def update(self):
-        if len(self.outputs) == 0:
-            self.outputs.new('SSMTSocketObject', "Output")
         if self.inputs and self.inputs[-1].is_linked:
             self.inputs.new('SSMTSocketObject', "Group {count}".format(count=len(self.inputs) + 1))
         
