@@ -125,9 +125,6 @@ class PanelBasicInformation(bpy.types.Panel):
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
             layout.prop(global_properties,"import_skip_empty_vertex_groups")
 
-        # Whether to use the normal map when importing
-        layout.prop(global_properties, "use_normal_map")
-
         if GlobalConfig.logic_name == LogicName.GIMI or str(GlobalConfig.gamename).strip().casefold() in {
             "gimi", "genshinimpact",
         }:

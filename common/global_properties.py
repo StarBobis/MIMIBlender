@@ -39,16 +39,6 @@ def _get_workspace_enum_items(self, context):
         return [("", "No workspace available", "No workspace found for the current game configuration")]
 
 
-def _disable_high_fidelity_when_normal_enabled(self, _context):
-    if self.use_normal_map and self.gimi_high_fidelity_rendering:
-        self.gimi_high_fidelity_rendering = False
-
-
-def _disable_normal_when_high_fidelity_enabled(self, _context):
-    if self.gimi_high_fidelity_rendering and self.use_normal_map:
-        self.use_normal_map = False
-
-
 class GlobalProperties(bpy.types.PropertyGroup):
     selected_blueprint_name: bpy.props.EnumProperty(
         name="Current Blueprint",
@@ -135,18 +125,10 @@ class GlobalProperties(bpy.types.PropertyGroup):
         default=False,
     ) # type: ignore
 
-    use_normal_map: bpy.props.BoolProperty(
-        name="Use Normal Maps During Auto Texture Assignment",
-        description="When enabled, a normal map node is automatically attached when importing models, giving a slightly better visual result in material preview mode",
-        default=False,
-        update=_disable_high_fidelity_when_normal_enabled,
-    ) # type: ignore
-
     gimi_high_fidelity_rendering: bpy.props.BoolProperty(
         name="Genshin High-Fidelity Rendering",
         description="Only available for GIMI / GenshinImpact workspaces. When enabled, imported characters get a preview material built from LightMap, Body Ramp, MatCap and edge-light node groups.",
         default=False,
-        update=_disable_normal_when_high_fidelity_enabled,
     ) # type: ignore
 
     align_face_on_import: bpy.props.BoolProperty(
@@ -272,10 +254,6 @@ class GlobalProperties(bpy.types.PropertyGroup):
     @classmethod
     def custom_workspace_folder_path(cls):
         return cls._instance().custom_workspace_folder_path
-
-    @classmethod
-    def use_normal_map(cls):
-        return cls._instance().use_normal_map
 
     @classmethod
     def gimi_high_fidelity_rendering(cls):
