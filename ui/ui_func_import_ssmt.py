@@ -263,15 +263,11 @@ def _exclude_marked_face_objects_from_regular_group(
             tree.links.remove(link)
 
 def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_dict, ws_model):
-    """Create Object Info nodes, connect them to the Group and lay them out per Submesh group.
+    """Create Object Info nodes, connect them to the Group and lay them out.
 
-    Each imported Submesh (mesh) owns one group: its Object Info node stands in
-    its own column, and columns run horizontally and wrap after at most
-    MAX_GROUP_COLS_PER_ROW groups per row.
-
-    Each group also gets a NodeFrame that frames that Submesh's Object Info
-    node for easier inspection. Submesh Frames sharing one IB hash are merged
-    into a DrawIB-level second Frame.
+    All Object Info nodes are stacked in a single vertical column from top to
+    bottom, and the whole column is wrapped in one big NodeFrame named after
+    the workspace.
 
     Returns (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right).
     """
@@ -279,13 +275,8 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
     oldfoldername_node_dict: dict[str, bpy.types.Node] = {}
     # old_folder_name -> group key (new-format submesh name)
     oldfoldername_group_dict: dict[str, str] = {}
-    group_order: list[str] = []
-    group_nodes: dict[str, list] = {}
-    # group key -> NodeFrame label (mesh name + DrawIB alias)
-    group_frame_labels: dict[str, str] = {}
-    # DrawIB second-level grouping: (lod, draw_ib) -> submesh group keys under that IB hash
-    outer_order: list[tuple] = []
-    outer_groups: dict[tuple, list] = {}
+    # Every created Object Info node, in import order
+    object_nodes: list[bpy.types.Node] = []
 
     for new_submesh_name, (imported_obj, display_name) in foldername_imported_obj_dict.items():
         if imported_obj.type != 'MESH':
@@ -314,122 +305,39 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             )
         if old_folder_name:
             oldfoldername_node_dict[old_folder_name] = node
+            oldfoldername_group_dict[old_folder_name] = new_submesh_name
 
-        # Group granularity is the Submesh: one group / Frame per mesh
-        group_key = new_submesh_name
-        if group_key not in group_nodes:
-            group_nodes[group_key] = []
-            group_order.append(group_key)
-        group_nodes[group_key].append(node)
-        if old_folder_name:
-            oldfoldername_group_dict[old_folder_name] = group_key
-
-        group_frame_labels[group_key] = imported_obj.name or new_submesh_name
-
-        outer_key = (parsed.get("lod", ""), parsed.get("draw_ib", "")) if parsed else ("", "")
-        if outer_key not in outer_groups:
-            outer_groups[outer_key] = []
-            outer_order.append(outer_key)
-        outer_groups[outer_key].append(group_key)
+        object_nodes.append(node)
 
         # Add a socket manually when the Group's last socket is already occupied
         if group_node.inputs[-1].is_linked:
             group_node.inputs.new('SSMTSocketObject', f"Input {len(group_node.inputs) + 1}")
         tree.links.new(node.outputs[0], group_node.inputs[-1])
 
-    # Group layout
-    OBJ_X_OFFSET = 40.0
-    GROUP_X_GAP = 620.0
-    ROW_Y_GAP = 120.0
-    MAX_GROUP_COLS_PER_ROW = 3
+    # Stack all Object Info nodes into one vertical column, top to bottom.
+    NODE_X = 40.0
     # Estimated height of a single Object Info node
-    OBJ_BASE_HEIGHT = 260.0
+    NODE_Y_GAP = 260.0
+    y = 0.0
+    for node in object_nodes:
+        node.location = (NODE_X, y)
+        y -= NODE_Y_GAP
+    max_node_right = NODE_X if object_nodes else 0.0
 
-    group_base_xy: dict[str, list] = {}
-    group_top_y: dict[str, float] = {}
-    max_node_right = 0.0
-    row_start_y = 0.0
-    row_max_height = 0.0
-    col_in_row = 0
-
-    for outer_key in outer_order:
-        submesh_keys = outer_groups[outer_key]
-        # Submeshes of one DrawIB line up consecutively in a row so that the
-        # second-level Frame does not cover other groups: wrap first when the
-        # remaining columns of the current row cannot fit the whole group
-        if 0 < col_in_row and len(submesh_keys) > MAX_GROUP_COLS_PER_ROW - col_in_row:
-            col_in_row = 0
-            row_start_y -= (row_max_height + ROW_Y_GAP)
-            row_max_height = 0.0
-        spanned_multiple_rows = False
-        for group_key in submesh_keys:
-            if col_in_row >= MAX_GROUP_COLS_PER_ROW:
-                col_in_row = 0
-                row_start_y -= (row_max_height + ROW_Y_GAP)
-                row_max_height = 0.0
-                spanned_multiple_rows = True
-            base_x = col_in_row * GROUP_X_GAP
-            col_in_row += 1
-
-            y = row_start_y
-            for node in group_nodes[group_key]:
-                node.location = (base_x + OBJ_X_OFFSET, y)
-                y -= OBJ_BASE_HEIGHT
-
-            # Count the node column height into the row height to avoid overlapping the next row
-            obj_height = row_start_y - y
-            row_max_height = max(row_max_height, obj_height)
-            max_node_right = max(max_node_right, base_x + OBJ_X_OFFSET)
-
-            group_base_xy[group_key] = [base_x, row_start_y]
-            group_top_y[group_key] = row_start_y
-        # A group spanning several rows has a second-level Frame whose rectangle
-        # covers those rows, so no other group may use the leftover columns
-        if spanned_multiple_rows:
-            col_in_row = MAX_GROUP_COLS_PER_ROW
-
-    # Create a Frame per group and parent the group's Object Info nodes into it
+    # Wrap the whole column in one big Frame named after the workspace.
+    # Blender fits the Frame size to its children; only a rough top-left
+    # position is given here.
     FRAME_PAD = 40.0
-    group_frame_dict: dict[str, bpy.types.Node] = {}
-    for group_key in group_order:
+    if object_nodes:
+        workspace_name = GlobalConfig.get_workspace_name() or "Workspace"
         frame = tree.nodes.new('NodeFrame')
-        frame_label = group_frame_labels.get(group_key, "") or str(group_key) or "Ungrouped"
-        frame.label = frame_label
-        frame.name = "Frame_" + (frame_label.replace(" ", "_") or "Ungrouped")
-        frame.location = (group_base_xy[group_key][0] - FRAME_PAD,
-                          group_top_y[group_key] + FRAME_PAD)
-        group_frame_dict[group_key] = frame
-
-        for node in group_nodes[group_key]:
+        frame.label = workspace_name
+        frame.name = "Frame_" + workspace_name.replace(" ", "_")
+        frame.location = (NODE_X - FRAME_PAD, FRAME_PAD)
+        for node in object_nodes:
             abs_x, abs_y = node.location.x, node.location.y
             node.parent = frame
             node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
-
-    # Create a second-level Frame per DrawIB and merge the Submesh Frames of
-    # the same IB hash into it. The layout stage already keeps the submeshes
-    # of one group consecutive, with multi-row groups owning all of their rows,
-    # so the second-level Frame rectangle never covers other groups.
-    # Blender fits the Frame size to its children; only a rough top-left
-    # position is given here.
-    OUTER_FRAME_PAD = 40.0
-    for outer_key in outer_order:
-        lod_name, draw_ib = outer_key
-        label_parts = [part for part in (lod_name, draw_ib) if part]
-        outer_label = ".".join(label_parts) if label_parts else "Ungrouped"
-        alias = getattr(ws_model, "drawib_aliases", {}).get(draw_ib, "")
-        if alias:
-            outer_label += f" ({alias})"
-        outer_frame = tree.nodes.new('NodeFrame')
-        outer_frame.label = outer_label
-        outer_frame.name = "Frame_" + (outer_label.replace(" ", "_") or "Ungrouped")
-        first_key = outer_groups[outer_key][0]
-        outer_frame.location = (group_base_xy[first_key][0] - FRAME_PAD - OUTER_FRAME_PAD,
-                                group_top_y[first_key] + FRAME_PAD + OUTER_FRAME_PAD)
-        for group_key in outer_groups[outer_key]:
-            inner_frame = group_frame_dict[group_key]
-            abs_x, abs_y = inner_frame.location.x, inner_frame.location.y
-            inner_frame.parent = outer_frame
-            inner_frame.location = (abs_x - outer_frame.location.x, abs_y - outer_frame.location.y)
 
     return (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right)
 
@@ -606,7 +514,7 @@ def ImprotFromWorkSpaceFull(self, context):
         group_node = tree.nodes.new('SSMTNode_Object_Group')
         group_node.label = "Default Group"
         
-        # 3. Create Object Info nodes laid out per Submesh group (same IB hash merged into a second-level Frame)
+        # 3. Create Object Info nodes stacked in one vertical column inside a single workspace-named Frame
         (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
