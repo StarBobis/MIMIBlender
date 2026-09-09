@@ -266,8 +266,8 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
     """Create Object Info nodes, connect them to the Group and lay them out.
 
     All Object Info nodes are stacked in a single vertical column from top to
-    bottom, and the whole column is wrapped in one big NodeFrame named after
-    the workspace.
+    bottom. The column and the Group node are wrapped in one big NodeFrame
+    named after the workspace.
 
     Returns (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right).
     """
@@ -322,11 +322,17 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
     for node in object_nodes:
         node.location = (NODE_X, y)
         y -= NODE_Y_GAP
-    max_node_right = NODE_X if object_nodes else 0.0
 
-    # Wrap the whole column in one big Frame named after the workspace.
-    # Blender fits the Frame size to its children; only a rough top-left
-    # position is given here.
+    # Place the Group node to the right of the column; it is included in the
+    # Frame below, so the Frame wraps the whole import result and the imported
+    # content is easy to tell apart at a glance.
+    GROUP_X_GAP = 560.0
+    group_node.location = (NODE_X + GROUP_X_GAP, -200.0)
+    max_node_right = NODE_X + GROUP_X_GAP
+
+    # Wrap the whole column and the Group node in one big Frame named after
+    # the workspace. Blender fits the Frame size to its children; only a
+    # rough top-left position is given here.
     FRAME_PAD = 40.0
     if object_nodes:
         workspace_name = GlobalConfig.get_workspace_name() or "Workspace"
@@ -338,6 +344,9 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
             abs_x, abs_y = node.location.x, node.location.y
             node.parent = frame
             node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
+        abs_x, abs_y = group_node.location.x, group_node.location.y
+        group_node.parent = frame
+        group_node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
 
     return (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right)
 
@@ -514,21 +523,20 @@ def ImprotFromWorkSpaceFull(self, context):
         group_node = tree.nodes.new('SSMTNode_Object_Group')
         group_node.label = "Default Group"
         
-        # 3. Create Object Info nodes stacked in one vertical column inside a single workspace-named Frame
+        # 3. Create Object Info nodes stacked in one vertical column; the column and the Group node share one workspace-named Frame
         (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
-        # 4. Place the Group and Output nodes
-        group_node.location = (max_node_right + 560.0, -200.0)
+        # 4. Place the Output nodes (the Group node is already placed inside the Frame)
         group_node.label = "Master Mesh Group"
 
         output_node = tree.nodes.new('SSMTNode_Result_Output')
-        output_node.location = (max_node_right + 1040.0, -200.0)
+        output_node.location = (max_node_right + 480.0, -200.0)
         output_node.label = "Generate Mod"
 
         face_export_node = _create_face_mod_export_node(
             tree, oldfoldername_node_dict, oldfoldername_jsonpath_dict,
-            (max_node_right + 1040.0, -760.0),
+            (max_node_right + 480.0, -760.0),
         )
         
         # Link the side-by-side group nodes directly to the Output
@@ -818,15 +826,13 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
-        group_node.location = (max_node_right + 560.0, -200.0)
-
         output_node = tree.nodes.new('SSMTNode_Result_Output')
-        output_node.location = (max_node_right + 1040.0, -200.0)
+        output_node.location = (max_node_right + 480.0, -200.0)
         output_node.label = "Generate Mod"
 
         face_export_node = _create_face_mod_export_node(
             tree, oldfoldername_node_dict, oldfoldername_jsonpath_dict or {},
-            (max_node_right + 1040.0, -760.0),
+            (max_node_right + 480.0, -760.0),
         )
 
         _link_group_to_output(tree, face_export_node, output_node)
