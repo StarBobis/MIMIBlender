@@ -592,11 +592,6 @@ class SSMTNode_Result_Output(SSMTNodeBase):
             box.label(text=context.scene.global_properties.generate_mod_folder_path)
 
             layout.operator("ssmt.select_generate_mod_folder", icon='FILE_FOLDER')
-        
-        # Add a button to go back to the previous level
-        layout.separator()
-        row = layout.row(align=True)
-        row.operator("ssmt.blueprint_nest_navigate", text="Back to Previous Level", icon='BACK')
 
     def update(self):
         if len(self.outputs) == 0:
