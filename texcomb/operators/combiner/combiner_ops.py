@@ -32,6 +32,7 @@ from ...globs import (
     is_blender_legacy,
     is_blender_modern,
 )
+from ....i18n.i18n import tr
 from ...type_annotations import (
     CombMats,
     Diffuse,
@@ -335,8 +336,8 @@ def collect_texture_diagnostics(data: Structure) -> List[str]:
         alpha_diagnostic = item["gfx"].get("alpha_diagnostic")
         if alpha_diagnostic:
             messages.append(
-                "Material '{}' alpha was not included in the merge: {}".format(
-                    mat.name, alpha_diagnostic
+                tr("Material '{name}' alpha was not included in the merge: {issue}").format(
+                    name=mat.name, issue=alpha_diagnostic
                 )
             )
     return messages
@@ -348,18 +349,18 @@ def _get_texture_fallback_message(
     """Explain why a material will be treated as color-only."""
     if not img:
         return (
-            "Material '{}' has no main texture connected to the current output; "
-            "it will be treated as a solid color material."
-        ).format(mat.name)
+            tr("Material '{name}' has no main texture connected to the current output; "
+               "it will be treated as a solid color material.")
+        ).format(name=mat.name)
 
     pack_issue = get_image_pack_issue(img)
     if pack_issue:
-        return "Material '{}' texture '{}' cannot be packed and will be treated as solid color: {}".format(
-            mat.name, img.name, pack_issue
+        return tr("Material '{name}' texture '{image}' cannot be packed and will be treated as solid color: {issue}").format(
+            name=mat.name, image=img.name, issue=pack_issue
         )
 
-    return "Material '{}' texture '{}' failed to pack and will be treated as a solid color material.".format(
-        mat.name, img.name
+    return tr("Material '{name}' texture '{image}' failed to pack and will be treated as a solid color material.").format(
+        name=mat.name, image=img.name
     )
 
 
@@ -742,7 +743,7 @@ def _apply_alpha_texture(
             alpha_img = _get_uv_image(item, alpha_img, size)
         img.putalpha(alpha_img)
     except Exception as e:
-        item["gfx"]["alpha_diagnostic"] = "Failed to apply the alpha texture: {}".format(e)
+        item["gfx"]["alpha_diagnostic"] = tr("Failed to apply the alpha texture: {error}").format(error=e)
     return img
 
 

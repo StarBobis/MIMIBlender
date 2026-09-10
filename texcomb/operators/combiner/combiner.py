@@ -15,6 +15,7 @@ import bpy
 from bpy.props import BoolProperty, StringProperty
 
 from ... import globs
+from ....i18n.i18n import I18nOperator, tr
 from ...utils.packers import pack
 from .combiner_ops import (
     align_uvs,
@@ -38,7 +39,7 @@ from .combiner_ops import (
 MAX_ATLAS_SIZE = 20000
 
 
-class Combiner(bpy.types.Operator):
+class Combiner(I18nOperator):
     """Main operator for combining materials into a texture atlas.
 
     This operator manages the complete workflow for texture atlas generation:
@@ -57,7 +58,7 @@ class Combiner(bpy.types.Operator):
     bl_options = {"UNDO", "INTERNAL"}
 
     directory: StringProperty(
-        description="Directory for saving the atlas",
+        description=tr("Directory for saving the atlas"),
         maxlen=1024,
         default="",
         subtype="FILE_PATH",
@@ -65,7 +66,7 @@ class Combiner(bpy.types.Operator):
     )
     filter_glob: StringProperty(default="", options={"HIDDEN"})
     cats: BoolProperty(
-        description="Enable the special Cats workflow mode", default=False
+        description=tr("Enable the special Cats workflow mode"), default=False
     )
     data = None
     mats_uv = None
@@ -93,7 +94,7 @@ class Combiner(bpy.types.Operator):
         scn = context.scene
 
         if not self.directory:
-            return self._return_with_message("ERROR", "No save directory selected")
+            return self._return_with_message("ERROR", tr("No save directory selected"))
 
         scn.smc_save_path = self.directory
         sized_structure = get_size(scn, self.structure)
@@ -107,8 +108,8 @@ class Combiner(bpy.types.Operator):
         if max(atlas_size, default=0) > MAX_ATLAS_SIZE:
             self.report(
                 {"ERROR"},
-                "Output image size {}x{}px is too large".format(
-                    *atlas_size
+                tr("Output image size {width}x{height}px is too large").format(
+                    width=atlas_size[0], height=atlas_size[1]
                 ),
             )
             return {"FINISHED"}
@@ -120,7 +121,7 @@ class Combiner(bpy.types.Operator):
         assign_comb_mats(scn, self.data, comb_mats)
         clear_mats(scn, self.mats_uv)
         bpy.ops.smc.refresh_ob_data()
-        self.report({"INFO"}, "Materials combined successfully")
+        self.report({"INFO"}, tr("Materials combined successfully"))
         return {"FINISHED"}
 
     def invoke(
@@ -148,7 +149,7 @@ class Combiner(bpy.types.Operator):
         validation_result = validate_ob_data(scn.smc_ob_data)
         if validation_result:
             return self._return_with_message(
-                "ERROR", "No valid object selected"
+                "ERROR", tr("No valid object selected")
             )
 
         if self.cats:
@@ -162,7 +163,7 @@ class Combiner(bpy.types.Operator):
         self.data = get_data(scn.smc_ob_data)
 
         if not self.data:
-            return self._return_with_message("ERROR", "No material selected")
+            return self._return_with_message("ERROR", tr("No material selected"))
 
         self.mats_uv = get_mats_uv(scn, self.data)
         clear_empty_mats(scn, self.data, self.mats_uv)
@@ -180,12 +181,12 @@ class Combiner(bpy.types.Operator):
 
         # Validate material requirements
         if total_unique_mats == 0:
-            return self._return_with_message("ERROR", "No material selected")
+            return self._return_with_message("ERROR", tr("No material selected"))
 
         if total_unique_mats == 1 and not has_duplicates:
             return self._return_with_message(
                 "ERROR",
-                "Only one unique material was selected; no merging needed",
+                tr("Only one unique material was selected; no merging needed"),
             )
 
         if event is not None:
@@ -243,8 +244,8 @@ class Combiner(bpy.types.Operator):
             )
             self.report(
                 {"WARNING"},
-                "{} more materials will be treated as solid color; see the material settings for details.".format(
-                    remaining
+                tr("{count} more materials will be treated as solid color; see the material settings for details.").format(
+                    count=remaining
                 ),
             )
         self._reported_texture_diagnostics = reported

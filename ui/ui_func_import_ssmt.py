@@ -19,6 +19,7 @@ from ..common.ssmt_import_helper import SSMTImportHelper
 from ..common.gimi_high_fidelity_material import GIMIHighFidelityMaterial
 from ..workspace.ssmt_workspace import SSMTWorkSpace, WorkSpaceModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
+from ..i18n.i18n import I18nOperator, tr
 from math import pi
 from mathutils import Quaternion, Vector
 
@@ -417,7 +418,7 @@ def ImprotFromWorkSpaceFull(self, context):
     workspace_collection = SSMTWorkSpace.create_and_get_workspace_collection()
 
     if not ws_model.lod_components:
-        self.report({'ERROR'}, "No LOD directories (LOD0, LOD1, ...) were found in the current workspace. Please check the workspace structure.")
+        self.report({'ERROR'}, tr("No LOD directories (LOD0, LOD1, ...) were found in the current workspace. Please check the workspace structure."))
         return
 
     # key: new-format submesh_name (e.g. "LOD0.94517393-0"), value: gametype_name
@@ -480,7 +481,7 @@ def ImprotFromWorkSpaceFull(self, context):
 
                         foldername_gametypename_dict[new_submesh_name] = gametype_name
                         oldfoldername_jsonpath_dict[old_folder_name] = json_file_path
-                        self.report({'INFO'}, "Successfully imported " + new_submesh_name + " data type: " + gametype_name)
+                        self.report({'INFO'}, tr("Successfully imported ") + new_submesh_name + tr(" data type: ") + gametype_name)
                     except Exception as e:
                         print(f"Failed to import from {import_folder_path}: {e}")
                         continue
@@ -488,7 +489,7 @@ def ImprotFromWorkSpaceFull(self, context):
                     break
 
     if successful_import_count == 0:
-        self.report({'ERROR'}, "No models were successfully imported from the current workspace; blueprint generation was skipped.")
+        self.report({'ERROR'}, tr("No models were successfully imported from the current workspace; blueprint generation was skipped."))
         return
 
     # Save the workspace-level Import.json selection record (using new-format keys)
@@ -497,7 +498,7 @@ def ImprotFromWorkSpaceFull(self, context):
     
     if getattr(context.scene.global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
-            self.report({'WARNING'}, "Face alignment requires at least one valid Face mark and one Neck mark.")
+            self.report({'WARNING'}, tr("Face alignment requires at least one valid Face mark and one Neck mark."))
 
     _deselect_imported_objects(foldername_imported_obj_dict)
     _deselect_imported_shader_nodes(foldername_imported_obj_dict)
@@ -567,7 +568,7 @@ def ImprotFromWorkSpaceFull(self, context):
     
 
 
-class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(bpy.types.Operator):
+class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
     bl_idname = "ssmt4.import_all_from_workspace"
     bl_label = "Import All From SSMT Workspace"
     bl_description = "Import everything from the current workspace folder with one click."
@@ -577,9 +578,9 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(bpy.types.Operator):
         # print("Current WorkSpace: " + GlobalConfig.get_workspace_name())
         # print("Current Game: " + GlobalConfig.gamename)
         if GlobalConfig.get_workspace_name() == "":
-            self.report({"ERROR"}, "Please select the current workspace in SSMT before importing.")
+            self.report({"ERROR"}, tr("Please select the current workspace in SSMT before importing."))
         elif not os.path.exists(GlobalConfig.path_workspace_folder()):
-            self.report({"ERROR"}, "Workspace folder does not exist. Please create a workspace in SSMT first: {path}".format(path=GlobalConfig.path_workspace_folder()))
+            self.report({"ERROR"}, tr("Workspace folder does not exist. Please create a workspace in SSMT first: {path}").format(path=GlobalConfig.path_workspace_folder()))
         else:
             TimerUtils.Start("ImportFromWorkSpaceBlueprint")
             ImprotFromWorkSpaceFull(self, context)
@@ -588,7 +589,7 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(bpy.types.Operator):
         return {'FINISHED'}
     
 
-class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
+class SSMT4ImportRaw(I18nOperator, ImportHelper):
     bl_idname = "ssmt4.import_raw"
     bl_label = "Import SSMT Model"
     bl_description = "Import an SSMT model file. You only need to select the .json file."
@@ -600,7 +601,7 @@ class SSMT4ImportRaw(bpy.types.Operator, ImportHelper):
     ) # type: ignore
 
     files: bpy.props.CollectionProperty(
-        name="File Path",
+        name=tr("File Path"),
         type=bpy.types.OperatorFileListElement,
     ) # type: ignore
 
@@ -759,19 +760,19 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
 
                     foldername_gametypename_dict[new_submesh_name] = gametype_name
                     oldfoldername_jsonpath_dict[submesh_folder_name] = json_file_path
-                    self.report({'INFO'}, "Successfully imported " + new_submesh_name + " data type: " + gametype_name)
+                    self.report({'INFO'}, tr("Successfully imported ") + new_submesh_name + tr(" data type: ") + gametype_name)
 
                     # In __AUTO__ mode, lock the type once the first import succeeds
                     if locked_gametype is None and force_gametype_name == "__AUTO__":
                         locked_gametype = gametype_name
-                        self.report({'INFO'}, f"DrawIB unified type locked to: {locked_gametype}; all later submeshes will use this type")
+                        self.report({'INFO'}, tr("DrawIB unified type locked to: {name}; all later submeshes will use this type").format(name=locked_gametype))
                 except Exception as e:
                     print(f"Failed to re-import from {import_folder_path}: {e}")
                     continue
                 break
 
     if successful_import_count == 0:
-        self.report({'ERROR'}, "None of the selected submeshes were imported successfully.")
+        self.report({'ERROR'}, tr("None of the selected submeshes were imported successfully."))
         return
 
     # Update Import.json (keep existing records, overwrite the ones imported now)
@@ -787,7 +788,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
 
     if getattr(context.scene.global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
-            self.report({'WARNING'}, "Face alignment requires at least one valid Face mark and one Neck mark.")
+            self.report({'WARNING'}, tr("Face alignment requires at least one valid Face mark and one Neck mark."))
 
     _deselect_imported_objects(foldername_imported_obj_dict)
     _deselect_imported_shader_nodes(foldername_imported_obj_dict)
@@ -889,18 +890,18 @@ def _show_last_type_warning(submesh_folder_name: str):
     '''Show a warning popup: this submesh is down to its last data type and cannot be deleted.'''
     def draw_popup(self, context):
         self.layout.label(
-            text=f"Submesh '{submesh_folder_name}' is down to its last data-type folder; "
+            text=tr("Submesh '{name}' is down to its last data-type folder;").format(name=submesh_folder_name)
         )
         self.layout.label(
-            text="that type cannot be deleted. If no correct data type exists, contact the SSMT developer to add one."
+            text=tr("That type cannot be deleted. If no correct data type exists, contact the SSMT developer to add one.")
         )
-    bpy.context.window_manager.popup_menu(draw_popup, title="Warning", icon='ERROR')
+    bpy.context.window_manager.popup_menu(draw_popup, title=tr("Warning"), icon='ERROR')
 
 
 # =============================================================================
 # Operator - the DrawIB data type is incorrect
 # =============================================================================
-class SSMT4FixDrawIBDataType(bpy.types.Operator):
+class SSMT4FixDrawIBDataType(I18nOperator):
     bl_idname = "ssmt4.fix_drawib_datatype"
     bl_label = "Fix DrawIB Data Type"
     bl_description = "The DrawIB data type is incorrect: delete all matching data-type folders under this DrawIB, delete the related meshes, and re-import"
@@ -909,14 +910,14 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, "Please select one or more objects first")
+            self.report({'ERROR'}, tr("Please select one or more objects first"))
             return {'CANCELLED'}
 
         from ..workspace.ssmt_workspace import SSMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
-            self.report({'ERROR'}, "Workspace folder does not exist. Please set the workspace first.")
+            self.report({'ERROR'}, tr("Workspace folder does not exist. Please set the workspace first."))
             return {'CANCELLED'}
 
         ws_model = WorkSpaceModel()
@@ -928,12 +929,12 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
         for obj in selected_objects:
             gametypename = obj.get("3DMigoto:GameTypeName", "")
             if not gametypename:
-                self.report({'WARNING'}, f"Object '{obj.name}' has no data-type attribute; skipped")
+                self.report({'WARNING'}, tr("Object '{name}' has no data-type attribute; skipped").format(name=obj.name))
                 continue
 
             parsed = ws_model.parse_any_format_name(obj.name)
             if not parsed or not parsed["lod"] or not parsed["draw_ib"]:
-                self.report({'WARNING'}, f"Could not parse the name of object '{obj.name}'; skipped")
+                self.report({'WARNING'}, tr("Could not parse the name of object '{name}'; skipped").format(name=obj.name))
                 continue
 
             submesh_folder_path = ws_model.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
@@ -945,7 +946,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
             lod_drawib_set[parsed["lod"]].add(parsed["draw_ib"])
 
         if not all_obj_info:
-            self.report({'ERROR'}, "Could not resolve any valid information from the selected objects.")
+            self.report({'ERROR'}, tr("Could not resolve any valid information from the selected objects."))
             return {'CANCELLED'}
 
         # 2. Pre-check: collect every submesh folder under this DrawIB
@@ -953,7 +954,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
         for lod_name, draw_ib_set in lod_drawib_set.items():
             lod_folder_path = os.path.join(workspace_folder, lod_name)
             if not os.path.isdir(lod_folder_path):
-                self.report({'WARNING'}, f"LOD directory does not exist: {lod_folder_path}")
+                self.report({'WARNING'}, tr("LOD directory does not exist: {path}").format(path=lod_folder_path))
                 continue
             for entry in os.scandir(lod_folder_path):
                 if not entry.is_dir():
@@ -963,7 +964,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                     all_submesh_entries.append((lod_name, entry.name, entry.path))
 
         if not all_submesh_entries:
-            self.report({'ERROR'}, "No matching submesh folders were found.")
+            self.report({'ERROR'}, tr("No matching submesh folders were found."))
             return {'CANCELLED'}
 
         # 3. Pre-check: see whether any submesh is down to its last data type
@@ -974,7 +975,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                 type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
                 if os.path.exists(type_folder_path) and _count_type_folders(submesh_folder_path) <= 1:
                     _show_last_type_warning(submesh_folder_name=submesh_folder_name)
-                    self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' has only its last data type left; operation aborted")
+                    self.report({'WARNING'}, tr("Submesh '{name}' has only its last data type left; operation aborted").format(name=submesh_folder_name))
                     return {'CANCELLED'}
 
         # 4. Delete: remove the TYPE folders
@@ -985,7 +986,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
                 type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
                 if os.path.exists(type_folder_path):
                     shutil.rmtree(type_folder_path)
-                    self.report({'INFO'}, f"Deleted data-type folder: {type_folder_path}")
+                    self.report({'INFO'}, tr("Deleted data-type folder: {path}").format(path=type_folder_path))
 
         # 5. Collect the names of the objects to delete (every object of this DrawIB in the current workspace collection)
         submesh_to_reimport = [(ln, fp) for ln, _, fp in all_submesh_entries]
@@ -1011,14 +1012,14 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
         # 6. Delete the objects
         if all_obj_to_delete:
             _delete_objects(all_obj_to_delete)
-            self.report({'INFO'}, f"Deleted {len(all_obj_to_delete)} objects")
+            self.report({'INFO'}, tr("Deleted {count} objects").format(count=len(all_obj_to_delete)))
 
         # 5. Re-import (DrawIB mode: unify the type automatically; all submeshes use the same data type)
         if submesh_to_reimport:
             ImprotFromWorkSpaceSelected(self, context, submesh_to_reimport, force_gametype_name="__AUTO__")
-            self.report({'INFO'}, f"Re-imported {len(submesh_to_reimport)} submeshes (unified DrawIB type)")
+            self.report({'INFO'}, tr("Re-imported {count} submeshes (unified DrawIB type)").format(count=len(submesh_to_reimport)))
         else:
-            self.report({'WARNING'}, "No submeshes need to be re-imported.")
+            self.report({'WARNING'}, tr("No submeshes need to be re-imported."))
 
         return {'FINISHED'}
 
@@ -1026,7 +1027,7 @@ class SSMT4FixDrawIBDataType(bpy.types.Operator):
 # =============================================================================
 # Operator - the Submesh data type is incorrect
 # =============================================================================
-class SSMT4FixSubmeshDataType(bpy.types.Operator):
+class SSMT4FixSubmeshDataType(I18nOperator):
     bl_idname = "ssmt4.fix_submesh_datatype"
     bl_label = "Fix Submesh Data Type"
     bl_description = "The Submesh data type is incorrect: delete the matching data-type folder, delete this mesh, and re-import"
@@ -1035,14 +1036,14 @@ class SSMT4FixSubmeshDataType(bpy.types.Operator):
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, "Please select one or more objects first")
+            self.report({'ERROR'}, tr("Please select one or more objects first"))
             return {'CANCELLED'}
 
         from ..workspace.ssmt_workspace import SSMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
-            self.report({'ERROR'}, "Workspace folder does not exist. Please set the workspace first.")
+            self.report({'ERROR'}, tr("Workspace folder does not exist. Please set the workspace first."))
             return {'CANCELLED'}
 
         ws_model = WorkSpaceModel()
@@ -1053,23 +1054,23 @@ class SSMT4FixSubmeshDataType(bpy.types.Operator):
         for obj in selected_objects:
             gametypename = obj.get("3DMigoto:GameTypeName", "")
             if not gametypename:
-                self.report({'WARNING'}, f"Object '{obj.name}' has no data-type attribute; skipped")
+                self.report({'WARNING'}, tr("Object '{name}' has no data-type attribute; skipped").format(name=obj.name))
                 continue
 
             parsed = ws_model.parse_any_format_name(obj.name)
             if not parsed or not parsed["lod"] or not parsed["draw_ib"]:
-                self.report({'WARNING'}, f"Could not parse the name of object '{obj.name}'; skipped")
+                self.report({'WARNING'}, tr("Could not parse the name of object '{name}'; skipped").format(name=obj.name))
                 continue
 
             submesh_folder_path = ws_model.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
             if not submesh_folder_path or not os.path.isdir(submesh_folder_path):
-                self.report({'WARNING'}, f"Could not find the submesh folder for object '{obj.name}'; skipped")
+                self.report({'WARNING'}, tr("Could not find the submesh folder for object '{name}'; skipped").format(name=obj.name))
                 continue
 
             submesh_entries.append((obj.name, parsed["lod"], submesh_folder_path, gametypename))
 
         if not submesh_entries:
-            self.report({'ERROR'}, "Could not resolve any valid information from the selected objects.")
+            self.report({'ERROR'}, tr("Could not resolve any valid information from the selected objects."))
             return {'CANCELLED'}
 
         # 2. Pre-check: see whether any submesh is down to its last data type
@@ -1078,7 +1079,7 @@ class SSMT4FixSubmeshDataType(bpy.types.Operator):
             if os.path.exists(type_folder_path) and _count_type_folders(submesh_folder_path) <= 1:
                 submesh_folder_name = os.path.basename(submesh_folder_path)
                 _show_last_type_warning(submesh_folder_name=submesh_folder_name)
-                self.report({'WARNING'}, f"Submesh '{submesh_folder_name}' has only its last data type left; operation aborted")
+                self.report({'WARNING'}, tr("Submesh '{name}' has only its last data type left; operation aborted").format(name=submesh_folder_name))
                 return {'CANCELLED'}
 
         # 3. Delete: remove the TYPE folders
@@ -1089,23 +1090,23 @@ class SSMT4FixSubmeshDataType(bpy.types.Operator):
             type_folder_path = os.path.join(submesh_folder_path, "TYPE_" + gametypename)
             if os.path.exists(type_folder_path):
                 shutil.rmtree(type_folder_path)
-                self.report({'INFO'}, f"Deleted data-type folder: {type_folder_path}")
+                self.report({'INFO'}, tr("Deleted data-type folder: {path}").format(path=type_folder_path))
 
             submesh_to_reimport.append((lod_name, submesh_folder_path))
             obj_names_to_delete.append(obj_name)
 
         if not submesh_to_reimport:
-            self.report({'ERROR'}, "No submeshes were found to process.")
+            self.report({'ERROR'}, tr("No submeshes were found to process."))
             return {'CANCELLED'}
 
         # 4. Delete the objects
         if obj_names_to_delete:
             _delete_objects(obj_names_to_delete)
-            self.report({'INFO'}, f"Deleted {len(obj_names_to_delete)} objects")
+            self.report({'INFO'}, tr("Deleted {count} objects").format(count=len(obj_names_to_delete)))
 
         # 4. Re-import
         ImprotFromWorkSpaceSelected(self, context, submesh_to_reimport)
-        self.report({'INFO'}, f"Re-imported {len(submesh_to_reimport)} submeshes")
+        self.report({'INFO'}, tr("Re-imported {count} submeshes").format(count=len(submesh_to_reimport)))
 
         return {'FINISHED'}
 

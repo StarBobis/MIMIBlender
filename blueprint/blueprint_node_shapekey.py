@@ -1,15 +1,17 @@
 
 import bpy
 
+from ..i18n.i18n import I18nOperator, tr
+
 # Shape key list item
 class SSMTShapeKeyListItem(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="", default=False) # type: ignore
-    shapekey_name: bpy.props.StringProperty(name="Shape Key Name", default="") # type: ignore
-    key: bpy.props.StringProperty(name="Key", default="") # type: ignore
+    shapekey_name: bpy.props.StringProperty(name=tr("Shape Key Name"), default="") # type: ignore
+    key: bpy.props.StringProperty(name=tr("Key"), default="") # type: ignore
 
 
 # Refresh shape key list
-class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
+class SSMT_OT_RefreshShapeKeyList(I18nOperator):
     bl_idname = "ssmt.refresh_shapekey_list"
     bl_label = "Refresh Shape Key List"
     bl_description = "Scans all object nodes in the blueprint and collects their shape keys"
@@ -28,7 +30,7 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
     def execute(self, context):
         tree = context.space_data.edit_tree
         if not tree or getattr(tree, 'bl_idname', '') != 'SSMTBlueprintTreeType':
-            self.report({'WARNING'}, "Please run this inside the SSMT blueprint editor")
+            self.report({'WARNING'}, tr("Please run this inside the SSMT blueprint editor"))
             return {'CANCELLED'}
 
         output_node = None
@@ -37,7 +39,7 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
                 output_node = node
                 break
         if not output_node:
-            self.report({'WARNING'}, "The current blueprint is missing a \"Generate Mod\" output node")
+            self.report({'WARNING'}, tr("The current blueprint is missing a \"Generate Mod\" output node"))
             return {'CANCELLED'}
 
         previous_items = {
@@ -60,26 +62,26 @@ class SSMT_OT_RefreshShapeKeyList(bpy.types.Operator):
                 if sk_name in previous_items:
                     item.enabled, item.key = previous_items[sk_name]
 
-        self.report({'INFO'}, f"Refreshed {len(output_node.shapekey_items)} shape keys")
+        self.report({'INFO'}, tr("Refreshed {count} shape keys").format(count=len(output_node.shapekey_items)))
         return {'FINISHED'}
 
 
 def draw_shapekey_settings(node, layout):
     """Draw the shape key settings of the Generate Mod output node."""
-    layout.prop(node, "enable_shapekey", text="Generate Shape Key Mod", icon='SHAPEKEY_DATA')
+    layout.prop(node, "enable_shapekey", text=tr("Generate Shape Key Mod"), icon='SHAPEKEY_DATA')
     if not node.enable_shapekey:
         return
 
     box = layout.box()
     row = box.row(align=True)
-    row.operator("ssmt.refresh_shapekey_list", text="Refresh List", icon='FILE_REFRESH')
-    row.label(text=f"Total: {len(node.shapekey_items)}" if node.shapekey_items else "(Empty)", icon='SHAPEKEY_DATA')
+    row.operator("ssmt.refresh_shapekey_list", text=tr("Refresh List"), icon='FILE_REFRESH')
+    row.label(text=tr("Total: {count}").format(count=len(node.shapekey_items)) if node.shapekey_items else tr("(Empty)"), icon='SHAPEKEY_DATA')
 
     for item in node.shapekey_items:
         row = box.row(align=True)
         row.prop(item, "enabled", text="")
         row.label(text=item.shapekey_name, icon='SHAPEKEY_DATA')
-        row.prop(item, "key", text="", placeholder="VK key value (optional)")
+        row.prop(item, "key", text="", placeholder=tr("VK key value (optional)"))
         op = row.operator("wm.url_open", text="", icon='HELP')
         op.url = "https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes"
 

@@ -19,6 +19,7 @@ from typing import Set, Tuple
 
 import bpy
 
+from ...i18n.i18n import I18nOperator, tr
 from .. import globs
 
 # Default to the Tsinghua PyPI mirror; the official PyPI often times out and fails to install
@@ -33,11 +34,11 @@ def _refresh_combiner_pillow_cache() -> bool:
 
         return combiner_ops.initialize_pillow()
     except Exception as e:
-        globs.pil_install_error_message = "Failed to refresh the cached Pillow module: {}".format(e)
+        globs.pil_install_error_message = tr("Failed to refresh the cached Pillow module: {error}").format(error=e)
         return False
 
 
-class InstallPIL(bpy.types.Operator):
+class InstallPIL(I18nOperator):
     """Installs Pillow into the addon-local libs directory.
 
     Uses Blender's bundled pip with ``--target``, so it works even though
@@ -69,7 +70,7 @@ class InstallPIL(bpy.types.Operator):
             if not globs.pil_install_success:
                 self.report({"ERROR"}, globs.pil_install_error_message)
                 return {"CANCELLED"}
-            self.report({"INFO"}, "Pillow is ready to use!")
+            self.report({"INFO"}, tr("Pillow is ready to use!"))
             return {"FINISHED"}
 
         success = self._install_pillow()
@@ -88,7 +89,7 @@ class InstallPIL(bpy.types.Operator):
 
         self.report(
             {"INFO" if success else "ERROR"},
-            "Pillow installation complete, please restart Blender" if success else "Installation failed",
+            tr("Pillow installation complete, please restart Blender") if success else tr("Installation failed"),
         )
         return {"FINISHED"} if success else {"CANCELLED"}
 
@@ -131,9 +132,9 @@ class InstallPIL(bpy.types.Operator):
                     timeout=180,
                 )
             except subprocess.TimeoutExpired:
-                return -2, "pip install timed out (over 180 seconds), please check your network and retry"
+                return -2, tr("pip install timed out (over 180 seconds), please check your network and retry")
             except OSError as e:
-                return -3, "Could not start pip: {}".format(e)
+                return -3, tr("Could not start pip: {error}").format(error=e)
             last_code = process.returncode
             if last_code == 0:
                 return 0, ""
@@ -156,8 +157,8 @@ class InstallPIL(bpy.types.Operator):
                 ["--target", lib_path, "--upgrade", "Pillow"]
             )
             if code != 0:
-                error_msg = "Pillow installation failed (error code: {}): {}".format(
-                    code, error
+                error_msg = tr("Pillow installation failed (error code: {code}): {error}").format(
+                    code=code, error=error
                 )
                 self.report({"ERROR"}, error_msg)
                 globs.pil_install_error_message = error_msg
@@ -165,13 +166,13 @@ class InstallPIL(bpy.types.Operator):
 
             return True
         except Exception as e:
-            error_msg = "An error occurred while installing Pillow: {}".format(e)
+            error_msg = tr("An error occurred while installing Pillow: {error}").format(error=e)
             self.report({"ERROR"}, error_msg)
             globs.pil_install_error_message = error_msg
             return False
 
 
-class CheckPillow(bpy.types.Operator):
+class CheckPillow(I18nOperator):
     """Checks if Pillow is installed and refreshes the status.
 
     This operator re-checks the Pillow installation status and updates
@@ -194,7 +195,7 @@ class CheckPillow(bpy.types.Operator):
         if success:
             success = _refresh_combiner_pillow_cache()
             if success:
-                self.report({"INFO"}, "Pillow is installed and ready to use!")
+                self.report({"INFO"}, tr("Pillow is installed and ready to use!"))
                 # Clear the previous error state
                 globs.pil_install_success = True
                 globs.pil_available = True
@@ -204,6 +205,6 @@ class CheckPillow(bpy.types.Operator):
                 globs.pil_available = False
                 self.report({"ERROR"}, globs.pil_install_error_message)
         else:
-            self.report({"ERROR"}, "Pillow is still not installed. Try reinstalling it or install it manually.")
+            self.report({"ERROR"}, tr("Pillow is still not installed. Try reinstalling it or install it manually."))
 
         return {"FINISHED"}

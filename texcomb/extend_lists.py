@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 
+from ..i18n.i18n import tr
 from .globs import (
     ICON_DROPDOWN,
     ICON_OBJECT,
@@ -26,6 +27,15 @@ from .utils.materials import (
 )
 
 
+def _get_filter_mode_items(self, context):
+    # Dynamic items callback so the filter-mode dropdown follows the UI language.
+    return [
+        ("MATERIAL", tr("Material"), tr("Filter by material name")),
+        ("OBJECT", tr("Object"), tr("Filter by object name")),
+        ("BOTH", tr("All"), tr("Filter by both material and object names")),
+    ]
+
+
 class SMC_UL_Combine_List(bpy.types.UIList):
     """Custom UI list for displaying materials and objects in the Material Combiner.
 
@@ -35,29 +45,26 @@ class SMC_UL_Combine_List(bpy.types.UIList):
     """
 
     filter_name: StringProperty(
-        name="Filter",
+        name=tr("Filter"),
         default="",
-        description="Filter entries by name",
+        description=tr("Filter entries by name"),
     )
     filter_mode: EnumProperty(
-        name="Filter Mode",
-        items=[
-            ("MATERIAL", "Material", "Filter by material name"),
-            ("OBJECT", "Object", "Filter by object name"),
-            ("BOTH", "All", "Filter by both material and object names"),
-        ],
-        default="BOTH",
-        description="Select the filtering method",
+        name=tr("Filter Mode"),
+        items=_get_filter_mode_items,
+        # Dynamic items only allow integer (0-based) defaults: 2 == "BOTH".
+        default=2,
+        description=tr("Select the filtering method"),
     )
     use_filter_sort_reverse: BoolProperty(
-        name="Reverse Sort",
+        name=tr("Reverse Sort"),
         default=False,
-        description="Reverse the display order of the list",
+        description=tr("Reverse the display order of the list"),
     )
     filter_initialized: BoolProperty(
-        name="Filter Initialized",
+        name=tr("Filter Initialized"),
         default=False,
-        description="Whether the filter panel has been initialized",
+        description=tr("Whether the filter panel has been initialized"),
     )
 
     def draw_item(  # noqa: PLR0913
@@ -117,7 +124,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
 
         action_row = row.row(align=True)
         action_row.alignment = "RIGHT"
-        action_label = "Deselect All" if item.used else "Select All"
+        action_label = tr("Deselect All") if item.used else tr("Select All")
         action_row.operator(
             "smc.combine_switch", text=action_label, emboss=False
         ).list_id = index
@@ -187,24 +194,24 @@ class SMC_UL_Combine_List(bpy.types.UIList):
         """Render a compact texture status label for material rows."""
         image = get_image_from_material(item.mat)
         if not image:
-            layout.label(text="No Main Texture", icon="ERROR")
+            layout.label(text=tr("No Main Texture"), icon="ERROR")
             return
 
         if get_image_pack_issue(image):
-            layout.label(text="Texture Issue", icon="ERROR")
+            layout.label(text=tr("Texture Issue"), icon="ERROR")
             return
 
         alpha_issue = get_alpha_texture_issue(item.mat)
         if alpha_issue:
-            layout.label(text="Alpha Issue", icon="ERROR")
+            layout.label(text=tr("Alpha Issue"), icon="ERROR")
             return
 
         if get_alpha_texture_image(item.mat):
-            layout.label(text="Alpha Texture", icon="IMAGE_DATA")
+            layout.label(text=tr("Alpha Texture"), icon="IMAGE_DATA")
             return
 
         if item.mat.smc_size:
-            layout.label(text="Size Limit", icon="INFO")
+            layout.label(text=tr("Size Limit"), icon="INFO")
 
     @staticmethod
     def _draw_toggle_control(

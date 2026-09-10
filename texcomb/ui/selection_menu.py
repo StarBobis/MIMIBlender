@@ -6,7 +6,10 @@ all materials in the Material Combiner addon.
 
 import bpy
 
+from ...i18n.i18n import tr, translatable
 
+
+@translatable
 class SMC_MT_SelectionMenu(bpy.types.Menu):
     """Dropdown menu for material selection actions.
 
@@ -24,5 +27,5 @@ class SMC_MT_SelectionMenu(bpy.types.Menu):
             context: The current Blender context.
         """
         layout = self.layout
-        layout.operator("smc.select_all", text="Select All")
-        layout.operator("smc.select_none", text="Deselect All")
+        layout.operator("smc.select_all", text=tr("Select All"))
+        layout.operator("smc.select_none", text=tr("Deselect All"))

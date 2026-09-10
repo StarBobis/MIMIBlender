@@ -9,6 +9,8 @@ from typing import Optional
 
 import bpy
 
+from ...i18n.i18n import tr
+
 
 def get_image(tex: bpy.types.Texture) -> Optional[bpy.types.Image]:
     """Extract image from a Blender texture.
@@ -46,21 +48,21 @@ def get_packed_file(
 def get_image_pack_issue(image: Optional[bpy.types.Image]) -> Optional[str]:
     """Return why an image cannot provide packed pixel data, if known."""
     if not image:
-        return "No main texture connected to the current material output was found."
+        return tr("No main texture connected to the current material output was found.")
 
     if image.packed_file:
         return None
 
     filepath = getattr(image, "filepath", "")
     if not filepath:
-        return "The texture has no file path; it may be an unsaved or runtime-generated image."
+        return tr("The texture has no file path; it may be an unsaved or runtime-generated image.")
 
     path = os.path.abspath(bpy.path.abspath(filepath))
     if path.lower().endswith((".spa", ".sph")):
-        return "This texture format is excluded from packing: {}".format(os.path.basename(path))
+        return tr("This texture format is excluded from packing: {name}").format(name=os.path.basename(path))
 
     if not os.path.isfile(path):
-        return "The texture file does not exist or its path is not accessible: {}".format(path)
+        return tr("The texture file does not exist or its path is not accessible: {path}").format(path=path)
 
     return None
 

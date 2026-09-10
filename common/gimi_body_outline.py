@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import bpy
 
+from ..i18n.i18n import I18nOperator, tr
+
 
 class OutlineError(RuntimeError):
     pass
@@ -50,7 +52,7 @@ class GIMIBodyOutline:
             cls._remove_managed_material_tail(obj, outline_material, strict=True)
             base_count = len(obj.data.materials)
             if base_count == 0:
-                raise OutlineError(f"Object {obj.name!r} has no material slots")
+                raise OutlineError(tr("Object {name!r} has no material slots").format(name=obj.name))
 
             for _ in range(base_count):
                 obj.data.materials.append(outline_material)
@@ -63,7 +65,7 @@ class GIMIBodyOutline:
                 modifier = obj.modifiers.new(cls.MODIFIER_NAME, "SOLIDIFY")
                 created_modifier = True
             elif modifier.type != "SOLIDIFY":
-                raise OutlineError(f"{cls.MODIFIER_NAME!r} exists but is not Solidify")
+                raise OutlineError(tr("{name!r} exists but is not Solidify").format(name=cls.MODIFIER_NAME))
             cls._configure_modifier(modifier, thickness, base_count)
             cls._move_modifier_to_end(obj, modifier)
 
@@ -98,7 +100,7 @@ class GIMIBodyOutline:
         modifier = obj.modifiers.get(cls.MODIFIER_NAME)
         if modifier is not None:
             if modifier.type != "SOLIDIFY":
-                raise OutlineError(f"{cls.MODIFIER_NAME!r} is not Solidify")
+                raise OutlineError(tr("{name!r} is not Solidify").format(name=cls.MODIFIER_NAME))
             obj.modifiers.remove(modifier)
         outline_material = bpy.data.materials.get(cls.MATERIAL_NAME)
         if outline_material is not None:
@@ -159,13 +161,13 @@ class GIMIBodyOutline:
         count = int(obj.get(cls.PROP_SLOT_COUNT, 0))
         if count <= 0 or len(obj.data.materials) < count:
             if strict:
-                raise OutlineError(f"{obj.name!r} has invalid outline material metadata")
+                raise OutlineError(tr("{name!r} has invalid outline material metadata").format(name=obj.name))
             return
         start = len(obj.data.materials) - count
         tail = [obj.data.materials[i] for i in range(start, len(obj.data.materials))]
         if any(material != outline_material for material in tail):
             if strict:
-                raise OutlineError(f"{obj.name!r} outline material tail was modified")
+                raise OutlineError(tr("{name!r} outline material tail was modified").format(name=obj.name))
             return
         for _ in range(count):
             obj.data.materials.pop(index=len(obj.data.materials) - 1)
@@ -175,10 +177,10 @@ class GIMIBodyOutline:
         if width_mode == "ABSOLUTE":
             return max(float(absolute_width), 1e-6)
         if width_mode != "RELATIVE":
-            raise OutlineError(f"Unknown outline width mode: {width_mode}")
+            raise OutlineError(tr("Unknown outline width mode: {mode}").format(mode=width_mode))
         extent = max(abs(float(value)) for value in obj.dimensions)
         if extent <= 1e-8:
-            raise OutlineError(f"Object {obj.name!r} has zero dimensions")
+            raise OutlineError(tr("Object {name!r} has zero dimensions").format(name=obj.name))
         scale = obj.matrix_world.to_scale()
         scale_ref = max(abs(float(value)) for value in scale)
         thickness = extent * float(width_ratio) / max(scale_ref, 1e-8)
@@ -224,14 +226,24 @@ class GIMIBodyOutline:
     @staticmethod
     def _validate_object(obj):
         if obj is None or obj.type != "MESH" or obj.data is None:
-            raise OutlineError("GIMI Body outline requires a mesh object")
+            raise OutlineError(tr("GIMI Body outline requires a mesh object"))
 
 
-class SSMT_OT_build_gimi_body_outline(bpy.types.Operator):
+def _get_outline_width_mode_items(self, context):
+    # Dynamic items callback so the width-mode dropdown follows the UI language.
+    return [
+        ("RELATIVE", tr("Relative"), ""),
+        ("ABSOLUTE", tr("Absolute"), ""),
+    ]
+
+
+class SSMT_OT_build_gimi_body_outline(I18nOperator):
     bl_idname = "ssmt.build_gimi_body_outline"
     bl_label = "Build GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}
-    width_mode: bpy.props.EnumProperty(items=[("RELATIVE", "Relative", ""), ("ABSOLUTE", "Absolute", "")], default="RELATIVE")
+    # Dynamic items only allow integer (0-based) defaults; the first item
+    # ("RELATIVE") is the intended default, so the argument is omitted.
+    width_mode: bpy.props.EnumProperty(items=_get_outline_width_mode_items)
     width_ratio: bpy.props.FloatProperty(default=0.0008, min=0.00001, max=0.01, precision=6)
     absolute_width: bpy.props.FloatProperty(default=0.0013, min=0.000001, max=0.1, precision=6)
 
@@ -248,7 +260,7 @@ class SSMT_OT_build_gimi_body_outline(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SSMT_OT_remove_gimi_body_outline(bpy.types.Operator):
+class SSMT_OT_remove_gimi_body_outline(I18nOperator):
     bl_idname = "ssmt.remove_gimi_body_outline"
     bl_label = "Remove GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}

@@ -10,6 +10,7 @@ from typing import Optional, Set, Tuple
 import bpy
 from bpy.props import IntProperty
 
+from ...i18n.i18n import I18nOperator, tr
 from .. import globs
 from ..utils.images import get_image_pack_issue
 from ..utils.materials import (
@@ -23,7 +24,7 @@ DIALOG_WIDTH_FACTOR = 4
 MAX_MATERIAL_NAME_LENGTH = 16
 
 
-class PropertyMenu(bpy.types.Operator):
+class PropertyMenu(I18nOperator):
     """Dialog operator for material property configuration.
 
     Displays a popup dialog with per-material settings including texture size
@@ -102,15 +103,15 @@ class PropertyMenu(bpy.types.Operator):
             self._show_size_settings(box_col, item)
         else:
             self._show_size_row(
-                box_col, "Solid only", 0, (scn.smc_diffuse_size,) * 2
+                box_col, tr("Solid only"), 0, (scn.smc_diffuse_size,) * 2
             )
             self._show_warning(
                 box_col,
-                "No main texture connected to the current material output was found; it will be combined as a solid-color material.",
+                tr("No main texture connected to the current material output was found; it will be combined as a solid-color material."),
             )
             self._show_warning(
                 box_col,
-                "Check that an Image Texture is connected to Base Color/Color and that this Material Output is the active output.",
+                tr("Check that an Image Texture is connected to Base Color/Color and that this Material Output is the active output."),
             )
             self._show_alpha_status(box_col, item.mat)
             box_col.separator()
@@ -119,7 +120,7 @@ class PropertyMenu(bpy.types.Operator):
         if hasattr(col, "template_popup_confirm"):
             col.separator()
             col.template_popup_confirm(
-                "", cancel_text="OK", cancel_default=True
+                "", cancel_text=tr("OK"), cancel_default=True
             )
 
     @staticmethod
@@ -193,7 +194,7 @@ class PropertyMenu(bpy.types.Operator):
 
         size_col = row.column(align=True)
         size_col.alignment = "RIGHT"
-        size_col.label(text="Size: {}x{}px".format(*size))
+        size_col.label(text=tr("Size: {width}x{height}px").format(width=size[0], height=size[1]))
 
     def _show_image_warnings(
         self,
@@ -203,7 +204,7 @@ class PropertyMenu(bpy.types.Operator):
     ) -> None:
         """Show warnings for images that will not be used at their raw size."""
         col.label(
-            text="The main texture is written to the atlas in RGBA; any alpha in the image is preserved.",
+            text=tr("The main texture is written to the atlas in RGBA; any alpha in the image is preserved."),
             icon="INFO",
         )
 
@@ -211,7 +212,7 @@ class PropertyMenu(bpy.types.Operator):
         if pack_issue:
             self._show_warning(
                 col,
-                "The texture cannot be read/packed; it will be combined as a solid-color material.",
+                tr("The texture cannot be read/packed; it will be combined as a solid-color material."),
             )
             self._show_warning(col, pack_issue)
 
@@ -223,8 +224,8 @@ class PropertyMenu(bpy.types.Operator):
             if limited_size != tuple(image.size):
                 self._show_warning(
                     col,
-                    "A custom material size is enabled; the combine will be limited to {}x{}px.".format(
-                        *limited_size
+                    tr("A custom material size is enabled; the combine will be limited to {width}x{height}px.").format(
+                        width=limited_size[0], height=limited_size[1]
                     ),
                 )
 
@@ -238,14 +239,14 @@ class PropertyMenu(bpy.types.Operator):
         if alpha_issue:
             self._show_warning(
                 col,
-                "The Alpha channel is not included in the combine: {}".format(alpha_issue),
+                tr("The Alpha channel is not included in the combine: {issue}").format(issue=alpha_issue),
             )
             return
 
         alpha_image = get_alpha_texture_image(mat)
         if alpha_image:
             col.label(
-                text="Alpha texture: {}".format(alpha_image.name),
+                text=tr("Alpha texture: {name}").format(name=alpha_image.name),
                 icon="IMAGE_DATA",
             )
 

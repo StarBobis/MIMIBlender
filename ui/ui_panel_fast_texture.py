@@ -15,6 +15,7 @@ from bpy_extras.io_utils import ImportHelper
 import bpy.utils.previews
 
 from ..common.global_config import GlobalConfig
+from ..i18n.i18n import I18nOperator, tr, translatable
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils,CollectionColor
@@ -44,10 +45,10 @@ def _refresh_lod_enum_cache():
                 for p in lod_folder_paths
             ]
         else:
-            _lod_enum_cache = [("", "No LOD folder", "No LOD folder found under the current workspace")]
+            _lod_enum_cache = [("", tr("No LOD folder"), tr("No LOD folder found under the current workspace"))]
     except Exception as e:
         print(f"Failed to refresh LOD list: {e}")
-        _lod_enum_cache = [("", "No LOD folder", "Refresh failed")]
+        _lod_enum_cache = [("", tr("No LOD folder"), tr("Refresh failed"))]
 
 
 def get_workspace_preview_texture_folder(lod_name: str = ""):
@@ -97,7 +98,7 @@ class SSMT_UL_FastImportTextureList(UIList):
 
 
 # Refresh LOD list
-class SSMT_ImportTexture_WM_OT_RefreshLODList(Operator):
+class SSMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
     bl_idname = "ssmt.refresh_lod_list"
     bl_label = "Refresh LOD List"
     bl_description = "Rescan the LOD folders under the current workspace"
@@ -108,12 +109,12 @@ class SSMT_ImportTexture_WM_OT_RefreshLODList(Operator):
         if _lod_enum_cache and _lod_enum_cache[0][0]:
             if not context.scene.fast_texture_lod or context.scene.fast_texture_lod not in [e[0] for e in _lod_enum_cache]:
                 context.scene.fast_texture_lod = _lod_enum_cache[0][0]
-        self.report({'INFO'}, f"LOD list refreshed, found {len([e for e in _lod_enum_cache if e[0]])} LOD folders.")
+        self.report({'INFO'}, tr("LOD list refreshed, found {count} LOD folders.").format(count=len([e for e in _lod_enum_cache if e[0]])))
         return {'FINISHED'}
 
 
 # Auto-detect and set the DedupedTextures folder
-class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
+class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
     bl_idname = "ssmt.auto_detect_texture_folder"
     bl_label = "Load DedupedTextures"
     
@@ -122,9 +123,9 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
         deduped_textures_folder_path, folder_name = get_workspace_preview_texture_folder(lod_name=lod_name)
 
         if not deduped_textures_folder_path:
-            msg = f"Could not find the {folder_name} folder in the current workspace"
+            msg = tr("Could not find the {folder} folder in the current workspace").format(folder=folder_name)
             if lod_name:
-                msg += f" (LOD: {lod_name})"
+                msg += tr(" (LOD: {lod})").format(lod=lod_name)
             self.report({'ERROR'}, msg)
             return {'CANCELLED'}
         
@@ -153,14 +154,14 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(Operator):
                     except Exception as e:
                         print(f"Could not load preview for {filename}: {e}")
 
-        lod_info = f" (LOD: {lod_name})" if lod_name else ""
-        self.report({'INFO'}, f"Loaded {image_count} images from the {folder_name} folder in the current workspace.{lod_info}")
+        lod_info = tr(" (LOD: {lod})").format(lod=lod_name) if lod_name else ""
+        self.report({'INFO'}, tr("Loaded {count} images from the {folder} folder in the current workspace.").format(count=image_count, folder=folder_name) + lod_info)
 
         return {'FINISHED'}
     
 
 # Operator that applies an image to materials
-class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
+class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
     bl_idname = "ssmt.apply_image_to_material"
     bl_label = "Apply Texture to Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
@@ -170,7 +171,7 @@ class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
         selected_index = scene.image_list_index
         
         if selected_index < 0 or selected_index >= len(scene.image_list):
-            self.report({'ERROR'}, "No image selected in the list.")
+            self.report({'ERROR'}, tr("No image selected in the list."))
             return {'CANCELLED'}
         
         selected_image = scene.image_list[selected_index]
@@ -181,7 +182,7 @@ class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
         
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'ERROR'}, "No objects selected!")
+            self.report({'ERROR'}, tr("No objects selected!"))
             return {'CANCELLED'}
         
         applied_count = 0
@@ -208,11 +209,12 @@ class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(Operator):
 
             applied_count += 1
         
-        self.report({'INFO'}, "Applied {image_name} to {count} objects.".format(image_name=selected_image.name, count=applied_count))
+        self.report({'INFO'}, tr("Applied {image_name} to {count} objects.").format(image_name=selected_image.name, count=applied_count))
         return {'FINISHED'}
 
 
 # Panel UI layout
+@translatable
 class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
     bl_label = "Quick Preview Texture"
     bl_idname = "VIEW3D_PT_fast_preview_texture"
@@ -228,17 +230,17 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         # LOD selection row
         box = layout.box()
         row = box.row(align=True)
-        row.label(text="LOD:")
+        row.label(text=tr("LOD:"))
         row.prop(scene, "fast_texture_lod", text="")
         row.operator("ssmt.refresh_lod_list", text="", icon='FILE_REFRESH')
 
         # Auto-detect button
         row = layout.row()
-        row.operator("ssmt.auto_detect_texture_folder")
+        row.operator("ssmt.auto_detect_texture_folder", text=tr("Load DedupedTextures"))
         
         # Show the image count
         if scene.image_list:
-            layout.label(text="Found {count} images".format(count=len(scene.image_list)))
+            layout.label(text=tr("Found {count} images").format(count=len(scene.image_list)))
         
         # Show the image list
         if scene.image_list:
@@ -253,11 +255,11 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
                 rows=6
             )
         else:
-            layout.label(text="No images found. Select a folder first.")
+            layout.label(text=tr("No images found. Select a folder first."))
         
         # Apply material button
         row = layout.row()
-        row.operator("ssmt.apply_image_to_material", icon='MATERIAL_DATA')
+        row.operator("ssmt.apply_image_to_material", text=tr("Apply Texture to Selected Objects"), icon='MATERIAL_DATA')
 
         
         # Show the preview of the currently selected image
@@ -267,7 +269,7 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
             
             if selected_item.name in pcoll:
                 box = layout.box()
-                box.label(text="Preview:")
+                box.label(text=tr("Preview:"))
                 box.template_icon(icon_value=pcoll[selected_item.name].icon_id, scale=10.0)
 
 
@@ -287,8 +289,8 @@ def register():
     bpy.types.Scene.image_list = CollectionProperty(type=SSMT_ImportTexture_ImageListItem)
     bpy.types.Scene.image_list_index = IntProperty(default=0)
     bpy.types.Scene.fast_texture_lod = EnumProperty(
-        name="LOD",
-        description="Select an LOD folder to load its DedupedTextures",
+        name=tr("LOD"),
+        description=tr("Select an LOD folder to load its DedupedTextures"),
         items=_get_lod_enum_items,
     )
 

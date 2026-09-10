@@ -3,6 +3,10 @@ MIMIBlender - Blender add-on for MIMITools (3Dmigoto modding).
 '''
 
 
+# UI language support must register first so every other module picks up the
+# saved language while its classes are being registered.
+from .i18n import i18n
+
 from .common import global_properties
 from .common import gimi_body_outline
 
@@ -54,6 +58,9 @@ def register():
 
 
 def _register_steps():
+    # 0. i18n (language preference must exist before any class registers)
+    yield i18n.register
+
     # 1. Configs
     yield global_properties.register
     yield gimi_body_outline.register
@@ -106,6 +113,8 @@ def unregister():
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
         global_properties.unregister,
+        # i18n unregisters last so the language preference outlives every UI class.
+        i18n.unregister,
     ]
     for step in steps:
         try:

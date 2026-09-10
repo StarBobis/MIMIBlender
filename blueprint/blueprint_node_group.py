@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import bpy
 
+from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import SSMTNodeBase
 
 TREE_IDNAME = "SSMTBlueprintTreeType"
@@ -65,11 +66,11 @@ def _remember_navigation(space, action, group_node):
 def _enter_group(space, group_node):
     child = getattr(group_node, "node_tree", None)
     if child is None:
-        raise GroupingError("No group to enter")
+        raise GroupingError(tr("No group to enter"))
     try:
         space.path.append(child, node=group_node)
     except Exception as exc:
-        raise GroupingError(f"Cannot enter node group: {exc}") from exc
+        raise GroupingError(tr("Cannot enter node group: {error}").format(error=exc)) from exc
     state = _navigation_state.setdefault(_navigation_key(space), {"stack": []})
     state["stack"].append(group_node)
     _remember_navigation(space, "ENTER", group_node)
@@ -77,12 +78,12 @@ def _enter_group(space, group_node):
 
 def _exit_group(space):
     if len(space.path) <= 1:
-        raise GroupingError("Currently at the outermost blueprint")
+        raise GroupingError(tr("Currently at the outermost blueprint"))
     state = _navigation_state.get(_navigation_key(space), {})
     stack = state.get("stack", [])
     group_node = stack[-1] if stack else None
     if group_node is None or getattr(group_node, "node_tree", None) != _tree_from_space(space):
-        raise GroupingError("Cannot determine the parent instance of the current group")
+        raise GroupingError(tr("Cannot determine the parent instance of the current group"))
     space.path.pop()
     stack.pop()
     _remember_navigation(space, "EXIT", group_node)
@@ -257,7 +258,7 @@ def _clone_node(source, target_tree):
     try:
         target = target_tree.nodes.new(source.bl_idname)
     except Exception as exc:
-        raise GroupingError(f"Cannot copy node {source.name} ({source.bl_idname}): {exc}") from exc
+        raise GroupingError(tr("Cannot copy node {name} ({idname}): {error}").format(name=source.name, idname=source.bl_idname, error=exc)) from exc
     target.location = source.location
     target["ssmt_uuid"] = uuid.uuid4().hex
 
@@ -267,11 +268,11 @@ def _clone_node(source, target_tree):
             try:
                 target.inputs.new(sock.bl_idname, sock.name)
             except Exception as exc:
-                raise GroupingError(f"Cannot copy the dynamic sockets of node {source.name}: {exc}") from exc
+                raise GroupingError(tr("Cannot copy the dynamic sockets of node {name}: {error}").format(name=source.name, error=exc)) from exc
     _copy_node_properties(source, target)
     if getattr(source, "bl_idname", "") == GROUP_NODE_IDNAME and getattr(source, "node_tree", None):
         if would_create_group_cycle(target_tree, source.node_tree):
-            raise GroupingError(f"Copying node {source.name} would create a recursive node group")
+            raise GroupingError(tr("Copying node {name} would create a recursive node group").format(name=source.name))
         target.node_tree = source.node_tree
     _copy_socket_defaults(source, target)
     return target
@@ -281,7 +282,7 @@ def _new_interface_socket(tree, source_socket, direction, name):
     try:
         item = tree.interface.new_socket(name=name, in_out=direction, socket_type=source_socket.bl_idname)
     except Exception as exc:
-        raise GroupingError(f"Cannot create group interface {name} ({source_socket.bl_idname}): {exc}") from exc
+        raise GroupingError(tr("Cannot create group interface {name} ({idname}): {error}").format(name=name, idname=source_socket.bl_idname, error=exc)) from exc
     for attr in ("description", "hide_value"):
         if hasattr(source_socket, attr) and hasattr(item, attr):
             try:
@@ -300,7 +301,7 @@ def _make_group_input_output(tree):
         group_input = tree.nodes.new(GROUP_INPUT_IDNAME)
         group_output = tree.nodes.new(GROUP_OUTPUT_IDNAME)
     except Exception as exc:
-        raise GroupingError("This Blender build does not support Group Input/Output nodes in custom trees") from exc
+        raise GroupingError(tr("This Blender build does not support Group Input/Output nodes in custom trees")) from exc
     group_input.location = (-300, 0)
     group_output.location = (300, 0)
     return group_input, group_output
@@ -335,7 +336,7 @@ def sync_group_node_sockets(group_node):
     for item in _all_interface_items(tree):
         socket_type = _interface_socket_type(item)
         if not socket_type:
-            raise GroupingError(f"Interface {item.name} has no usable socket type")
+            raise GroupingError(tr("Interface {name} has no usable socket type").format(name=item.name))
         sockets = group_node.inputs if item.in_out == "INPUT" else group_node.outputs
         sockets.new(socket_type, item.name)
 
@@ -343,12 +344,12 @@ def sync_group_node_sockets(group_node):
 def make_group_from_selection(context, group_name="Group"):
     parent_tree = _tree_from_context(context)
     if parent_tree is None or parent_tree.bl_idname != TREE_IDNAME:
-        raise GroupingError("The current tree is not an editable SSMT blueprint tree")
+        raise GroupingError(tr("The current tree is not an editable SSMT blueprint tree"))
     selected = _expand_frame_selection(node for node in parent_tree.nodes if node.select)
     if not selected:
-        raise GroupingError("No nodes are selected")
+        raise GroupingError(tr("No nodes are selected"))
     if any(node.bl_idname in {GROUP_INPUT_IDNAME, GROUP_OUTPUT_IDNAME} for node in selected):
-        raise GroupingError("Group Input/Output nodes cannot be grouped again")
+        raise GroupingError(tr("Group Input/Output nodes cannot be grouped again"))
 
     internal, incoming, outgoing = partition_links(parent_tree, selected)
     group_tree = None
@@ -459,7 +460,7 @@ def ungroup_node(parent_tree, group_node):
     """Expand one independent group instance back into its parent tree."""
     group_tree = getattr(group_node, "node_tree", None)
     if group_tree is None:
-        raise GroupingError("The group node has no child tree")
+        raise GroupingError(tr("The group node has no child tree"))
     child_nodes = [
         node for node in group_tree.nodes
         if node.bl_idname not in {GROUP_INPUT_IDNAME, GROUP_OUTPUT_IDNAME}
@@ -518,6 +519,7 @@ def ungroup_node(parent_tree, group_node):
         bpy.data.node_groups.remove(group_tree, do_unlink=True)
 
 
+@translatable
 class SSMTBlueprintGroupNode(SSMTNodeBase):
     bl_idname = GROUP_NODE_IDNAME
     bl_label = "Group"
@@ -533,7 +535,7 @@ class SSMTBlueprintGroupNode(SSMTNodeBase):
             pass
 
     node_tree: bpy.props.PointerProperty(
-        name="Group Tree",
+        name=tr("Group Tree"),
         type=bpy.types.NodeTree,
         update=update_group_tree,
     )  # type: ignore
@@ -556,11 +558,12 @@ class SSMTBlueprintGroupNode(SSMTNodeBase):
         op.node_name = self.name
 
 
-class SSMT_OT_MakeGroup(bpy.types.Operator):
+class SSMT_OT_MakeGroup(I18nOperator):
     bl_idname = "ssmt.make_group"
     bl_label = "Make Group"
     bl_options = {"REGISTER", "UNDO"}
-    group_name: bpy.props.StringProperty(name="Group Name", default="Group")
+    # The default value stays English because it becomes the node group's name (data).
+    group_name: bpy.props.StringProperty(name=tr("Group Name"), default="Group")
 
     @classmethod
     def poll(cls, context):
@@ -574,12 +577,12 @@ class SSMT_OT_MakeGroup(bpy.types.Operator):
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         except Exception as exc:
-            self.report({"ERROR"}, f"Grouping failed: {exc}")
+            self.report({"ERROR"}, tr("Grouping failed: {error}").format(error=exc))
             return {"CANCELLED"}
         return {"FINISHED"}
 
 
-class SSMT_OT_Ungroup(bpy.types.Operator):
+class SSMT_OT_Ungroup(I18nOperator):
     bl_idname = "ssmt.ungroup"
     bl_label = "Ungroup"
     bl_options = {"REGISTER", "UNDO"}
@@ -589,7 +592,7 @@ class SSMT_OT_Ungroup(bpy.types.Operator):
         tree = _tree_from_context(context)
         node = tree.nodes.get(self.node_name) if tree and self.node_name else getattr(tree.nodes, "active", None) if tree else None
         if not tree or not node or node.bl_idname != GROUP_NODE_IDNAME or not getattr(node, "node_tree", None):
-            self.report({"ERROR"}, "Select a valid custom group node")
+            self.report({"ERROR"}, tr("Select a valid custom group node"))
             return {"CANCELLED"}
         try:
             ungroup_node(tree, node)
@@ -597,12 +600,12 @@ class SSMT_OT_Ungroup(bpy.types.Operator):
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         except Exception as exc:
-            self.report({"ERROR"}, f"Ungrouping failed: {exc}")
+            self.report({"ERROR"}, tr("Ungrouping failed: {error}").format(error=exc))
             return {"CANCELLED"}
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupEnter(bpy.types.Operator):
+class SSMT_OT_GroupEnter(I18nOperator):
     bl_idname = "ssmt.group_enter"
     bl_label = "Enter Group"
     bl_options = {"REGISTER", "UNDO"}
@@ -619,7 +622,7 @@ class SSMT_OT_GroupEnter(bpy.types.Operator):
         node = tree.nodes.get(self.node_name) if tree and self.node_name else getattr(tree.nodes, "active", None) if tree else None
         space = getattr(context, "space_data", None)
         if not node or not getattr(node, "node_tree", None) or not space:
-            self.report({"ERROR"}, "No group to enter")
+            self.report({"ERROR"}, tr("No group to enter"))
             return {"CANCELLED"}
         try:
             _enter_group(space, node)
@@ -629,7 +632,7 @@ class SSMT_OT_GroupEnter(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupExit(bpy.types.Operator):
+class SSMT_OT_GroupExit(I18nOperator):
     bl_idname = "ssmt.group_exit"
     bl_label = "Exit Group"
     bl_options = {"REGISTER", "UNDO"}
@@ -646,7 +649,7 @@ class SSMT_OT_GroupExit(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupTab(bpy.types.Operator):
+class SSMT_OT_GroupTab(I18nOperator):
     """Navigate SSMT groups with context-sensitive Tab behavior."""
     bl_idname = "ssmt.group_tab"
     bl_label = "Toggle Group Navigation"
@@ -679,10 +682,10 @@ class SSMT_OT_GroupTab(bpy.types.Operator):
                 elif state.get("action") == "EXIT":
                     previous_group = state.get("group_node")
                     if previous_group is None or previous_group.id_data != tree:
-                        raise GroupingError("The group exited last time is no longer available")
+                        raise GroupingError(tr("The group exited last time is no longer available"))
                     _enter_group(space, previous_group)
                 else:
-                    raise GroupingError("No group navigation action to reverse")
+                    raise GroupingError(tr("No group navigation action to reverse"))
         except GroupingError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}

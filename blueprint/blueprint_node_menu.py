@@ -2,11 +2,12 @@
 import bpy
 
 from ..common.global_config import GlobalConfig
+from ..i18n.i18n import I18nOperator, tr, translatable
 
 from .blueprint_export_helper import BlueprintExportHelper
 
 
-class SSMT_OT_CreateGroupFromSelection(bpy.types.Operator):
+class SSMT_OT_CreateGroupFromSelection(I18nOperator):
     '''Create nodes from selected objects and group them under a new Group node'''
     bl_idname = "ssmt.create_group_from_selection"
     bl_label = "Create Group from Selected Objects"
@@ -15,7 +16,7 @@ class SSMT_OT_CreateGroupFromSelection(bpy.types.Operator):
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'WARNING'}, "No objects selected")
+            self.report({'WARNING'}, tr("No objects selected"))
             return {'CANCELLED'}
 
         # Get the current active blueprint tree
@@ -49,7 +50,7 @@ class SSMT_OT_CreateGroupFromSelection(bpy.types.Operator):
             node_tree = bpy.data.node_groups.get(workspace_name)
         
         if not node_tree or node_tree.bl_idname != 'SSMTBlueprintTreeType':
-            self.report({'WARNING'}, "No valid blueprint tree found. Please open the blueprint editor first.")
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
         # Compute the node position offset to prevent overlap
@@ -86,7 +87,7 @@ class SSMT_OT_CreateGroupFromSelection(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class SSMT_OT_CreateInternalSwitch(bpy.types.Operator):
+class SSMT_OT_CreateInternalSwitch(I18nOperator):
     '''Create Object Info nodes from selected objects and connect them to a Switch Key node'''
     bl_idname = "ssmt.create_internal_switch"
     bl_label = "Create Internal Switch"
@@ -95,7 +96,7 @@ class SSMT_OT_CreateInternalSwitch(bpy.types.Operator):
     def execute(self, context):
         selected_objects = context.selected_objects
         if not selected_objects:
-            self.report({'WARNING'}, "No objects selected")
+            self.report({'WARNING'}, tr("No objects selected"))
             return {'CANCELLED'}
         
         import re
@@ -114,11 +115,11 @@ class SSMT_OT_CreateInternalSwitch(bpy.types.Operator):
                 objects_without_sequence.append(obj)
         
         if objects_without_sequence:
-            self.report({'WARNING'}, "These objects do not have sequence numbers: {names}".format(names=', '.join([obj.name for obj in objects_without_sequence])))
+            self.report({'WARNING'}, tr("These objects do not have sequence numbers: {names}").format(names=', '.join([obj.name for obj in objects_without_sequence])))
             return {'CANCELLED'}
         
         if not objects_with_sequence:
-            self.report({'WARNING'}, "No objects with sequence numbers were found.")
+            self.report({'WARNING'}, tr("No objects with sequence numbers were found."))
             return {'CANCELLED'}
         
         objects_with_sequence.sort(key=lambda x: x[0])
@@ -154,7 +155,7 @@ class SSMT_OT_CreateInternalSwitch(bpy.types.Operator):
             node_tree = bpy.data.node_groups.get(workspace_name)
         
         if not node_tree or node_tree.bl_idname != 'SSMTBlueprintTreeType':
-            self.report({'WARNING'}, "No valid blueprint tree found. Please open the blueprint editor first.")
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
         
         nodes = node_tree.nodes
@@ -191,11 +192,11 @@ class SSMT_OT_CreateInternalSwitch(bpy.types.Operator):
         
         switch_node.select = True
         
-        self.report({'INFO'}, "Created {count} object nodes and connected them to the switch node".format(count=len(obj_nodes)))
+        self.report({'INFO'}, tr("Created {count} object nodes and connected them to the switch node").format(count=len(obj_nodes)))
         return {'FINISHED'}
 
 
-class SSMT_OT_RefreshBlueprintSubmeshList(bpy.types.Operator):
+class SSMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
     bl_idname = "ssmt.refresh_blueprint_submesh_list"
     bl_label = "Refresh Submesh List"
     bl_options = {'REGISTER', 'UNDO'}
@@ -203,15 +204,15 @@ class SSMT_OT_RefreshBlueprintSubmeshList(bpy.types.Operator):
     def execute(self, context):
         node_tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not node_tree:
-            self.report({'WARNING'}, "No valid blueprint tree found. Please open the blueprint editor first.")
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
         submesh_names = BlueprintExportHelper.refresh_tree_submesh_list(tree=node_tree)
-        self.report({'INFO'}, "Refreshed the current blueprint submesh list with {count} entries".format(count=len(submesh_names)))
+        self.report({'INFO'}, tr("Refreshed the current blueprint submesh list with {count} entries").format(count=len(submesh_names)))
         return {'FINISHED'}
 
 
-class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(bpy.types.Operator):
+class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
     bl_idname = "ssmt.batch_set_selected_object_node_submesh"
     bl_label = "Batch Set Selected Nodes to Submesh"
     bl_options = {'REGISTER', 'UNDO'}
@@ -227,13 +228,13 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(bpy.types.Operator):
     def invoke(self, context, event):
         node_tree = self._get_node_tree(context)
         if not node_tree:
-            self.report({'WARNING'}, "No valid blueprint tree found. Please open the blueprint editor first.")
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
         BlueprintExportHelper.set_runtime_blueprint_tree(node_tree)
         submesh_names = BlueprintExportHelper.get_tree_submesh_names(tree=node_tree)
         if not submesh_names:
-            self.report({'WARNING'}, "No Submesh list is available in the current blueprint. Please refresh the Submesh list first.")
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
             return {'CANCELLED'}
 
         def draw_submesh_popup(menu, popup_context):
@@ -248,7 +249,7 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(bpy.types.Operator):
 
         context.window_manager.popup_menu(
             draw_submesh_popup,
-            title="Target Submesh",
+            title=tr("Target Submesh"),
             icon='OUTLINER_COLLECTION',
         )
         return {'FINISHED'}
@@ -257,12 +258,12 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(bpy.types.Operator):
         return self.invoke(context, None)
 
 
-class SSMT_OT_ApplySelectedObjectNodeSubmesh(bpy.types.Operator):
+class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
     bl_idname = "ssmt.apply_selected_object_node_submesh"
     bl_label = "Set to Specified Submesh"
     bl_options = {'REGISTER', 'UNDO'}
 
-    target_submesh: bpy.props.StringProperty(name="Submesh", default="") # type: ignore
+    target_submesh: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
 
     def _get_node_tree(self, context):
         space_data = getattr(context, "space_data", None)
@@ -275,13 +276,13 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(bpy.types.Operator):
     def execute(self, context):
         node_tree = self._get_node_tree(context)
         if not node_tree:
-            self.report({'WARNING'}, "No valid blueprint tree found. Please open the blueprint editor first.")
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
         target_submesh = str(self.target_submesh or "").strip()
 
         if not target_submesh:
-            self.report({'WARNING'}, "Please select a valid Submesh.")
+            self.report({'WARNING'}, tr("Please select a valid Submesh."))
             return {'CANCELLED'}
 
         updated_count = 0
@@ -292,28 +293,29 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(bpy.types.Operator):
             updated_count += 1
 
         if updated_count == 0:
-            self.report({'WARNING'}, "No object info nodes are currently selected")
+            self.report({'WARNING'}, tr("No object info nodes are currently selected"))
             return {'CANCELLED'}
 
-        self.report({'INFO'}, "Set {count} object info nodes to submesh: {submesh}".format(count=updated_count, submesh=target_submesh))
+        self.report({'INFO'}, tr("Set {count} object info nodes to submesh: {submesh}").format(count=updated_count, submesh=target_submesh))
         return {'FINISHED'}
 
 
 def draw_objects_context_menu_add(self, context):
     layout = self.layout
     layout.separator()
-    layout.menu("SSMT_MT_ObjectContextMenuSub", text="SSMT Blueprint Graph", icon='NODETREE')
+    layout.menu("SSMT_MT_ObjectContextMenuSub", text=tr("SSMT Blueprint Graph"), icon='NODETREE')
 
+@translatable
 class SSMT_MT_ObjectContextMenuSub(bpy.types.Menu):
     bl_label = "SSMT Blueprint Graph"
     
     def draw(self, context):
         layout = self.layout
-        layout.operator("ssmt.create_group_from_selection", text="Create Group from Selected Objects", icon='GROUP')
-        layout.operator("ssmt.create_internal_switch", text="Create Internal Switch", icon='ARROW_LEFTRIGHT')
+        layout.operator("ssmt.create_group_from_selection", text=tr("Create Group from Selected Objects"), icon='GROUP')
+        layout.operator("ssmt.create_internal_switch", text=tr("Create Internal Switch"), icon='ARROW_LEFTRIGHT')
 
 
-class SSMT_OT_AlignNodes(bpy.types.Operator):
+class SSMT_OT_AlignNodes(I18nOperator):
     '''Align the selected nodes in a grid layout'''
     bl_idname = "ssmt.align_nodes"
     bl_label = "Align Nodes in Grid"
@@ -323,18 +325,18 @@ class SSMT_OT_AlignNodes(bpy.types.Operator):
         # Get the current node tree
         space_data = getattr(context, "space_data", None)
         if not space_data or space_data.type != 'NODE_EDITOR':
-            self.report({'ERROR'}, "Please use this feature in the node editor")
+            self.report({'ERROR'}, tr("Please use this feature in the node editor"))
             return {'CANCELLED'}
 
         node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
         if not node_tree:
-            self.report({'ERROR'}, "Node tree not found")
+            self.report({'ERROR'}, tr("Node tree not found"))
             return {'CANCELLED'}
 
         # Get the selected nodes
         selected_nodes = [node for node in node_tree.nodes if node.select]
         if len(selected_nodes) < 2:
-            self.report({'WARNING'}, "Please select at least 2 nodes")
+            self.report({'WARNING'}, tr("Please select at least 2 nodes"))
             return {'CANCELLED'}
 
         # Step 1: group the nodes into columns (based on X coordinate)
@@ -350,7 +352,7 @@ class SSMT_OT_AlignNodes(bpy.types.Operator):
         # Step 4: reorder the nodes to match their connections
         self.adjust_node_order_by_connections(selected_nodes, node_tree)
 
-        self.report({'INFO'}, "Aligned {node_count} nodes into a structured layout with {column_count} columns".format(node_count=len(selected_nodes), column_count=len(columns)))
+        self.report({'INFO'}, tr("Aligned {node_count} nodes into a structured layout with {column_count} columns").format(node_count=len(selected_nodes), column_count=len(columns)))
         return {'FINISHED'}
     
     def group_nodes_by_columns(self, nodes):
@@ -490,7 +492,7 @@ class SSMT_OT_AlignNodes(bpy.types.Operator):
             ))
 
 
-class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
+class SSMT_OT_BatchConnectNodes(I18nOperator):
     '''Batch connect the selected nodes: supports one-to-one or many-to-one connections'''
     bl_idname = "ssmt.batch_connect_nodes"
     bl_label = "Batch Connect Nodes"
@@ -500,18 +502,18 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
         # Get the current node tree
         space_data = getattr(context, "space_data", None)
         if not space_data or space_data.type != 'NODE_EDITOR':
-            self.report({'ERROR'}, "Please use this feature in the node editor")
+            self.report({'ERROR'}, tr("Please use this feature in the node editor"))
             return {'CANCELLED'}
 
         node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
         if not node_tree:
-            self.report({'ERROR'}, "Node tree not found")
+            self.report({'ERROR'}, tr("Node tree not found"))
             return {'CANCELLED'}
 
         # Get the selected nodes
         selected_nodes = [node for node in node_tree.nodes if node.select]
         if len(selected_nodes) < 2:
-            self.report({'WARNING'}, "Please select at least 2 nodes")
+            self.report({'WARNING'}, tr("Please select at least 2 nodes"))
             return {'CANCELLED'}
 
         # Count the node type distribution
@@ -522,13 +524,13 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
 
         # Check the number of node types
         if len(type_count_dict) > 2:
-            self.report({'ERROR'}, "Too many selected node types ({count}). Please select 1 or 2 types of nodes.".format(count=len(type_count_dict)))
+            self.report({'ERROR'}, tr("Too many selected node types ({count}). Please select 1 or 2 types of nodes.").format(count=len(type_count_dict)))
             return {'CANCELLED'}
 
         # Determine the connection mode
         if len(type_count_dict) == 1:
             # Only one type: cannot connect
-            self.report({'ERROR'}, "Selected nodes are all the same type and cannot be connected")
+            self.report({'ERROR'}, tr("Selected nodes are all the same type and cannot be connected"))
             return {'CANCELLED'}
         else:
             # Two types: determine whether this is one-to-one or many-to-one
@@ -592,13 +594,13 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
             # B has outputs, A has no inputs: B -> A
             source_nodes, target_nodes = nodes_b, nodes_a
         else:
-            self.report({'ERROR'}, "Cannot determine connection direction. Please check the node socket configuration.")
+            self.report({'ERROR'}, tr("Cannot determine connection direction. Please check the node socket configuration."))
             return {'CANCELLED'}
 
         # Check that the target nodes have input sockets
         for node in target_nodes:
             if len(node.inputs) == 0:
-                self.report({'ERROR'}, "Node '{node_name}' has no input socket".format(node_name=node.name))
+                self.report({'ERROR'}, tr("Node '{node_name}' has no input socket").format(node_name=node.name))
                 return {'CANCELLED'}
 
         # Clear existing links
@@ -632,7 +634,7 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
                         target_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(target_node.inputs) + 1))
                         available_input = target_node.inputs[-1]
                 except Exception:
-                    self.report({'WARNING'}, "Node '{node_name}' has no available input socket".format(node_name=target_node.name))
+                    self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=target_node.name))
                     continue
 
             # Create the link
@@ -647,7 +649,7 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
 
         # Report the result
         total_connections = len(connection_info)
-        self.report({'INFO'}, "One-to-one connection: successfully connected {count} node pairs".format(count=total_connections))
+        self.report({'INFO'}, tr("One-to-one connection: successfully connected {count} node pairs").format(count=total_connections))
         print(f"One-to-one connection complete: created {total_connections} connections:")
         for info in connection_info:
             print(f"  {info}")
@@ -670,12 +672,12 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
         # Check that the nodes have suitable input/output sockets
         for node in majority_nodes:
             if len(node.outputs) == 0:
-                self.report({'ERROR'}, "Majority node '{node_name}' has no output socket".format(node_name=node.name))
+                self.report({'ERROR'}, tr("Majority node '{node_name}' has no output socket").format(node_name=node.name))
                 return {'CANCELLED'}
 
         for node in minority_nodes:
             if len(node.inputs) == 0:
-                self.report({'ERROR'}, "Minority node '{node_name}' has no input socket".format(node_name=node.name))
+                self.report({'ERROR'}, tr("Minority node '{node_name}' has no input socket").format(node_name=node.name))
                 return {'CANCELLED'}
 
         # Clear existing links (only those between the selected nodes)
@@ -721,7 +723,7 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
                             minority_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(minority_node.inputs) + 1))
                             available_input = minority_node.inputs[-1]
                     except Exception:
-                        self.report({'WARNING'}, "Node '{node_name}' has no available input socket".format(node_name=minority_node.name))
+                        self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=minority_node.name))
                         majority_index += 1
                         continue
 
@@ -739,7 +741,7 @@ class SSMT_OT_BatchConnectNodes(bpy.types.Operator):
 
         # Report success
         total_connections = len(connection_info)
-        self.report({'INFO'}, "Many-to-one connection: successfully connected {count} node pairs".format(count=total_connections))
+        self.report({'INFO'}, tr("Many-to-one connection: successfully connected {count} node pairs").format(count=total_connections))
         print(f"Many-to-one connection complete: created {total_connections} connections:")
         for info in connection_info:
             print(f"  {info}")
@@ -752,16 +754,16 @@ def draw_node_add_menu(self, context):
         return
     
     layout = self.layout
-    layout.operator("node.add_node", text="Object Info", icon='OBJECT_DATAMODE').type = "SSMTNode_Object_Info"
-    layout.operator("node.add_node", text="Group", icon='GROUP').type = "SSMTNode_Object_Group"
-    layout.operator("node.add_node", text="Generate Mod", icon='EXPORT').type = "SSMTNode_Result_Output"
-    layout.operator("node.add_node", text="Export Face Mod", icon='MOD_MASK').type = "SSMTNode_Face_Mod_Export"
-    layout.operator("node.add_node", text="Switch Key", icon='GROUP').type = "SSMTNode_SwitchKey"
+    layout.operator("node.add_node", text=tr("Object Info"), icon='OBJECT_DATAMODE').type = "SSMTNode_Object_Info"
+    layout.operator("node.add_node", text=tr("Group"), icon='GROUP').type = "SSMTNode_Object_Group"
+    layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "SSMTNode_Result_Output"
+    layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "SSMTNode_Face_Mod_Export"
+    layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "SSMTNode_SwitchKey"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper
     # for organizing and grouping nodes in the node editor. Just treat it as a section divider.
-    layout.operator("node.add_node", text="Frame", icon='FILE_PARENT').type = "NodeFrame"
+    layout.operator("node.add_node", text=tr("Frame"), icon='FILE_PARENT').type = "NodeFrame"
     layout.separator()
 
 
@@ -775,13 +777,13 @@ def draw_node_context_menu(self, context):
     
     layout = self.layout
     layout.separator()
-    layout.operator("ssmt.make_group", text="Make Group", icon='NODETREE')
-    layout.operator("ssmt.align_nodes", text="Align Nodes in Grid", icon='GRID')
-    layout.operator("ssmt.batch_connect_nodes", text="Batch Connect Nodes", icon='LINKED')
-    layout.operator("ssmt.refresh_blueprint_submesh_list", text="Refresh Submesh List", icon='FILE_REFRESH')
-    layout.operator("ssmt.batch_set_selected_object_node_submesh", text="Batch Set Selected Nodes to Submesh", icon='OUTLINER_COLLECTION')
+    layout.operator("ssmt.make_group", text=tr("Make Group"), icon='NODETREE')
+    layout.operator("ssmt.align_nodes", text=tr("Align Nodes in Grid"), icon='GRID')
+    layout.operator("ssmt.batch_connect_nodes", text=tr("Batch Connect Nodes"), icon='LINKED')
+    layout.operator("ssmt.refresh_blueprint_submesh_list", text=tr("Refresh Submesh List"), icon='FILE_REFRESH')
+    layout.operator("ssmt.batch_set_selected_object_node_submesh", text=tr("Batch Set Selected Nodes to Submesh"), icon='OUTLINER_COLLECTION')
     layout.separator()
-    layout.operator("ssmt.refresh_node_object_ids", text="Refresh Object Node Info", icon='FILE_REFRESH')
+    layout.operator("ssmt.refresh_node_object_ids", text=tr("Refresh Object Node Info"), icon='FILE_REFRESH')
 
 
 def register():

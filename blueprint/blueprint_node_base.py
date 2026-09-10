@@ -7,14 +7,16 @@ import bpy
 from bpy.types import NodeTree, Node, NodeSocket, PropertyGroup
 
 from ..common.global_config import GlobalConfig
+from ..i18n.i18n import I18nOperator, tr, translatable
 
 
 
 # Custom Socket Types
 class SSMTSubmeshListItem(PropertyGroup):
-    name: bpy.props.StringProperty(name="Submesh", default="") # type: ignore
+    name: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
 
 
+@translatable
 class SSMTSocketObject(NodeSocket):
     '''Custom Socket for Object Data'''
     bl_idname = 'SSMTSocketObject'
@@ -29,6 +31,7 @@ class SSMTSocketObject(NodeSocket):
 # 1. Define the custom node tree type
 
 
+@translatable
 class SSMTBlueprintTree(NodeTree):
     '''SSMT Mod Logic Blueprint'''
     bl_idname = 'SSMTBlueprintTreeType'
@@ -76,14 +79,14 @@ class SSMTNodeBase(Node):
         self.width = max_width + 50
     
 
-class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
+class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
     bl_idname = "theherta3.open_persistent_blueprint"
     bl_label = "Open Blueprint"
     bl_description = "Open a standalone blueprint window for configuring Mod logic"
     bl_options = {'REGISTER', 'UNDO'}
 
     blueprint_name: bpy.props.StringProperty(
-        name="Blueprint Name",
+        name=tr("Blueprint Name"),
         default="",
         options={'SKIP_SAVE'},
     ) # type: ignore
@@ -162,14 +165,14 @@ class THEHERTA3_OT_OpenPersistentBlueprint(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
+class THEHERTA3_OT_DeletePersistentBlueprint(I18nOperator):
     bl_idname = "theherta3.delete_persistent_blueprint"
     bl_label = "Delete Blueprint"
     bl_description = "Delete the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     blueprint_name: bpy.props.StringProperty(
-        name="Blueprint Name",
+        name=tr("Blueprint Name"),
         default="",
         options={'SKIP_SAVE'},
     ) # type: ignore
@@ -186,7 +189,7 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
     def invoke(self, context, event):
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "There is no blueprint to delete!")
+            self.report({'WARNING'}, tr("There is no blueprint to delete!"))
             return {'CANCELLED'}
 
         self.blueprint_name = target_tree.name
@@ -194,16 +197,16 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Delete the currently selected blueprint?", icon='TRASH')
+        layout.label(text=tr("Delete the currently selected blueprint?"), icon='TRASH')
         layout.label(text=self.blueprint_name)
-        layout.label(text="This cannot be undone; please confirm this is not a mistake.", icon='ERROR')
+        layout.label(text=tr("This cannot be undone; please confirm this is not a mistake."), icon='ERROR')
 
     def execute(self, context):
         from .blueprint_export_helper import BlueprintExportHelper
 
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "There is no blueprint to delete!")
+            self.report({'WARNING'}, tr("There is no blueprint to delete!"))
             return {'CANCELLED'}
 
         for window in context.window_manager.windows:
@@ -231,24 +234,24 @@ class THEHERTA3_OT_DeletePersistentBlueprint(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, "Deleted blueprint: " + deleted_blueprint_name)
+        self.report({'INFO'}, tr("Deleted blueprint: ") + deleted_blueprint_name)
         return {'FINISHED'}
 
 
-class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
+class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
     bl_idname = "theherta3.rename_persistent_blueprint"
     bl_label = "Rename Blueprint"
     bl_description = "Rename the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     blueprint_name: bpy.props.StringProperty(
-        name="Blueprint Name",
+        name=tr("Blueprint Name"),
         default="",
         options={'SKIP_SAVE'},
     ) # type: ignore
 
     new_blueprint_name: bpy.props.StringProperty(
-        name="New Blueprint Name",
+        name=tr("New Blueprint Name"),
         default="",
     ) # type: ignore
 
@@ -264,7 +267,7 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
     def invoke(self, context, event):
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "There is no blueprint to rename!")
+            self.report({'WARNING'}, tr("There is no blueprint to rename!"))
             return {'CANCELLED'}
 
         self.blueprint_name = target_tree.name
@@ -273,33 +276,33 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
 
     def draw(self, context):
         layout = self.layout
-        layout.label(text="Enter the new blueprint name", icon='GREASEPENCIL')
-        layout.prop(self, "new_blueprint_name", text="Name")
+        layout.label(text=tr("Enter the new blueprint name"), icon='GREASEPENCIL')
+        layout.prop(self, "new_blueprint_name", text=tr("Name"))
 
     def execute(self, context):
         from .blueprint_export_helper import BlueprintExportHelper
 
         target_tree = self._get_target_tree(context)
         if not target_tree:
-            self.report({'WARNING'}, "There is no blueprint to rename!")
+            self.report({'WARNING'}, tr("There is no blueprint to rename!"))
             return {'CANCELLED'}
 
         new_name = str(self.new_blueprint_name or "").strip()
         if not new_name:
-            self.report({'ERROR'}, "Blueprint name cannot be empty!")
+            self.report({'ERROR'}, tr("Blueprint name cannot be empty!"))
             return {'CANCELLED'}
 
         if new_name == "__NONE__":
-            self.report({'ERROR'}, "Blueprint name cannot use the reserved value __NONE__!")
+            self.report({'ERROR'}, tr("Blueprint name cannot use the reserved value __NONE__!"))
             return {'CANCELLED'}
 
         if new_name == target_tree.name:
-            self.report({'INFO'}, "Blueprint name is unchanged")
+            self.report({'INFO'}, tr("Blueprint name is unchanged"))
             return {'CANCELLED'}
 
         existing_tree = bpy.data.node_groups.get(new_name)
         if existing_tree and existing_tree != target_tree:
-            self.report({'ERROR'}, "A blueprint with that name already exists; please use a different name!")
+            self.report({'ERROR'}, tr("A blueprint with that name already exists; please use a different name!"))
             return {'CANCELLED'}
 
         old_name = target_tree.name
@@ -316,9 +319,10 @@ class THEHERTA3_OT_RenamePersistentBlueprint(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, "Renamed blueprint to: " + target_tree.name)
+        self.report({'INFO'}, tr("Renamed blueprint to: ") + target_tree.name)
         return {'FINISHED'}
     
+@translatable
 class SSMT_PT_FrameProperties(bpy.types.Panel):
     '''Frame properties panel: with a Frame node selected, adjust its color, transparency, label, etc. from the sidebar'''
     bl_idname = "SSMT_PT_FrameProperties"
@@ -356,51 +360,51 @@ class SSMT_PT_FrameProperties(bpy.types.Panel):
 
         # === Label ===
         box = layout.box()
-        box.label(text="Label", icon='FONT_DATA')
+        box.label(text=tr("Label"), icon='FONT_DATA')
         col = box.column(align=True)
-        col.prop(frame, "label", text="Name")
-        col.prop(frame, "label_size", text="Font Size")
+        col.prop(frame, "label", text=tr("Name"))
+        col.prop(frame, "label_size", text=tr("Font Size"))
 
         # === Appearance ===
         box = layout.box()
-        box.label(text="Appearance", icon='MATERIAL')
+        box.label(text=tr("Appearance"), icon='MATERIAL')
         col = box.column(align=True)
-        col.prop(frame, "use_custom_color", text="Custom Color")
+        col.prop(frame, "use_custom_color", text=tr("Custom Color"))
         if frame.use_custom_color:
             col.prop(frame, "color", text="")
-        col.prop(frame, "shrink", text="Auto Shrink")
+        col.prop(frame, "shrink", text=tr("Auto Shrink"))
 
         # === Size ===
         box = layout.box()
-        box.label(text="Size", icon='MESH_PLANE')
+        box.label(text=tr("Size"), icon='MESH_PLANE')
         col = box.column(align=True)
-        col.prop(frame, "width", text="Width")
-        col.prop(frame, "height", text="Height")
+        col.prop(frame, "width", text=tr("Width"))
+        col.prop(frame, "height", text=tr("Height"))
 
         # === Extended text ===
         box = layout.box()
-        box.label(text="Description Text", icon='TEXT')
+        box.label(text=tr("Description Text"), icon='TEXT')
         col = box.column()
         col.prop(frame, "text", text="")
 
         # === Visibility ===
         box = layout.box()
-        box.label(text="Visibility", icon='HIDE_OFF')
+        box.label(text=tr("Visibility"), icon='HIDE_OFF')
         col = box.column(align=True)
-        col.prop(frame, "hide", text="Hide")
-        col.prop(frame, "mute", text="Mute (Disable)")
+        col.prop(frame, "hide", text=tr("Hide"))
+        col.prop(frame, "mute", text=tr("Mute (Disable)"))
 
         # === Apply-to-all button for multi-selection ===
         if len(frames) > 1:
             layout.separator()
-            layout.label(text=f"Selected {len(frames)} Frames", icon='INFO')
-            layout.label(text="After editing the properties above, click the button to apply to all", icon='LOOP_BACK')
-            op = layout.operator("ssmt.apply_frame_properties_to_all", text="Apply to All Selected Frames", icon='CHECKMARK')
+            layout.label(text=tr("Selected {count} Frames").format(count=len(frames)), icon='INFO')
+            layout.label(text=tr("After editing the properties above, click the button to apply to all"), icon='LOOP_BACK')
+            op = layout.operator("ssmt.apply_frame_properties_to_all", text=tr("Apply to All Selected Frames"), icon='CHECKMARK')
             op.source_frame_name = frame.name
             op.tree_name = frame.id_data.name if frame.id_data else ""
 
 
-class SSMT_OT_ApplyFramePropertiesToAll(bpy.types.Operator):
+class SSMT_OT_ApplyFramePropertiesToAll(I18nOperator):
     '''Copy all properties of the first selected Frame to the other selected Frames'''
     bl_idname = "ssmt.apply_frame_properties_to_all"
     bl_label = "Apply to All Selected Frames"
@@ -427,7 +431,7 @@ class SSMT_OT_ApplyFramePropertiesToAll(bpy.types.Operator):
             for prop in props:
                 setattr(frame, prop, getattr(source, prop))
 
-        self.report({'INFO'}, f"Applied properties of {source.label or source.name} to {len(frames)} Frames")
+        self.report({'INFO'}, tr("Applied properties of {name} to {count} Frames").format(name=source.label or source.name, count=len(frames)))
         return {'FINISHED'}
 
 

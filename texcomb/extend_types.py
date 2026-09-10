@@ -16,6 +16,8 @@ from bpy.props import (
     StringProperty,
 )
 
+from ..i18n.i18n import tr
+
 
 _SCENE_PROPS = (
     "smc_ob_data",
@@ -50,37 +52,48 @@ _MIN_DIMENSION = 8
 _MAX_DIMENSION = 8192
 _DEFAULT_IMAGE_FORMAT = "PNG"
 
-_IMAGE_FORMAT_ITEMS = [
-    ("PNG", "PNG", "Portable Network Graphics format, lossless, supports Alpha, best general compatibility", 0),
-    ("TGA", "TGA", "Truevision Targa format, lossless, supports Alpha, widely supported by game engines", 1),
-    ("TIFF", "TIFF", "Tagged Image File format, lossless, supports Alpha, good for archiving", 2),
-    ("BMP", "BMP", "Windows Bitmap format, lossless, supports Alpha, but large in file size", 3),
-]
 
-_ATLAS_SIZE_ITEMS = [
-    ("PO2", "Power of 2", "Combined image size is a power of 2 (e.g. 1024, 2048, 4096)"),
-    ("QUAD", "Square", "Combined image has equal width and height"),
-    ("AUTO", "Auto", "Combined image uses the smallest size"),
-    ("CUST", "Custom", "Scale inner textures proportionally to the specified size"),
-    ("STRICTCUST", "Strict Custom", "Strictly use the specified width and height without scaling inner textures"),
-]
+def _get_image_format_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    # The numeric values keep the original ordering stable.
+    return [
+        ("PNG", "PNG", tr("Portable Network Graphics format, lossless, supports Alpha, best general compatibility"), 0),
+        ("TGA", "TGA", tr("Truevision Targa format, lossless, supports Alpha, widely supported by game engines"), 1),
+        ("TIFF", "TIFF", tr("Tagged Image File format, lossless, supports Alpha, good for archiving"), 2),
+        ("BMP", "BMP", tr("Windows Bitmap format, lossless, supports Alpha, but large in file size"), 3),
+    ]
+
+
+def _get_atlas_size_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    return [
+        ("PO2", tr("Power of 2"), tr("Combined image size is a power of 2 (e.g. 1024, 2048, 4096)")),
+        ("QUAD", tr("Square"), tr("Combined image has equal width and height")),
+        ("AUTO", tr("Auto"), tr("Combined image uses the smallest size")),
+        ("CUST", tr("Custom"), tr("Scale inner textures proportionally to the specified size")),
+        ("STRICTCUST", tr("Strict Custom"), tr("Strictly use the specified width and height without scaling inner textures")),
+    ]
+
 
 _DEFAULT_PACKER_TYPE = "BINARY_TREE"
 
-_PACKER_TYPE_ITEMS = [
-    (
-        "MAX_RECTS",
-        "Max Rects",
-        "Uses the Max Rects bin packing algorithm - balanced speed and efficiency"),
-    (
-        "BINARY_TREE",
-        "Binary Tree",
-        "Uses the binary tree bin packing algorithm - simple but less efficient"),
-    (
-        "RECT_PACK2D",
-        "RectPack2D",
-        "Uses the RectPack2D algorithm - best for dense packing"),
-]
+
+def _get_packer_type_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    return [
+        (
+            "MAX_RECTS",
+            tr("Max Rects"),
+            tr("Uses the Max Rects bin packing algorithm - balanced speed and efficiency")),
+        (
+            "BINARY_TREE",
+            tr("Binary Tree"),
+            tr("Uses the binary tree bin packing algorithm - simple but less efficient")),
+        (
+            "RECT_PACK2D",
+            tr("RectPack2D"),
+            tr("Uses the RectPack2D algorithm - best for dense packing")),
+    ]
 
 
 class CombineListEntry(bpy.types.PropertyGroup):
@@ -92,43 +105,43 @@ class CombineListEntry(bpy.types.PropertyGroup):
     """
 
     ob: PointerProperty(
-        name="Object",
+        name=tr("Object"),
         type=bpy.types.Object,
-        description="Source object containing the material",
+        description=tr("Source object containing the material"),
     )
 
     ob_id: IntProperty(
-        name="Object ID",
+        name=tr("Object ID"),
         default=0,
-        description="Unique identifier for grouping materials under their parent object",
+        description=tr("Unique identifier for grouping materials under their parent object"),
     )
 
     mat: PointerProperty(
-        name="Material",
+        name=tr("Material"),
         type=bpy.types.Material,
-        description="Material instance to be merged",
+        description=tr("Material instance to be merged"),
     )
 
     layer: IntProperty(
-        name="Layer Group",
+        name=tr("Layer Group"),
         min=1,
         max=99,
         step=1,
         default=1,
-        description="Materials with the same layer number are merged into the same atlas\n"
-        "so that multiple materials can share one atlas",
+        description=tr("Materials with the same layer number are merged into the same atlas\n"
+        "so that multiple materials can share one atlas"),
     )
 
     used: BoolProperty(
-        name="Include",
+        name=tr("Include"),
         default=True,
-        description="Include this element in atlas generation",
+        description=tr("Include this element in atlas generation"),
     )
 
     type: IntProperty(
-        name="Entry Type",
+        name=tr("Entry Type"),
         default=0,
-        description="Type of the list entry (object, material, or separator)",
+        description=tr("Type of the list entry (object, material, or separator)"),
     )
 
 
@@ -145,92 +158,95 @@ def _register_scene_properties() -> None:
     bpy.types.Scene.smc_list_id = IntProperty(default=0)
 
     bpy.types.Scene.smc_size = EnumProperty(
-        name="Atlas Size",
-        items=_ATLAS_SIZE_ITEMS,
-        default=_DEFAULT_ATLAS_SIZE,
-        description="Size strategy of the texture atlas",
+        name=tr("Atlas Size"),
+        items=_get_atlas_size_items,
+        # Dynamic items only allow integer (0-based) defaults: 1 == "QUAD".
+        default=1,
+        description=tr("Size strategy of the texture atlas"),
     )
 
     bpy.types.Scene.smc_packer_type = EnumProperty(
-        name="Packing Algorithm",
-        items=_PACKER_TYPE_ITEMS,
-        default=_DEFAULT_PACKER_TYPE,
-        description="Algorithm used to pack textures into the atlas",
+        name=tr("Packing Algorithm"),
+        items=_get_packer_type_items,
+        # Dynamic items only allow integer (0-based) defaults: 1 == "BINARY_TREE".
+        default=1,
+        description=tr("Algorithm used to pack textures into the atlas"),
     )
 
     dimension_args = {
         "min": _MIN_DIMENSION,
         "max": _MAX_DIMENSION,
-        "description": "Maximum pixel size of the texture",
+        "description": tr("Maximum pixel size of the texture"),
     }
     bpy.types.Scene.smc_size_width = IntProperty(
-        name="Width", default=_DEFAULT_DIMENSION, **dimension_args
+        name=tr("Width"), default=_DEFAULT_DIMENSION, **dimension_args
     )
     bpy.types.Scene.smc_size_height = IntProperty(
-        name="Height", default=_DEFAULT_DIMENSION, **dimension_args
+        name=tr("Height"), default=_DEFAULT_DIMENSION, **dimension_args
     )
 
     bpy.types.Scene.smc_crop = BoolProperty(
-        name="Crop to UV Bounds",
+        name=tr("Crop to UV Bounds"),
         default=True,
-        description="Removes redundant areas",
+        description=tr("Removes redundant areas"),
     )
 
     bpy.types.Scene.smc_pixel_art = BoolProperty(
-        name="Disable Anti-Aliased Scaling",
+        name=tr("Disable Anti-Aliased Scaling"),
         default=False,
-        description="Suitable for textures such as pixel art",
+        description=tr("Suitable for textures such as pixel art"),
     )
 
     bpy.types.Scene.smc_diffuse_size = IntProperty(
-        name="Solid Color Texture Size",
+        name=tr("Solid Color Texture Size"),
         min=8,
         max=256,
         default=32,
-        description="Base texture size of solid-color materials when batching",
+        description=tr("Base texture size of solid-color materials when batching"),
     )
 
     bpy.types.Scene.smc_gaps = IntProperty(
-        name="Spacing",
+        name=tr("Spacing"),
         min=0,
         max=32,
         default=0,
         options={"HIDDEN"},
-        description="Spacing between elements in the atlas (pixels)",
+        description=tr("Spacing between elements in the atlas (pixels)"),
     )
 
     bpy.types.Scene.smc_include_extra_textures = BoolProperty(
-        name="Atlas PBR Textures",
+        name=tr("Atlas PBR Textures"),
         default=False,
-        description="Also generate atlases for metallic, roughness, specular, normal, and emission textures",
+        description=tr("Also generate atlases for metallic, roughness, specular, normal, and emission textures"),
     )
 
     bpy.types.Scene.smc_uniform_size = BoolProperty(
-        name="Uniform Texture Size",
+        name=tr("Uniform Texture Size"),
         default=True,
-        description="Force all small textures to be scaled to the same size before packing (may be enlarged or shrunk)",
+        description=tr("Force all small textures to be scaled to the same size before packing (may be enlarged or shrunk)"),
     )
 
     bpy.types.Scene.smc_uniform_size_value = IntProperty(
-        name="Uniform Size",
+        name=tr("Uniform Size"),
         min=8,
         max=8192,
         default=1024,
-        description="Pixel size to which all small textures are uniformly scaled (width = height)",
+        description=tr("Pixel size to which all small textures are uniformly scaled (width = height)"),
     )
 
     bpy.types.Scene.smc_image_format = EnumProperty(
-        name="Output Format",
-        items=_IMAGE_FORMAT_ITEMS,
-        default=_DEFAULT_IMAGE_FORMAT,
-        description="Format of the atlas output image; PNG supports the Alpha channel",
+        name=tr("Output Format"),
+        items=_get_image_format_items,
+        # Dynamic items only allow integer (0-based) defaults; the first item
+        # ("PNG") is the intended default, so the argument is omitted.
+        description=tr("Format of the atlas output image; PNG supports the Alpha channel"),
     )
 
     bpy.types.Scene.smc_save_path = StringProperty(
-        name="Save Location",
+        name=tr("Save Location"),
         default="",
         subtype="DIR_PATH",
-        description="Output directory for the generated atlases",
+        description=tr("Output directory for the generated atlases"),
     )
 
 
@@ -241,33 +257,33 @@ def _register_material_properties() -> None:
     atlas-specific settings and references to original materials.
     """
     bpy.types.Material.root_mat = PointerProperty(
-        name="Base Material",
+        name=tr("Base Material"),
         type=bpy.types.Material,
-        description="Reference to the original material, used to track the material's source",
+        description=tr("Reference to the original material, used to track the material's source"),
     )
 
     bpy.types.Material.smc_diffuse = BoolProperty(
-        name="Blend Diffuse Color",
+        name=tr("Blend Diffuse Color"),
         default=True,
-        description="Blend the diffuse color with the texture",
+        description=tr("Blend the diffuse color with the texture"),
     )
 
     bpy.types.Material.smc_size = BoolProperty(
-        name="Custom Size",
+        name=tr("Custom Size"),
         default=False,
-        description="Enable a custom texture size",
+        description=tr("Enable a custom texture size"),
     )
 
     dimension_args = {
         "min": _MIN_DIMENSION,
         "max": _MAX_DIMENSION // 2,
-        "description": "Maximum pixel size of the texture",
+        "description": tr("Maximum pixel size of the texture"),
     }
     bpy.types.Material.smc_size_width = IntProperty(
-        name="Width", default=2048, **dimension_args
+        name=tr("Width"), default=2048, **dimension_args
     )
     bpy.types.Material.smc_size_height = IntProperty(
-        name="Height", default=2048, **dimension_args
+        name=tr("Height"), default=2048, **dimension_args
     )
 
 

@@ -8,6 +8,7 @@ from bpy_extras.io_utils import ImportHelper
 from ..common.global_config import LogicName
 from ..common.global_config import GlobalConfig
 from ..common.global_properties import GlobalProperties
+from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_base import SSMTNodeBase
 from .blueprint_node_shapekey import SSMTShapeKeyListItem
@@ -133,7 +134,7 @@ class ObjectPersistentIdManager:
         return summary
 
 
-class SSMT_OT_RefreshNodeObjectIDs(bpy.types.Operator):
+class SSMT_OT_RefreshNodeObjectIDs(I18nOperator):
     '''Refresh the object reference info of every object node in blueprints'''
     bl_idname = "ssmt.refresh_node_object_ids"
     bl_label = "Refresh Object Node Info"
@@ -143,16 +144,16 @@ class SSMT_OT_RefreshNodeObjectIDs(bpy.types.Operator):
         refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(include_all_blueprints=True, source="manual")
 
         if refresh_summary["missing_count"] > 0:
-            self.report({'WARNING'}, "Refreshed {updated_count} object nodes, but {missing_count} nodes have no matching object, took {elapsed_ms:.3f} ms".format(updated_count=refresh_summary['updated_count'], missing_count=refresh_summary['missing_count'], elapsed_ms=refresh_summary['elapsed_ms']))
+            self.report({'WARNING'}, tr("Refreshed {updated_count} object nodes, but {missing_count} nodes have no matching object, took {elapsed_ms:.3f} ms").format(updated_count=refresh_summary['updated_count'], missing_count=refresh_summary['missing_count'], elapsed_ms=refresh_summary['elapsed_ms']))
         elif refresh_summary["updated_count"] > 0:
-            self.report({'INFO'}, "Refreshed {updated_count} object nodes, took {elapsed_ms:.3f} ms".format(updated_count=refresh_summary['updated_count'], elapsed_ms=refresh_summary['elapsed_ms']))
+            self.report({'INFO'}, tr("Refreshed {updated_count} object nodes, took {elapsed_ms:.3f} ms").format(updated_count=refresh_summary['updated_count'], elapsed_ms=refresh_summary['elapsed_ms']))
         else:
-            self.report({'INFO'}, "All object nodes are already up to date, took {elapsed_ms:.3f} ms".format(elapsed_ms=refresh_summary['elapsed_ms']))
+            self.report({'INFO'}, tr("All object nodes are already up to date, took {elapsed_ms:.3f} ms").format(elapsed_ms=refresh_summary['elapsed_ms']))
         
         return {'FINISHED'}
 
 
-class SSMT_OT_SelectNodeObject(bpy.types.Operator):
+class SSMT_OT_SelectNodeObject(I18nOperator):
     '''Select this object in 3D View'''
     bl_idname = "ssmt.select_node_object"
     bl_label = "Select Object"
@@ -178,14 +179,14 @@ class SSMT_OT_SelectNodeObject(bpy.types.Operator):
                 
             obj.select_set(True)
             context.view_layer.objects.active = obj
-            self.report({'INFO'}, "Selected object: {name}".format(name=obj.name))
+            self.report({'INFO'}, tr("Selected object: {name}").format(name=obj.name))
         else:
-            self.report({'WARNING'}, "Object not found")
+            self.report({'WARNING'}, tr("Object not found"))
         
         return {'FINISHED'}
 
 
-class SSMT_OT_StartPickObject(bpy.types.Operator):
+class SSMT_OT_StartPickObject(I18nOperator):
     '''Start picking an object from 3D View'''
     bl_idname = "ssmt.start_pick_object"
     bl_label = "Pick Object"
@@ -204,19 +205,19 @@ class SSMT_OT_StartPickObject(bpy.types.Operator):
             tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
         
         if not tree:
-            self.report({'WARNING'}, "Cannot get node tree context")
+            self.report({'WARNING'}, tr("Cannot get node tree context"))
             return {'CANCELLED'}
         
         _picking_node_name = self.node_name
         _picking_tree_name = tree.name
-        self.report({'INFO'}, "Please click an object in the 3D View")
+        self.report({'INFO'}, tr("Please click an object in the 3D View"))
         
         bpy.ops.ssmt.pick_object_modal('INVOKE_DEFAULT')
         
         return {'FINISHED'}
 
 
-class SSMT_OT_PickObjectModal(bpy.types.Operator):
+class SSMT_OT_PickObjectModal(I18nOperator):
     '''Modal operator for picking objects in 3D View'''
     bl_idname = "ssmt.pick_object_modal"
     bl_label = "Pick Object"
@@ -290,14 +291,14 @@ class SSMT_OT_PickObjectModal(bpy.types.Operator):
                     tree, node = resolve_picking_node()
                     if not node:
                         clear_picking_state()
-                        self.report({'WARNING'}, "Cannot get node tree context")
+                        self.report({'WARNING'}, tr("Cannot get node tree context"))
                         return {'CANCELLED'}
 
                     node.object_name = current_obj.name
                     node.object_id = ObjectPersistentIdManager.ensure_id(current_obj)
                     if tree:
                         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
-                    self.report({'INFO'}, "Picked object: {name}".format(name=current_obj.name))
+                    self.report({'INFO'}, tr("Picked object: {name}").format(name=current_obj.name))
 
                     clear_picking_state()
                     return {'FINISHED'}
@@ -308,9 +309,10 @@ class SSMT_OT_PickObjectModal(bpy.types.Operator):
 def draw_view3d_header(self, context):
     global _picking_node_name
     if _picking_node_name:
-        self.layout.label(text="Please click an object in the 3D View...", icon='EYEDROPPER')
+        self.layout.label(text=tr("Please click an object in the 3D View..."), icon='EYEDROPPER')
 
 
+@translatable
 class SSMTNode_Object_Info(SSMTNodeBase):
     '''Object Info Node'''
     bl_idname = 'SSMTNode_Object_Info'
@@ -330,7 +332,9 @@ class SSMTNode_Object_Info(SSMTNodeBase):
         if self.object_name:
             self.label = self.object_name
         else:
-            self.label = "Object Info"
+            # The default title is instance data, so bake in the language that
+            # is active when the node is created.
+            self.label = tr("Object Info")
 
         # Collect all texts that participate in the width calculation
         width_texts = [self.object_name, self.submesh_name]
@@ -381,11 +385,11 @@ class SSMTNode_Object_Info(SSMTNodeBase):
         self._refresh_display_fields()
         self._refresh_index_info()
 
-    object_name: bpy.props.StringProperty(name="Object Name", default="", update=update_object_name) #type: ignore
-    object_id: bpy.props.StringProperty(name="Object ID", default="") #type: ignore
-    original_object_name: bpy.props.StringProperty(name="Original Object Name", default="") #type: ignore
-    component: bpy.props.StringProperty(name="Component", default="") #type: ignore
-    submesh_name: bpy.props.StringProperty(name="Submesh", default="", update=update_submesh_name) #type: ignore
+    object_name: bpy.props.StringProperty(name=tr("Object Name"), default="", update=update_object_name) #type: ignore
+    object_id: bpy.props.StringProperty(name=tr("Object ID"), default="") #type: ignore
+    original_object_name: bpy.props.StringProperty(name=tr("Original Object Name"), default="") #type: ignore
+    component: bpy.props.StringProperty(name=tr("Component"), default="") #type: ignore
+    submesh_name: bpy.props.StringProperty(name=tr("Submesh"), default="", update=update_submesh_name) #type: ignore
     index_count_display: bpy.props.StringProperty(name="IndexCount", default="") #type: ignore
     first_index_display: bpy.props.StringProperty(name="FirstIndex", default="") #type: ignore
 
@@ -408,18 +412,19 @@ class SSMTNode_Object_Info(SSMTNodeBase):
             op.object_id = self.object_id
 
         if tree is not None:
-            layout.prop_search(self, "submesh_name", tree, "ssmt_submesh_items", text="Submesh", icon='OUTLINER_COLLECTION')
+            layout.prop_search(self, "submesh_name", tree, "ssmt_submesh_items", text=tr("Submesh"), icon='OUTLINER_COLLECTION')
 
             if self.submesh_name:
                 layout.label(text=f"IndexCount: {self.index_count_display or '—'}")
                 layout.label(text=f"FirstIndex: {self.first_index_display or '—'}")
 
             if self.submesh_name and self.submesh_name not in BlueprintExportHelper.get_tree_submesh_names(tree=tree):
-                layout.label(text="Current Submesh is not in the list; export will fall back to object name resolution", icon='ERROR')
+                layout.label(text=tr("Current Submesh is not in the list; export will fall back to object name resolution"), icon='ERROR')
 
 
 
 
+@translatable
 class SSMTNode_Object_Group(SSMTNodeBase):
     '''Node used purely for grouping; accepts any node as input and gathers it into one group'''
     bl_idname = 'SSMTNode_Object_Group'
@@ -432,7 +437,7 @@ class SSMTNode_Object_Group(SSMTNodeBase):
         self.width = 200
 
     def draw_buttons(self, context, layout):
-        layout.operator("ssmt.view_group_objects", text="Preview Recursive Objects", icon='HIDE_OFF').node_name = self.name
+        layout.operator("ssmt.view_group_objects", text=tr("Preview Recursive Objects"), icon='HIDE_OFF').node_name = self.name
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
@@ -444,7 +449,7 @@ class SSMTNode_Object_Group(SSMTNodeBase):
 
 
 
-class SSMT_OT_SwitchKey_AddSocket(bpy.types.Operator):
+class SSMT_OT_SwitchKey_AddSocket(I18nOperator):
     '''Add a new socket to the switch node'''
     bl_idname = "ssmt.switch_add_socket"
     bl_label = "Add Socket"
@@ -462,7 +467,7 @@ class SSMT_OT_SwitchKey_AddSocket(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class SSMT_OT_SwitchKey_RemoveSocket(bpy.types.Operator):
+class SSMT_OT_SwitchKey_RemoveSocket(I18nOperator):
     '''Remove the last socket from the switch node'''
     bl_idname = "ssmt.switch_remove_socket"
     bl_label = "Remove Socket"
@@ -480,6 +485,7 @@ class SSMT_OT_SwitchKey_RemoveSocket(bpy.types.Operator):
         return {'FINISHED'}
 
 
+@translatable
 class SSMTNode_SwitchKey(SSMTNodeBase):
     '''Switch Key assigns each connected branch to its own separate variable'''
     bl_idname = 'SSMTNode_SwitchKey'
@@ -502,12 +508,13 @@ class SSMTNode_SwitchKey(SSMTNodeBase):
     def update_comment(self, context):
         self.update_node_width([self.key_name, self.key_alias, self.comment])
     
-    key_name: bpy.props.StringProperty(name="Key Name", default="", update=update_key_name) # type: ignore
-    key_alias: bpy.props.StringProperty(name="Variable Alias", description="Only ASCII letters and digits are allowed; the same alias shares a variable and different branch counts expand by least common multiple", default="", update=update_key_alias) # type: ignore
-    comment: bpy.props.StringProperty(name="Comment", description="Comment text; written into the config table as comments", default="", update=update_comment) # type: ignore
+    key_name: bpy.props.StringProperty(name=tr("Key Name"), default="", update=update_key_name) # type: ignore
+    key_alias: bpy.props.StringProperty(name=tr("Variable Alias"), description=tr("Only ASCII letters and digits are allowed; the same alias shares a variable and different branch counts expand by least common multiple"), default="", update=update_key_alias) # type: ignore
+    comment: bpy.props.StringProperty(name=tr("Comment"), description=tr("Comment text; written into the config table as comments"), default="", update=update_comment) # type: ignore
     
     def init(self, context):
-        self.label = "Switch Key"
+        # The default title is instance data, so bake in the active language.
+        self.label = tr("Switch Key")
         self.inputs.new('SSMTSocketObject', "Status 0")
         self.outputs.new('SSMTSocketObject', "Output")
         self.width = 200
@@ -516,20 +523,21 @@ class SSMTNode_SwitchKey(SSMTNodeBase):
 
     def draw_buttons(self, context, layout):
         row = layout.row(align=True)
-        row.prop(self, "key_name", text="Key")
+        row.prop(self, "key_name", text=tr("Key"))
         row.operator("wm.url_open", text="", icon='HELP').url = "https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes"
         
-        layout.prop(self, "key_alias", text="Variable Alias")
-        layout.prop(self, "comment", text="Comment")
+        layout.prop(self, "key_alias", text=tr("Variable Alias"))
+        layout.prop(self, "comment", text=tr("Comment"))
         
         row = layout.row(align=True)
-        op_add = row.operator("ssmt.switch_add_socket", text="Add", icon='ADD')
+        op_add = row.operator("ssmt.switch_add_socket", text=tr("Add"), icon='ADD')
         op_add.node_name = self.name
         
-        op_rem = row.operator("ssmt.switch_remove_socket", text="Remove", icon='REMOVE')
+        op_rem = row.operator("ssmt.switch_remove_socket", text=tr("Remove"), icon='REMOVE')
         op_rem.node_name = self.name
 
 
+@translatable
 class SSMTNode_Result_Output(SSMTNodeBase):
     '''Result Output Node'''
     bl_idname = 'SSMTNode_Result_Output'
@@ -537,8 +545,8 @@ class SSMTNode_Result_Output(SSMTNodeBase):
     bl_icon = 'EXPORT'
 
     enable_shapekey: bpy.props.BoolProperty(
-        name="Use Shape Key Options",
-        description="Export the checked shape key buffers and runtime control config",
+        name=tr("Use Shape Key Options"),
+        description=tr("Export the checked shape key buffers and runtime control config"),
         default=False,
     ) # type: ignore
     shapekey_items: bpy.props.CollectionProperty(type=SSMTShapeKeyListItem) # type: ignore
@@ -548,7 +556,7 @@ class SSMTNode_Result_Output(SSMTNodeBase):
         self.width = 400
 
     def draw_buttons(self, context, layout):
-        operator = layout.operator("ssmt.generate_mod_blueprint", text="Generate Mod", icon='EXPORT')
+        operator = layout.operator("ssmt.generate_mod_blueprint", text=tr("Generate Mod"), icon='EXPORT')
         operator.node_name = self.name
         operator.tree_name = self.id_data.name if self.id_data else ""
 
@@ -556,34 +564,34 @@ class SSMTNode_Result_Output(SSMTNodeBase):
         draw_shapekey_settings(self, layout)
         
         if GlobalConfig.logic_name == LogicName.WWMI:
-            layout.prop(context.scene.global_properties, "ignore_muted_shape_keys")
-            layout.prop(context.scene.global_properties, "apply_all_modifiers")
-            layout.prop(context.scene.global_properties, "export_add_missing_vertex_groups")
+            layout.prop(context.scene.global_properties, "ignore_muted_shape_keys", text=tr("Ignore Muted Shape Keys"))
+            layout.prop(context.scene.global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
+            layout.prop(context.scene.global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
 
         if GlobalConfig.logic_name != LogicName.GF2:
             layout.prop(context.scene.global_properties,
-                        "recalculate_tangent",text="Store Vector-Normalized Normals in TANGENT (Global)")
+                        "recalculate_tangent",text=tr("Store Vector-Normalized Normals in TANGENT (Global)"))
 
         if GlobalConfig.logic_name == LogicName.HIMI:
             layout.prop(context.scene.global_properties,
-                        "recalculate_color",text="Store Arithmetic-Average Normals in COLOR (Global)")
+                        "recalculate_color",text=tr("Store Arithmetic-Average Normals in COLOR (Global)"))
 
         if LogicName.is_zzmi_family(GlobalConfig.logic_name):
-            layout.prop(context.scene.global_properties, "zzz_use_slot_fix")
+            layout.prop(context.scene.global_properties, "zzz_use_slot_fix", text=tr("Use Slot Fix"))
 
         if GlobalConfig.logic_name == LogicName.GIMI:
-            layout.prop(context.scene.global_properties, "gimi_use_orfix")
+            layout.prop(context.scene.global_properties, "gimi_use_orfix", text=tr("Use ORFix"))
 
-        layout.prop(context.scene.global_properties, "open_mod_folder_after_generate_mod",text="Open Mod Folder After Generating Mod")
+        layout.prop(context.scene.global_properties, "open_mod_folder_after_generate_mod",text=tr("Open Mod Folder After Generating Mod"))
 
-        layout.prop(context.scene.global_properties, "use_specific_generate_mod_folder_path")
+        layout.prop(context.scene.global_properties, "use_specific_generate_mod_folder_path", text=tr("Specify Generate Mod Folder"))
 
         if GlobalProperties.use_specific_generate_mod_folder_path():
             box = layout.box()
-            box.label(text="Current Generate Mod Folder: ")
+            box.label(text=tr("Current Generate Mod Folder: "))
             box.label(text=context.scene.global_properties.generate_mod_folder_path)
 
-            layout.operator("ssmt.select_generate_mod_folder", icon='FILE_FOLDER')
+            layout.operator("ssmt.select_generate_mod_folder", text=tr("Select Generate Mod Folder"), icon='FILE_FOLDER')
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
@@ -593,7 +601,7 @@ class SSMTNode_Result_Output(SSMTNodeBase):
              self.inputs.remove(self.inputs[-1])
 
 
-class SSMT_OT_View_Group_Objects(bpy.types.Operator):
+class SSMT_OT_View_Group_Objects(I18nOperator):
     '''Recursively resolve all objects under the current group and display them in the current 3D View; clicking toggles local view. Note: group nodes should preferably not contain Switch Key, otherwise all switch branches are shown at once'''
     bl_idname = "ssmt.view_group_objects"
     bl_label = "View Objects in Group"
@@ -632,7 +640,7 @@ class SSMT_OT_View_Group_Objects(bpy.types.Operator):
                     break
 
         if not view_3d_area:
-            self.report({'WARNING'}, "No 3D View found")
+            self.report({'WARNING'}, tr("No 3D View found"))
             return {'CANCELLED'}
 
         in_local_view = False
@@ -656,7 +664,7 @@ class SSMT_OT_View_Group_Objects(bpy.types.Operator):
                     if space.type == 'VIEW_3D':
                         space.local_view = None
                         break
-            self.report({'INFO'}, "Exited local view")
+            self.report({'INFO'}, tr("Exited local view"))
             return {'FINISHED'}
 
         objects_to_show = set()
@@ -685,7 +693,7 @@ class SSMT_OT_View_Group_Objects(bpy.types.Operator):
         collect_objects(node)
 
         if not objects_to_show:
-            self.report({'WARNING'}, "No objects found in this group")
+            self.report({'WARNING'}, tr("No objects found in this group"))
             return {'CANCELLED'}
 
         def deselect_all_safe():
@@ -738,13 +746,13 @@ class SSMT_OT_View_Group_Objects(bpy.types.Operator):
                     # If temp_override still fails, fall back: do not use the operator
                     print(f"temp_override failed, using fallback: {e}")
                     # At least the shading type was set; inform the user
-                    self.report({'WARNING'}, "Objects are selected, but the view switch failed. Press '/' to enter local view manually")
+                    self.report({'WARNING'}, tr("Objects are selected, but the view switch failed. Press '/' to enter local view manually"))
 
-        self.report({'INFO'}, "Showing {count} objects in local view".format(count=len(objects_to_show)))
+        self.report({'INFO'}, tr("Showing {count} objects in local view").format(count=len(objects_to_show)))
         return {'FINISHED'}
 
 
-class SSMT_OT_SelectGenerateModFolder(bpy.types.Operator, ImportHelper):
+class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
     '''Choose the target folder for the generated Mod'''
     bl_idname = "ssmt.select_generate_mod_folder"
     bl_label = "Select Generate Mod Folder"
@@ -763,12 +771,12 @@ class SSMT_OT_SelectGenerateModFolder(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         selected_directory = bpy.path.abspath(self.directory).rstrip("\\/")
         if not selected_directory:
-            self.report({'ERROR'}, "Please select a valid folder")
+            self.report({'ERROR'}, tr("Please select a valid folder"))
             return {'CANCELLED'}
 
         os.makedirs(selected_directory, exist_ok=True)
         context.scene.global_properties.generate_mod_folder_path = selected_directory
-        self.report({'INFO'}, "Generate Mod folder set to: {path}".format(path=selected_directory))
+        self.report({'INFO'}, tr("Generate Mod folder set to: {path}").format(path=selected_directory))
         return {'FINISHED'}
 
 classes = (

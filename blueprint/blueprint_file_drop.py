@@ -12,6 +12,7 @@ import os
 
 import bpy
 
+from ..i18n.i18n import I18nOperator, tr, translatable
 from ..workspace.ssmt_workspace import WorkSpaceModel
 
 
@@ -54,7 +55,7 @@ def parse_mesh_filename(filepath: str) -> str:
     return base_name
 
 
-class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
+class SSMT_OT_BlueprintFileDrop(I18nOperator):
     '''Drop files onto the SSMT Blueprint, creating matching nodes at the release position'''
     bl_idname = "ssmt.blueprint_file_drop"
     bl_label = "Drop Files onto the SSMT Blueprint"
@@ -138,11 +139,11 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
         tree.nodes.active = created_nodes[0]
 
         if len(created_nodes) == 1:
-            message = "Created node from file: {name}".format(
+            message = tr("Created node from file: {name}").format(
                 name=os.path.basename(filepaths[0]),
             )
         else:
-            message = "Created {count} nodes from files".format(
+            message = tr("Created {count} nodes from files").format(
                 count=len(created_nodes),
             )
         self.report({'INFO'}, message)
@@ -151,6 +152,7 @@ class SSMT_OT_BlueprintFileDrop(bpy.types.Operator):
 
 classes = [SSMT_OT_BlueprintFileDrop]
 
+@translatable
 class SSMT_FH_BlueprintFileDrop(bpy.types.FileHandler):
     '''Handle files dropped from the OS into the SSMT Blueprint editor'''
     bl_idname = "SSMT_FH_BlueprintFileDrop"

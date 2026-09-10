@@ -6,12 +6,13 @@ import bpy
 from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
+from ..i18n.i18n import I18nOperator, tr, translatable, get_preferences
 
 from .ui_func_export import SSMTGenerateSelectedBlueprintMod
 from .ui_func_import_ssmt import SSMT4ImportAllFromCurrentWorkSpaceBlueprint, SSMT4ImportRaw
 
 
-class SSMT4RefreshWorkspaceList(bpy.types.Operator):
+class SSMT4RefreshWorkspaceList(I18nOperator):
     bl_idname = "ssmt4.refresh_workspace_list"
     bl_label = "Refresh Workspace List"
     bl_description = "Refresh the workspace list of the current game configuration"
@@ -23,10 +24,11 @@ class SSMT4RefreshWorkspaceList(bpy.types.Operator):
             for area in window.screen.areas:
                 area.tag_redraw()
 
-        self.report({'INFO'}, "Workspace list refreshed")
+        self.report({'INFO'}, tr("Workspace list refreshed"))
         return {'FINISHED'}
 
 
+@translatable
 class PanelBasicInformation(bpy.types.Panel):
     '''
     Basic Information Panel
@@ -41,6 +43,12 @@ class PanelBasicInformation(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         global_properties = context.scene.global_properties
+
+        # UI language switch: offered at the top of the first panel so users
+        # can always find it. The choice is stored in the add-on preferences.
+        prefs = get_preferences()
+        if prefs is not None:
+            layout.prop(prefs, "ui_language", expand=True)
         
         GlobalConfig.read_from_main_json_ssmt4()
 
@@ -53,18 +61,18 @@ class PanelBasicInformation(bpy.types.Panel):
         # action buttons below. Operators/import callbacks remain responsible
         # for persisting an explicit selection.
 
-        layout.label(text="SSMT Cache Folder: " + GlobalConfig.ssmtlocation)
-        layout.label(text="Current Config Name: " + GlobalConfig.gamename)
-        layout.label(text="Current Game Preset: " + GlobalConfig.logic_name)
-        layout.label(text="Current Workspace: " + GlobalConfig.get_workspace_name())
+        layout.label(text=tr("SSMT Cache Folder: ") + GlobalConfig.ssmtlocation)
+        layout.label(text=tr("Current Config Name: ") + GlobalConfig.gamename)
+        layout.label(text=tr("Current Game Preset: ") + GlobalConfig.logic_name)
+        layout.label(text=tr("Current Workspace: ") + GlobalConfig.get_workspace_name())
 
-        layout.prop(global_properties, "workspace_source_mode")
+        layout.prop(global_properties, "workspace_source_mode", text=tr("Workspace Mode"))
         if global_properties.workspace_source_mode == "SPECIFIC":
             workspace_row = layout.row(align=True)
-            workspace_row.prop(global_properties, "specific_workspace_name", text="Specified Workspace")
+            workspace_row.prop(global_properties, "specific_workspace_name", text=tr("Specified Workspace"))
             workspace_row.operator(SSMT4RefreshWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
         elif global_properties.workspace_source_mode == "CUSTOM":
-            layout.prop(global_properties, "custom_workspace_folder_path", text="Custom Folder")
+            layout.prop(global_properties, "custom_workspace_folder_path", text=tr("Custom Folder"))
 
         # layout.prop(global_properties,"use_mirror_workflow")
         
@@ -77,20 +85,20 @@ class PanelBasicInformation(bpy.types.Panel):
             recalculate_color = obj.get("3DMigoto:RecalculateCOLOR", False)
 
             row = layout.row(align=True)
-            row.label(text="Data Type: " + gametypename)
+            row.label(text=tr("Data Type: ") + gametypename)
             row.operator("ssmt4.fix_drawib_datatype", text="", icon='TOOL_SETTINGS', emboss=False)
             row.operator("ssmt4.fix_submesh_datatype", text="", icon='TOOL_SETTINGS', emboss=False)
-            layout.label(text="Recalculate TANGENT: " + str(recalculate_tangent))
-            layout.label(text="Recalculate COLOR: " + str(recalculate_color))
+            layout.label(text=tr("Recalculate TANGENT: ") + str(recalculate_tangent))
+            layout.label(text=tr("Recalculate COLOR: ") + str(recalculate_color))
 
         # Manually import an SSMT model
-        layout.operator(SSMT4ImportRaw.bl_idname,icon='IMPORT')
+        layout.operator(SSMT4ImportRaw.bl_idname, text=tr(SSMT4ImportRaw.bl_label), icon='IMPORT')
         # One-click import of the current SSMT workspace contents
-        layout.operator(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_idname,icon='IMPORT')
+        layout.operator(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_idname, text=tr(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_label), icon='IMPORT')
         
         # SSMT blueprint dropdown list
         blueprint_row = layout.row(align=True)
-        blueprint_row.prop(global_properties, "selected_blueprint_name", text="SSMT Blueprint")
+        blueprint_row.prop(global_properties, "selected_blueprint_name", text=tr("SSMT Blueprint"))
 
         rename_blueprint_operator = blueprint_row.operator(
             "theherta3.rename_persistent_blueprint",
@@ -115,27 +123,27 @@ class PanelBasicInformation(bpy.types.Panel):
 
         # Quick Generate Mod button, to avoid opening the blueprint editor for it
         quick_generate_row = layout.row()
-        quick_generate_row.operator(SSMTGenerateSelectedBlueprintMod.bl_idname, text="Generate Mod", icon='EXPORT')
+        quick_generate_row.operator(SSMTGenerateSelectedBlueprintMod.bl_idname, text=tr("Generate Mod"), icon='EXPORT')
 
 
 
         if GlobalConfig.logic_name == LogicName.WWMI:
-            layout.prop(global_properties,"import_merged_vgmap")
+            layout.prop(global_properties,"import_merged_vgmap", text=tr("Vertex Group Mode"))
 
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
-            layout.prop(global_properties,"import_skip_empty_vertex_groups")
+            layout.prop(global_properties,"import_skip_empty_vertex_groups", text=tr("Skip Empty Vertex Groups"))
 
         if GlobalConfig.logic_name == LogicName.GIMI or str(GlobalConfig.gamename).strip().casefold() in {
             "gimi", "genshinimpact",
         }:
-            layout.prop(global_properties, "align_face_on_import")
-            layout.prop(global_properties, "gimi_high_fidelity_rendering")
+            layout.prop(global_properties, "align_face_on_import", text=tr("Align Face"))
+            layout.prop(global_properties, "gimi_high_fidelity_rendering", text=tr("Genshin High-Fidelity Rendering"))
             if global_properties.gimi_high_fidelity_rendering:
                 outline = layout.column(align=True)
-                outline.prop(global_properties, "gimi_body_outline_enabled")
-                outline.prop(global_properties, "gimi_body_outline_width_ratio")
+                outline.prop(global_properties, "gimi_body_outline_enabled", text=tr("GIMI Body Black Outline"))
+                outline.prop(global_properties, "gimi_body_outline_width_ratio", text=tr("GIMI Outline Relative Width"))
                 row = outline.row(align=True)
-                row.operator("ssmt.build_gimi_body_outline", icon='MOD_SOLIDIFY')
+                row.operator("ssmt.build_gimi_body_outline", text=tr("Build GIMI Body Outline"), icon='MOD_SOLIDIFY')
                 row.operator("ssmt.remove_gimi_body_outline", text="", icon='X')
 
 

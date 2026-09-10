@@ -17,12 +17,13 @@ from typing import Dict, List, Set, cast
 import bpy
 from bpy.props import IntProperty
 
+from ....i18n.i18n import I18nOperator, tr
 from ...globs import CombineListTypes, is_blender_3_plus
 from ...type_annotations import CombineListData, Scene
 from ...utils.materials import get_materials
 
 
-class MaterialListRefreshOperator(bpy.types.Operator):
+class MaterialListRefreshOperator(I18nOperator):
     """Updates the material list for combining.
 
     Scans visible mesh objects with UV maps and materials, rebuilding the combine
@@ -231,7 +232,7 @@ class MaterialListRefreshOperator(bpy.types.Operator):
         entry.ob_id = obj_id
 
 
-class MaterialListToggleOperator(bpy.types.Operator):
+class MaterialListToggleOperator(I18nOperator):
     """Toggle selection states in the material list.
 
     Provides functionality to toggle the selection state of materials and objects
@@ -243,7 +244,7 @@ class MaterialListToggleOperator(bpy.types.Operator):
     bl_label = "Toggle Selection"
     bl_description = "Toggle the selection state of materials/objects to control whether they are combined"
 
-    list_id: IntProperty(name="List Index", default=0)
+    list_id: IntProperty(name=tr("List Index"), default=0)
 
     def execute(self, context: bpy.types.Context) -> Set[str]:
         """Main execution method for toggle operation.
@@ -322,7 +323,7 @@ class MaterialListToggleOperator(bpy.types.Operator):
         target_item.used = not target_item.used
 
 
-class SelectAllMaterials(bpy.types.Operator):
+class SelectAllMaterials(I18nOperator):
     """Select all materials in the combine list.
 
     Operator that marks all objects and materials as selected for the combining
@@ -351,7 +352,7 @@ class SelectAllMaterials(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class SelectNoneMaterials(bpy.types.Operator):
+class SelectNoneMaterials(I18nOperator):
     """Deselect all materials in the combine list.
 
     Operator that marks all objects and materials as deselected, excluding them

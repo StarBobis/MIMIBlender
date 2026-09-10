@@ -12,6 +12,7 @@ import bpy
 import numpy as np
 
 from .. import globs
+from ...i18n.i18n import tr
 from ..type_annotations import Diffuse, MatDict, MatDictItem
 from .images import get_image, get_image_pack_issue, get_packed_file
 from .textures import get_texture
@@ -423,17 +424,17 @@ def get_alpha_texture_issue(
 
     image_info = _get_alpha_texture_image_info(mat)
     if not image_info:
-        return "The Alpha input is connected, but no readable Image Texture was found."
+        return tr("The Alpha input is connected, but no readable Image Texture was found.")
 
     image_node, _output_name = image_info
     pack_issue = get_image_pack_issue(image_node.image)
     if pack_issue:
-        return "Alpha texture '{}' cannot be packed: {}".format(
-            image_node.image.name, pack_issue
+        return tr("Alpha texture '{name}' cannot be packed: {issue}").format(
+            name=image_node.image.name, issue=pack_issue
         )
 
     if validate_pack and not get_packed_file(image_node.image):
-        return "Alpha texture '{}' packing failed.".format(image_node.image.name)
+        return tr("Alpha texture '{name}' packing failed.").format(name=image_node.image.name)
 
     return None
 
