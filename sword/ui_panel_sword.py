@@ -48,12 +48,12 @@ def _get_sword_reversed_workspace_items(self, context):
         return sword_reversed_workspace_items_cache
 
 # Define the image list item
-class Sword_ImportTexture_ImageListItem(PropertyGroup):
+class MIMISword_ImportTexture_ImageListItem(PropertyGroup):
     name: StringProperty(name=tr("Image Name")) # type: ignore
     filepath: StringProperty(name=tr("File Path")) # type: ignore
 
 # Custom UI list showing images and thumbnails
-class SWORD_UL_FastImportTextureList(UIList):
+class MIMISWORD_UL_FastImportTextureList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         pcoll = preview_collections["main"]
         
@@ -75,7 +75,7 @@ class SWORD_UL_FastImportTextureList(UIList):
 
 # Folder selection operator
 class Sword_ImportTexture_WM_OT_SelectImageFolder(I18nOperator, ImportHelper):
-    bl_idname = "wm.select_image_folder"
+    bl_idname = "mimi.select_image_folder"
     bl_label = "Select Preview Texture Folder"
     
     directory: StringProperty(subtype='DIR_PATH') # type: ignore
@@ -84,7 +84,7 @@ class Sword_ImportTexture_WM_OT_SelectImageFolder(I18nOperator, ImportHelper):
 
     def execute(self, context):
         # Clear the previous list
-        context.scene.sword_image_list.clear()
+        context.scene.mimi_sword_image_list.clear()
         
         # Clear the preview collection
         pcoll = preview_collections["main"]
@@ -99,7 +99,7 @@ class Sword_ImportTexture_WM_OT_SelectImageFolder(I18nOperator, ImportHelper):
             if filename.lower().endswith(image_extensions):
                 full_path = os.path.join(self.directory, filename)
                 if os.path.isfile(full_path):
-                    item = context.scene.sword_image_list.add()
+                    item = context.scene.mimi_sword_image_list.add()
                     item.name = filename
                     item.filepath = full_path
                     
@@ -116,7 +116,7 @@ class Sword_ImportTexture_WM_OT_SelectImageFolder(I18nOperator, ImportHelper):
 
 def reload_textures_from_folder(picture_folder_path:str):
     # Clear the previous list and previews
-    bpy.context.scene.sword_image_list.clear()
+    bpy.context.scene.mimi_sword_image_list.clear()
     pcoll = preview_collections["main"]
     pcoll.clear()
     
@@ -129,7 +129,7 @@ def reload_textures_from_folder(picture_folder_path:str):
         if filename.lower().endswith(image_extensions):
             full_path = os.path.join(picture_folder_path, filename)
             if os.path.isfile(full_path):
-                item = bpy.context.scene.sword_image_list.add()
+                item = bpy.context.scene.mimi_sword_image_list.add()
                 item.name = filename
                 item.filepath = full_path
                 
@@ -143,7 +143,7 @@ def reload_textures_from_folder(picture_folder_path:str):
 
 # Auto-detect and set the DedupedTextures_jpg folder
 class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
-    bl_idname = "wm.auto_detect_texture_folder"
+    bl_idname = "mimi.auto_detect_texture_folder_wm"
     bl_label = "Auto Detect Extracted Texture Folder"
     
     def execute(self, context):
@@ -174,7 +174,7 @@ class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
             return {'CANCELLED'}
         
         # Clear the previous list and previews
-        context.scene.sword_image_list.clear()
+        context.scene.mimi_sword_image_list.clear()
         pcoll = preview_collections["main"]
         pcoll.clear()
         
@@ -187,7 +187,7 @@ class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
             if filename.lower().endswith(image_extensions):
                 full_path = os.path.join(deduped_textures_jpg_folder_path, filename)
                 if os.path.isfile(full_path):
-                    item = context.scene.sword_image_list.add()
+                    item = context.scene.mimi_sword_image_list.add()
                     item.name = filename
                     item.filepath = full_path
                     
@@ -205,19 +205,19 @@ class Sword_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
 
 # Apply the image to the materials of the selected objects
 class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
-    bl_idname = "wm.apply_image_to_material"
+    bl_idname = "mimi.apply_image_to_material_wm"
     bl_label = "Apply Texture to Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         scene = context.scene
-        selected_index = scene.sword_image_list_index
+        selected_index = scene.mimi_sword_image_list_index
         
-        if selected_index < 0 or selected_index >= len(scene.sword_image_list):
+        if selected_index < 0 or selected_index >= len(scene.mimi_sword_image_list):
             self.report({'ERROR'}, tr("No image selected in the list."))
             return {'CANCELLED'}
         
-        selected_image = scene.sword_image_list[selected_index]
+        selected_image = scene.mimi_sword_image_list[selected_index]
         image_path = selected_image.filepath
         
         # Get or create the image data block
@@ -258,16 +258,16 @@ class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
 
 
 class SwordImportAllReversed(I18nOperator):
-    bl_idname = "ssmt.import_all_reverse"
+    bl_idname = "mimi.import_all_reverse"
     bl_label = "Import All Reversed Models"
     bl_description = "Import all models generated by the last one-click reverse pass into Blender, then you can manually filter and delete incorrect data types for a smoother workflow. Supports both the ib_vb_fmt and ssmt_fmt reverse output formats."
     bl_options = {'REGISTER', 'UNDO'}
 
     def _resolve_reverse_output_folder_path(self, context):
         # Reversed paths come from MMT settings only, no SSMT config needed.
-        source_mode = context.scene.sword_reverse_source_mode
+        source_mode = context.scene.mimi_sword_reverse_source_mode
         if source_mode == "SPECIFIC":
-            selected_workspace_name = context.scene.sword_specific_reversed_workspace_name
+            selected_workspace_name = context.scene.mimi_sword_specific_reversed_workspace_name
             if not selected_workspace_name:
                 self.report({"ERROR"}, tr("No specific workspace selected, please select a subfolder under Reversed first"))
                 return ""
@@ -279,7 +279,7 @@ class SwordImportAllReversed(I18nOperator):
             return os.path.join(reversed_root, selected_workspace_name)
 
         if source_mode == "CUSTOM":
-            custom_folder_path = str(context.scene.sword_custom_reverse_output_folder_path).strip()
+            custom_folder_path = str(context.scene.mimi_sword_custom_reverse_output_folder_path).strip()
             if not custom_folder_path:
                 self.report({"ERROR"}, tr("Custom folder is empty, please select a folder first"))
                 return ""
@@ -414,7 +414,7 @@ class SwordImportAllReversed(I18nOperator):
 
 
 class SWORD4RefreshReversedWorkspaceList(I18nOperator):
-    bl_idname = "ssmt4.sword_refresh_reversed_workspace_list"
+    bl_idname = "mimi.sword_refresh_reversed_workspace_list"
     bl_label = "Refresh Reversed Workspace List"
     bl_description = "Refresh the subfolder list under the Reversed folder of the current MMT / MIMITools cache folder"
 
@@ -430,9 +430,9 @@ class SWORD4RefreshReversedWorkspaceList(I18nOperator):
 
 # Panel UI layout
 @translatable
-class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
+class MIMISword_ImageMaterialPanel(Panel):
     bl_label = "Mod Reverse Panel"
-    bl_idname = "VIEW3D_PT_image_material_panel"
+    bl_idname = "mimi.PT_image_material_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -442,35 +442,35 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         layout = self.layout
         scene = context.scene
 
-        layout.prop(scene, "sword_reverse_source_mode", text=tr("Import Mode"))
-        if scene.sword_reverse_source_mode == "SPECIFIC":
+        layout.prop(scene, "mimi_sword_reverse_source_mode", text=tr("Import Mode"))
+        if scene.mimi_sword_reverse_source_mode == "SPECIFIC":
             reversed_workspace_row = layout.row(align=True)
-            reversed_workspace_row.prop(scene, "sword_specific_reversed_workspace_name", text=tr("Specified Workspace"))
+            reversed_workspace_row.prop(scene, "mimi_sword_specific_reversed_workspace_name", text=tr("Specified Workspace"))
             reversed_workspace_row.operator(SWORD4RefreshReversedWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
-        elif scene.sword_reverse_source_mode == "CUSTOM":
-            layout.prop(scene, "sword_custom_reverse_output_folder_path", text=tr("Custom Folder"))
+        elif scene.mimi_sword_reverse_source_mode == "CUSTOM":
+            layout.prop(scene, "mimi_sword_custom_reverse_output_folder_path", text=tr("Custom Folder"))
 
         # One-click import of the reverse result button
-        layout.operator("ssmt.import_all_reverse", text=tr("Import All Reversed Models"), icon='IMPORT')
+        layout.operator("mimi.import_all_reverse", text=tr("Import All Reversed Models"), icon='IMPORT')
 
         # Folder selection button
         row = layout.row()
-        row.operator("wm.select_image_folder", text=tr("Select Preview Texture Folder"), icon='FILE_FOLDER')
+        row.operator("mimi.select_image_folder", text=tr("Select Preview Texture Folder"), icon='FILE_FOLDER')
         
         # Show the image count
-        if scene.sword_image_list:
-            layout.label(text=tr("Found {count} image(s)").format(count=len(scene.sword_image_list)))
+        if scene.mimi_sword_image_list:
+            layout.label(text=tr("Found {count} image(s)").format(count=len(scene.mimi_sword_image_list)))
         
         # Show the image list
-        if scene.sword_image_list:
+        if scene.mimi_sword_image_list:
             row = layout.row()
             row.template_list(
-                "SWORD_UL_FastImportTextureList",  # Correct class name
+                "MIMISWORD_UL_FastImportTextureList",  # Correct class name
                 "Image List", 
                 scene, 
-                "sword_image_list", 
+                "mimi_sword_image_list", 
                 scene, 
-                "sword_image_list_index",
+                "mimi_sword_image_list_index",
                 rows=6
             )
         else:
@@ -478,11 +478,11 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         
         # Apply material button
         row = layout.row()
-        row.operator("wm.apply_image_to_material", text=tr("Apply Texture to Selected Objects"), icon='MATERIAL_DATA')
+        row.operator("mimi.apply_image_to_material_wm", text=tr("Apply Texture to Selected Objects"), icon='MATERIAL_DATA')
         
         # Show the preview of the currently selected image
-        if scene.sword_image_list and scene.sword_image_list_index >= 0 and scene.sword_image_list_index < len(scene.sword_image_list):
-            selected_item = scene.sword_image_list[scene.sword_image_list_index]
+        if scene.mimi_sword_image_list and scene.mimi_sword_image_list_index >= 0 and scene.mimi_sword_image_list_index < len(scene.mimi_sword_image_list):
+            selected_item = scene.mimi_sword_image_list[scene.mimi_sword_image_list_index]
             pcoll = preview_collections["main"]
             
             if selected_item.name in pcoll:
@@ -492,9 +492,9 @@ class Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
 
 
 @translatable
-class Sword_SplitModel_By_DrawIndexed_Panel(Panel):
+class MIMISword_SplitModel_Panel(Panel):
     bl_label = "Split Model by DrawIndexed After Manual Reverse"
-    bl_idname = "VIEW3D_PT_Sword_SplitModel_By_DrawIndexed_Panel"
+    bl_idname = "mimi.PT_Sword_SplitModel_By_DrawIndexed_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -504,12 +504,12 @@ class Sword_SplitModel_By_DrawIndexed_Panel(Panel):
         layout = self.layout
         scene = context.scene
 
-        layout.prop(scene, "submesh_start", text=tr("Start Index"))
-        layout.prop(scene, "submesh_count", text=tr("Index Count"))
+        layout.prop(scene, "mimi_submesh_start", text=tr("Start Index"))
+        layout.prop(scene, "mimi_submesh_count", text=tr("Index Count"))
         
-        op = layout.operator("mesh.extract_submesh", text=tr("Split Model by DrawIndexed Values"))
-        op.start_index = scene.submesh_start
-        op.index_count = scene.submesh_count
+        op = layout.operator("mimi.extract_submesh", text=tr("Split Model by DrawIndexed Values"))
+        op.start_index = scene.mimi_submesh_start
+        op.index_count = scene.mimi_submesh_count
 
 def _get_sword_reverse_source_mode_items(self, context):
     # Dynamic items callback so the dropdown entries follow the UI language.
@@ -525,30 +525,30 @@ def register():
     pcoll = bpy.utils.previews.new()
     preview_collections["main"] = pcoll
 
-    bpy.utils.register_class(Sword_ImportTexture_ImageListItem)
-    bpy.utils.register_class(SWORD_UL_FastImportTextureList)
-    bpy.utils.register_class(Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel)
+    bpy.utils.register_class(MIMISword_ImportTexture_ImageListItem)
+    bpy.utils.register_class(MIMISWORD_UL_FastImportTextureList)
+    bpy.utils.register_class(MIMISword_ImageMaterialPanel)
     bpy.utils.register_class(Sword_ImportTexture_WM_OT_ApplyImageToMaterial)
     bpy.utils.register_class(Sword_ImportTexture_WM_OT_SelectImageFolder)
     bpy.utils.register_class(SwordImportAllReversed)
     bpy.utils.register_class(SWORD4RefreshReversedWorkspaceList)
-    bpy.utils.register_class(Sword_SplitModel_By_DrawIndexed_Panel)
+    bpy.utils.register_class(MIMISword_SplitModel_Panel)
 
-    bpy.types.Scene.sword_image_list = CollectionProperty(type=Sword_ImportTexture_ImageListItem)
-    bpy.types.Scene.sword_image_list_index = IntProperty(default=0)
-    bpy.types.Scene.sword_reverse_source_mode = EnumProperty(
+    bpy.types.Scene.mimi_sword_image_list = CollectionProperty(type=MIMISword_ImportTexture_ImageListItem)
+    bpy.types.Scene.mimi_sword_image_list_index = IntProperty(default=0)
+    bpy.types.Scene.mimi_sword_reverse_source_mode = EnumProperty(
         name=tr("Import Mode"),
         description=tr("Controls the folder source used when importing reverse results in one click"),
         items=_get_sword_reverse_source_mode_items,
         # Dynamic items only allow integer (0-based) defaults; the first item
         # ("LAST") is the intended default, so the argument is omitted.
     )
-    bpy.types.Scene.sword_specific_reversed_workspace_name = EnumProperty(
+    bpy.types.Scene.mimi_sword_specific_reversed_workspace_name = EnumProperty(
         name=tr("Specified Workspace"),
         description=tr("Subfolders under Reversed in the current MMT / MIMITools cache folder"),
         items=_get_sword_reversed_workspace_items,
     )
-    bpy.types.Scene.sword_custom_reverse_output_folder_path = StringProperty(
+    bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path = StringProperty(
         name=tr("Custom Folder"),
         description=tr("Manually specify the folder used for the one-click import of reverse results"),
         default="",
@@ -557,11 +557,11 @@ def register():
 
 def unregister():
     try:
-        del bpy.types.Scene.sword_image_list
-        del bpy.types.Scene.sword_image_list_index
-        del bpy.types.Scene.sword_reverse_source_mode
-        del bpy.types.Scene.sword_specific_reversed_workspace_name
-        del bpy.types.Scene.sword_custom_reverse_output_folder_path
+        del bpy.types.Scene.mimi_sword_image_list
+        del bpy.types.Scene.mimi_sword_image_list_index
+        del bpy.types.Scene.mimi_sword_reverse_source_mode
+        del bpy.types.Scene.mimi_sword_specific_reversed_workspace_name
+        del bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path
     except Exception:
         pass
 
@@ -573,12 +573,12 @@ def unregister():
             pass
     preview_collections.clear()
 
-    bpy.utils.unregister_class(Sword_SplitModel_By_DrawIndexed_Panel)
+    bpy.utils.unregister_class(MIMISword_SplitModel_Panel)
     bpy.utils.unregister_class(SwordImportAllReversed)
     bpy.utils.unregister_class(Sword_ImportTexture_WM_OT_SelectImageFolder)
     bpy.utils.unregister_class(Sword_ImportTexture_WM_OT_ApplyImageToMaterial)
-    bpy.utils.unregister_class(Sword_ImportTexture_VIEW3D_PT_ImageMaterialPanel)
+    bpy.utils.unregister_class(MIMISword_ImageMaterialPanel)
     bpy.utils.unregister_class(SWORD4RefreshReversedWorkspaceList)
-    bpy.utils.unregister_class(SWORD_UL_FastImportTextureList)
-    bpy.utils.unregister_class(Sword_ImportTexture_ImageListItem)
+    bpy.utils.unregister_class(MIMISWORD_UL_FastImportTextureList)
+    bpy.utils.unregister_class(MIMISword_ImportTexture_ImageListItem)
                 

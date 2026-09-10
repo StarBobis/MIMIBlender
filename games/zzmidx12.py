@@ -2,7 +2,7 @@ import math
 import os
 
 from ..common.global_config import GlobalConfig
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.global_config import GlobalConfig
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
@@ -127,8 +127,8 @@ class ExportZZMIDX12:
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
             texture_markup_info_list = drawib_model.get_submesh_texture_markup_info_list(submesh_model)
-            if not GlobalProperties.forbid_auto_texture_ini() and texture_markup_info_list:
-                slot_fix_enabled = GlobalProperties.zzz_use_slot_fix()
+            if not MIMIGlobalProperties.forbid_auto_texture_ini() and texture_markup_info_list:
+                slot_fix_enabled = MIMIGlobalProperties.zzz_use_slot_fix()
                 uses_slot_fix = False
 
                 for texture_markup_info in texture_markup_info_list:
@@ -197,7 +197,7 @@ class ExportZZMIDX12:
         ini_builder.append_section(resource_vb_section)
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             return
 
         resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)

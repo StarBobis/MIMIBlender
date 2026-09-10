@@ -1,4 +1,4 @@
-"""Custom node-tree grouping for ``SSMTBlueprintTreeType``.
+"""Custom node-tree grouping for ``MIMIBlueprintTreeType``.
 
 The built-in node grouping operators intentionally reject custom trees.  This
 module keeps the transformation data-oriented so it is usable from tests and
@@ -14,9 +14,9 @@ from dataclasses import dataclass
 import bpy
 
 from ..i18n.i18n import I18nOperator, tr, translatable
-from .blueprint_node_base import SSMTNodeBase
+from .blueprint_node_base import MIMINodeBase
 
-TREE_IDNAME = "SSMTBlueprintTreeType"
+TREE_IDNAME = "MIMIBlueprintTreeType"
 GROUP_NODE_IDNAME = "SSMTBlueprintGroupNode"
 GROUP_INPUT_IDNAME = "NodeGroupInput"
 GROUP_OUTPUT_IDNAME = "NodeGroupOutput"
@@ -520,7 +520,7 @@ def ungroup_node(parent_tree, group_node):
 
 
 @translatable
-class SSMTBlueprintGroupNode(SSMTNodeBase):
+class SSMTBlueprintGroupNode(MIMINodeBase):
     bl_idname = GROUP_NODE_IDNAME
     bl_label = "Group"
     bl_icon = "NODETREE"
@@ -552,14 +552,14 @@ class SSMTBlueprintGroupNode(SSMTNodeBase):
 
     def draw_buttons(self, context, layout):
         row = layout.row(align=True)
-        op = row.operator("ssmt.group_enter", text="", icon="NODETREE")
+        op = row.operator("mimi.group_enter", text="", icon="NODETREE")
         op.node_name = self.name
-        op = row.operator("ssmt.ungroup", text="", icon="UNLINKED")
+        op = row.operator("mimi.ungroup", text="", icon="UNLINKED")
         op.node_name = self.name
 
 
 class SSMT_OT_MakeGroup(I18nOperator):
-    bl_idname = "ssmt.make_group"
+    bl_idname = "mimi.make_group"
     bl_label = "Make Group"
     bl_options = {"REGISTER", "UNDO"}
     # The default value stays English because it becomes the node group's name (data).
@@ -583,7 +583,7 @@ class SSMT_OT_MakeGroup(I18nOperator):
 
 
 class SSMT_OT_Ungroup(I18nOperator):
-    bl_idname = "ssmt.ungroup"
+    bl_idname = "mimi.ungroup"
     bl_label = "Ungroup"
     bl_options = {"REGISTER", "UNDO"}
     node_name: bpy.props.StringProperty(default="")
@@ -606,7 +606,7 @@ class SSMT_OT_Ungroup(I18nOperator):
 
 
 class SSMT_OT_GroupEnter(I18nOperator):
-    bl_idname = "ssmt.group_enter"
+    bl_idname = "mimi.group_enter"
     bl_label = "Enter Group"
     bl_options = {"REGISTER", "UNDO"}
     node_name: bpy.props.StringProperty(default="")
@@ -633,7 +633,7 @@ class SSMT_OT_GroupEnter(I18nOperator):
 
 
 class SSMT_OT_GroupExit(I18nOperator):
-    bl_idname = "ssmt.group_exit"
+    bl_idname = "mimi.group_exit"
     bl_label = "Exit Group"
     bl_options = {"REGISTER", "UNDO"}
 
@@ -651,7 +651,7 @@ class SSMT_OT_GroupExit(I18nOperator):
 
 class SSMT_OT_GroupTab(I18nOperator):
     """Navigate SSMT groups with context-sensitive Tab behavior."""
-    bl_idname = "ssmt.group_tab"
+    bl_idname = "mimi.group_tab"
     bl_label = "Toggle Group Navigation"
 
     @classmethod

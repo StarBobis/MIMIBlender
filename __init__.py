@@ -7,7 +7,7 @@ MIMIBlender - Blender add-on for MIMITools (3Dmigoto modding).
 # saved language while its classes are being registered.
 from .i18n import i18n
 
-from .common import global_properties
+from .common import mimi_global_properties
 from .common import gimi_body_outline
 
 
@@ -62,7 +62,7 @@ def _register_steps():
     yield i18n.register
 
     # 1. Configs
-    yield global_properties.register
+    yield mimi_global_properties.register
     yield gimi_body_outline.register
 
     # 2. UI Panels & Logic
@@ -112,7 +112,7 @@ def unregister():
         ui_panel_model.unregister,
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
-        global_properties.unregister,
+        mimi_global_properties.unregister,
         # i18n unregisters last so the language preference outlives every UI class.
         i18n.unregister,
     ]

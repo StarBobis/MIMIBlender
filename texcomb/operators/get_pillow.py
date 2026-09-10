@@ -7,8 +7,8 @@ addon-local approach works without administrator rights and without
 modifying Blender's installation.
 
 Usage example:
-    bpy.ops.smc.get_pillow()
-    bpy.ops.smc.check_pillow()
+    bpy.ops.mimi.get_pillow()
+    bpy.ops.mimi.check_pillow()
 """
 
 import importlib.util
@@ -46,7 +46,7 @@ class InstallPIL(I18nOperator):
     needed.
     """
 
-    bl_idname = "smc.get_pillow"
+    bl_idname = "mimi.get_pillow"
     bl_label = "Install PIL"
     bl_description = "Click to install the Pillow library (installed into the addon's own directory, no administrator rights required)."
 
@@ -180,7 +180,7 @@ class CheckPillow(I18nOperator):
     to refresh the UI without restarting Blender.
     """
 
-    bl_idname = "smc.check_pillow"
+    bl_idname = "mimi.check_pillow"
     bl_label = "Check Pillow"
     bl_description = "Re-check whether the Pillow library is installed; refreshes the status without a restart."
 

@@ -17,7 +17,7 @@ class BlueprintExportHelper:
     def _is_valid_blueprint_tree(tree):
         return (
             tree is not None
-            and getattr(tree, "bl_idname", "") == 'SSMTBlueprintTreeType'
+            and getattr(tree, "bl_idname", "") == 'MIMIBlueprintTreeType'
             and getattr(tree, "users", 0) > 0
         )
 
@@ -106,7 +106,7 @@ class BlueprintExportHelper:
                 for space in area.spaces:
                     if space.type != 'NODE_EDITOR':
                         continue
-                    if getattr(space, "tree_type", '') != 'SSMTBlueprintTreeType':
+                    if getattr(space, "tree_type", '') != 'MIMIBlueprintTreeType':
                         continue
                     if getattr(space, "node_tree", None) != tree:
                         space.node_tree = tree
@@ -145,7 +145,7 @@ class BlueprintExportHelper:
     @staticmethod
     def _bind_workspace_tree_to_space(space):
         """Bind the workspace blueprint of the same name when an area has just switched to the SSMT tree type."""
-        if getattr(space, "tree_type", "") != 'SSMTBlueprintTreeType':
+        if getattr(space, "tree_type", "") != 'MIMIBlueprintTreeType':
             return None
         workspace_name = str(GlobalConfig.get_workspace_name() or "").strip()
         if not workspace_name:
@@ -174,8 +174,8 @@ class BlueprintExportHelper:
                     previous_tree_type = BlueprintExportHelper._node_editor_tree_type_by_space.get(space_id)
                     current_tree_type_by_space[space_id] = current_tree_type
                     if (
-                        current_tree_type == 'SSMTBlueprintTreeType'
-                        and previous_tree_type != 'SSMTBlueprintTreeType'
+                        current_tree_type == 'MIMIBlueprintTreeType'
+                        and previous_tree_type != 'MIMIBlueprintTreeType'
                         and getattr(space, "node_tree", None) is None
                     ):
                         BlueprintExportHelper._bind_workspace_tree_to_space(space)
@@ -284,7 +284,7 @@ class BlueprintExportHelper:
     def find_node_in_all_blueprints(node_name):
         """Find the node with the given name in all blueprints"""
         for node_group in bpy.data.node_groups:
-            if node_group.bl_idname == 'SSMTBlueprintTreeType':
+            if node_group.bl_idname == 'MIMIBlueprintTreeType':
                 node = node_group.nodes.get(node_name)
                 if node:
                     return node
@@ -331,7 +331,7 @@ class BlueprintExportHelper:
         if output_node is not None and getattr(output_node, "id_data", None) is not tree:
             output_node = None
         for node in tree.nodes:
-            if output_node is None and node.bl_idname == 'SSMTNode_Result_Output':
+            if output_node is None and node.bl_idname == 'MIMINode_Result_Output':
                 output_node = node
                 break
         if not output_node or not getattr(output_node, "enable_shapekey", False):

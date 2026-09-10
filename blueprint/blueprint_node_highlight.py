@@ -3,8 +3,8 @@
 import bpy
 
 
-TREE_IDNAME = "SSMTBlueprintTreeType"
-OBJECT_INFO_IDNAME = "SSMTNode_Object_Info"
+TREE_IDNAME = "MIMIBlueprintTreeType"
+OBJECT_INFO_IDNAME = "MIMINode_Object_Info"
 OBJECT_PERSISTENT_ID_KEY = "_ssmt_object_uuid"
 
 _COLORS = {

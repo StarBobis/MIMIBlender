@@ -11,7 +11,7 @@ import textwrap
 from ....i18n.i18n import tr
 from ... import globs
 from ...type_annotations import Scene
-from ...ui.main_panel import MaterialCombinerPanel
+from ...ui.main_panel import MIMIMaterialCombinerPanel
 
 
 def draw_ui(context: bpy.types.Context, m_col: bpy.types.UILayout) -> None:
@@ -43,10 +43,10 @@ def draw_ui(context: bpy.types.Context, m_col: bpy.types.UILayout) -> None:
 
             row = box.row(align=True)
             row.scale_y = 1.2
-            row.operator("smc.get_pillow", text=tr("Retry Install"), icon="FILE_REFRESH")
-            row.operator("smc.check_pillow", text=tr("Check Install"), icon="FILE_TICK")
+            row.operator("mimi.get_pillow", text=tr("Retry Install"), icon="FILE_REFRESH")
+            row.operator("mimi.check_pillow", text=tr("Check Install"), icon="FILE_TICK")
     else:
-        MaterialCombinerPanel.draw_pillow_installer(context, m_col)
+        MIMIMaterialCombinerPanel.draw_pillow_installer(context, m_col)
 
 
 def _materials_list(scn: Scene, m_col: bpy.types.UILayout) -> None:
@@ -60,29 +60,29 @@ def _materials_list(scn: Scene, m_col: bpy.types.UILayout) -> None:
         m_col: UILayout to draw the material list in.
     """
 
-    if scn.smc_ob_data:
+    if scn.mimi_smc_ob_data:
         m_col.template_list(
-            "SMC_UL_Combine_List",
+            "MIMISMC_UL_Combine_List",
             "combine_list",
             scn,
-            "smc_ob_data",
+            "mimi_smc_ob_data",
             scn,
-            "smc_ob_data_id",
+            "mimi_smc_ob_data_id",
             rows=12,
             type="DEFAULT",
         )
     col = m_col.column(align=True)
     col.scale_y = 1.2
     col.operator(
-        "smc.refresh_ob_data",
+        "mimi.refresh_ob_data",
         text=tr("Refresh Material List")
-        if scn.smc_ob_data
+        if scn.mimi_smc_ob_data
         else tr("Generate Material List"),
     )
     col = m_col.column()
     col.scale_y = 1.5
     col.operator(
-        "smc.combiner", text=tr("Save Atlas to...")
+        "mimi.combiner", text=tr("Save Atlas to...")
     ).cats = True
     col.separator()
     col = m_col.column()

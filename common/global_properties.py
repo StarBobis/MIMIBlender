@@ -60,7 +60,7 @@ def _get_import_merged_vgmap_items(self, context):
     ]
 
 
-class GlobalProperties(bpy.types.PropertyGroup):
+class MIMIGlobalProperties(bpy.types.PropertyGroup):
     selected_blueprint_name: bpy.props.EnumProperty(
         name=tr("Current Blueprint"),
         description=tr("Select the blueprint to open or to quickly generate a Mod"),
@@ -197,7 +197,7 @@ class GlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def _instance(cls):
-        return bpy.context.scene.global_properties
+        return bpy.context.scene.mimi_global_properties
 
     @classmethod
     def open_mod_folder_after_generate_mod(cls):
@@ -301,17 +301,17 @@ class GlobalProperties(bpy.types.PropertyGroup):
 
 def register():
     try:
-        bpy.utils.register_class(GlobalProperties)
+        bpy.utils.register_class(MIMIGlobalProperties)
     except ValueError:
         pass
-    if not hasattr(bpy.types.Scene, "global_properties"):
-        bpy.types.Scene.global_properties = bpy.props.PointerProperty(type=GlobalProperties)
+    if not hasattr(bpy.types.Scene, "mimi_global_properties"):
+        bpy.types.Scene.mimi_global_properties = bpy.props.PointerProperty(type=MIMIGlobalProperties)
 
 
 def unregister():
-    if hasattr(bpy.types.Scene, "global_properties"):
-        del bpy.types.Scene.global_properties
+    if hasattr(bpy.types.Scene, "mimi_global_properties"):
+        del bpy.types.Scene.mimi_global_properties
     try:
-        bpy.utils.unregister_class(GlobalProperties)
+        bpy.utils.unregister_class(MIMIGlobalProperties)
     except (ValueError, RuntimeError):
         pass

@@ -33,7 +33,7 @@ class PropertyMenu(I18nOperator):
     """
 
     bl_label = "Material Settings"
-    bl_idname = "smc.material_properties"
+    bl_idname = "mimi.material_properties"
     bl_description = "Displays the settings for this material"
     bl_options = {"UNDO", "INTERNAL"}
 
@@ -49,7 +49,7 @@ class PropertyMenu(I18nOperator):
         Returns:
             Modal state set indicating dialog should be displayed.
         """
-        context.scene.smc_list_id = self.list_id
+        context.scene.mimi_smc_list_id = self.list_id
         dpi = self._get_system_dpi(context)
         return context.window_manager.invoke_props_dialog(
             self, width=dpi * DIALOG_WIDTH_FACTOR
@@ -84,7 +84,7 @@ class PropertyMenu(I18nOperator):
             context: Current Blender context.
         """
         scn = context.scene
-        item = scn.smc_ob_data[scn.smc_list_id]
+        item = scn.mimi_smc_ob_data[scn.mimi_smc_list_id]
 
         image = self._get_material_image(item.mat)
 
@@ -103,7 +103,7 @@ class PropertyMenu(I18nOperator):
             self._show_size_settings(box_col, item)
         else:
             self._show_size_row(
-                box_col, tr("Solid only"), 0, (scn.smc_diffuse_size,) * 2
+                box_col, tr("Solid only"), 0, (scn.mimi_smc_diffuse_size,) * 2
             )
             self._show_warning(
                 box_col,
@@ -216,10 +216,10 @@ class PropertyMenu(I18nOperator):
             )
             self._show_warning(col, pack_issue)
 
-        if mat.smc_size:
+        if mat.mimi_smc_size:
             limited_size = (
-                min(mat.smc_size_width, image.size[0]),
-                min(mat.smc_size_height, image.size[1]),
+                min(mat.mimi_smc_size_width, image.size[0]),
+                min(mat.mimi_smc_size_height, image.size[1]),
             )
             if limited_size != tuple(image.size):
                 self._show_warning(
@@ -275,8 +275,8 @@ class PropertyMenu(I18nOperator):
         mat = item.mat
 
         if globs.is_blender_legacy:
-            col.prop(mat, "smc_diffuse")
-            if not mat.smc_diffuse:
+            col.prop(mat, "mimi_smc_diffuse")
+            if not mat.mimi_smc_diffuse:
                 return
 
             col.prop(mat, "diffuse_color", text="")
@@ -287,8 +287,8 @@ class PropertyMenu(I18nOperator):
             return
 
         if image:
-            col.prop(mat, "smc_diffuse")
-            if not mat.smc_diffuse:
+            col.prop(mat, "mimi_smc_diffuse")
+            if not mat.mimi_smc_diffuse:
                 return
 
         self._display_shader_color_input(col, mat, shader)
@@ -359,11 +359,11 @@ class PropertyMenu(I18nOperator):
             col: UI column to add the size settings to.
             item: Material item from the combine list.
         """
-        col.prop(item.mat, "smc_size")
-        if item.mat.smc_size:
+        col.prop(item.mat, "mimi_smc_size")
+        if item.mat.mimi_smc_size:
             col = col.column(align=True)
-            col.prop(item.mat, "smc_size_width")
-            col.prop(item.mat, "smc_size_height")
+            col.prop(item.mat, "mimi_smc_size_width")
+            col.prop(item.mat, "mimi_smc_size_height")
 
     @staticmethod
     def _get_system_dpi(context: bpy.types.Context) -> int:

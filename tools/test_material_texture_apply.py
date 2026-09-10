@@ -190,9 +190,9 @@ def test_apply_operator_reuses_original_material():
 
         class _Scene:
             def __init__(self, image_path):
-                self.image_list = [SimpleNamespace(filepath=image_path,
+                self.mimi_image_list = [SimpleNamespace(filepath=image_path,
                                                   name="temp.png")]
-                self.image_list_index = 0
+                self.mimi_image_list_index = 0
 
         fake_context = SimpleNamespace(
             scene=_Scene(image_path),
@@ -243,9 +243,9 @@ def test_apply_operator_creates_material_when_missing():
 
         class _Scene:
             def __init__(self, image_path):
-                self.image_list = [SimpleNamespace(filepath=image_path,
+                self.mimi_image_list = [SimpleNamespace(filepath=image_path,
                                                   name="temp2.png")]
-                self.image_list_index = 0
+                self.mimi_image_list_index = 0
 
         fake_context = SimpleNamespace(
             scene=_Scene(path),

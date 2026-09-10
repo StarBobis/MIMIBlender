@@ -1,11 +1,11 @@
 '''
 Blueprint file drop support:
-- Dropping a .ib/.buf/.txt creates an object info node (SSMTNode_Object_Info) at the drop
+- Dropping a .ib/.buf/.txt creates an object info node (MIMINode_Object_Info) at the drop
   position, parsing submesh_name from the filename when possible (the new DrawIB-Component
   format, old-format long names, and names with a LOD prefix are all handled).
 
 Files dropped from the OS into the Node Editor are handled through bpy.types.FileHandler;
-it only takes effect while the current node tree is SSMTBlueprintTreeType and does not
+it only takes effect while the current node tree is MIMIBlueprintTreeType and does not
 affect other editors.
 '''
 import os
@@ -31,7 +31,7 @@ def is_ssmt_blueprint_context(context) -> bool:
         return False
     space = getattr(context, "space_data", None)
     tree = getattr(space, "node_tree", None) if space else None
-    return bool(tree) and getattr(tree, "bl_idname", "") == 'SSMTBlueprintTreeType'
+    return bool(tree) and getattr(tree, "bl_idname", "") == 'MIMIBlueprintTreeType'
 
 
 def parse_mesh_filename(filepath: str) -> str:
@@ -57,7 +57,7 @@ def parse_mesh_filename(filepath: str) -> str:
 
 class SSMT_OT_BlueprintFileDrop(I18nOperator):
     '''Drop files onto the SSMT Blueprint, creating matching nodes at the release position'''
-    bl_idname = "ssmt.blueprint_file_drop"
+    bl_idname = "mimi.blueprint_file_drop"
     bl_label = "Drop Files onto the SSMT Blueprint"
     bl_options = {'UNDO'}
 
@@ -87,7 +87,7 @@ class SSMT_OT_BlueprintFileDrop(I18nOperator):
         return [self.filepath] if self.filepath else []
 
     def _create_mesh_info_node(self, tree, location, filepath):
-        node = tree.nodes.new(type='SSMTNode_Object_Info')
+        node = tree.nodes.new(type='MIMINode_Object_Info')
         node.location = location
         node.submesh_name = parse_mesh_filename(filepath)
         return node
@@ -95,7 +95,7 @@ class SSMT_OT_BlueprintFileDrop(I18nOperator):
     def invoke(self, context, event):
         space = getattr(context, "space_data", None)
         tree = getattr(space, "node_tree", None) if space else None
-        if tree is None or getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
+        if tree is None or getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
             return {'CANCELLED'}
 
         # FileHandler's poll_drop is restricted to the WINDOW region, so the
@@ -153,18 +153,18 @@ class SSMT_OT_BlueprintFileDrop(I18nOperator):
 classes = [SSMT_OT_BlueprintFileDrop]
 
 @translatable
-class SSMT_FH_BlueprintFileDrop(bpy.types.FileHandler):
+class MIMI_FH_BlueprintFileDrop(bpy.types.FileHandler):
     '''Handle files dropped from the OS into the SSMT Blueprint editor'''
-    bl_idname = "SSMT_FH_BlueprintFileDrop"
+    bl_idname = "MIMI_FH_BlueprintFileDrop"
     bl_label = "Drop Files onto the SSMT Blueprint"
-    bl_import_operator = "ssmt.blueprint_file_drop"
+    bl_import_operator = "mimi.blueprint_file_drop"
     bl_file_extensions = ".ib;.buf;.txt"
 
     @classmethod
     def poll_drop(cls, context):
         return is_ssmt_blueprint_context(context)
 
-classes.append(SSMT_FH_BlueprintFileDrop)
+classes.append(MIMI_FH_BlueprintFileDrop)
 
 
 def register():

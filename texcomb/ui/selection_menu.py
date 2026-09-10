@@ -10,7 +10,7 @@ from ...i18n.i18n import tr, translatable
 
 
 @translatable
-class SMC_MT_SelectionMenu(bpy.types.Menu):
+class MIMISMC_MT_SelectionMenu(bpy.types.Menu):
     """Dropdown menu for material selection actions.
 
     This class implements a Blender menu that allows users to quickly
@@ -18,7 +18,7 @@ class SMC_MT_SelectionMenu(bpy.types.Menu):
     """
 
     bl_label = "Selection Operations"
-    bl_idname = "SMC_MT_SelectionMenu"
+    bl_idname = "MIMISMC_MT_SelectionMenu"
 
     def draw(self, context):
         """Define the contents of the menu.
@@ -27,5 +27,5 @@ class SMC_MT_SelectionMenu(bpy.types.Menu):
             context: The current Blender context.
         """
         layout = self.layout
-        layout.operator("smc.select_all", text=tr("Select All"))
-        layout.operator("smc.select_none", text=tr("Deselect All"))
+        layout.operator("mimi.select_all", text=tr("Select All"))
+        layout.operator("mimi.select_none", text=tr("Deselect All"))

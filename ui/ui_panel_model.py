@@ -56,7 +56,7 @@ def keep_one_triangle_in_mesh_object(obj):
 
 
 class ModelSplitByLoosePart(I18nOperator):
-    bl_idname = "panel_model.split_by_loose_part"
+    bl_idname = "mimi.split_by_loose_part"
     bl_label = "Split Model by UV Loose Parts"
     bl_description = "Similar to Edit mode's Split => Split by Loose Parts, but it splits the model into loose parts and stores them in a new collection."
     bl_options = {'REGISTER', 'UNDO'}
@@ -76,7 +76,7 @@ class ModelSplitByLoosePart(I18nOperator):
 
 
 class ModelSplitByVertexGroup(I18nOperator):
-    bl_idname = "panel_model.split_by_vertex_group"
+    bl_idname = "mimi.split_by_vertex_group"
     bl_label = "Split Model by Shared and Isolated Vertex Groups"
     bl_description = "Splits the model apart by shared vertex groups so small parts on the body can be quickly separated and will not interfere with later weight painting."
     bl_options = {'REGISTER', 'UNDO'}
@@ -162,7 +162,7 @@ class ModelSplitByVertexGroup(I18nOperator):
     
 
 class ModelDeleteLoosePoint(I18nOperator):
-    bl_idname = "panel_model.delete_loose_point"
+    bl_idname = "mimi.delete_loose_point"
     bl_label = "Delete Loose Points"
     bl_description = "Deletes loose points in the model to keep them from affecting subsequent model processing."
     bl_options = {'REGISTER', 'UNDO'}
@@ -179,7 +179,7 @@ class ModelDeleteLoosePoint(I18nOperator):
         return {'FINISHED'}
     
 class ModelClearCustomSplitNormals(I18nOperator):
-    bl_idname = "panel_model.clear_custom_split_normals"
+    bl_idname = "mimi.clear_custom_split_normals"
     bl_label = "Clear Custom Split Normals"
     bl_description = "Models ripped with WWMI sometimes have skewed vertex normals; just run this to fix them."
     bl_options = {'REGISTER', 'UNDO'}
@@ -196,7 +196,7 @@ class ModelClearCustomSplitNormals(I18nOperator):
         return {'FINISHED'}
     
 class KeepOneTriangleInSelectedSubmesh(I18nOperator):
-    bl_idname = "object.keep_one_triangle_in_selected_submesh"
+    bl_idname = "mimi.keep_one_triangle_in_selected_submesh"
     bl_label = "Keep One Triangle Face of the Selected Submesh"
     bl_description = "Keeps one triangle face of each selected Submesh in place; all other vertices and faces are removed"
     bl_options = {'REGISTER', 'UNDO'}
@@ -221,7 +221,7 @@ class KeepOneTriangleInSelectedSubmesh(I18nOperator):
 
 
 class ModelRenameVertexGroupNameWithTheirSuffix(I18nOperator):
-    bl_idname = "panel_model.rename_vertex_group_name_with_their_suffix"
+    bl_idname = "mimi.rename_vertex_group_name_with_their_suffix"
     bl_label = "Rename Vertex Groups with Model Name Prefix"
     bl_description = "Renames the vertex groups of each mesh using the model name as a prefix, so that same-named vertex groups will not conflict once the parts are merged into one object, which makes one-click rigging easier later."
     bl_options = {'REGISTER', 'UNDO'}
@@ -249,7 +249,7 @@ class ModelRenameVertexGroupNameWithTheirSuffix(I18nOperator):
     
 
 class RemoveAllVertexGroupOperator(I18nOperator):
-    bl_idname = "object.remove_all_vertex_group"
+    bl_idname = "mimi.remove_all_vertex_group"
     bl_label = "Remove All Vertex Groups"
     bl_description = "Removes all vertex groups of the currently selected obj"
     bl_options = {'REGISTER', 'UNDO'}
@@ -267,7 +267,7 @@ class RemoveAllVertexGroupOperator(I18nOperator):
 
 
 class RemoveUnusedVertexGroupOperator(I18nOperator):
-    bl_idname = "object.remove_unused_vertex_group"
+    bl_idname = "mimi.remove_unused_vertex_group"
     bl_label = "Remove Unused Empty Vertex Groups"
     bl_description = "Removes all empty vertex groups of the currently selected obj, i.e. the unused vertex groups"
     bl_options = {'REGISTER', 'UNDO'}
@@ -285,7 +285,7 @@ class RemoveUnusedVertexGroupOperator(I18nOperator):
     
 
 class MergeVertexGroupsWithSameNumber(I18nOperator):
-    bl_idname = "object.merge_vertex_group_with_same_number"
+    bl_idname = "mimi.merge_vertex_group_with_same_number"
     bl_label = "Merge Vertex Groups with the Same Numeric Prefix"
     bl_description = "Merges all vertex groups of the currently selected obj that share the same numeric prefix name"
     bl_options = {'REGISTER', 'UNDO'}
@@ -299,7 +299,7 @@ class MergeVertexGroupsWithSameNumber(I18nOperator):
         return {'FINISHED'}
 
 class FillVertexGroupGaps(I18nOperator):
-    bl_idname = "object.fill_vertex_group_gaps"
+    bl_idname = "mimi.fill_vertex_group_gaps"
     bl_label = "Fill Numeric Vertex Group Gaps"
     bl_description = "Fills the gaps in the numeric vertex groups of the currently selected obj with empty vertex groups named by number; e.g. groups 1,2,5,8 become 1,2,3,4,5,6,7,8"
     bl_options = {'REGISTER', 'UNDO'}
@@ -314,7 +314,7 @@ class FillVertexGroupGaps(I18nOperator):
     
 
 class AddBoneFromVertexGroupV2(I18nOperator):
-    bl_idname = "object.add_bone_from_vertex_group_v2"
+    bl_idname = "mimi.add_bone_from_vertex_group_v2"
     bl_label = "Generate Basic Bones from Vertex Groups"
     bl_description = "Creates a bone at a default position for every vertex group of the currently selected obj, so you can then adjust bone positions and parenting to rig it. Improved version by Hongxi"
     bl_options = {'REGISTER', 'UNDO'}
@@ -328,7 +328,7 @@ class AddBoneFromVertexGroupV2(I18nOperator):
 
 
 class RemoveNotNumberVertexGroup(I18nOperator):
-    bl_idname = "object.remove_not_number_vertex_group"
+    bl_idname = "mimi.remove_not_number_vertex_group"
     bl_label = "Remove Non-Numeric Vertex Groups"
     bl_description = "Removes every vertex group of the currently selected obj whose name is not purely numeric"
     bl_options = {'REGISTER', 'UNDO'}
@@ -346,7 +346,7 @@ class RemoveNotNumberVertexGroup(I18nOperator):
     
 
 class SplitMeshByCommonVertexGroup(I18nOperator):
-    bl_idname = "object.split_mesh_by_common_vertex_group"
+    bl_idname = "mimi.split_mesh_by_common_vertex_group"
     bl_label = "Break Model into Loose Parts by Vertex Groups"
     bl_description = "Splits the currently selected obj by its vertex groups; suited to workflows where parts are carefully weight-painted and then reassembled into a model"
     bl_options = {'REGISTER', 'UNDO'}
@@ -360,7 +360,7 @@ class SplitMeshByCommonVertexGroup(I18nOperator):
 
 
 class SplitMeshByEachVertexGroup(I18nOperator):
-    bl_idname = "object.split_mesh_by_each_vertex_group"
+    bl_idname = "mimi.split_mesh_by_each_vertex_group"
     bl_label = "Split Model by Vertex Group"
     bl_description = "Splits the currently selected obj into separate meshes, one per vertex group, preserving all attributes (UVs, weights, colors, normals, shape keys, etc.); the results go into a '{obj_name}_Split' collection"
     bl_options = {'REGISTER', 'UNDO'}
@@ -383,7 +383,7 @@ class SplitMeshByEachVertexGroup(I18nOperator):
 
 
 class SplitMeshByEachVertexGroupCluster(I18nOperator):
-    bl_idname = "object.split_mesh_by_each_vertex_group_cluster"
+    bl_idname = "mimi.split_mesh_by_each_vertex_group_cluster"
     bl_label = "Split by Loose Parts and Cluster"
     bl_description = "After splitting by loose parts, merges loose parts whose VG sets are similar (Jaccard similarity) and that are spatially adjacent into one part; the results go into a '{obj_name}_SplitCluster' collection"
     bl_options = {'REGISTER', 'UNDO'}
@@ -429,7 +429,7 @@ class SplitMeshByEachVertexGroupCluster(I18nOperator):
 
 
 class MMTResetRotation(I18nOperator):
-    bl_idname = "object.mmt_reset_rotation"
+    bl_idname = "mimi.mmt_reset_rotation"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Reset Model Rotation on X, Y, Z to 0"
     bl_description = "Resets the X, Y, Z rotation of the currently selected obj to 0"
@@ -442,7 +442,7 @@ class MMTResetRotation(I18nOperator):
         return {'FINISHED'}
 
 class SmoothNormalSaveToUV(I18nOperator):
-    bl_idname = "object.smooth_normal_save_to_uv"
+    bl_idname = "mimi.smooth_normal_save_to_uv"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Store Smooth Normals in UV (Approximate)"
     bl_description = "Smooth normal to UV storage algorithm; can repair certain UVs from ZZZ and WWMI (approximate implementation, only about 60% as effective)" 
@@ -454,15 +454,15 @@ class SmoothNormalSaveToUV(I18nOperator):
 
 
         
-class PropertyCollectionModifierItem(bpy.types.PropertyGroup):
+class MIMIPropertyCollectionModifierItem(bpy.types.PropertyGroup):
     checked: BoolProperty(
         name="", 
         default=False
     ) # type: ignore
-bpy.utils.register_class(PropertyCollectionModifierItem)
+bpy.utils.register_class(MIMIPropertyCollectionModifierItem)
 
 class WWMI_ApplyModifierForObjectWithShapeKeysOperator(I18nOperator):
-    bl_idname = "wwmi_tools.apply_modifier_for_object_with_shape_keys"
+    bl_idname = "mimi.apply_modifier_for_object_with_shape_keys"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Apply Modifiers on a Model with Shape Keys"
     bl_description = "Applies the selected modifiers on a model with shape keys and removes them from the stack, solving the issue that \"a modifier cannot be applied to a mesh with shape keys\"."
@@ -471,7 +471,7 @@ class WWMI_ApplyModifierForObjectWithShapeKeysOperator(I18nOperator):
         return [(modifier.name, modifier.name, modifier.name) for modifier in bpy.context.object.modifiers]
     
     my_collection: CollectionProperty(
-        type=PropertyCollectionModifierItem
+        type=MIMIPropertyCollectionModifierItem
     ) # type: ignore
     
     disable_armatures: BoolProperty(
@@ -523,7 +523,7 @@ class WWMI_ApplyModifierForObjectWithShapeKeysOperator(I18nOperator):
     
 
 class RecalculateTANGENTWithVectorNormalizedNormal(I18nOperator):
-    bl_idname = "object.recalculate_tangent_arithmetic_average_normal"
+    bl_idname = "mimi.recalculate_tangent_arithmetic_average_normal"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Recalculate TANGENT with Vector-Sum Normalization"
     bl_description = "Approximate outline-repair algorithm that can reach 99% outline similarity; suited to the older characters of GI, HSR, ZZZ and pre-2.0 HI3" 
@@ -539,7 +539,7 @@ class RecalculateTANGENTWithVectorNormalizedNormal(I18nOperator):
 
 
 class RecalculateCOLORWithVectorNormalizedNormal(I18nOperator):
-    bl_idname = "object.recalculate_color_arithmetic_average_normal"
+    bl_idname = "mimi.recalculate_color_arithmetic_average_normal"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Recalculate COLOR with Arithmetic-Average Normalization"
     bl_description = "Approximate outline-repair algorithm that can reach 99% outline similarity; suited only to the new characters of HI3 2.0" 
@@ -557,7 +557,7 @@ class RecalculateCOLORWithVectorNormalizedNormal(I18nOperator):
 
 
 class RenameAmatureFromGame(I18nOperator):
-    bl_idname = "object.rename_amature_from_game"
+    bl_idname = "mimi.rename_amature_from_game"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Rename Bones of Selected Armature (GI) (Test)"
     bl_description = "Renames the bones unpacked from the game so they can be bound to the extracted Mod model in one click; thanks to Leotorrez."
@@ -617,7 +617,7 @@ class ModelResetLocation(I18nOperator):
         return {'FINISHED'}
     
 class ModelSortVertexGroupByName(I18nOperator):
-    bl_idname = "object.sort_vertex_group_by_name"
+    bl_idname = "mimi.sort_vertex_group_by_name"
     bl_options = {'REGISTER', 'UNDO'}
     bl_label = "Sort Vertex Groups by Name"
     bl_description = "Same as Blender's built-in Sort => By Name next to the vertex group weights; placed here for quick access"
@@ -658,7 +658,7 @@ class ModelVertexGroupRenameByLocation(I18nOperator):
     
 
 class ExtractSubmeshOperator(I18nOperator):
-    bl_idname = "mesh.extract_submesh"
+    bl_idname = "mimi.extract_submesh"
     bl_label = "Split Model by DrawIndexed Values"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -900,13 +900,13 @@ class MirrorMeshOperator(I18nOperator):
 
 
 @translatable
-class PanelModelProcess(bpy.types.Panel):
+class MIMIPanelModelProcess(bpy.types.Panel):
     '''
     Having a copy here matters because beginners have no idea the right-click menu can trigger these features; unless it is handed to them on a plate, beginners will not discover them.
     So the panel also holds a copy for the convenience of beginners. Of course, it is collapsed by default so it does not affect the visuals, and once a beginner has used it enough to become an expert, they use the right-click menu options instead.
     '''
     bl_label = "Model Processing Panel" 
-    bl_idname = "VIEW3D_PT_MIMI_ModelProcess_Panel"
+    bl_idname = "mimi.PT_ModelProcess_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -959,12 +959,12 @@ class PanelModelProcess(bpy.types.Panel):
 
 
 @translatable
-class CatterRightClickMenu(bpy.types.Menu):
+class MIMICatterRightClickMenu(bpy.types.Menu):
     '''
     Keeping these only in the MIMITools panel is not enough either, because users with a lot of add-ons installed often cannot see the MIMITools panel at all
     So a copy is also placed in the right-click 3Dmigoto menu, which makes them easier to find.
     '''
-    bl_idname = "VIEW3D_MT_object_3Dmigoto"
+    bl_idname = "mimi.MT_object_3Dmigoto"
     bl_label = "3Dmigoto"
     bl_description = "Common features for making 3Dmigoto Mods."
     
@@ -1014,7 +1014,7 @@ class CatterRightClickMenu(bpy.types.Menu):
 
 def menu_func_migoto_right_click(self, context):
     self.layout.separator()
-    self.layout.menu(CatterRightClickMenu.bl_idname)
+    self.layout.menu(MIMICatterRightClickMenu.bl_idname)
 
 def register():
     bpy.utils.register_class(RemoveAllVertexGroupOperator)
@@ -1024,7 +1024,7 @@ def register():
     bpy.utils.register_class(AddBoneFromVertexGroupV2)
     bpy.utils.register_class(RemoveNotNumberVertexGroup)
     bpy.utils.register_class(MMTResetRotation)
-    bpy.utils.register_class(CatterRightClickMenu)
+    bpy.utils.register_class(MIMICatterRightClickMenu)
     bpy.utils.register_class(SplitMeshByCommonVertexGroup)
     bpy.utils.register_class(SplitMeshByEachVertexGroup)
     bpy.utils.register_class(SplitMeshByEachVertexGroupCluster)
@@ -1044,28 +1044,28 @@ def register():
     bpy.utils.register_class(ModelVertexGroupRenameByLocation)
     bpy.utils.register_class(ExtractSubmeshOperator)
     bpy.utils.register_class(MirrorMeshOperator)
-    bpy.utils.register_class(PanelModelProcess)
+    bpy.utils.register_class(MIMIPanelModelProcess)
 
     bpy.types.VIEW3D_MT_object_context_menu.append(menu_func_migoto_right_click)
 
-    bpy.types.Scene.submesh_start = bpy.props.IntProperty(
+    bpy.types.Scene.mimi_submesh_start = bpy.props.IntProperty(
         name=tr("Start Index"),
         default=0,
         min=0
     )
-    bpy.types.Scene.submesh_count = bpy.props.IntProperty(
+    bpy.types.Scene.mimi_submesh_count = bpy.props.IntProperty(
         name=tr("Index Count"),
         default=3,
         min=3
     )
 
 def unregister():
-    del bpy.types.Scene.submesh_start
-    del bpy.types.Scene.submesh_count
+    del bpy.types.Scene.mimi_submesh_start
+    del bpy.types.Scene.mimi_submesh_count
 
     bpy.types.VIEW3D_MT_object_context_menu.remove(menu_func_migoto_right_click)
 
-    bpy.utils.unregister_class(PanelModelProcess)
+    bpy.utils.unregister_class(MIMIPanelModelProcess)
     bpy.utils.unregister_class(MirrorMeshOperator)
     bpy.utils.unregister_class(ExtractSubmeshOperator)
     bpy.utils.unregister_class(ModelVertexGroupRenameByLocation)
@@ -1085,7 +1085,7 @@ def unregister():
     bpy.utils.unregister_class(SplitMeshByEachVertexGroup)
     bpy.utils.unregister_class(SplitMeshByEachVertexGroupCluster)
     bpy.utils.unregister_class(SplitMeshByCommonVertexGroup)
-    bpy.utils.unregister_class(CatterRightClickMenu)
+    bpy.utils.unregister_class(MIMICatterRightClickMenu)
     bpy.utils.unregister_class(MMTResetRotation)
     bpy.utils.unregister_class(RemoveNotNumberVertexGroup)
     bpy.utils.unregister_class(AddBoneFromVertexGroupV2)

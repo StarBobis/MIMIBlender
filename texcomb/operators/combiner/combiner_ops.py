@@ -8,7 +8,7 @@ and proper UV mapping.
 
 Typical usage example:
     # Running the operator directly (requires directory parameter)
-    bpy.ops.smc.combiner(directory=r'/path/to/save/directory')
+    bpy.ops.mimi.combiner(directory=r'/path/to/save/directory')
 
 Note: When running the operator directly (not from the addon's UI),
 the `directory` parameter is required to specify where the atlas image will be saved.
@@ -213,7 +213,7 @@ def get_duplicates(mats_uv: MatsUV) -> None:
     """Identify and mark duplicate materials.
 
     Finds visually identical materials and marks duplicates by setting
-    their root_mat property to the first matching material.
+    their mimi_root_mat property to the first matching material.
 
     Args:
         mats_uv: Dictionary mapping object names to materials with UV coordinates.
@@ -221,9 +221,9 @@ def get_duplicates(mats_uv: MatsUV) -> None:
     mat_list = list(chain.from_iterable(mats_uv.values()))
     sorted_mat_list = sort_materials(mat_list)
     for mats in sorted_mat_list:
-        root_mat = mats[0]
+        mimi_root_mat = mats[0]
         for mat in mats[1:]:
-            mat.root_mat = root_mat
+            mat.mimi_root_mat = mimi_root_mat
 
 
 def get_structure(scn: Scene, data: SMCObData, mats_uv: MatsUV) -> Structure:
@@ -266,19 +266,19 @@ def get_structure(scn: Scene, data: SMCObData, mats_uv: MatsUV) -> Structure:
         for mat in item:
             if mat.name not in ob.data.materials:
                 continue
-            root_mat = mat.root_mat or mat
+            mimi_root_mat = mat.mimi_root_mat or mat
             if (
-                mat.root_mat
-                and mat.root_mat != mat
-                and mat.name not in structure[root_mat]["dup"]
+                mat.mimi_root_mat
+                and mat.mimi_root_mat != mat
+                and mat.name not in structure[mimi_root_mat]["dup"]
             ):
-                structure[root_mat]["dup"].append(mat.name)
-            if ob.name not in structure[root_mat]["ob"]:
-                structure[root_mat]["ob"].append(ob.name)
-            structure[root_mat]["uv"].extend(mats_uv[ob_n][mat])
+                structure[mimi_root_mat]["dup"].append(mat.name)
+            if ob.name not in structure[mimi_root_mat]["ob"]:
+                structure[mimi_root_mat]["ob"].append(ob.name)
+            structure[mimi_root_mat]["uv"].extend(mats_uv[ob_n][mat])
 
-            if scn.smc_include_extra_textures:
-                _set_extra_maps(structure[root_mat], root_mat)
+            if scn.mimi_smc_include_extra_textures:
+                _set_extra_maps(structure[mimi_root_mat], mimi_root_mat)
 
     return structure
 
@@ -306,7 +306,7 @@ def get_size(scn: Scene, data: Structure) -> Dict:
         max_x, max_y = _get_max_uv_coordinates(item["uv"])
         item["gfx"]["uv_size"] = (np.clip(max_x, 1, 25), np.clip(max_y, 1, 25))
 
-        if not scn.smc_crop:
+        if not scn.mimi_smc_crop:
             item["gfx"]["uv_size"] = tuple(
                 math.ceil(x) for x in item["gfx"]["uv_size"]
             )
@@ -314,14 +314,14 @@ def get_size(scn: Scene, data: Structure) -> Dict:
         if packed_file:
             img_size = _get_image_size(mat, img)
             item["gfx"]["size"] = _calculate_size(
-                img_size, item["gfx"]["uv_size"], scn.smc_gaps
+                img_size, item["gfx"]["uv_size"], scn.mimi_smc_gaps
             )
         else:
-            item["gfx"]["size"] = (scn.smc_diffuse_size + scn.smc_gaps,) * 2
+            item["gfx"]["size"] = (scn.mimi_smc_diffuse_size + scn.mimi_smc_gaps,) * 2
             item["gfx"]["diagnostic"] = _get_texture_fallback_message(mat, img)
 
-        if scn.smc_uniform_size:
-            item["gfx"]["size"] = (scn.smc_uniform_size_value,) * 2
+        if scn.mimi_smc_uniform_size:
+            item["gfx"]["size"] = (scn.mimi_smc_uniform_size_value,) * 2
 
     return OrderedDict(sorted(data.items(), key=_size_sorting, reverse=True))
 
@@ -417,10 +417,10 @@ def _get_image_size(
     """
     return (
         (
-            min(mat.smc_size_width, img.size[0]),
-            min(mat.smc_size_height, img.size[1]),
+            min(mat.mimi_smc_size_width, img.size[0]),
+            min(mat.mimi_smc_size_height, img.size[1]),
         )
-        if mat.smc_size
+        if mat.mimi_smc_size
         else cast(Tuple[int, int], img.size)
     )
 
@@ -498,11 +498,11 @@ def calculate_adjusted_size(
     Returns:
         Adjusted size based on the selected size strategy.
     """
-    if scn.smc_size == "PO2":
+    if scn.mimi_smc_size == "PO2":
         return cast(
             Tuple[int, int], tuple(1 << int(x - 1).bit_length() for x in size)
         )
-    elif scn.smc_size == "QUAD":
+    elif scn.mimi_smc_size == "QUAD":
         return (int(max(size)),) * 2
     return size
 
@@ -524,8 +524,8 @@ def get_atlas(  # noqa: PLR0912
     Returns:
         Dictionary of generated atlas images by texture type.
     """
-    smc_size = (scn.smc_size_width, scn.smc_size_height)
-    half_gaps = int(scn.smc_gaps / 2)
+    mimi_smc_size = (scn.mimi_smc_size_width, scn.mimi_smc_size_height)
+    half_gaps = int(scn.mimi_smc_gaps / 2)
 
     albedo_atlas = Image.new("RGBA", atlas_size)
 
@@ -545,12 +545,12 @@ def get_atlas(  # noqa: PLR0912
             scn, item, mat, item["gfx"]["img_or_color"], albedo_atlas, half_gaps
         )
 
-        if scn.smc_include_extra_textures:
+        if scn.mimi_smc_include_extra_textures:
             for tex_type in texture_types:
                 if item["gfx"].get(tex_type):
                     materials_with_textures[tex_type].append((mat, item))
 
-    if scn.smc_include_extra_textures:
+    if scn.mimi_smc_include_extra_textures:
         for tex_type in texture_types:
             if materials_with_textures[tex_type]:
                 atlas = Image.new("RGBA", atlas_size, (0, 0, 0, 0))
@@ -565,7 +565,7 @@ def get_atlas(  # noqa: PLR0912
                         size = cast(
                             Tuple[int, int],
                             tuple(
-                                int(size - scn.smc_gaps)
+                                int(size - scn.mimi_smc_gaps)
                                 for size in item["gfx"]["size"]
                             ),
                         )
@@ -586,18 +586,18 @@ def get_atlas(  # noqa: PLR0912
 
                 extra_atlases[tex_type] = atlas
 
-    if scn.smc_size in ["CUST", "STRICTCUST"]:
-        albedo_atlas.thumbnail(smc_size, resampling)
+    if scn.mimi_smc_size in ["CUST", "STRICTCUST"]:
+        albedo_atlas.thumbnail(mimi_smc_size, resampling)
         for _tex_type, atlas in extra_atlases.items():
-            atlas.thumbnail(smc_size, resampling)
+            atlas.thumbnail(mimi_smc_size, resampling)
 
-    if scn.smc_size == "STRICTCUST":
-        canvas_img = Image.new("RGBA", smc_size)
+    if scn.mimi_smc_size == "STRICTCUST":
+        canvas_img = Image.new("RGBA", mimi_smc_size)
         canvas_img.paste(albedo_atlas)
         result = {"albedo": canvas_img}
 
         for tex_type, atlas in extra_atlases.items():
-            canvas = Image.new("RGBA", smc_size, (0, 0, 0, 0))
+            canvas = Image.new("RGBA", mimi_smc_size, (0, 0, 0, 0))
             canvas.paste(atlas)
             result[tex_type] = canvas
 
@@ -692,7 +692,7 @@ def _get_gfx(
     """
     size = cast(
         Tuple[int, int],
-        tuple(int(size - scn.smc_gaps) for size in item["gfx"]["size"]),
+        tuple(int(size - scn.mimi_smc_gaps) for size in item["gfx"]["size"]),
     )
     alpha_texture = item["gfx"].get("alpha")
 
@@ -707,11 +707,11 @@ def _get_gfx(
     img = Image.open(io.BytesIO(img_or_color.data)).convert("RGBA")
     if img.size != size:
         img = img.resize(size, resampling)
-    if mat.smc_size:
-        img.thumbnail((mat.smc_size_width, mat.smc_size_height), resampling)
+    if mat.mimi_smc_size:
+        img.thumbnail((mat.mimi_smc_size_width, mat.mimi_smc_size_height), resampling)
     if max(item["gfx"]["uv_size"], default=0) > 1:
         img = _get_uv_image(item, img, size)
-    if mat.smc_diffuse:
+    if mat.mimi_smc_diffuse:
         diffuse_img = Image.new(img.mode, size, get_diffuse(mat))
         img = ImageChops.multiply(img, diffuse_img)
 
@@ -797,8 +797,8 @@ def align_uvs(
 
     scaled_width, scaled_height = _get_scale_factors(atlas_size, size)
 
-    margin = scn.smc_gaps + (0 if scn.smc_pixel_art else 2)
-    border_margin = int(scn.smc_gaps / 2) + (0 if scn.smc_pixel_art else 1)
+    margin = scn.mimi_smc_gaps + (0 if scn.mimi_smc_pixel_art else 2)
+    border_margin = int(scn.mimi_smc_gaps / 2) + (0 if scn.mimi_smc_pixel_art else 1)
 
     for item in data.values():
         gfx_size = item["gfx"]["size"]
@@ -888,7 +888,7 @@ def _get_layers(scn: Scene, mats_uv: MatsUV) -> Set[int]:
     """
     return {
         item.layer
-        for item in scn.smc_ob_data
+        for item in scn.mimi_smc_ob_data
         if item.type == CombineListTypes.MATERIAL
         and item.used
         and item.mat in mats_uv[item.ob.name]
@@ -907,7 +907,7 @@ def _get_unique_id(scn: Scene) -> str:
     existed_ids = set()
     _add_ids_from_existing_materials(scn, existed_ids)
 
-    if not os.path.isdir(scn.smc_save_path):
+    if not os.path.isdir(scn.mimi_smc_save_path):
         return _generate_random_unique_id(existed_ids)
 
     _add_ids_from_existing_files(scn, existed_ids)
@@ -927,7 +927,7 @@ def _add_ids_from_existing_materials(scn: Scene, existed_ids: Set[int]) -> None:
     atlas_material_pattern = re.compile(
         r"{}(\d+)_\d+".format(atlas_material_prefix)
     )
-    for item in scn.smc_ob_data:
+    for item in scn.mimi_smc_ob_data:
         if item.type != CombineListTypes.MATERIAL:
             continue
 
@@ -957,7 +957,7 @@ def _add_ids_from_existing_files(scn: Scene, existed_ids: Set[int]) -> None:
         existed_ids: Set to add IDs to.
     """
     atlas_file_pattern = re.compile(r"{}(\d+).png".format(atlas_prefix))
-    for file_name in os.listdir(scn.smc_save_path):
+    for file_name in os.listdir(scn.mimi_smc_save_path):
         match = atlas_file_pattern.fullmatch(file_name)
         if match:
             existed_ids.add(int(match.group(1)))
@@ -982,7 +982,7 @@ def _save_atlas_with_type(
         "TGA": "tga",
         "TIFF": "tif",
         "BMP": "bmp",
-    }.get(scn.smc_image_format, "png")
+    }.get(scn.mimi_smc_image_format, "png")
 
     filename = "{}{}{}.{}".format(
         atlas_prefix,
@@ -991,7 +991,7 @@ def _save_atlas_with_type(
         ext,
     )
 
-    path = os.path.join(scn.smc_save_path, filename)
+    path = os.path.join(scn.mimi_smc_save_path, filename)
     # Ensure the output is always in RGBA mode, even if the source texture has no alpha (e.g. JPG)
     # This way the output image always carries an alpha channel, ready for later transparency needs
     if atlas.mode != "RGBA":

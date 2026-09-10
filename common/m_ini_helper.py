@@ -10,7 +10,7 @@ from ..model.drawib_model import DrawIBModel
 from ..utils.json_utils import JsonUtils
 from ..utils.format_utils import Fatal
 from .global_config import GlobalConfig
-from .global_properties import GlobalProperties
+from .mimi_global_properties import MIMIGlobalProperties
 from ..workspace.ssmt_workspace import SSMTWorkSpace
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.texture_metadata_helper import TextureMetadataResolver, TextureMarkUpInfo
@@ -231,7 +231,7 @@ class M_IniHelper:
         # ═══════════════════════════════════════════════════
         # Step 1: check the global switch; skip all processing when forbidden
         # ═══════════════════════════════════════════════════
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             print("[TRACE] generate_hash_style_texture_ini: forbid_auto_texture_ini=True, skipped!")
             return
 
@@ -359,7 +359,7 @@ class M_IniHelper:
           - INI output = Slot style (write [Resource-XXX] sections, no TextureOverride sections)
         File copying dedupes the Hash-style way (each hash is copied only once).
         """
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             print("[TRACE] generate_shared_slot_style_texture_ini: forbid_auto_texture_ini=True, skipped!")
             return
 
@@ -479,7 +479,7 @@ class M_IniHelper:
         print("[TRACE] move_slot_style_textures() entry - DrawIB: " + draw_ib_model.draw_ib)
         print("=" * 60)
 
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             print("[TRACE] move_slot_style_textures: forbid_auto_texture_ini=True, skipping all texture copies!")
             return
 

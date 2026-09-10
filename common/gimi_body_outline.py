@@ -238,7 +238,7 @@ def _get_outline_width_mode_items(self, context):
 
 
 class SSMT_OT_build_gimi_body_outline(I18nOperator):
-    bl_idname = "ssmt.build_gimi_body_outline"
+    bl_idname = "mimi.build_gimi_body_outline"
     bl_label = "Build GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}
     # Dynamic items only allow integer (0-based) defaults; the first item
@@ -261,7 +261,7 @@ class SSMT_OT_build_gimi_body_outline(I18nOperator):
 
 
 class SSMT_OT_remove_gimi_body_outline(I18nOperator):
-    bl_idname = "ssmt.remove_gimi_body_outline"
+    bl_idname = "mimi.remove_gimi_body_outline"
     bl_label = "Remove GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}
 

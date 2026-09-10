@@ -7,11 +7,11 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..common.global_config import LogicName
 from ..common.global_config import GlobalConfig
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
-from .blueprint_node_base import SSMTNodeBase
-from .blueprint_node_shapekey import SSMTShapeKeyListItem
+from .blueprint_node_base import MIMINodeBase
+from .blueprint_node_shapekey import MIMIShapeKeyListItem
 from ..workspace.ssmt_workspace import WorkSpaceModel
 
 OBJECT_PERSISTENT_ID_KEY = "_ssmt_object_uuid"
@@ -60,7 +60,7 @@ class ObjectPersistentIdManager:
 
     @staticmethod
     def resolve_node_target(node, allow_name_fallback=True):
-        if not node or getattr(node, "bl_idname", "") != 'SSMTNode_Object_Info':
+        if not node or getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
             return None
         resolved_obj = None
         node_object_name = str(getattr(node, "object_name", "") or "")
@@ -112,14 +112,14 @@ class ObjectPersistentIdManager:
         start_time = time.perf_counter()
         trees = []
         if include_all_blueprints:
-            trees = [node_group for node_group in bpy.data.node_groups if getattr(node_group, "bl_idname", "") == 'SSMTBlueprintTreeType']
+            trees = [node_group for node_group in bpy.data.node_groups if getattr(node_group, "bl_idname", "") == 'MIMIBlueprintTreeType']
         else:
             tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
             if tree:
                 trees = [tree]
         for blueprint_tree in trees:
             for node in blueprint_tree.nodes:
-                if getattr(node, "bl_idname", "") != 'SSMTNode_Object_Info':
+                if getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
                     continue
                 checked_count += 1
                 refresh_result = ObjectPersistentIdManager.refresh_node(node, allow_name_fallback=True)
@@ -136,7 +136,7 @@ class ObjectPersistentIdManager:
 
 class SSMT_OT_RefreshNodeObjectIDs(I18nOperator):
     '''Refresh the object reference info of every object node in blueprints'''
-    bl_idname = "ssmt.refresh_node_object_ids"
+    bl_idname = "mimi.refresh_node_object_ids"
     bl_label = "Refresh Object Node Info"
     bl_options = {'REGISTER', 'UNDO'}
     
@@ -155,7 +155,7 @@ class SSMT_OT_RefreshNodeObjectIDs(I18nOperator):
 
 class SSMT_OT_SelectNodeObject(I18nOperator):
     '''Select this object in 3D View'''
-    bl_idname = "ssmt.select_node_object"
+    bl_idname = "mimi.select_node_object"
     bl_label = "Select Object"
     
     object_name: bpy.props.StringProperty() # type: ignore
@@ -188,7 +188,7 @@ class SSMT_OT_SelectNodeObject(I18nOperator):
 
 class SSMT_OT_StartPickObject(I18nOperator):
     '''Start picking an object from 3D View'''
-    bl_idname = "ssmt.start_pick_object"
+    bl_idname = "mimi.start_pick_object"
     bl_label = "Pick Object"
     bl_description = "Click to pick an object in the 3D View"
     
@@ -212,14 +212,14 @@ class SSMT_OT_StartPickObject(I18nOperator):
         _picking_tree_name = tree.name
         self.report({'INFO'}, tr("Please click an object in the 3D View"))
         
-        bpy.ops.ssmt.pick_object_modal('INVOKE_DEFAULT')
+        bpy.ops.mimi.pick_object_modal('INVOKE_DEFAULT')
         
         return {'FINISHED'}
 
 
 class SSMT_OT_PickObjectModal(I18nOperator):
     '''Modal operator for picking objects in 3D View'''
-    bl_idname = "ssmt.pick_object_modal"
+    bl_idname = "mimi.pick_object_modal"
     bl_label = "Pick Object"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
     
@@ -313,9 +313,9 @@ def draw_view3d_header(self, context):
 
 
 @translatable
-class SSMTNode_Object_Info(SSMTNodeBase):
+class MIMINode_Object_Info(MIMINodeBase):
     '''Object Info Node'''
-    bl_idname = 'SSMTNode_Object_Info'
+    bl_idname = 'MIMINode_Object_Info'
     bl_label = 'Object Info'
     bl_icon = 'OBJECT_DATAMODE'
     bl_width_min = 400
@@ -341,7 +341,7 @@ class SSMTNode_Object_Info(SSMTNodeBase):
 
         # Also include every Submesh name from the dropdown in the width
         # calculation, so long names that are not currently selected are not truncated
-        tree = self.id_data if hasattr(self, "id_data") and getattr(self.id_data, "bl_idname", "") == 'SSMTBlueprintTreeType' else None
+        tree = self.id_data if hasattr(self, "id_data") and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
         if tree is not None:
             for item in getattr(tree, "ssmt_submesh_items", []):
                 name = str(getattr(item, "name", "") or "")
@@ -394,20 +394,20 @@ class SSMTNode_Object_Info(SSMTNodeBase):
     first_index_display: bpy.props.StringProperty(name="FirstIndex", default="") #type: ignore
 
     def init(self, context):
-        self.outputs.new('SSMTSocketObject', "Object")
+        self.outputs.new('MIMISocketObject', "Object")
 
     def draw_buttons(self, context, layout):
-        tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'SSMTBlueprintTreeType' else None
+        tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
         row = layout.row(align=True)
 
         row.prop_search(self, "object_name", bpy.data, "objects", text="", icon='OBJECT_DATA')
         
-        op = row.operator("ssmt.start_pick_object", text="", icon='EYEDROPPER')
+        op = row.operator("mimi.start_pick_object", text="", icon='EYEDROPPER')
         op.node_name = self.name
         op.tree_name = tree.name if tree else ""
 
         if self.object_name or self.object_id:
-            op = row.operator("ssmt.select_node_object", text="", icon='RESTRICT_SELECT_OFF')
+            op = row.operator("mimi.select_node_object", text="", icon='RESTRICT_SELECT_OFF')
             op.object_name = self.object_name
             op.object_id = self.object_id
 
@@ -425,23 +425,23 @@ class SSMTNode_Object_Info(SSMTNodeBase):
 
 
 @translatable
-class SSMTNode_Object_Group(SSMTNodeBase):
+class MIMINode_Object_Group(MIMINodeBase):
     '''Node used purely for grouping; accepts any node as input and gathers it into one group'''
-    bl_idname = 'SSMTNode_Object_Group'
+    bl_idname = 'MIMINode_Object_Group'
     bl_label = 'Group'
     bl_icon = 'GROUP'
 
     def init(self, context):
-        self.inputs.new('SSMTSocketObject', "Input 1")
-        self.outputs.new('SSMTSocketObject', "Output")
+        self.inputs.new('MIMISocketObject', "Input 1")
+        self.outputs.new('MIMISocketObject', "Output")
         self.width = 200
 
     def draw_buttons(self, context, layout):
-        layout.operator("ssmt.view_group_objects", text=tr("Preview Recursive Objects"), icon='HIDE_OFF').node_name = self.name
+        layout.operator("mimi.view_group_objects", text=tr("Preview Recursive Objects"), icon='HIDE_OFF').node_name = self.name
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
-            self.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(self.inputs) + 1))
+            self.inputs.new('MIMISocketObject', "Input {count}".format(count=len(self.inputs) + 1))
         
         if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
              self.inputs.remove(self.inputs[-1])
@@ -451,7 +451,7 @@ class SSMTNode_Object_Group(SSMTNodeBase):
 
 class SSMT_OT_SwitchKey_AddSocket(I18nOperator):
     '''Add a new socket to the switch node'''
-    bl_idname = "ssmt.switch_add_socket"
+    bl_idname = "mimi.switch_add_socket"
     bl_label = "Add Socket"
     bl_options = {'REGISTER', 'UNDO'}
     
@@ -463,13 +463,13 @@ class SSMT_OT_SwitchKey_AddSocket(I18nOperator):
              return {'CANCELLED'}
         node = tree.nodes.get(self.node_name)
         if node:
-               node.inputs.new('SSMTSocketObject', "Status {count}".format(count=len(node.inputs)))
+               node.inputs.new('MIMISocketObject', "Status {count}".format(count=len(node.inputs)))
         return {'FINISHED'}
 
 
 class SSMT_OT_SwitchKey_RemoveSocket(I18nOperator):
     '''Remove the last socket from the switch node'''
-    bl_idname = "ssmt.switch_remove_socket"
+    bl_idname = "mimi.switch_remove_socket"
     bl_label = "Remove Socket"
     bl_options = {'REGISTER', 'UNDO'}
     
@@ -486,9 +486,9 @@ class SSMT_OT_SwitchKey_RemoveSocket(I18nOperator):
 
 
 @translatable
-class SSMTNode_SwitchKey(SSMTNodeBase):
+class MIMINode_SwitchKey(MIMINodeBase):
     '''Switch Key assigns each connected branch to its own separate variable'''
-    bl_idname = 'SSMTNode_SwitchKey'
+    bl_idname = 'MIMINode_SwitchKey'
     bl_label = 'Switch Key'
     bl_icon = 'GROUP'
 
@@ -515,8 +515,8 @@ class SSMTNode_SwitchKey(SSMTNodeBase):
     def init(self, context):
         # The default title is instance data, so bake in the active language.
         self.label = tr("Switch Key")
-        self.inputs.new('SSMTSocketObject', "Status 0")
-        self.outputs.new('SSMTSocketObject', "Output")
+        self.inputs.new('MIMISocketObject', "Status 0")
+        self.outputs.new('MIMISocketObject', "Output")
         self.width = 200
         self.use_custom_color = True
         self.color = (0.34, 0.54, 0.34)
@@ -530,17 +530,17 @@ class SSMTNode_SwitchKey(SSMTNodeBase):
         layout.prop(self, "comment", text=tr("Comment"))
         
         row = layout.row(align=True)
-        op_add = row.operator("ssmt.switch_add_socket", text=tr("Add"), icon='ADD')
+        op_add = row.operator("mimi.switch_add_socket", text=tr("Add"), icon='ADD')
         op_add.node_name = self.name
         
-        op_rem = row.operator("ssmt.switch_remove_socket", text=tr("Remove"), icon='REMOVE')
+        op_rem = row.operator("mimi.switch_remove_socket", text=tr("Remove"), icon='REMOVE')
         op_rem.node_name = self.name
 
 
 @translatable
-class SSMTNode_Result_Output(SSMTNodeBase):
+class MIMINode_Result_Output(MIMINodeBase):
     '''Result Output Node'''
-    bl_idname = 'SSMTNode_Result_Output'
+    bl_idname = 'MIMINode_Result_Output'
     bl_label = 'Generate Mod'
     bl_icon = 'EXPORT'
 
@@ -549,14 +549,14 @@ class SSMTNode_Result_Output(SSMTNodeBase):
         description=tr("Export the checked shape key buffers and runtime control config"),
         default=False,
     ) # type: ignore
-    shapekey_items: bpy.props.CollectionProperty(type=SSMTShapeKeyListItem) # type: ignore
+    shapekey_items: bpy.props.CollectionProperty(type=MIMIShapeKeyListItem) # type: ignore
 
     def init(self, context):
-        self.inputs.new('SSMTSocketObject', "Group 1")
+        self.inputs.new('MIMISocketObject', "Group 1")
         self.width = 400
 
     def draw_buttons(self, context, layout):
-        operator = layout.operator("ssmt.generate_mod_blueprint", text=tr("Generate Mod"), icon='EXPORT')
+        operator = layout.operator("mimi.generate_mod_blueprint", text=tr("Generate Mod"), icon='EXPORT')
         operator.node_name = self.name
         operator.tree_name = self.id_data.name if self.id_data else ""
 
@@ -564,38 +564,38 @@ class SSMTNode_Result_Output(SSMTNodeBase):
         draw_shapekey_settings(self, layout)
         
         if GlobalConfig.logic_name == LogicName.WWMI:
-            layout.prop(context.scene.global_properties, "ignore_muted_shape_keys", text=tr("Ignore Muted Shape Keys"))
-            layout.prop(context.scene.global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
-            layout.prop(context.scene.global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
+            layout.prop(context.scene.mimi_global_properties, "ignore_muted_shape_keys", text=tr("Ignore Muted Shape Keys"))
+            layout.prop(context.scene.mimi_global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
+            layout.prop(context.scene.mimi_global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
 
         if GlobalConfig.logic_name != LogicName.GF2:
-            layout.prop(context.scene.global_properties,
+            layout.prop(context.scene.mimi_global_properties,
                         "recalculate_tangent",text=tr("Store Vector-Normalized Normals in TANGENT (Global)"))
 
         if GlobalConfig.logic_name == LogicName.HIMI:
-            layout.prop(context.scene.global_properties,
+            layout.prop(context.scene.mimi_global_properties,
                         "recalculate_color",text=tr("Store Arithmetic-Average Normals in COLOR (Global)"))
 
         if LogicName.is_zzmi_family(GlobalConfig.logic_name):
-            layout.prop(context.scene.global_properties, "zzz_use_slot_fix", text=tr("Use Slot Fix"))
+            layout.prop(context.scene.mimi_global_properties, "zzz_use_slot_fix", text=tr("Use Slot Fix"))
 
         if GlobalConfig.logic_name == LogicName.GIMI:
-            layout.prop(context.scene.global_properties, "gimi_use_orfix", text=tr("Use ORFix"))
+            layout.prop(context.scene.mimi_global_properties, "gimi_use_orfix", text=tr("Use ORFix"))
 
-        layout.prop(context.scene.global_properties, "open_mod_folder_after_generate_mod",text=tr("Open Mod Folder After Generating Mod"))
+        layout.prop(context.scene.mimi_global_properties, "open_mod_folder_after_generate_mod",text=tr("Open Mod Folder After Generating Mod"))
 
-        layout.prop(context.scene.global_properties, "use_specific_generate_mod_folder_path", text=tr("Specify Generate Mod Folder"))
+        layout.prop(context.scene.mimi_global_properties, "use_specific_generate_mod_folder_path", text=tr("Specify Generate Mod Folder"))
 
-        if GlobalProperties.use_specific_generate_mod_folder_path():
+        if MIMIGlobalProperties.use_specific_generate_mod_folder_path():
             box = layout.box()
             box.label(text=tr("Current Generate Mod Folder: "))
-            box.label(text=context.scene.global_properties.generate_mod_folder_path)
+            box.label(text=context.scene.mimi_global_properties.generate_mod_folder_path)
 
-            layout.operator("ssmt.select_generate_mod_folder", text=tr("Select Generate Mod Folder"), icon='FILE_FOLDER')
+            layout.operator("mimi.select_generate_mod_folder", text=tr("Select Generate Mod Folder"), icon='FILE_FOLDER')
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
-            self.inputs.new('SSMTSocketObject', "Group {count}".format(count=len(self.inputs) + 1))
+            self.inputs.new('MIMISocketObject', "Group {count}".format(count=len(self.inputs) + 1))
         
         if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
              self.inputs.remove(self.inputs[-1])
@@ -603,7 +603,7 @@ class SSMTNode_Result_Output(SSMTNodeBase):
 
 class SSMT_OT_View_Group_Objects(I18nOperator):
     '''Recursively resolve all objects under the current group and display them in the current 3D View; clicking toggles local view. Note: group nodes should preferably not contain Switch Key, otherwise all switch branches are shown at once'''
-    bl_idname = "ssmt.view_group_objects"
+    bl_idname = "mimi.view_group_objects"
     bl_label = "View Objects in Group"
     
     node_name: bpy.props.StringProperty() # type: ignore
@@ -676,7 +676,7 @@ class SSMT_OT_View_Group_Objects(I18nOperator):
                 return
             checked_nodes.add(current_node)
 
-            if getattr(current_node, "bl_idname", "") == 'SSMTNode_Object_Info':
+            if getattr(current_node, "bl_idname", "") == 'MIMINode_Object_Info':
                 obj_name = getattr(current_node, "object_name", "")
                 if obj_name:
                     obj = bpy.data.objects.get(obj_name)
@@ -754,7 +754,7 @@ class SSMT_OT_View_Group_Objects(I18nOperator):
 
 class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
     '''Choose the target folder for the generated Mod'''
-    bl_idname = "ssmt.select_generate_mod_folder"
+    bl_idname = "mimi.select_generate_mod_folder"
     bl_label = "Select Generate Mod Folder"
 
     directory: bpy.props.StringProperty(subtype='DIR_PATH') # type: ignore
@@ -762,7 +762,7 @@ class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
     filter_image: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 
     def invoke(self, context, event):
-        current_directory = context.scene.global_properties.generate_mod_folder_path
+        current_directory = context.scene.mimi_global_properties.generate_mod_folder_path
         if current_directory:
             self.directory = bpy.path.abspath(current_directory)
         context.window_manager.fileselect_add(self)
@@ -775,7 +775,7 @@ class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
             return {'CANCELLED'}
 
         os.makedirs(selected_directory, exist_ok=True)
-        context.scene.global_properties.generate_mod_folder_path = selected_directory
+        context.scene.mimi_global_properties.generate_mod_folder_path = selected_directory
         self.report({'INFO'}, tr("Generate Mod folder set to: {path}").format(path=selected_directory))
         return {'FINISHED'}
 
@@ -786,10 +786,10 @@ classes = (
     SSMT_OT_StartPickObject,
     SSMT_OT_PickObjectModal,
     SSMT_OT_View_Group_Objects,
-    SSMTNode_Object_Info,
-    SSMTNode_Object_Group,
-    SSMTNode_Result_Output,
-    SSMTNode_SwitchKey,
+    MIMINode_Object_Info,
+    MIMINode_Object_Group,
+    MIMINode_Result_Output,
+    MIMINode_SwitchKey,
     SSMT_OT_SwitchKey_AddSocket,
     SSMT_OT_SwitchKey_RemoveSocket,
 )

@@ -9,7 +9,7 @@ from .blueprint_export_helper import BlueprintExportHelper
 
 class SSMT_OT_CreateGroupFromSelection(I18nOperator):
     '''Create nodes from selected objects and group them under a new Group node'''
-    bl_idname = "ssmt.create_group_from_selection"
+    bl_idname = "mimi.create_group_from_selection"
     bl_label = "Create Group from Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -35,7 +35,7 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
                         for space in area.spaces:
                             if space.type == 'NODE_EDITOR':
                                 tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
-                                if tree and tree.bl_idname == 'SSMTBlueprintTreeType':
+                                if tree and tree.bl_idname == 'MIMIBlueprintTreeType':
                                     node_tree = tree
                                     break
                         if node_tree:
@@ -49,7 +49,7 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
             workspace_name = f"{GlobalConfig.get_workspace_name()}" if GlobalConfig.get_workspace_name() else "SSMT_Mod_Logic"
             node_tree = bpy.data.node_groups.get(workspace_name)
         
-        if not node_tree or node_tree.bl_idname != 'SSMTBlueprintTreeType':
+        if not node_tree or node_tree.bl_idname != 'MIMIBlueprintTreeType':
             self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
@@ -64,13 +64,13 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
             node.select = False
 
         # Create the Group node
-        group_node = node_tree.nodes.new(type='SSMTNode_Object_Group')
+        group_node = node_tree.nodes.new(type='MIMINode_Object_Group')
         group_node.location = (base_x + 400, base_y)
         group_node.select = True
         
         # Create Object Info nodes and connect them
         for i, obj in enumerate(selected_objects):
-            obj_node = node_tree.nodes.new(type='SSMTNode_Object_Info')
+            obj_node = node_tree.nodes.new(type='MIMINode_Object_Info')
             obj_node.location = (base_x, base_y - i * 150)
             obj_node.select = True
             
@@ -89,7 +89,7 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
 
 class SSMT_OT_CreateInternalSwitch(I18nOperator):
     '''Create Object Info nodes from selected objects and connect them to a Switch Key node'''
-    bl_idname = "ssmt.create_internal_switch"
+    bl_idname = "mimi.create_internal_switch"
     bl_label = "Create Internal Switch"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -140,7 +140,7 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
                         for space in area.spaces:
                             if space.type == 'NODE_EDITOR':
                                 tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
-                                if tree and tree.bl_idname == 'SSMTBlueprintTreeType':
+                                if tree and tree.bl_idname == 'MIMIBlueprintTreeType':
                                     node_tree = tree
                                     break
                         if node_tree:
@@ -154,7 +154,7 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
             workspace_name = f"{GlobalConfig.get_workspace_name()}" if GlobalConfig.get_workspace_name() else "SSMT_Mod_Logic"
             node_tree = bpy.data.node_groups.get(workspace_name)
         
-        if not node_tree or node_tree.bl_idname != 'SSMTBlueprintTreeType':
+        if not node_tree or node_tree.bl_idname != 'MIMIBlueprintTreeType':
             self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
         
@@ -170,18 +170,18 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
         for node in nodes:
             node.select = False
         
-        switch_node = nodes.new(type='SSMTNode_SwitchKey')
+        switch_node = nodes.new(type='MIMINode_SwitchKey')
         switch_node.location = (base_x + 600, base_y)
         
         while len(switch_node.inputs) > 1:
             switch_node.inputs.remove(switch_node.inputs[-1])
         
         while len(switch_node.inputs) < len(objects_with_sequence):
-            switch_node.inputs.new('SSMTSocketObject', f"Status {len(switch_node.inputs)}")
+            switch_node.inputs.new('MIMISocketObject', f"Status {len(switch_node.inputs)}")
         
         obj_nodes = []
         for i, (seq_num, obj) in enumerate(objects_with_sequence):
-            obj_node = nodes.new(type='SSMTNode_Object_Info')
+            obj_node = nodes.new(type='MIMINode_Object_Info')
             obj_node.location = (base_x, base_y - i * 15)
             obj_node.object_name = obj.name
             obj_node.select = True
@@ -197,7 +197,7 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
 
 
 class SSMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
-    bl_idname = "ssmt.refresh_blueprint_submesh_list"
+    bl_idname = "mimi.refresh_blueprint_submesh_list"
     bl_label = "Refresh Submesh List"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -213,7 +213,7 @@ class SSMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
 
 
 class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
-    bl_idname = "ssmt.batch_set_selected_object_node_submesh"
+    bl_idname = "mimi.batch_set_selected_object_node_submesh"
     bl_label = "Batch Set Selected Nodes to Submesh"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -221,7 +221,7 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
         space_data = getattr(context, "space_data", None)
         if space_data and getattr(space_data, "type", None) == 'NODE_EDITOR':
             node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
-            if node_tree and getattr(node_tree, "bl_idname", "") == 'SSMTBlueprintTreeType':
+            if node_tree and getattr(node_tree, "bl_idname", "") == 'MIMIBlueprintTreeType':
                 return node_tree
         return BlueprintExportHelper.get_current_blueprint_tree(context=context)
 
@@ -241,7 +241,7 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
             layout = menu.layout
             for submesh_name in submesh_names:
                 op = layout.operator(
-                    "ssmt.apply_selected_object_node_submesh",
+                    "mimi.apply_selected_object_node_submesh",
                     text=submesh_name,
                     icon='OUTLINER_COLLECTION',
                 )
@@ -259,7 +259,7 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
 
 
 class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
-    bl_idname = "ssmt.apply_selected_object_node_submesh"
+    bl_idname = "mimi.apply_selected_object_node_submesh"
     bl_label = "Set to Specified Submesh"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -269,7 +269,7 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
         space_data = getattr(context, "space_data", None)
         if space_data and getattr(space_data, "type", None) == 'NODE_EDITOR':
             node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
-            if node_tree and getattr(node_tree, "bl_idname", "") == 'SSMTBlueprintTreeType':
+            if node_tree and getattr(node_tree, "bl_idname", "") == 'MIMIBlueprintTreeType':
                 return node_tree
         return BlueprintExportHelper.get_current_blueprint_tree(context=context)
 
@@ -287,7 +287,7 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
 
         updated_count = 0
         for node in node_tree.nodes:
-            if not node.select or getattr(node, "bl_idname", "") != 'SSMTNode_Object_Info':
+            if not node.select or getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
                 continue
             node.submesh_name = target_submesh
             updated_count += 1
@@ -303,21 +303,21 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
 def draw_objects_context_menu_add(self, context):
     layout = self.layout
     layout.separator()
-    layout.menu("SSMT_MT_ObjectContextMenuSub", text=tr("SSMT Blueprint Graph"), icon='NODETREE')
+    layout.menu("MIMIMT_ObjectContextMenuSub", text=tr("SSMT Blueprint Graph"), icon='NODETREE')
 
 @translatable
-class SSMT_MT_ObjectContextMenuSub(bpy.types.Menu):
+class MIMIMT_ObjectContextMenuSub(bpy.types.Menu):
     bl_label = "SSMT Blueprint Graph"
     
     def draw(self, context):
         layout = self.layout
-        layout.operator("ssmt.create_group_from_selection", text=tr("Create Group from Selected Objects"), icon='GROUP')
-        layout.operator("ssmt.create_internal_switch", text=tr("Create Internal Switch"), icon='ARROW_LEFTRIGHT')
+        layout.operator("mimi.create_group_from_selection", text=tr("Create Group from Selected Objects"), icon='GROUP')
+        layout.operator("mimi.create_internal_switch", text=tr("Create Internal Switch"), icon='ARROW_LEFTRIGHT')
 
 
 class SSMT_OT_AlignNodes(I18nOperator):
     '''Align the selected nodes in a grid layout'''
-    bl_idname = "ssmt.align_nodes"
+    bl_idname = "mimi.align_nodes"
     bl_label = "Align Nodes in Grid"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -494,7 +494,7 @@ class SSMT_OT_AlignNodes(I18nOperator):
 
 class SSMT_OT_BatchConnectNodes(I18nOperator):
     '''Batch connect the selected nodes: supports one-to-one or many-to-one connections'''
-    bl_idname = "ssmt.batch_connect_nodes"
+    bl_idname = "mimi.batch_connect_nodes"
     bl_label = "Batch Connect Nodes"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -631,7 +631,7 @@ class SSMT_OT_BatchConnectNodes(I18nOperator):
             if not available_input:
                 try:
                     if hasattr(target_node, 'update'):
-                        target_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(target_node.inputs) + 1))
+                        target_node.inputs.new('MIMISocketObject', "Input {count}".format(count=len(target_node.inputs) + 1))
                         available_input = target_node.inputs[-1]
                 except Exception:
                     self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=target_node.name))
@@ -720,7 +720,7 @@ class SSMT_OT_BatchConnectNodes(I18nOperator):
                     try:
                         # Some nodes (such as Group, Output) support dynamically added sockets
                         if hasattr(minority_node, 'update'):
-                            minority_node.inputs.new('SSMTSocketObject', "Input {count}".format(count=len(minority_node.inputs) + 1))
+                            minority_node.inputs.new('MIMISocketObject', "Input {count}".format(count=len(minority_node.inputs) + 1))
                             available_input = minority_node.inputs[-1]
                     except Exception:
                         self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=minority_node.name))
@@ -750,15 +750,15 @@ class SSMT_OT_BatchConnectNodes(I18nOperator):
 def draw_node_add_menu(self, context):
     if not isinstance(context.space_data, bpy.types.SpaceNodeEditor):
         return
-    if context.space_data.tree_type != 'SSMTBlueprintTreeType':
+    if context.space_data.tree_type != 'MIMIBlueprintTreeType':
         return
     
     layout = self.layout
-    layout.operator("node.add_node", text=tr("Object Info"), icon='OBJECT_DATAMODE').type = "SSMTNode_Object_Info"
-    layout.operator("node.add_node", text=tr("Group"), icon='GROUP').type = "SSMTNode_Object_Group"
-    layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "SSMTNode_Result_Output"
-    layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "SSMTNode_Face_Mod_Export"
-    layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "SSMTNode_SwitchKey"
+    layout.operator("node.add_node", text=tr("Object Info"), icon='OBJECT_DATAMODE').type = "MIMINode_Object_Info"
+    layout.operator("node.add_node", text=tr("Group"), icon='GROUP').type = "MIMINode_Object_Group"
+    layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
+    layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
+    layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper
@@ -772,18 +772,18 @@ def draw_node_context_menu(self, context):
     """Add batch connection options to the node editor context menu"""
     if not isinstance(context.space_data, bpy.types.SpaceNodeEditor):
         return
-    if context.space_data.tree_type != 'SSMTBlueprintTreeType':
+    if context.space_data.tree_type != 'MIMIBlueprintTreeType':
         return
     
     layout = self.layout
     layout.separator()
-    layout.operator("ssmt.make_group", text=tr("Make Group"), icon='NODETREE')
-    layout.operator("ssmt.align_nodes", text=tr("Align Nodes in Grid"), icon='GRID')
-    layout.operator("ssmt.batch_connect_nodes", text=tr("Batch Connect Nodes"), icon='LINKED')
-    layout.operator("ssmt.refresh_blueprint_submesh_list", text=tr("Refresh Submesh List"), icon='FILE_REFRESH')
-    layout.operator("ssmt.batch_set_selected_object_node_submesh", text=tr("Batch Set Selected Nodes to Submesh"), icon='OUTLINER_COLLECTION')
+    layout.operator("mimi.make_group", text=tr("Make Group"), icon='NODETREE')
+    layout.operator("mimi.align_nodes", text=tr("Align Nodes in Grid"), icon='GRID')
+    layout.operator("mimi.batch_connect_nodes", text=tr("Batch Connect Nodes"), icon='LINKED')
+    layout.operator("mimi.refresh_blueprint_submesh_list", text=tr("Refresh Submesh List"), icon='FILE_REFRESH')
+    layout.operator("mimi.batch_set_selected_object_node_submesh", text=tr("Batch Set Selected Nodes to Submesh"), icon='OUTLINER_COLLECTION')
     layout.separator()
-    layout.operator("ssmt.refresh_node_object_ids", text=tr("Refresh Object Node Info"), icon='FILE_REFRESH')
+    layout.operator("mimi.refresh_node_object_ids", text=tr("Refresh Object Node Info"), icon='FILE_REFRESH')
 
 
 def register():
@@ -794,7 +794,7 @@ def register():
     bpy.utils.register_class(SSMT_OT_ApplySelectedObjectNodeSubmesh)
     bpy.utils.register_class(SSMT_OT_AlignNodes)
     bpy.utils.register_class(SSMT_OT_BatchConnectNodes)
-    bpy.utils.register_class(SSMT_MT_ObjectContextMenuSub)
+    bpy.utils.register_class(MIMIMT_ObjectContextMenuSub)
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
     # Add to the 3D viewport object context menu
     bpy.types.VIEW3D_MT_object_context_menu.append(draw_objects_context_menu_add)
@@ -805,12 +805,12 @@ def register():
     if keyconfig:
         keymap = keyconfig.keymaps.new(name='Node Editor', space_type='NODE_EDITOR')
         if not any(
-            item.idname == 'ssmt.make_group' and item.type == 'G' and item.ctrl
+            item.idname == 'mimi.make_group' and item.type == 'G' and item.ctrl
             for item in keymap.keymap_items
         ):
-            keymap.keymap_items.new('ssmt.make_group', 'G', 'PRESS', ctrl=True)
-        if not any(item.idname == 'ssmt.group_tab' and item.type == 'TAB' for item in keymap.keymap_items):
-            keymap.keymap_items.new('ssmt.group_tab', 'TAB', 'PRESS')
+            keymap.keymap_items.new('mimi.make_group', 'G', 'PRESS', ctrl=True)
+        if not any(item.idname == 'mimi.group_tab' and item.type == 'TAB' for item in keymap.keymap_items):
+            keymap.keymap_items.new('mimi.group_tab', 'TAB', 'PRESS')
 
 def unregister():
     wm = bpy.context.window_manager
@@ -820,15 +820,15 @@ def unregister():
         if keymap:
             for item in list(keymap.keymap_items):
                 if (
-                    (item.idname == 'ssmt.make_group' and item.type == 'G' and item.ctrl)
-                    or (item.idname == 'ssmt.group_tab' and item.type == 'TAB')
+                    (item.idname == 'mimi.make_group' and item.type == 'G' and item.ctrl)
+                    or (item.idname == 'mimi.group_tab' and item.type == 'TAB')
                 ):
                     keymap.keymap_items.remove(item)
     bpy.types.NODE_MT_context_menu.remove(draw_node_context_menu)
     bpy.types.NODE_MT_add.remove(draw_node_add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
 
-    bpy.utils.unregister_class(SSMT_MT_ObjectContextMenuSub)
+    bpy.utils.unregister_class(MIMIMT_ObjectContextMenuSub)
     bpy.utils.unregister_class(SSMT_OT_BatchConnectNodes)
     bpy.utils.unregister_class(SSMT_OT_AlignNodes)
     bpy.utils.unregister_class(SSMT_OT_ApplySelectedObjectNodeSubmesh)

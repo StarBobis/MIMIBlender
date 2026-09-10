@@ -200,7 +200,7 @@ def _link_group_to_output(tree, group_node, output_node):
     if group_node is None or len(group_node.outputs) == 0:
         return
     if len(output_node.inputs) == 0 or output_node.inputs[-1].is_linked:
-        output_node.inputs.new('SSMTSocketObject', "Group {count}".format(count=len(output_node.inputs) + 1))
+        output_node.inputs.new('MIMISocketObject', "Group {count}".format(count=len(output_node.inputs) + 1))
     tree.links.new(group_node.outputs[0], output_node.inputs[-1])
 
 
@@ -234,14 +234,14 @@ def _create_face_mod_export_node(tree, oldfoldername_node_dict, oldfoldername_js
     if not face_nodes:
         return None
 
-    export_node = tree.nodes.new('SSMTNode_Face_Mod_Export')
+    export_node = tree.nodes.new('MIMINode_Face_Mod_Export')
     export_node.location = location
     export_node.label = "Export Face Mod"
     export_node.diffuse_hash = diffuse_hash
     export_node.output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
     for object_node in face_nodes:
         if export_node.inputs[-1].is_linked:
-            export_node.inputs.new('SSMTSocketObject', f"Face Group {len(export_node.inputs) + 1}")
+            export_node.inputs.new('MIMISocketObject', f"Face Group {len(export_node.inputs) + 1}")
         tree.links.new(object_node.outputs[0], export_node.inputs[-1])
     return export_node
 
@@ -288,7 +288,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
         component_str = str(parsed["component"]) if parsed else "0"
 
         # Create the node
-        node = tree.nodes.new('SSMTNode_Object_Info')
+        node = tree.nodes.new('MIMINode_Object_Info')
 
         # Fill in the properties
         node.object_name = imported_obj.name
@@ -312,7 +312,7 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
 
         # Add a socket manually when the Group's last socket is already occupied
         if group_node.inputs[-1].is_linked:
-            group_node.inputs.new('SSMTSocketObject', f"Input {len(group_node.inputs) + 1}")
+            group_node.inputs.new('MIMISocketObject', f"Input {len(group_node.inputs) + 1}")
         tree.links.new(node.outputs[0], group_node.inputs[-1])
 
     # Stack all Object Info nodes into one vertical column, top to bottom.
@@ -496,7 +496,7 @@ def ImprotFromWorkSpaceFull(self, context):
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
     JsonUtils.SaveToFile(json_dict=foldername_gametypename_dict, filepath=save_import_json_path)
     
-    if getattr(context.scene.global_properties, "align_face_on_import", False):
+    if getattr(context.scene.mimi_global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
             self.report({'WARNING'}, tr("Face alignment requires at least one valid Face mark and one Neck mark."))
 
@@ -513,15 +513,15 @@ def ImprotFromWorkSpaceFull(self, context):
         # Nico: always create a new blueprint to avoid overwriting user-modified ones
         # If a blueprint with the same name exists, Blender appends a suffix like .001, preserving the old one
         try:
-            tree = bpy.data.node_groups.new(name=tree_name, type='SSMTBlueprintTreeType')
+            tree = bpy.data.node_groups.new(name=tree_name, type='MIMIBlueprintTreeType')
         except Exception as e:
-            print(f"Failed to create new node tree: {e}. Check if SSMTBlueprintTreeType is registered.")
+            print(f"Failed to create new node tree: {e}. Check if MIMIBlueprintTreeType is registered.")
             return
         tree.use_fake_user = True
         BlueprintExportHelper.set_tree_submesh_names(all_submesh_display_names, tree=tree)
         
         # Create the Group node (and link to it in the loop)
-        group_node = tree.nodes.new('SSMTNode_Object_Group')
+        group_node = tree.nodes.new('MIMINode_Object_Group')
         group_node.label = "Default Group"
         
         # 3. Create Object Info nodes stacked in one vertical column; the column and the Group node share one workspace-named Frame
@@ -531,7 +531,7 @@ def ImprotFromWorkSpaceFull(self, context):
         # 4. Place the Output nodes (the Group node is already placed inside the Frame)
         group_node.label = "Master Mesh Group"
 
-        output_node = tree.nodes.new('SSMTNode_Result_Output')
+        output_node = tree.nodes.new('MIMINode_Result_Output')
         output_node.location = (max_node_right + 480.0, -200.0)
         output_node.label = "Generate Mod"
 
@@ -552,9 +552,9 @@ def ImprotFromWorkSpaceFull(self, context):
 
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
-        if global_properties:
-            global_properties.selected_blueprint_name = tree.name
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = tree.name
 
         BlueprintExportHelper.reveal_tree_in_node_editors(context, tree)
         _clear_blueprint_node_selection(tree)
@@ -569,7 +569,7 @@ def ImprotFromWorkSpaceFull(self, context):
 
 
 class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
-    bl_idname = "ssmt4.import_all_from_workspace"
+    bl_idname = "mimi.import_all_from_workspace"
     bl_label = "Import All From SSMT Workspace"
     bl_description = "Import everything from the current workspace folder with one click."
     bl_options = {'REGISTER','UNDO'}
@@ -590,7 +590,7 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
     
 
 class SSMT4ImportRaw(I18nOperator, ImportHelper):
-    bl_idname = "ssmt4.import_raw"
+    bl_idname = "mimi.import_raw"
     bl_label = "Import SSMT Model"
     bl_description = "Import an SSMT model file. You only need to select the .json file."
     bl_options = {'REGISTER','UNDO'}
@@ -786,7 +786,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
     existing_import_json.update(foldername_gametypename_dict)
     JsonUtils.SaveToFile(json_dict=existing_import_json, filepath=save_import_json_path)
 
-    if getattr(context.scene.global_properties, "align_face_on_import", False):
+    if getattr(context.scene.mimi_global_properties, "align_face_on_import", False):
         if not _apply_face_neck_object_alignment(foldername_imported_obj_dict):
             self.report({'WARNING'}, tr("Face alignment requires at least one valid Face mark and one Neck mark."))
 
@@ -819,7 +819,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         tree.use_fake_user = True
         BlueprintExportHelper.set_tree_submesh_names(all_submesh_display_names, tree=tree)
 
-        group_node = tree.nodes.new('SSMTNode_Object_Group')
+        group_node = tree.nodes.new('MIMINode_Object_Group')
         group_node.label = "Default Group"
 
         ws_model = WorkSpaceModel()
@@ -827,7 +827,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
-        output_node = tree.nodes.new('SSMTNode_Result_Output')
+        output_node = tree.nodes.new('MIMINode_Result_Output')
         output_node.location = (max_node_right + 480.0, -200.0)
         output_node.label = "Generate Mod"
 
@@ -847,9 +847,9 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
-        if global_properties:
-            global_properties.selected_blueprint_name = tree.name
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = tree.name
 
         BlueprintExportHelper.reveal_tree_in_node_editors(context, tree)
         _clear_blueprint_node_selection(tree)
@@ -902,7 +902,7 @@ def _show_last_type_warning(submesh_folder_name: str):
 # Operator - the DrawIB data type is incorrect
 # =============================================================================
 class SSMT4FixDrawIBDataType(I18nOperator):
-    bl_idname = "ssmt4.fix_drawib_datatype"
+    bl_idname = "mimi.fix_drawib_datatype"
     bl_label = "Fix DrawIB Data Type"
     bl_description = "The DrawIB data type is incorrect: delete all matching data-type folders under this DrawIB, delete the related meshes, and re-import"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1028,7 +1028,7 @@ class SSMT4FixDrawIBDataType(I18nOperator):
 # Operator - the Submesh data type is incorrect
 # =============================================================================
 class SSMT4FixSubmeshDataType(I18nOperator):
-    bl_idname = "ssmt4.fix_submesh_datatype"
+    bl_idname = "mimi.fix_submesh_datatype"
     bl_label = "Fix Submesh Data Type"
     bl_description = "The Submesh data type is incorrect: delete the matching data-type folder, delete this mesh, and re-import"
     bl_options = {'REGISTER', 'UNDO'}

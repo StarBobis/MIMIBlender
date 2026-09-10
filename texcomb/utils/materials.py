@@ -489,7 +489,7 @@ def sort_materials(
     """
     # Reset material references
     for mat in bpy.data.materials:
-        mat.root_mat = None
+        mat.mimi_root_mat = None
 
     mat_dict = cast(MatDict, defaultdict(list))
 
@@ -510,7 +510,7 @@ def sort_materials(
             # Group by texture and optionally diffuse color
             key = (
                 packed_file,
-                diffuse if mat.smc_diffuse else DEFAULT_DIFFUSE,
+                diffuse if mat.mimi_smc_diffuse else DEFAULT_DIFFUSE,
                 gfx_textures_tuple,
             )
         else:

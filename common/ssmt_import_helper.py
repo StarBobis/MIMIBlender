@@ -5,7 +5,7 @@ import os
 from .d3d11_element import D3D11Element
 from .mesh_create_helper import MeshCreateHelper
 from ..workspace.submesh_json import SubmeshJson, SubmeshCategoryBuffer
-from .global_properties import GlobalProperties
+from .mimi_global_properties import MIMIGlobalProperties
 from ..utils.format_utils import Fatal, FormatUtils
 
 
@@ -23,7 +23,7 @@ class SSMTImportHelper:
 		gametypename = submesh_json.WorkGameType
 
 		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
-		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and GlobalProperties.is_merged_mode()) else None
+		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and MIMIGlobalProperties.is_merged_mode()) else None
 
 		# Reverse-engineered products may carry a DrawCallSegmentList (one segment per drawindexed).
 		# When valid segments exist, create one mesh object per segment (per-segment model creation,

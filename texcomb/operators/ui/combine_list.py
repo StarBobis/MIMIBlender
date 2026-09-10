@@ -5,10 +5,10 @@ process. It includes functionality for refreshing the list, toggling selection
 states, and managing selection of materials and objects.
 
 Usage example:
-    bpy.ops.smc.refresh_ob_data()
-    bpy.ops.smc.combine_switch(list_id=index)
-    bpy.ops.smc.select_all()
-    bpy.ops.smc.select_none()
+    bpy.ops.mimi.refresh_ob_data()
+    bpy.ops.mimi.combine_switch(list_id=index)
+    bpy.ops.mimi.select_all()
+    bpy.ops.mimi.select_none()
 """
 
 from collections import defaultdict
@@ -30,7 +30,7 @@ class MaterialListRefreshOperator(I18nOperator):
     list while preserving user selections from previous refreshes.
     """
 
-    bl_idname = "smc.refresh_ob_data"
+    bl_idname = "mimi.refresh_ob_data"
     bl_label = "Refresh Material List"
     bl_description = "Rescan the scene and rebuild the material list available for combining"
 
@@ -89,7 +89,7 @@ class MaterialListRefreshOperator(I18nOperator):
             CombineListData, defaultdict(self._create_object_entry)
         )
 
-        for item in scene.smc_ob_data:
+        for item in scene.mimi_smc_ob_data:
             if item.type == CombineListTypes.OBJECT:
                 cached_data[item.ob]["used"] = item.used
             elif item.type == CombineListTypes.MATERIAL:
@@ -114,7 +114,7 @@ class MaterialListRefreshOperator(I18nOperator):
             objects: Set of eligible objects to process.
             cached_data: Dictionary containing cached selection data.
         """
-        scene.smc_ob_data.clear()
+        scene.mimi_smc_ob_data.clear()
 
         for obj_id, obj in enumerate(objects):
             obj_state = cached_data[obj]
@@ -186,7 +186,7 @@ class MaterialListRefreshOperator(I18nOperator):
             obj_id: Index of the object in the list.
             is_used: Whether the object is selected for combining.
         """
-        entry = scene.smc_ob_data.add()
+        entry = scene.mimi_smc_ob_data.add()
         entry.ob = obj
         entry.ob_id = obj_id
         entry.type = CombineListTypes.OBJECT
@@ -211,7 +211,7 @@ class MaterialListRefreshOperator(I18nOperator):
             is_used: Whether the material is selected for combining.
             layer: Atlas layer assignment for the material.
         """
-        entry = scene.smc_ob_data.add()
+        entry = scene.mimi_smc_ob_data.add()
         entry.ob = obj
         entry.ob_id = obj_id
         entry.mat = material
@@ -227,7 +227,7 @@ class MaterialListRefreshOperator(I18nOperator):
             scene: Current Blender scene.
             obj_id: Index of the object to add separator after.
         """
-        entry = scene.smc_ob_data.add()
+        entry = scene.mimi_smc_ob_data.add()
         entry.type = CombineListTypes.SEPARATOR
         entry.ob_id = obj_id
 
@@ -240,7 +240,7 @@ class MaterialListToggleOperator(I18nOperator):
     and their materials.
     """
 
-    bl_idname = "smc.combine_switch"
+    bl_idname = "mimi.combine_switch"
     bl_label = "Toggle Selection"
     bl_description = "Toggle the selection state of materials/objects to control whether they are combined"
 
@@ -256,7 +256,7 @@ class MaterialListToggleOperator(I18nOperator):
             Set containing operation status.
         """
         scene = context.scene
-        items = scene.smc_ob_data
+        items = scene.mimi_smc_ob_data
         target_item = items[self.list_id]
 
         if target_item.type == CombineListTypes.OBJECT:
@@ -330,7 +330,7 @@ class SelectAllMaterials(I18nOperator):
     process.
     """
 
-    bl_idname = "smc.select_all"
+    bl_idname = "mimi.select_all"
     bl_label = "Select All"
     bl_description = "Select all objects and materials"
 
@@ -343,7 +343,7 @@ class SelectAllMaterials(I18nOperator):
         Returns:
             Set containing operation status.
         """
-        for item in context.scene.smc_ob_data:
+        for item in context.scene.mimi_smc_ob_data:
             if item.type in (
                 CombineListTypes.OBJECT,
                 CombineListTypes.MATERIAL,
@@ -359,7 +359,7 @@ class SelectNoneMaterials(I18nOperator):
     from the combining process.
     """
 
-    bl_idname = "smc.select_none"
+    bl_idname = "mimi.select_none"
     bl_label = "Deselect All"
     bl_description = "Deselect all objects and materials"
 
@@ -372,7 +372,7 @@ class SelectNoneMaterials(I18nOperator):
         Returns:
             Set containing operation status.
         """
-        for item in context.scene.smc_ob_data:
+        for item in context.scene.mimi_smc_ob_data:
             if item.type in (
                 CombineListTypes.OBJECT,
                 CombineListTypes.MATERIAL,

@@ -12,14 +12,14 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 
 
 # Custom Socket Types
-class SSMTSubmeshListItem(PropertyGroup):
+class MIMISubmeshListItem(PropertyGroup):
     name: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
 
 
 @translatable
-class SSMTSocketObject(NodeSocket):
+class MIMISocketObject(NodeSocket):
     '''Custom Socket for Object Data'''
-    bl_idname = 'SSMTSocketObject'
+    bl_idname = 'MIMISocketObject'
     bl_label = 'Object Socket'
 
     def draw_color(self, context, node):
@@ -32,18 +32,18 @@ class SSMTSocketObject(NodeSocket):
 
 
 @translatable
-class SSMTBlueprintTree(NodeTree):
+class MIMIBlueprintTree(NodeTree):
     '''SSMT Mod Logic Blueprint'''
-    bl_idname = 'SSMTBlueprintTreeType'
+    bl_idname = 'MIMIBlueprintTreeType'
     bl_label = 'SSMT Blueprint'
     bl_icon = 'NODETREE'
 
 
 # 2. Define the base nodes
-class SSMTNodeBase(Node):
+class MIMINodeBase(Node):
     @classmethod
     def poll(cls, ntree):
-        return ntree.bl_idname == 'SSMTBlueprintTreeType'
+        return ntree.bl_idname == 'MIMIBlueprintTreeType'
     
     def calculate_text_width(self, text, padding=40):
         """Estimate the width required to display the text."""
@@ -80,7 +80,7 @@ class SSMTNodeBase(Node):
     
 
 class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
-    bl_idname = "theherta3.open_persistent_blueprint"
+    bl_idname = "mimi.open_persistent_blueprint"
     bl_label = "Open Blueprint"
     bl_description = "Open a standalone blueprint window for configuring Mod logic"
     bl_options = {'REGISTER', 'UNDO'}
@@ -99,7 +99,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
         
         # Look for an existing NodeGroup with the same name
         tree = bpy.data.node_groups.get(tree_name)
-        if tree and getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
+        if tree and getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
             tree = None
 
         if not tree and requested_tree_name:
@@ -108,15 +108,15 @@ class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
 
         if not tree:
             # Create a new NodeTree; the type must be our custom bl_idname
-            tree = bpy.data.node_groups.new(name=tree_name, type='SSMTBlueprintTreeType')
+            tree = bpy.data.node_groups.new(name=tree_name, type='MIMIBlueprintTreeType')
             tree.use_fake_user = True
 
         from .blueprint_export_helper import BlueprintExportHelper
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
-        if global_properties and getattr(global_properties, "selected_blueprint_name", "") != tree.name:
-            global_properties.selected_blueprint_name = tree.name
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties and getattr(mimi_global_properties, "selected_blueprint_name", "") != tree.name:
+            mimi_global_properties.selected_blueprint_name = tree.name
         
         # 1.5 Check for an already-open window editing this tree; reuse it instead of closing and reopening.
         target_window = None
@@ -150,13 +150,13 @@ class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
             target_area = max(screen.areas, key=lambda a: a.width * a.height)
             
             if target_area:
-                target_area.ui_type = 'SSMTBlueprintTreeType' # Seems ineffective; the node editor needs the tree type set
+                target_area.ui_type = 'MIMIBlueprintTreeType' # Seems ineffective; the node editor needs the tree type set
                 target_area.type = 'NODE_EDITOR'
                 
                 # Configure space properties
                 for space in target_area.spaces:
                     if space.type == 'NODE_EDITOR':
-                        space.tree_type = 'SSMTBlueprintTreeType' # Key: switch to the custom tree type
+                        space.tree_type = 'MIMIBlueprintTreeType' # Key: switch to the custom tree type
                         space.node_tree = tree # Set the data block to edit
                         space.pin = True # Pin
                         
@@ -166,7 +166,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
 
 
 class THEHERTA3_OT_DeletePersistentBlueprint(I18nOperator):
-    bl_idname = "theherta3.delete_persistent_blueprint"
+    bl_idname = "mimi.delete_persistent_blueprint"
     bl_label = "Delete Blueprint"
     bl_description = "Delete the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
@@ -225,10 +225,10 @@ class THEHERTA3_OT_DeletePersistentBlueprint(I18nOperator):
         deleted_blueprint_name = target_tree.name
         bpy.data.node_groups.remove(target_tree)
 
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
         preferred_blueprint_name = BlueprintExportHelper.get_preferred_blueprint_name(context=context)
-        if global_properties:
-            global_properties.selected_blueprint_name = preferred_blueprint_name or "__NONE__"
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = preferred_blueprint_name or "__NONE__"
 
         for window in context.window_manager.windows:
             for area in window.screen.areas:
@@ -239,7 +239,7 @@ class THEHERTA3_OT_DeletePersistentBlueprint(I18nOperator):
 
 
 class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
-    bl_idname = "theherta3.rename_persistent_blueprint"
+    bl_idname = "mimi.rename_persistent_blueprint"
     bl_label = "Rename Blueprint"
     bl_description = "Rename the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
@@ -311,9 +311,9 @@ class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
         if BlueprintExportHelper.runtime_blueprint_tree_name == old_name:
             BlueprintExportHelper.runtime_blueprint_tree_name = target_tree.name
 
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
-        if global_properties:
-            global_properties.selected_blueprint_name = target_tree.name
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = target_tree.name
 
         for window in context.window_manager.windows:
             for area in window.screen.areas:
@@ -323,9 +323,9 @@ class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
         return {'FINISHED'}
     
 @translatable
-class SSMT_PT_FrameProperties(bpy.types.Panel):
+class MIMIPT_FrameProperties(bpy.types.Panel):
     '''Frame properties panel: with a Frame node selected, adjust its color, transparency, label, etc. from the sidebar'''
-    bl_idname = "SSMT_PT_FrameProperties"
+    bl_idname = "MIMIPT_FrameProperties"
     bl_label = "Frame Properties"
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
@@ -338,7 +338,7 @@ class SSMT_PT_FrameProperties(bpy.types.Panel):
         if space.type != 'NODE_EDITOR':
             return False
         tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
-        if not tree or getattr(tree, "bl_idname", "") != 'SSMTBlueprintTreeType':
+        if not tree or getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
             return False
         # Check whether a Frame node is selected
         if not context.selected_nodes:
@@ -399,14 +399,14 @@ class SSMT_PT_FrameProperties(bpy.types.Panel):
             layout.separator()
             layout.label(text=tr("Selected {count} Frames").format(count=len(frames)), icon='INFO')
             layout.label(text=tr("After editing the properties above, click the button to apply to all"), icon='LOOP_BACK')
-            op = layout.operator("ssmt.apply_frame_properties_to_all", text=tr("Apply to All Selected Frames"), icon='CHECKMARK')
+            op = layout.operator("mimi.apply_frame_properties_to_all", text=tr("Apply to All Selected Frames"), icon='CHECKMARK')
             op.source_frame_name = frame.name
             op.tree_name = frame.id_data.name if frame.id_data else ""
 
 
 class SSMT_OT_ApplyFramePropertiesToAll(I18nOperator):
     '''Copy all properties of the first selected Frame to the other selected Frames'''
-    bl_idname = "ssmt.apply_frame_properties_to_all"
+    bl_idname = "mimi.apply_frame_properties_to_all"
     bl_label = "Apply to All Selected Frames"
     bl_options = {'REGISTER', 'UNDO'}
 
@@ -436,15 +436,15 @@ class SSMT_OT_ApplyFramePropertiesToAll(I18nOperator):
 
 
 def register():
-    bpy.utils.register_class(SSMTSubmeshListItem)
-    bpy.utils.register_class(SSMTBlueprintTree)
-    bpy.utils.register_class(SSMTSocketObject)
+    bpy.utils.register_class(MIMISubmeshListItem)
+    bpy.utils.register_class(MIMIBlueprintTree)
+    bpy.utils.register_class(MIMISocketObject)
     bpy.utils.register_class(THEHERTA3_OT_OpenPersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_DeletePersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_RenamePersistentBlueprint)
-    bpy.utils.register_class(SSMT_PT_FrameProperties)
+    bpy.utils.register_class(MIMIPT_FrameProperties)
     bpy.utils.register_class(SSMT_OT_ApplyFramePropertiesToAll)
-    SSMTBlueprintTree.ssmt_submesh_items = bpy.props.CollectionProperty(type=SSMTSubmeshListItem) # type: ignore[attr-defined]
+    MIMIBlueprintTree.ssmt_submesh_items = bpy.props.CollectionProperty(type=MIMISubmeshListItem) # type: ignore[attr-defined]
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.register_workspace_tree_sync_timer()
 
@@ -452,12 +452,12 @@ def register():
 def unregister():
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.unregister_workspace_tree_sync_timer()
-    del SSMTBlueprintTree.ssmt_submesh_items
+    del MIMIBlueprintTree.ssmt_submesh_items
     bpy.utils.unregister_class(SSMT_OT_ApplyFramePropertiesToAll)
-    bpy.utils.unregister_class(SSMT_PT_FrameProperties)
+    bpy.utils.unregister_class(MIMIPT_FrameProperties)
     bpy.utils.unregister_class(THEHERTA3_OT_RenamePersistentBlueprint)
     bpy.utils.unregister_class(THEHERTA3_OT_DeletePersistentBlueprint)
-    bpy.utils.unregister_class(SSMTSocketObject)
+    bpy.utils.unregister_class(MIMISocketObject)
     bpy.utils.unregister_class(THEHERTA3_OT_OpenPersistentBlueprint)
-    bpy.utils.unregister_class(SSMTBlueprintTree)
-    bpy.utils.unregister_class(SSMTSubmeshListItem)
+    bpy.utils.unregister_class(MIMIBlueprintTree)
+    bpy.utils.unregister_class(MIMISubmeshListItem)

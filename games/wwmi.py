@@ -2,7 +2,7 @@ import os
 
 import shutil
 
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 from ..model.drawib_model_wwmi import DrawIBModelWWMI
@@ -29,7 +29,7 @@ class ExportWWMI:
             ordered_draw_ib_list.append(draw_ib)
 
         # UniComponent debug: print the submesh assignment of every DrawCallModel
-        if GlobalProperties.is_unico_component():
+        if MIMIGlobalProperties.is_unico_component():
             print("[UniComponent Export] DrawCallModel list:")
             for dcm in self.blueprint_model.ordered_draw_obj_data_model_list:
                 print(f"  obj='{dcm.obj_name}' submesh='{dcm.get_submesh_name()}' draw_ib='{dcm.match_draw_ib}'")
@@ -39,7 +39,7 @@ class ExportWWMI:
             self.drawib_drawibmodel_dict[draw_ib] = draw_ib_model
 
             # UniComponent debug: print the submesh grouping
-            if GlobalProperties.is_unico_component():
+            if MIMIGlobalProperties.is_unico_component():
                 print(f"[UniComponent Export] DrawIB '{draw_ib}' submesh groups:")
                 for idx, group in enumerate(draw_ib_model.submesh_drawcall_groups):
                     names = [dcm.obj_name for dcm in group]
@@ -94,7 +94,7 @@ class ExportWWMI:
             constants_section.append("global $shapekey_vertex_count_batch" + str(batch_id) + " = " + str(batch["custom_vertex_count"]))
         constants_section.append("global $mod_id = -1000")
 
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             constants_section.append("global $state_id = 0")
 
         constants_section.append("global $mod_enabled = 0")
@@ -144,7 +144,7 @@ class ExportWWMI:
         present_section.append("  if $mod_enabled")
         present_section.append("    post $object_detected = 0")
 
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             if draw_ib_model.blend_remap:
                 present_section.append("    run = CommandListInitializeBlendRemaps")
             present_section.append("    run = CommandListUpdateMergedSkeleton")
@@ -178,7 +178,7 @@ class ExportWWMI:
 
     def add_commandlist_update_merged_skeleton(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
         commandlist_section = M_IniSection(M_SectionType.CommandList)
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             commandlist_section.append("[CommandListUpdateMergedSkeleton]")
             commandlist_section.append("if $state_id")
             commandlist_section.append("  $state_id = 0")
@@ -195,7 +195,7 @@ class ExportWWMI:
     def add_blend_remap_sections(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
         blend_remap_section = M_IniSection(M_SectionType.CommandList)
 
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             blend_remap_section.append("[ResourceMergedSkeletonRemap]")
             blend_remap_section.append("[ResourceExtraMergedSkeletonRemap]")
             blend_remap_section.new_line()
@@ -298,7 +298,7 @@ class ExportWWMI:
         commandlist_section.append("CheckTextureOverride = ps-t5")
         commandlist_section.append("CheckTextureOverride = ps-t6")
         commandlist_section.append("CheckTextureOverride = ps-t7")
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             commandlist_section.append("CheckTextureOverride = vs-cb3")
             commandlist_section.append("CheckTextureOverride = vs-cb4")
         commandlist_section.new_line()
@@ -328,7 +328,7 @@ class ExportWWMI:
         # "= ref ResourceMergedSkeleton" is a reference binding.
         # Without ref, when a later compute shader updates the skeleton, vs-cb will not update in sync.
 
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             if draw_ib_model.blend_remap:
                 commandlist_section.append("if ResourceBlendBufferOverride === null")
                 commandlist_section.append("vb4 = ResourceBlendBuffer")
@@ -377,7 +377,7 @@ class ExportWWMI:
 
     def add_commandlist_merge_skeleton_section(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
         commandlist_section = M_IniSection(M_SectionType.CommandList)
-        if GlobalProperties.import_merged_vgmap() == 'MERGED':
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
             commandlist_section.append("[CommandListMergeSkeleton]")
             commandlist_section.append("$\\WWMIv1\\custom_mesh_scale = 1.00")
             commandlist_section.append("cs-cb8 = ref vs-cb4")
@@ -441,7 +441,7 @@ class ExportWWMI:
 
             texture_override_component.append("if $mod_enabled")
 
-            if GlobalProperties.import_merged_vgmap() == 'MERGED':
+            if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
                 state_id_var_str = "$state_id_" + component_count_str
                 texture_override_component.append("  local " + state_id_var_str)
                 texture_override_component.append("  if " + state_id_var_str + " != $state_id")
@@ -536,7 +536,7 @@ class ExportWWMI:
             texture_override_shapekeys_section.append("hash = " + draw_ib_model.wwmi_info.shapekeys.offsets_hash)
             texture_override_shapekeys_section.append("match_priority = 0")
             texture_override_shapekeys_section.append("if $mod_enabled")
-            if GlobalProperties.import_merged_vgmap() == 'MERGED':
+            if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
                 texture_override_shapekeys_section.append("  if cs == 3381.3333 && ResourceMergedSkeleton !== null")
             else:
                 texture_override_shapekeys_section.append("  if cs == 3381.3333")
@@ -557,7 +557,7 @@ class ExportWWMI:
             texture_override_shapekeys_section.append("hash = " + draw_ib_model.wwmi_info.shapekeys.offsets_hash)
             texture_override_shapekeys_section.append("match_priority = 0")
             texture_override_shapekeys_section.append("if $mod_enabled")
-            if GlobalProperties.import_merged_vgmap() == 'MERGED':
+            if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
                 texture_override_shapekeys_section.append("  if cs == 3381.4444 && ResourceMergedSkeleton !== null")
             else:
                 texture_override_shapekeys_section.append("  if cs == 3381.4444")
@@ -824,7 +824,7 @@ class ExportWWMI:
             self.add_resource_shapekeys(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             self.add_wwmi_shapekey_sections(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
 
-            if GlobalProperties.import_merged_vgmap() == 'MERGED':
+            if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
                 self.add_resource_merged_skeleton(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             
             self.add_resource_buffer(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)

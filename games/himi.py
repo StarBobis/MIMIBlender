@@ -2,7 +2,7 @@ import math
 import os
 
 from ..common.global_config import GlobalConfig, LogicName
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
 
@@ -66,7 +66,7 @@ class ExportHIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            if not GlobalProperties.forbid_auto_texture_ini():
+            if not MIMIGlobalProperties.forbid_auto_texture_ini():
                 for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
                     if texture_markup_info.mark_type in ("Slot", "SharedSlot"):
                         texture_override_ib_section.append(texture_markup_info.mark_slot + " = " + texture_markup_info.get_resource_name())
@@ -116,7 +116,7 @@ class ExportHIMI:
         ini_builder.append_section(resource_vb_section)
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             return
 
         resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
@@ -187,7 +187,7 @@ class ExportHIMI:
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
             texture_override_ib_section.append("checktextureoverride = vb1")
 
-            if not GlobalProperties.forbid_auto_texture_ini():
+            if not MIMIGlobalProperties.forbid_auto_texture_ini():
                 for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
                     if texture_markup_info.mark_type == "Hash":
                         texture_override_ib_section.append("checktextureoverride = " + texture_markup_info.mark_slot)
@@ -207,7 +207,7 @@ class ExportHIMI:
 
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
-            if not GlobalProperties.forbid_auto_texture_ini():
+            if not MIMIGlobalProperties.forbid_auto_texture_ini():
                 for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
                     if texture_markup_info.mark_type in ("Slot", "SharedSlot"):
                         texture_override_ib_section.append(texture_markup_info.mark_slot + " = " + texture_markup_info.get_resource_name())

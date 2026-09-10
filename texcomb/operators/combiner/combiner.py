@@ -6,7 +6,7 @@ to generating the final atlas and updating UV coordinates. The Combiner operator
 manages the main workflow and delegates specific tasks to specialized functions.
 
 Usage example:
-    bpy.ops.smc.combiner(directory=r'/path/to/save/directory')
+    bpy.ops.mimi.combiner(directory=r'/path/to/save/directory')
 """
 
 from typing import Set
@@ -52,7 +52,7 @@ class Combiner(I18nOperator):
     7. Cleaning up unneeded materials.
     """
 
-    bl_idname = "smc.combiner"
+    bl_idname = "mimi.combiner"
     bl_label = "Create Atlas"
     bl_description = "Combine multiple materials into a texture atlas"
     bl_options = {"UNDO", "INTERNAL"}
@@ -96,11 +96,11 @@ class Combiner(I18nOperator):
         if not self.directory:
             return self._return_with_message("ERROR", tr("No save directory selected"))
 
-        scn.smc_save_path = self.directory
+        scn.mimi_smc_save_path = self.directory
         sized_structure = get_size(scn, self.structure)
         self._reported_texture_diagnostics = set()
         self._report_texture_diagnostics(sized_structure)
-        self.structure = pack(sized_structure, scn.smc_packer_type)
+        self.structure = pack(sized_structure, scn.mimi_smc_packer_type)
 
         size = get_atlas_size(self.structure)
         atlas_size = calculate_adjusted_size(scn, size)
@@ -120,7 +120,7 @@ class Combiner(I18nOperator):
         comb_mats = get_comb_mats(scn, atlases, self.mats_uv)
         assign_comb_mats(scn, self.data, comb_mats)
         clear_mats(scn, self.mats_uv)
-        bpy.ops.smc.refresh_ob_data()
+        bpy.ops.mimi.refresh_ob_data()
         self.report({"INFO"}, tr("Materials combined successfully"))
         return {"FINISHED"}
 
@@ -144,23 +144,23 @@ class Combiner(I18nOperator):
             Set containing operation status.
         """
         scn = context.scene
-        bpy.ops.smc.refresh_ob_data()
+        bpy.ops.mimi.refresh_ob_data()
 
-        validation_result = validate_ob_data(scn.smc_ob_data)
+        validation_result = validate_ob_data(scn.mimi_smc_ob_data)
         if validation_result:
             return self._return_with_message(
                 "ERROR", tr("No valid object selected")
             )
 
         if self.cats:
-            scn.smc_size = "PO2"
-            scn.smc_gaps = 0
+            scn.mimi_smc_size = "PO2"
+            scn.mimi_smc_gaps = 0
 
         set_ob_mode(
             context.view_layer if globs.is_blender_modern else scn,
-            scn.smc_ob_data,
+            scn.mimi_smc_ob_data,
         )
-        self.data = get_data(scn.smc_ob_data)
+        self.data = get_data(scn.mimi_smc_ob_data)
 
         if not self.data:
             return self._return_with_message("ERROR", tr("No material selected"))
@@ -216,7 +216,7 @@ class Combiner(I18nOperator):
         Returns:
             Set containing operation status.
         """
-        bpy.ops.smc.refresh_ob_data()
+        bpy.ops.mimi.refresh_ob_data()
         self.report({message_type}, message)
         return {"FINISHED"}
 

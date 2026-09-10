@@ -36,7 +36,7 @@ def _get_filter_mode_items(self, context):
     ]
 
 
-class SMC_UL_Combine_List(bpy.types.UIList):
+class MIMISMC_UL_Combine_List(bpy.types.UIList):
     """Custom UI list for displaying materials and objects in the Material Combiner.
 
     This UIList implementation displays a hierarchical list of objects and their
@@ -126,7 +126,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
         action_row.alignment = "RIGHT"
         action_label = tr("Deselect All") if item.used else tr("Select All")
         action_row.operator(
-            "smc.combine_switch", text=action_label, emboss=False
+            "mimi.combine_switch", text=action_label, emboss=False
         ).list_id = index
 
     def _draw_material_entry(
@@ -210,7 +210,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
             layout.label(text=tr("Alpha Texture"), icon="IMAGE_DATA")
             return
 
-        if item.mat.smc_size:
+        if item.mat.mimi_smc_size:
             layout.label(text=tr("Size Limit"), icon="INFO")
 
     @staticmethod
@@ -229,7 +229,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
         """
         icon = "CHECKBOX_HLT" if item.used else "CHECKBOX_DEHLT"
         layout.operator(
-            "smc.combine_switch", text="", icon=icon, emboss=False
+            "mimi.combine_switch", text="", icon=icon, emboss=False
         ).list_id = index
 
     @staticmethod
@@ -244,7 +244,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
             index: The index of the item in the list.
         """
         layout.operator(
-            "smc.material_properties", text="", icon=ICON_PROPERTIES
+            "mimi.material_properties", text="", icon=ICON_PROPERTIES
         ).list_id = index
 
     def draw_filter(
@@ -274,7 +274,7 @@ class SMC_UL_Combine_List(bpy.types.UIList):
             icon=sort_reverse_icon,
             icon_only=True,
         )
-        row.menu("SMC_MT_SelectionMenu", text="", icon=ICON_DROPDOWN)
+        row.menu("MIMISMC_MT_SelectionMenu", text="", icon=ICON_DROPDOWN)
 
     def _get_filter_mode_icon(self) -> str:
         """Get the appropriate icon name for the current filter mode.

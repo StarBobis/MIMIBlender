@@ -14,7 +14,7 @@ from ..utils.timer_utils import TimerUtils
 from ..utils.vertexgroup_utils import VertexGroupUtils
 
 from .global_config import GlobalConfig
-from .global_properties import GlobalProperties
+from .mimi_global_properties import MIMIGlobalProperties
 from .global_config import LogicName
 from .gimi_high_fidelity_material import GIMIHighFidelityMaterial
 from .gimi_body_outline import GIMIBodyOutline, OutlineError
@@ -257,7 +257,7 @@ class MeshCreateHelper:
             obj.rotation_euler[2] = 0
 
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
-            if GlobalProperties.import_skip_empty_vertex_groups():
+            if MIMIGlobalProperties.import_skip_empty_vertex_groups():
                 VertexGroupUtils.remove_unused_vertex_groups(obj)
 
         import_collection.objects.link(obj)
@@ -265,7 +265,7 @@ class MeshCreateHelper:
 
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
-        if GlobalProperties.use_mirror_workflow():
+        if MIMIGlobalProperties.use_mirror_workflow():
             print(f"Non-mirror workflow: applying mirror transform and face direction flip to {obj.name}")
             ObjUtils.apply_mirror_workflow(obj)
 
@@ -684,7 +684,7 @@ class MeshCreateHelper:
         texture_path, normal_path = MeshCreateHelper.get_import_texture_paths(mesh_name, directory)
 
         high_fidelity_gimi = (
-            GlobalProperties.gimi_high_fidelity_rendering()
+            MIMIGlobalProperties.gimi_high_fidelity_rendering()
             and GIMIHighFidelityMaterial.is_genshin_workspace(logic_name=logic_name)
         )
         if texture_path is None and not high_fidelity_gimi:
@@ -708,8 +708,8 @@ class MeshCreateHelper:
                 try:
                     GIMIBodyOutline.ensure(
                         obj,
-                        enabled=GlobalProperties.gimi_body_outline_enabled(),
-                        width_ratio=GlobalProperties.gimi_body_outline_width_ratio(),
+                        enabled=MIMIGlobalProperties.gimi_body_outline_enabled(),
+                        width_ratio=MIMIGlobalProperties.gimi_body_outline_width_ratio(),
                     )
                 except OutlineError as error:
                     print(f"[GIMI Outline] WARNING: {obj.name}: {error}")

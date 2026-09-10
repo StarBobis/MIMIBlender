@@ -3,7 +3,7 @@ import os
 import json
 
 
-from .global_properties import GlobalProperties
+from .mimi_global_properties import MIMIGlobalProperties
 
 
 '''
@@ -345,16 +345,16 @@ class GlobalConfig:
     @classmethod
     def get_workspace_name(cls):
         try:
-            workspace_source_mode = GlobalProperties.workspace_source_mode()
+            workspace_source_mode = MIMIGlobalProperties.workspace_source_mode()
 
             if workspace_source_mode == "SPECIFIC":
-                specified_workspace_name = GlobalProperties.specific_workspace_name()
+                specified_workspace_name = MIMIGlobalProperties.specific_workspace_name()
                 if specified_workspace_name:
                     return specified_workspace_name
 
             if workspace_source_mode == "CUSTOM":
                 custom_workspace_folder_path = GlobalConfig._normalize_workspace_folder_path(
-                    GlobalProperties.custom_workspace_folder_path()
+                    MIMIGlobalProperties.custom_workspace_folder_path()
                 )
                 if custom_workspace_folder_path:
                     return os.path.basename(custom_workspace_folder_path.rstrip("\\/"))
@@ -366,9 +366,9 @@ class GlobalConfig:
     @classmethod
     def path_workspace_folder(cls):
         try:
-            if GlobalProperties.workspace_source_mode() == "CUSTOM":
+            if MIMIGlobalProperties.workspace_source_mode() == "CUSTOM":
                 custom_workspace_folder_path = GlobalConfig._normalize_workspace_folder_path(
-                    GlobalProperties.custom_workspace_folder_path()
+                    MIMIGlobalProperties.custom_workspace_folder_path()
                 )
                 if custom_workspace_folder_path:
                     return custom_workspace_folder_path
@@ -382,8 +382,8 @@ class GlobalConfig:
     def path_generate_mod_folder(cls):
         # If the user enabled the "use a specified folder" option, return that folder location,
         # otherwise return our default location. Note that SkipIB and VSCheck are not generated into the specified location.
-        if GlobalProperties.use_specific_generate_mod_folder_path():
-            return GlobalProperties.generate_mod_folder_path()
+        if MIMIGlobalProperties.use_specific_generate_mod_folder_path():
+            return MIMIGlobalProperties.generate_mod_folder_path()
         else:
             # Make sure the caller directly receives an already-existing directory
             ssmt_generated_mod_folder_path = os.path.join(GlobalConfig.path_mods_folder(),"SSMTGeneratedMod\\")

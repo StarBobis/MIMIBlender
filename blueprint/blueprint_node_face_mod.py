@@ -13,7 +13,7 @@ from ..utils.gimi_face_mod import FACE_VERTEX_STRIDE, FaceModPart, build_key_byt
 from ..workspace.ssmt_workspace import SSMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
 from .blueprint_export_helper import BlueprintExportHelper
-from .blueprint_node_base import SSMTNodeBase
+from .blueprint_node_base import MIMINodeBase
 from .blueprint_node_obj import ObjectPersistentIdManager
 
 
@@ -28,13 +28,13 @@ def _collect_object_nodes(node, visited=None, *, is_root=True):
         return []
     visited.add(node)
 
-    if getattr(node, "bl_idname", "") == "SSMTNode_Object_Info":
+    if getattr(node, "bl_idname", "") == "MIMINode_Object_Info":
         return [node]
 
     # Output nodes are composition boundaries.  Their object graph must not
     # silently become a part of this face export as well.
     if not is_root and getattr(node, "bl_idname", "") in {
-        "SSMTNode_Result_Output", "SSMTNode_Face_Mod_Export",
+        "MIMINode_Result_Output", "MIMINode_Face_Mod_Export",
     }:
         return []
 
@@ -161,8 +161,8 @@ def export_face_mod_from_node(node) -> tuple[str, int]:
 
 
 @translatable
-class SSMTNode_Face_Mod_Export(SSMTNodeBase):
-    bl_idname = "SSMTNode_Face_Mod_Export"
+class MIMINode_Face_Mod_Export(MIMINodeBase):
+    bl_idname = "MIMINode_Face_Mod_Export"
     bl_label = "Export Face Mod"
     bl_icon = "MOD_MASK"
 
@@ -185,20 +185,20 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
     open_folder: bpy.props.BoolProperty(name=tr("Open Folder After Export"), default=True)  # type: ignore
 
     def init(self, context):
-        self.inputs.new("SSMTSocketObject", "Face Group 1")
+        self.inputs.new("MIMISocketObject", "Face Group 1")
         self.width = 360
         self.use_custom_color = True
         self.color = (0.58, 0.32, 0.12)
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
-            self.inputs.new("SSMTSocketObject", f"Face Group {len(self.inputs) + 1}")
+            self.inputs.new("MIMISocketObject", f"Face Group {len(self.inputs) + 1}")
         if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
             self.inputs.remove(self.inputs[-1])
 
     def draw_buttons(self, context, layout):
         row = layout.row(align=True)
-        operator = row.operator("ssmt.export_face_mod", text=tr("Export Face Mod"), icon="EXPORT")
+        operator = row.operator("mimi.export_face_mod", text=tr("Export Face Mod"), icon="EXPORT")
         operator.node_name = self.name
         operator.tree_name = self.id_data.name if self.id_data else ""
 
@@ -207,14 +207,14 @@ class SSMTNode_Face_Mod_Export(SSMTNodeBase):
         if self.use_specific_output_folder:
             folder_row = layout.row(align=True)
             folder_row.prop(self, "output_folder", text=tr("Output"))
-            folder_operator = folder_row.operator("ssmt.select_face_mod_export_folder", text="", icon="FILE_FOLDER")
+            folder_operator = folder_row.operator("mimi.select_face_mod_export_folder", text="", icon="FILE_FOLDER")
             folder_operator.node_name = self.name
             folder_operator.tree_name = self.id_data.name if self.id_data else ""
         layout.prop(self, "open_folder", text=tr("Open Folder After Export"))
 
 
 class SSMT_OT_ExportFaceMod(I18nOperator):
-    bl_idname = "ssmt.export_face_mod"
+    bl_idname = "mimi.export_face_mod"
     bl_label = "Export Face Mod"
     bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an SSMT workspace"
     bl_options = {"REGISTER"}
@@ -225,7 +225,7 @@ class SSMT_OT_ExportFaceMod(I18nOperator):
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else BlueprintExportHelper.get_current_blueprint_tree(context=context)
         node = tree.nodes.get(self.node_name) if tree and self.node_name else None
-        if node is None or getattr(node, "bl_idname", "") != SSMTNode_Face_Mod_Export.bl_idname:
+        if node is None or getattr(node, "bl_idname", "") != MIMINode_Face_Mod_Export.bl_idname:
             self.report({"ERROR"}, tr("Face Mod export node not found."))
             return {"CANCELLED"}
 
@@ -236,7 +236,7 @@ class SSMT_OT_ExportFaceMod(I18nOperator):
 
 
 class SSMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
-    bl_idname = "ssmt.select_face_mod_export_folder"
+    bl_idname = "mimi.select_face_mod_export_folder"
     bl_label = "Select Face Mod Output Folder"
     bl_options = {"INTERNAL"}
 
@@ -262,7 +262,7 @@ class SSMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
 
 
 _CLASSES = (
-    SSMTNode_Face_Mod_Export,
+    MIMINode_Face_Mod_Export,
     SSMT_OT_ExportFaceMod,
     SSMT_OT_SelectFaceModExportFolder,
 )

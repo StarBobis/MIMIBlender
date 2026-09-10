@@ -3,7 +3,7 @@ import os
 import subprocess
 
 from ..common.global_config import GlobalConfig
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 
 class CommandUtils:
 
@@ -16,7 +16,7 @@ class CommandUtils:
         # Also, opening the folder with subprocess.run('explorer',path) opens a new folder every single time; hundreds of them piled up will freeze the computer.
         So using os.startfile() is the best way
         '''
-        if GlobalProperties.open_mod_folder_after_generate_mod():
+        if MIMIGlobalProperties.open_mod_folder_after_generate_mod():
             generated_mod_folder_path = GlobalConfig.path_generate_mod_folder()
             os.startfile(generated_mod_folder_path)
 

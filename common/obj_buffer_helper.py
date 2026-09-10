@@ -13,7 +13,7 @@ from ..utils.ssmt_error_utils import SSMTErrorUtils
 from .d3d11_semantics import D3D11Semantic, D3D11Format
 from .global_config import LogicName
 from .global_config import GlobalConfig
-from .global_properties import GlobalProperties
+from .mimi_global_properties import MIMIGlobalProperties
 from .raw_vertex_attributes import (
     RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX,
     RAW_NORMAL_W_ATTRIBUTE_PREFIX,
@@ -781,7 +781,7 @@ class ObjBufferHelper:
         if D3D11Semantic.COLOR not in d3d11_game_type.OrderedFullElementList:
             return indexed_vertices
         allow_calc = False
-        if GlobalProperties.recalculate_color():
+        if MIMIGlobalProperties.recalculate_color():
             allow_calc = True
         elif obj.get("3DMigoto:RecalculateCOLOR",False): 
             allow_calc = True
@@ -878,7 +878,7 @@ class ObjBufferHelper:
         if D3D11Semantic.TANGENT not in d3d11_game_type.OrderedFullElementList:
             return indexed_vertices
         allow_calc = False
-        if GlobalProperties.recalculate_tangent():
+        if MIMIGlobalProperties.recalculate_tangent():
             allow_calc = True
         elif obj.get("3DMigoto:RecalculateTANGENT",False): 
             allow_calc = True
@@ -960,7 +960,7 @@ class ObjBufferHelper:
             return indexed_vertices
 
         allow_calc = False
-        if GlobalProperties.recalculate_tangent():
+        if MIMIGlobalProperties.recalculate_tangent():
             allow_calc = True
         elif obj.get("3DMigoto:RecalculateTANGENT",False):
             allow_calc = True

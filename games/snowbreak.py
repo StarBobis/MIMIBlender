@@ -1,7 +1,7 @@
 import os
 
 from ..common.global_config import GlobalConfig
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.global_config import GlobalConfig
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
@@ -33,7 +33,7 @@ class ExportSnowBreak:
             texture_override_ib_section.append(backup_resource_name + " = ref ib")
             texture_override_ib_section.append("checktextureoverride = vb0")
 
-            if not GlobalProperties.forbid_auto_texture_ini():
+            if not MIMIGlobalProperties.forbid_auto_texture_ini():
                 texture_markup_info_list = drawib_model.get_submesh_texture_markup_info_list(submesh_model)
                 if texture_markup_info_list:
                     for texture_markup_info in texture_markup_info_list:
@@ -46,7 +46,7 @@ class ExportSnowBreak:
                 category_original_slot = d3d11_game_type.CategoryExtractSlotDict[original_category_name]
                 texture_override_ib_section.append(category_original_slot + " = Resource" + draw_ib + original_category_name)
 
-            if not GlobalProperties.forbid_auto_texture_ini():
+            if not MIMIGlobalProperties.forbid_auto_texture_ini():
                 texture_markup_info_list = drawib_model.get_submesh_texture_markup_info_list(submesh_model)
                 if texture_markup_info_list:
                     for texture_markup_info in texture_markup_info_list:
@@ -89,7 +89,7 @@ class ExportSnowBreak:
         ini_builder.append_section(resource_vb_section)
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             return
         resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
         appended_resource_names = set()

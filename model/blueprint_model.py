@@ -8,14 +8,14 @@ from ..utils.log_utils import LOG
 from ..utils.vertexgroup_utils import VertexGroupUtils
 
 from ..common.m_key import M_Key
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from .draw_call_model import DrawCallModel
 from .submesh_model import SubMeshModel
 from .drawib_model import DrawIBModel
 from ..common.global_config import GlobalConfig
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
-from ..blueprint.blueprint_node_obj import SSMTNode_Object_Group, SSMTNode_SwitchKey, SSMTNode_Object_Info, SSMTNode_Result_Output
+from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
 
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
@@ -51,7 +51,7 @@ class BluePrintModel:
 
         print(tree)
         output_node = output_node or BlueprintExportHelper.get_node_from_bl_idname(
-            tree, SSMTNode_Result_Output.bl_idname
+            tree, MIMINode_Result_Output.bl_idname
         )
         if not output_node:
             raise ValueError("The current blueprint is missing the Generate Mod output node")
@@ -95,7 +95,7 @@ class BluePrintModel:
                 return
             visited_trees.add(id(tree))
             for node in getattr(tree, "nodes", []):
-                if getattr(node, "bl_idname", "") == SSMTNode_SwitchKey.bl_idname:
+                if getattr(node, "bl_idname", "") == MIMINode_SwitchKey.bl_idname:
                     alias = cls._normalize_switch_key_alias(node)
                     branch_count = len(getattr(node, "inputs", []))
                     if alias and branch_count > 1:
@@ -129,11 +129,11 @@ class BluePrintModel:
         if unknown_node.bl_idname == GROUP_NODE_IDNAME:
             self._parse_custom_group(unknown_node, chain_key_list)
 
-        elif unknown_node.bl_idname == SSMTNode_Object_Group.bl_idname:
+        elif unknown_node.bl_idname == MIMINode_Object_Group.bl_idname:
             # If it is a plain group node, pass through without further processing
             self.parse_current_node(unknown_node, chain_key_list)
 
-        elif unknown_node.bl_idname == SSMTNode_SwitchKey.bl_idname:
+        elif unknown_node.bl_idname == MIMINode_SwitchKey.bl_idname:
             # If it is a key switch node, take all of its branch nodes and process them one by one.
             # Here we iterate over all inputs directly instead of using get_connected_nodes,
             # because get_connected_nodes ignores unconnected (empty) sockets and would compute a wrong branch count.
@@ -221,7 +221,7 @@ class BluePrintModel:
                         # This achieves the effect of "switching to this branch displays nothing"
                         pass
 
-        elif unknown_node.bl_idname == SSMTNode_Object_Info.bl_idname:
+        elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
 
             # Filter empty meshes early while parsing the blueprint, so the later export step never hits the "all vertex groups locked" error.
@@ -230,7 +230,7 @@ class BluePrintModel:
                 return
 
             # UniComponent mode: automatically detect and split the object
-            if GlobalProperties.is_unico_component():
+            if MIMIGlobalProperties.is_unico_component():
                 split_results = self._unico_split_object(
                     obj=obj,
                     node_submesh_name=getattr(unknown_node, 'submesh_name', ''),
@@ -260,13 +260,13 @@ class BluePrintModel:
                 
                 self.ordered_draw_obj_data_model_list.append(obj_model)
 
-        elif unknown_node.bl_idname == SSMTNode_Result_Output.bl_idname:
+        elif unknown_node.bl_idname == MIMINode_Result_Output.bl_idname:
             # Result Output nodes are composition boundaries.  The selected
             # output is handled as the root by __init__; any other output node
             # found upstream is never parsed into this INI layer.
             return
 
-        elif unknown_node.bl_idname == "SSMTNode_Face_Mod_Export":
+        elif unknown_node.bl_idname == "MIMINode_Face_Mod_Export":
             # Face Output is a composition boundary, just like the regular
             # Result Output.  Parsing its mesh inputs here would duplicate
             # them in the regular output layer.

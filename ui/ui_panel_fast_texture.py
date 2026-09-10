@@ -71,12 +71,12 @@ def get_workspace_preview_texture_folder(lod_name: str = ""):
     return "", folder_name
 
 # Defines the image list item
-class SSMT_ImportTexture_ImageListItem(PropertyGroup):
+class MIMIImportTexture_ImageListItem(PropertyGroup):
     name: StringProperty(name="Image Name") # type: ignore
     filepath: StringProperty(name="File Path") # type: ignore
 
 # Custom UI list that displays images and thumbnails
-class SSMT_UL_FastImportTextureList(UIList):
+class MIMIUL_FastImportTextureList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         pcoll = fast_preview_collections["main"]
         
@@ -99,7 +99,7 @@ class SSMT_UL_FastImportTextureList(UIList):
 
 # Refresh LOD list
 class SSMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
-    bl_idname = "ssmt.refresh_lod_list"
+    bl_idname = "mimi.refresh_lod_list"
     bl_label = "Refresh LOD List"
     bl_description = "Rescan the LOD folders under the current workspace"
 
@@ -107,19 +107,19 @@ class SSMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
         _refresh_lod_enum_cache()
         # If an LOD exists and none is currently selected, default to the first one
         if _lod_enum_cache and _lod_enum_cache[0][0]:
-            if not context.scene.fast_texture_lod or context.scene.fast_texture_lod not in [e[0] for e in _lod_enum_cache]:
-                context.scene.fast_texture_lod = _lod_enum_cache[0][0]
+            if not context.scene.mimi_fast_texture_lod or context.scene.mimi_fast_texture_lod not in [e[0] for e in _lod_enum_cache]:
+                context.scene.mimi_fast_texture_lod = _lod_enum_cache[0][0]
         self.report({'INFO'}, tr("LOD list refreshed, found {count} LOD folders.").format(count=len([e for e in _lod_enum_cache if e[0]])))
         return {'FINISHED'}
 
 
 # Auto-detect and set the DedupedTextures folder
 class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
-    bl_idname = "ssmt.auto_detect_texture_folder"
+    bl_idname = "mimi.auto_detect_texture_folder"
     bl_label = "Load DedupedTextures"
     
     def execute(self, context):
-        lod_name = context.scene.fast_texture_lod
+        lod_name = context.scene.mimi_fast_texture_lod
         deduped_textures_folder_path, folder_name = get_workspace_preview_texture_folder(lod_name=lod_name)
 
         if not deduped_textures_folder_path:
@@ -130,7 +130,7 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
             return {'CANCELLED'}
         
         # Clear the previous list and previews
-        bpy.context.scene.image_list.clear()
+        bpy.context.scene.mimi_image_list.clear()
         pcoll = fast_preview_collections["main"]
         pcoll.clear()
         
@@ -143,7 +143,7 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
             if filename.lower().endswith(image_extensions):
                 full_path = os.path.join(deduped_textures_folder_path, filename)
                 if os.path.isfile(full_path):
-                    item = bpy.context.scene.image_list.add()
+                    item = bpy.context.scene.mimi_image_list.add()
                     item.name = filename
                     item.filepath = full_path
                     
@@ -162,19 +162,19 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
 
 # Operator that applies an image to materials
 class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
-    bl_idname = "ssmt.apply_image_to_material"
+    bl_idname = "mimi.apply_image_to_material"
     bl_label = "Apply Texture to Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         scene = context.scene
-        selected_index = scene.image_list_index
+        selected_index = scene.mimi_image_list_index
         
-        if selected_index < 0 or selected_index >= len(scene.image_list):
+        if selected_index < 0 or selected_index >= len(scene.mimi_image_list):
             self.report({'ERROR'}, tr("No image selected in the list."))
             return {'CANCELLED'}
         
-        selected_image = scene.image_list[selected_index]
+        selected_image = scene.mimi_image_list[selected_index]
         image_path = selected_image.filepath
         
         # Get or create the image data block
@@ -215,9 +215,9 @@ class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
 
 # Panel UI layout
 @translatable
-class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
+class MIMIMT_ImageMaterialPanel(Panel):
     bl_label = "Quick Preview Texture"
-    bl_idname = "VIEW3D_PT_fast_preview_texture"
+    bl_idname = "mimi.PT_fast_preview_texture"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -231,27 +231,27 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         box = layout.box()
         row = box.row(align=True)
         row.label(text=tr("LOD:"))
-        row.prop(scene, "fast_texture_lod", text="")
-        row.operator("ssmt.refresh_lod_list", text="", icon='FILE_REFRESH')
+        row.prop(scene, "mimi_fast_texture_lod", text="")
+        row.operator("mimi.refresh_lod_list", text="", icon='FILE_REFRESH')
 
         # Auto-detect button
         row = layout.row()
-        row.operator("ssmt.auto_detect_texture_folder", text=tr("Load DedupedTextures"))
+        row.operator("mimi.auto_detect_texture_folder", text=tr("Load DedupedTextures"))
         
         # Show the image count
-        if scene.image_list:
-            layout.label(text=tr("Found {count} images").format(count=len(scene.image_list)))
+        if scene.mimi_image_list:
+            layout.label(text=tr("Found {count} images").format(count=len(scene.mimi_image_list)))
         
         # Show the image list
-        if scene.image_list:
+        if scene.mimi_image_list:
             row = layout.row()
             row.template_list(
-                "SSMT_UL_FastImportTextureList",
+                "MIMIUL_FastImportTextureList",
                 "Image List", 
                 scene, 
-                "image_list", 
+                "mimi_image_list", 
                 scene, 
-                "image_list_index",
+                "mimi_image_list_index",
                 rows=6
             )
         else:
@@ -259,12 +259,12 @@ class SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel(Panel):
         
         # Apply material button
         row = layout.row()
-        row.operator("ssmt.apply_image_to_material", text=tr("Apply Texture to Selected Objects"), icon='MATERIAL_DATA')
+        row.operator("mimi.apply_image_to_material", text=tr("Apply Texture to Selected Objects"), icon='MATERIAL_DATA')
 
         
         # Show the preview of the currently selected image
-        if scene.image_list and scene.image_list_index >= 0 and scene.image_list_index < len(scene.image_list):
-            selected_item = scene.image_list[scene.image_list_index]
+        if scene.mimi_image_list and scene.mimi_image_list_index >= 0 and scene.mimi_image_list_index < len(scene.mimi_image_list):
+            selected_item = scene.mimi_image_list[scene.mimi_image_list_index]
             pcoll = fast_preview_collections["main"]
             
             if selected_item.name in pcoll:
@@ -279,16 +279,16 @@ def register():
     fast_pcoll = bpy.utils.previews.new()
     fast_preview_collections["main"] = fast_pcoll
 
-    bpy.utils.register_class(SSMT_ImportTexture_ImageListItem)
-    bpy.utils.register_class(SSMT_UL_FastImportTextureList)
+    bpy.utils.register_class(MIMIImportTexture_ImageListItem)
+    bpy.utils.register_class(MIMIUL_FastImportTextureList)
     bpy.utils.register_class(SSMT_ImportTexture_WM_OT_ApplyImageToMaterial)
     bpy.utils.register_class(SSMT_ImportTexture_WM_OT_RefreshLODList)
     bpy.utils.register_class(SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
-    bpy.utils.register_class(SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel)
+    bpy.utils.register_class(MIMIMT_ImageMaterialPanel)
 
-    bpy.types.Scene.image_list = CollectionProperty(type=SSMT_ImportTexture_ImageListItem)
-    bpy.types.Scene.image_list_index = IntProperty(default=0)
-    bpy.types.Scene.fast_texture_lod = EnumProperty(
+    bpy.types.Scene.mimi_image_list = CollectionProperty(type=MIMIImportTexture_ImageListItem)
+    bpy.types.Scene.mimi_image_list_index = IntProperty(default=0)
+    bpy.types.Scene.mimi_fast_texture_lod = EnumProperty(
         name=tr("LOD"),
         description=tr("Select an LOD folder to load its DedupedTextures"),
         items=_get_lod_enum_items,
@@ -299,9 +299,9 @@ def register():
 
 def unregister():
     try:
-        del bpy.types.Scene.image_list
-        del bpy.types.Scene.image_list_index
-        del bpy.types.Scene.fast_texture_lod
+        del bpy.types.Scene.mimi_image_list
+        del bpy.types.Scene.mimi_image_list_index
+        del bpy.types.Scene.mimi_fast_texture_lod
     except Exception:
         pass
 
@@ -313,9 +313,9 @@ def unregister():
             pass
     fast_preview_collections.clear()
 
-    bpy.utils.unregister_class(SSMT_ImportTexture_VIEW3D_PT_ImageMaterialPanel)
+    bpy.utils.unregister_class(MIMIMT_ImageMaterialPanel)
     bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
     bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_RefreshLODList)
     bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_ApplyImageToMaterial)
-    bpy.utils.unregister_class(SSMT_UL_FastImportTextureList)
-    bpy.utils.unregister_class(SSMT_ImportTexture_ImageListItem)
+    bpy.utils.unregister_class(MIMIUL_FastImportTextureList)
+    bpy.utils.unregister_class(MIMIImportTexture_ImageListItem)

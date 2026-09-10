@@ -5,7 +5,7 @@ import hashlib
 from ..model.blueprint_model import BluePrintModel
 from ..model.drawib_model import DrawIBModel
 from ..common.global_config import GlobalConfig
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.global_config import GlobalConfig
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
@@ -298,7 +298,7 @@ class ExportNTEMI:
         self._append_draw_overrides(lines, drawib_drawibmodel_dict, draw_ib_active_index_dict, source_suffix)
 
         # Texture handling
-        if not GlobalProperties.forbid_auto_texture_ini():
+        if not MIMIGlobalProperties.forbid_auto_texture_ini():
             self._append_texture_resources(lines, drawib_drawibmodel_dict)
             # Also generate hash-style texture overrides (standard for all game types)
             tex_ini_builder = M_IniBuilder()
@@ -641,7 +641,7 @@ class ExportNTEMI:
                     lines.append(f"match = vs, {outline_hash}, ResourcePart_{token}_OutlineParam")
 
                 # Texture bindings
-                if not GlobalProperties.forbid_auto_texture_ini():
+                if not MIMIGlobalProperties.forbid_auto_texture_ini():
                     texture_markup_info_list = drawib_model.get_submesh_texture_markup_info_list(submesh_model)
                     for tmi in texture_markup_info_list:
                         if getattr(tmi, "mark_type", "") not in ("Slot", "SharedSlot"):
@@ -662,7 +662,7 @@ class ExportNTEMI:
 
     def _append_texture_resources(self, lines: list[str], drawib_drawibmodel_dict: dict):
         """Append texture resource sections when auto-texture is enabled."""
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             return
 
         appended: set[str] = set()

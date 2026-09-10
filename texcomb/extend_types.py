@@ -20,30 +20,30 @@ from ..i18n.i18n import tr
 
 
 _SCENE_PROPS = (
-    "smc_ob_data",
-    "smc_ob_data_id",
-    "smc_list_id",
-    "smc_size",
-    "smc_size_width",
-    "smc_size_height",
-    "smc_crop",
-    "smc_pixel_art",
-    "smc_diffuse_size",
-    "smc_gaps",
-    "smc_save_path",
-    "smc_packer_type",
-    "smc_include_extra_textures",
-    "smc_uniform_size",
-    "smc_uniform_size_value",
-    "smc_image_format",
+    "mimi_smc_ob_data",
+    "mimi_smc_ob_data_id",
+    "mimi_smc_list_id",
+    "mimi_smc_size",
+    "mimi_smc_size_width",
+    "mimi_smc_size_height",
+    "mimi_smc_crop",
+    "mimi_smc_pixel_art",
+    "mimi_smc_diffuse_size",
+    "mimi_smc_gaps",
+    "mimi_smc_save_path",
+    "mimi_smc_packer_type",
+    "mimi_smc_include_extra_textures",
+    "mimi_smc_uniform_size",
+    "mimi_smc_uniform_size_value",
+    "mimi_smc_image_format",
 )
 
 _MATERIAL_PROPS = (
-    "root_mat",
-    "smc_diffuse",
-    "smc_size",
-    "smc_size_width",
-    "smc_size_height",
+    "mimi_root_mat",
+    "mimi_smc_diffuse",
+    "mimi_smc_size",
+    "mimi_smc_size_width",
+    "mimi_smc_size_height",
 )
 
 _DEFAULT_ATLAS_SIZE = "QUAD"
@@ -96,7 +96,7 @@ def _get_packer_type_items(self, context):
     ]
 
 
-class CombineListEntry(bpy.types.PropertyGroup):
+class MIMICombineListEntry(bpy.types.PropertyGroup):
     """Property group representing an object-material mapping for a combination.
 
     This class defines the data structure for entries in the material combination list.
@@ -153,11 +153,11 @@ def _register_scene_properties() -> None:
     This function adds properties to the Scene class for storing
     object data, atlas configuration, and output settings.
     """
-    bpy.types.Scene.smc_ob_data = CollectionProperty(type=CombineListEntry)
-    bpy.types.Scene.smc_ob_data_id = IntProperty(default=0)
-    bpy.types.Scene.smc_list_id = IntProperty(default=0)
+    bpy.types.Scene.mimi_smc_ob_data = CollectionProperty(type=MIMICombineListEntry)
+    bpy.types.Scene.mimi_smc_ob_data_id = IntProperty(default=0)
+    bpy.types.Scene.mimi_smc_list_id = IntProperty(default=0)
 
-    bpy.types.Scene.smc_size = EnumProperty(
+    bpy.types.Scene.mimi_smc_size = EnumProperty(
         name=tr("Atlas Size"),
         items=_get_atlas_size_items,
         # Dynamic items only allow integer (0-based) defaults: 1 == "QUAD".
@@ -165,7 +165,7 @@ def _register_scene_properties() -> None:
         description=tr("Size strategy of the texture atlas"),
     )
 
-    bpy.types.Scene.smc_packer_type = EnumProperty(
+    bpy.types.Scene.mimi_smc_packer_type = EnumProperty(
         name=tr("Packing Algorithm"),
         items=_get_packer_type_items,
         # Dynamic items only allow integer (0-based) defaults: 1 == "BINARY_TREE".
@@ -178,26 +178,26 @@ def _register_scene_properties() -> None:
         "max": _MAX_DIMENSION,
         "description": tr("Maximum pixel size of the texture"),
     }
-    bpy.types.Scene.smc_size_width = IntProperty(
+    bpy.types.Scene.mimi_smc_size_width = IntProperty(
         name=tr("Width"), default=_DEFAULT_DIMENSION, **dimension_args
     )
-    bpy.types.Scene.smc_size_height = IntProperty(
+    bpy.types.Scene.mimi_smc_size_height = IntProperty(
         name=tr("Height"), default=_DEFAULT_DIMENSION, **dimension_args
     )
 
-    bpy.types.Scene.smc_crop = BoolProperty(
+    bpy.types.Scene.mimi_smc_crop = BoolProperty(
         name=tr("Crop to UV Bounds"),
         default=True,
         description=tr("Removes redundant areas"),
     )
 
-    bpy.types.Scene.smc_pixel_art = BoolProperty(
+    bpy.types.Scene.mimi_smc_pixel_art = BoolProperty(
         name=tr("Disable Anti-Aliased Scaling"),
         default=False,
         description=tr("Suitable for textures such as pixel art"),
     )
 
-    bpy.types.Scene.smc_diffuse_size = IntProperty(
+    bpy.types.Scene.mimi_smc_diffuse_size = IntProperty(
         name=tr("Solid Color Texture Size"),
         min=8,
         max=256,
@@ -205,7 +205,7 @@ def _register_scene_properties() -> None:
         description=tr("Base texture size of solid-color materials when batching"),
     )
 
-    bpy.types.Scene.smc_gaps = IntProperty(
+    bpy.types.Scene.mimi_smc_gaps = IntProperty(
         name=tr("Spacing"),
         min=0,
         max=32,
@@ -214,19 +214,19 @@ def _register_scene_properties() -> None:
         description=tr("Spacing between elements in the atlas (pixels)"),
     )
 
-    bpy.types.Scene.smc_include_extra_textures = BoolProperty(
+    bpy.types.Scene.mimi_smc_include_extra_textures = BoolProperty(
         name=tr("Atlas PBR Textures"),
         default=False,
         description=tr("Also generate atlases for metallic, roughness, specular, normal, and emission textures"),
     )
 
-    bpy.types.Scene.smc_uniform_size = BoolProperty(
+    bpy.types.Scene.mimi_smc_uniform_size = BoolProperty(
         name=tr("Uniform Texture Size"),
         default=True,
         description=tr("Force all small textures to be scaled to the same size before packing (may be enlarged or shrunk)"),
     )
 
-    bpy.types.Scene.smc_uniform_size_value = IntProperty(
+    bpy.types.Scene.mimi_smc_uniform_size_value = IntProperty(
         name=tr("Uniform Size"),
         min=8,
         max=8192,
@@ -234,7 +234,7 @@ def _register_scene_properties() -> None:
         description=tr("Pixel size to which all small textures are uniformly scaled (width = height)"),
     )
 
-    bpy.types.Scene.smc_image_format = EnumProperty(
+    bpy.types.Scene.mimi_smc_image_format = EnumProperty(
         name=tr("Output Format"),
         items=_get_image_format_items,
         # Dynamic items only allow integer (0-based) defaults; the first item
@@ -242,7 +242,7 @@ def _register_scene_properties() -> None:
         description=tr("Format of the atlas output image; PNG supports the Alpha channel"),
     )
 
-    bpy.types.Scene.smc_save_path = StringProperty(
+    bpy.types.Scene.mimi_smc_save_path = StringProperty(
         name=tr("Save Location"),
         default="",
         subtype="DIR_PATH",
@@ -256,19 +256,19 @@ def _register_material_properties() -> None:
     This function adds properties to the Material class for storing
     atlas-specific settings and references to original materials.
     """
-    bpy.types.Material.root_mat = PointerProperty(
+    bpy.types.Material.mimi_root_mat = PointerProperty(
         name=tr("Base Material"),
         type=bpy.types.Material,
         description=tr("Reference to the original material, used to track the material's source"),
     )
 
-    bpy.types.Material.smc_diffuse = BoolProperty(
+    bpy.types.Material.mimi_smc_diffuse = BoolProperty(
         name=tr("Blend Diffuse Color"),
         default=True,
         description=tr("Blend the diffuse color with the texture"),
     )
 
-    bpy.types.Material.smc_size = BoolProperty(
+    bpy.types.Material.mimi_smc_size = BoolProperty(
         name=tr("Custom Size"),
         default=False,
         description=tr("Enable a custom texture size"),
@@ -279,10 +279,10 @@ def _register_material_properties() -> None:
         "max": _MAX_DIMENSION // 2,
         "description": tr("Maximum pixel size of the texture"),
     }
-    bpy.types.Material.smc_size_width = IntProperty(
+    bpy.types.Material.mimi_smc_size_width = IntProperty(
         name=tr("Width"), default=2048, **dimension_args
     )
-    bpy.types.Material.smc_size_height = IntProperty(
+    bpy.types.Material.mimi_smc_size_height = IntProperty(
         name=tr("Height"), default=2048, **dimension_args
     )
 

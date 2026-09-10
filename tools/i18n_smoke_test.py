@@ -59,10 +59,10 @@ def main():
     check("tr() falls back for unknown keys", i18n.tr("Some Untranslated Text") == "Some Untranslated Text")
 
     # A @translatable panel label must have been rewritten in place.
-    from MIMIBlender.ui.ui_panel_basic import PanelBasicInformation
+    from MIMIBlender.ui.ui_panel_basic import MIMIPanelBasicInformation
     check(
         "panel bl_label switched to zh",
-        PanelBasicInformation.bl_label == i18n.tr("Basic Information Panel"),
+        MIMIPanelBasicInformation.bl_label == i18n.tr("Basic Information Panel"),
     )
 
     # An I18nOperator description classmethod must translate live.
@@ -75,7 +75,7 @@ def main():
 
     # A dynamic enum items callback must return translated display names while
     # keeping the identifiers untouched.
-    from MIMIBlender.common.global_properties import _get_workspace_source_mode_items
+    from MIMIBlender.common.mimi_global_properties import _get_workspace_source_mode_items
     items = _get_workspace_source_mode_items(None, bpy.context)
     identifiers = [entry[0] for entry in items]
     check("enum identifiers unchanged", identifiers == ["SYNC", "SPECIFIC", "CUSTOM"])
@@ -86,7 +86,7 @@ def main():
     check("tr() falls back to English", i18n.tr("Generate Mod") == "Generate Mod")
     check(
         "panel bl_label restored to English",
-        PanelBasicInformation.bl_label == "Basic Information Panel",
+        MIMIPanelBasicInformation.bl_label == "Basic Information Panel",
     )
 
     # 5. Clean unload through the addon system.

@@ -2,7 +2,7 @@ import math
 import os
 
 from ..common.global_config import GlobalConfig, LogicName
-from ..common.global_properties import GlobalProperties
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
 
@@ -47,14 +47,14 @@ def _slot_texture_has_normal_map(drawib_model, submesh_model) -> bool:
 
 def _append_slot_texture_lines(section, drawib_model, submesh_model):
     """Append the automatic slot texture lines plus the ORFix/NNFix command when enabled."""
-    if GlobalProperties.forbid_auto_texture_ini():
+    if MIMIGlobalProperties.forbid_auto_texture_ini():
         return
     slot_lines = _slot_texture_lines(drawib_model, submesh_model)
     if not slot_lines:
         return
     for line in slot_lines:
         section.append(line)
-    if GlobalProperties.gimi_use_orfix():
+    if MIMIGlobalProperties.gimi_use_orfix():
         if _slot_texture_has_normal_map(drawib_model, submesh_model):
             section.append(r"run = CommandList\global\ORFix\ORFix")
         else:
@@ -173,7 +173,7 @@ class ExportGIMI:
 
     def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # Generate the [Resource_...] sections of the automatic Slot textures
-        if GlobalProperties.forbid_auto_texture_ini():
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
             return
 
         resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)

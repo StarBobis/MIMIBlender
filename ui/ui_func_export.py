@@ -64,7 +64,7 @@ def _export_blueprint_model(blueprint_model):
         raise ValueError(tr("The current game preset does not yet support generating Mods"))
 
 
-_OUTPUT_NODE_IDS = {"SSMTNode_Result_Output", "SSMTNode_Face_Mod_Export"}
+_OUTPUT_NODE_IDS = {"MIMINode_Result_Output", "MIMINode_Face_Mod_Export"}
 
 
 def _export_regular_output(tree, context, output_node, config_name):
@@ -106,7 +106,7 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
         report_callback({'WARNING'}, tr("Before export, {count} object nodes found no matching object").format(count=refresh_summary['missing_count']))
 
     try:
-        if getattr(output_node, "bl_idname", "") == "SSMTNode_Face_Mod_Export":
+        if getattr(output_node, "bl_idname", "") == "MIMINode_Face_Mod_Export":
             # Face Mod nodes write their own Face.ini and do not use the
             # regular workspace-named INI path.
             export_face_mod_from_node(output_node)
@@ -163,7 +163,7 @@ def _cleanup_unico_temp_objects(blueprint_model: BluePrintModel):
 
 
 class SSMTGenerateModBlueprint(I18nOperator):
-    bl_idname = "ssmt.generate_mod_blueprint"
+    bl_idname = "mimi.generate_mod_blueprint"
     bl_label = "Generate Mod"
     bl_description = "Generate the Mod files from the blueprint architecture for the current workspace"
     bl_options = {'REGISTER','UNDO'}
@@ -187,14 +187,14 @@ class SSMTGenerateModBlueprint(I18nOperator):
 
 
 class SSMTGenerateSelectedBlueprintMod(I18nOperator):
-    bl_idname = "ssmt.generate_selected_blueprint_mod"
+    bl_idname = "mimi.generate_selected_blueprint_mod"
     bl_label = "Generate Mod"
     bl_description = "Quickly generate the Mod files from the currently selected blueprint"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        global_properties = getattr(getattr(context, "scene", None), "global_properties", None)
-        selected_name = getattr(global_properties, "selected_blueprint_name", "") if global_properties else ""
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        selected_name = getattr(mimi_global_properties, "selected_blueprint_name", "") if mimi_global_properties else ""
 
         tree = BlueprintExportHelper.get_selected_blueprint_tree(
             selected_name=selected_name,
@@ -204,8 +204,8 @@ class SSMTGenerateSelectedBlueprintMod(I18nOperator):
             self.report({'ERROR'}, tr("Please select a valid blueprint"))
             return {'CANCELLED'}
 
-        if global_properties and global_properties.selected_blueprint_name != tree.name:
-            global_properties.selected_blueprint_name = tree.name
+        if mimi_global_properties and mimi_global_properties.selected_blueprint_name != tree.name:
+            mimi_global_properties.selected_blueprint_name = tree.name
 
         return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
     

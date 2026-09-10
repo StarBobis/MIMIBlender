@@ -4,7 +4,7 @@ import bpy
 from ..i18n.i18n import I18nOperator, tr
 
 # Shape key list item
-class SSMTShapeKeyListItem(bpy.types.PropertyGroup):
+class MIMIShapeKeyListItem(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="", default=False) # type: ignore
     shapekey_name: bpy.props.StringProperty(name=tr("Shape Key Name"), default="") # type: ignore
     key: bpy.props.StringProperty(name=tr("Key"), default="") # type: ignore
@@ -12,7 +12,7 @@ class SSMTShapeKeyListItem(bpy.types.PropertyGroup):
 
 # Refresh shape key list
 class SSMT_OT_RefreshShapeKeyList(I18nOperator):
-    bl_idname = "ssmt.refresh_shapekey_list"
+    bl_idname = "mimi.refresh_shapekey_list"
     bl_label = "Refresh Shape Key List"
     bl_description = "Scans all object nodes in the blueprint and collects their shape keys"
     bl_options = {'REGISTER', 'UNDO'}
@@ -29,13 +29,13 @@ class SSMT_OT_RefreshShapeKeyList(I18nOperator):
 
     def execute(self, context):
         tree = context.space_data.edit_tree
-        if not tree or getattr(tree, 'bl_idname', '') != 'SSMTBlueprintTreeType':
+        if not tree or getattr(tree, 'bl_idname', '') != 'MIMIBlueprintTreeType':
             self.report({'WARNING'}, tr("Please run this inside the SSMT blueprint editor"))
             return {'CANCELLED'}
 
         output_node = None
         for node in tree.nodes:
-            if node.bl_idname == 'SSMTNode_Result_Output':
+            if node.bl_idname == 'MIMINode_Result_Output':
                 output_node = node
                 break
         if not output_node:
@@ -50,7 +50,7 @@ class SSMT_OT_RefreshShapeKeyList(I18nOperator):
         seen = set()
         output_node.shapekey_items.clear()
         for node in tree.nodes:
-            if node.bl_idname != 'SSMTNode_Object_Info':
+            if node.bl_idname != 'MIMINode_Object_Info':
                 continue
             obj = bpy.data.objects.get(node.object_name)
             for sk_name in self._get_shapekeys_from_object(obj):
@@ -74,7 +74,7 @@ def draw_shapekey_settings(node, layout):
 
     box = layout.box()
     row = box.row(align=True)
-    row.operator("ssmt.refresh_shapekey_list", text=tr("Refresh List"), icon='FILE_REFRESH')
+    row.operator("mimi.refresh_shapekey_list", text=tr("Refresh List"), icon='FILE_REFRESH')
     row.label(text=tr("Total: {count}").format(count=len(node.shapekey_items)) if node.shapekey_items else tr("(Empty)"), icon='SHAPEKEY_DATA')
 
     for item in node.shapekey_items:
@@ -87,7 +87,7 @@ def draw_shapekey_settings(node, layout):
 
 
 classes = (
-    SSMTShapeKeyListItem,
+    MIMIShapeKeyListItem,
     SSMT_OT_RefreshShapeKeyList,
 )
 

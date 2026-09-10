@@ -15,8 +15,8 @@ from . import (
 )
 
 __bl_classes = [
-    ui.selection_menu.SMC_MT_SelectionMenu,
-    ui.main_panel.MaterialCombinerPanel,
+    ui.selection_menu.MIMISMC_MT_SelectionMenu,
+    ui.main_panel.MIMIMaterialCombinerPanel,
     ui.property_panel.PropertyMenu,
     operators.combine_list.MaterialListRefreshOperator,
     operators.combine_list.MaterialListToggleOperator,
@@ -25,8 +25,8 @@ __bl_classes = [
     operators.combiner.Combiner,
     operators.get_pillow.InstallPIL,
     operators.get_pillow.CheckPillow,
-    extend_types.CombineListEntry,
-    extend_lists.SMC_UL_Combine_List,
+    extend_types.MIMICombineListEntry,
+    extend_lists.MIMISMC_UL_Combine_List,
 ]
 
 
