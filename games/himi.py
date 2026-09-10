@@ -5,7 +5,6 @@ from ..common.global_config import GlobalConfig, LogicName
 from ..common.global_properties import GlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
-from ..common.m_ini_helper_gui import M_IniHelperGUI
 
 
 class ExportHIMI:
@@ -41,8 +40,6 @@ class ExportHIMI:
             if category_name == d3d11_game_type.CategoryDrawCategoryDict["Position"]:
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                     texture_override_vb_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
-                    if GlobalProperties.generate_branch_mod_gui():
-                        texture_override_vb_section.append("$ActiveCharacter = 1")
 
             texture_override_vb_section.new_line()
 
@@ -171,8 +168,6 @@ class ExportHIMI:
             if category_name == d3d11_game_type.CategoryDrawCategoryDict["Position"]:
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                     texture_override_vb_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
-                    if GlobalProperties.generate_branch_mod_gui():
-                        texture_override_vb_section.append("$ActiveCharacter = 1")
 
             texture_override_vb_section.new_line()
 
@@ -226,8 +221,6 @@ class ExportHIMI:
             if not d3d11_game_type.GPU_PreSkinning:
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                     texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
-                    if GlobalProperties.generate_branch_mod_gui():
-                        texture_override_ib_section.append("$ActiveCharacter = 1")
 
         ini_builder.append_section(texture_override_ib_section)
 
@@ -288,7 +281,6 @@ class ExportHIMI:
 
         M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
-        M_IniHelperGUI.add_branch_mod_gui_section(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         self.add_unity_cs_vertex_shader_check(ini_builder=ini_builder)
         ini_builder.save_to_file(os.path.join(GlobalConfig.path_generate_mod_folder(), GlobalConfig.get_generated_mod_name() + ".ini"))
 
@@ -310,7 +302,6 @@ class ExportHIMI:
 
         M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
-        M_IniHelperGUI.add_branch_mod_gui_section(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
         ini_builder.save_to_file(os.path.join(GlobalConfig.path_generate_mod_folder(), GlobalConfig.get_generated_mod_name() + ".ini"))
 
     def export(self):

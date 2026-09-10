@@ -300,38 +300,7 @@ class BlueprintExportHelper:
             if node.bl_idname == node_type:
                 return node
         return None
-    
-    @staticmethod
-    def get_nodes_from_bl_idname(tree, node_type:str):
-        """Find all matching nodes in the tree"""
-        if not tree:
-            return []
-        nodes = []
-        for node in tree.nodes:
-            if node.bl_idname == node_type:
-                nodes.append(node)
-        return nodes
 
-    @staticmethod
-    def get_active_mod_panel_nodes(context=None, tree=None):
-        current_tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
-        if not current_tree:
-            return []
-
-        panel_nodes = BlueprintExportHelper.get_nodes_from_bl_idname(current_tree, 'SSMTNode_ModPanel')
-        return [node for node in panel_nodes if not getattr(node, "mute", False)]
-
-    @staticmethod
-    def has_mod_panel_node(context=None, tree=None):
-        return len(BlueprintExportHelper.get_active_mod_panel_nodes(context=context, tree=tree)) > 0
-
-    @staticmethod
-    def is_mod_panel_flow_effect_enabled(context=None, tree=None):
-        panel_nodes = BlueprintExportHelper.get_active_mod_panel_nodes(context=context, tree=tree)
-        if not panel_nodes:
-            return False
-        return any(getattr(node, "enable_flow_effect", True) for node in panel_nodes)
-    
     @staticmethod
     def get_connected_nodes(current_node):
         """

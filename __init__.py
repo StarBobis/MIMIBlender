@@ -18,7 +18,6 @@ from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_base
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
-from .blueprint import blueprint_node_panel
 
 from .blueprint import blueprint_node_face_mod
 from .blueprint import blueprint_node_group
@@ -74,7 +73,6 @@ def _register_steps():
     yield blueprint_node_obj.register
     yield ui_func_export.register
     yield blueprint_node_menu.register
-    yield blueprint_node_panel.register
 
     yield blueprint_node_face_mod.register
     yield blueprint_file_drop.register
@@ -97,7 +95,6 @@ def unregister():
         blueprint_file_drop.unregister,
         blueprint_node_face_mod.unregister,
         blueprint_node_group.unregister,
-        blueprint_node_panel.unregister,
         blueprint_node_menu.unregister,
         ui_func_export.unregister,
         blueprint_node_obj.unregister,

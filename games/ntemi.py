@@ -9,7 +9,6 @@ from ..common.global_properties import GlobalProperties
 from ..common.global_config import GlobalConfig
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
-from ..common.m_ini_helper_gui import M_IniHelperGUI
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.ssmt_workspace import SSMTWorkSpace
 from ..utils.format_utils import FormatUtils
@@ -320,11 +319,9 @@ class ExportNTEMI:
 
         GlobalConfig.generated_mod_number = len(self.drawib_model_list)
 
-        # Branch key / GUI sections
+        # Branch key sections
         key_lines = self._build_branch_key_lines()
         lines.extend(key_lines)
-        gui_lines = self._build_gui_lines()
-        lines.extend(gui_lines)
 
         ini_filepath = os.path.join(
             GlobalConfig.path_generate_mod_folder(),
@@ -344,8 +341,6 @@ class ExportNTEMI:
             "[Constants]",
             "global $ntemi_mod_enabled = 0",
         ])
-        if GlobalProperties.generate_branch_mod_gui():
-            lines.append("global $ActiveCharacter = 1")
         lines.append("")
 
     def _append_present(self, lines: list[str]):
@@ -701,15 +696,6 @@ class ExportNTEMI:
             for mkey in mkey_list:
                 lines.append(f"key = {mkey}")
             lines.append("")
-        return lines
-
-    def _build_gui_lines(self) -> list[str]:
-        if not GlobalProperties.generate_branch_mod_gui():
-            return []
-        lines: list[str] = []
-        lines.append("[Present]")
-        lines.append("post $ActiveCharacter = 1")
-        lines.append("")
         return lines
 
     # ---- helpers ----------------------------------------------------------------------------------------------------------------------

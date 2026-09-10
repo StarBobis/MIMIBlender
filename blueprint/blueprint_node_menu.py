@@ -312,13 +312,6 @@ class SSMT_MT_ObjectContextMenuSub(bpy.types.Menu):
         layout.operator("ssmt.create_group_from_selection", text="Create Group from Selected Objects", icon='GROUP')
         layout.operator("ssmt.create_internal_switch", text="Create Internal Switch", icon='ARROW_LEFTRIGHT')
 
-class SSMT_MT_NodeMenu_ModPanel(bpy.types.Menu):
-    bl_label = "Mod Panel"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.operator("node.add_node", text="Generate Mod Panel", icon='MENU_PANEL').type = "SSMTNode_ModPanel"
-
 
 class SSMT_OT_AlignNodes(bpy.types.Operator):
     '''Align the selected nodes in a grid layout'''
@@ -764,7 +757,6 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text="Generate Mod", icon='EXPORT').type = "SSMTNode_Result_Output"
     layout.operator("node.add_node", text="Export Face Mod", icon='MOD_MASK').type = "SSMTNode_Face_Mod_Export"
     layout.operator("node.add_node", text="Switch Key", icon='GROUP').type = "SSMTNode_SwitchKey"
-    layout.menu("SSMT_MT_NodeMenu_ModPanel", text="Mod Panel", icon='MENU_PANEL')
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper
@@ -801,7 +793,6 @@ def register():
     bpy.utils.register_class(SSMT_OT_AlignNodes)
     bpy.utils.register_class(SSMT_OT_BatchConnectNodes)
     bpy.utils.register_class(SSMT_MT_ObjectContextMenuSub)
-    bpy.utils.register_class(SSMT_MT_NodeMenu_ModPanel)
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
     # Add to the 3D viewport object context menu
     bpy.types.VIEW3D_MT_object_context_menu.append(draw_objects_context_menu_add)
@@ -835,7 +826,6 @@ def unregister():
     bpy.types.NODE_MT_add.remove(draw_node_add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
 
-    bpy.utils.unregister_class(SSMT_MT_NodeMenu_ModPanel)
     bpy.utils.unregister_class(SSMT_MT_ObjectContextMenuSub)
     bpy.utils.unregister_class(SSMT_OT_BatchConnectNodes)
     bpy.utils.unregister_class(SSMT_OT_AlignNodes)

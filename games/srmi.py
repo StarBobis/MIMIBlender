@@ -6,7 +6,6 @@ from ..common.global_properties import GlobalProperties
 from ..common.buffer_export_helper import BufferExportHelper
 from ..common.global_config import GlobalConfig
 from ..common.m_ini_helper import M_IniHelper
-from ..common.m_ini_helper_gui import M_IniHelperGUI
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
 from ..model.drawib_model import DrawIBModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
@@ -169,8 +168,6 @@ class ExportSRMI:
                     if category_name == d3d11_game_type.CategoryDrawCategoryDict.get("Position"):
                         if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                             texture_override_vb_section.append("$active" + str(active_index) + " = 1")
-                            if GlobalProperties.generate_branch_mod_gui():
-                                texture_override_vb_section.append("$ActiveCharacter = 1")
 
                     texture_override_vb_section.new_line()
 
@@ -217,8 +214,6 @@ class ExportSRMI:
                 if not d3d11_game_type.GPU_PreSkinning:
                     if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                         texture_override_ib_section.append("$active" + str(active_index) + " = 1")
-                        if GlobalProperties.generate_branch_mod_gui():
-                            texture_override_ib_section.append("$ActiveCharacter = 1")
 
                 texture_override_ib_section.new_line()
 
@@ -258,10 +253,6 @@ class ExportSRMI:
         M_IniHelper.add_shapekey_ini_sections(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
-        )
-        M_IniHelperGUI.add_branch_mod_gui_section(
-            ini_builder=ini_builder,
-            key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict,
         )
 
         

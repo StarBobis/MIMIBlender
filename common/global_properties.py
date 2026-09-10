@@ -64,12 +64,6 @@ class GlobalProperties(bpy.types.PropertyGroup):
         default=True,
     ) # type: ignore
 
-    generate_branch_mod_gui: bpy.props.BoolProperty(
-        name="Generate Branch-Switch Mod Panel (Beta)",
-        description="When generating a Mod, a branch-switch Mod panel based on the current collection structure is also generated; it can be summoned in-game by holding Ctrl + Alt. Still under testing and improvement",
-        default=False,
-    ) # type: ignore
-
     recalculate_tangent: bpy.props.BoolProperty(
         name="Store Vector-Normalized Normals into TANGENT (Global)",
         description="Recomputes the TANGENT of all models using vector-sum normalization. When enabled, you cannot precisely control whether a specific model is processed; it is the lazy option. When unchecked, the option marked in the right-click menu is used by default.\nUses:\n1. Generally used to fix outline lines on GI, HI3 1.0 and HSR characters.\n2. Used to fix black patches on models caused by incorrect TANGENT values; thin HSR skirts may show this problem, for example.",
@@ -206,22 +200,6 @@ class GlobalProperties(bpy.types.PropertyGroup):
     def forbid_auto_texture_ini(cls) -> bool:
         """The old auto-texture pipeline has been removed. This method is kept only as a compatibility shim and always returns False."""
         return False
-
-    @classmethod
-    def generate_branch_mod_gui(cls):
-        try:
-            from ..blueprint.blueprint_export_helper import BlueprintExportHelper
-            return BlueprintExportHelper.has_mod_panel_node()
-        except Exception:
-            return False
-
-    @classmethod
-    def generate_branch_mod_gui_flow_effect(cls):
-        try:
-            from ..blueprint.blueprint_export_helper import BlueprintExportHelper
-            return BlueprintExportHelper.is_mod_panel_flow_effect_enabled()
-        except Exception:
-            return False
 
     @classmethod
     def recalculate_tangent(cls):
