@@ -538,10 +538,10 @@ class ObjBufferHelper:
                     pass
                 else:
                     data = ObjBufferHelper._parse_normal(mesh_loops, mesh_loops_length, d3d11_element, has_encoded_data)
-                    # Only the GIMI preset restores the raw NORMAL w component
-                    # stored on import; all other presets keep the legacy
-                    # parsing result untouched.
-                    if GlobalConfig.logic_name == LogicName.GIMI:
+                    # Only the raw-byte round-trip presets (GIMI and SRMI)
+                    # restore the raw NORMAL w component stored on import;
+                    # all other presets keep the legacy parsing result untouched.
+                    if LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name):
                         data = ObjBufferHelper._restore_raw_fourth_component(
                             mesh, RAW_NORMAL_W_ATTRIBUTE_PREFIX, d3d11_element, loop_vertex_indices, data
                         )
@@ -549,10 +549,11 @@ class ObjBufferHelper:
             elif d3d11_element_name == 'TANGENT':
                 if has_encoded_data and (GlobalConfig.logic_name == LogicName.EFMI ):
                     pass
-                elif GlobalConfig.logic_name == LogicName.GIMI:
-                    # GIMI path: prefer the lossless raw TANGENT bytes stored
-                    # on import, and only fall back to Blender loop tangents
-                    # when no raw payload exists on this mesh.
+                elif LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name):
+                    # Raw-byte round-trip path (GIMI and SRMI): prefer the
+                    # lossless raw TANGENT bytes stored on import, and only fall
+                    # back to Blender loop tangents when no raw payload exists
+                    # on this mesh.
                     data = ObjBufferHelper._load_raw_point_element(
                         mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, d3d11_element, loop_vertex_indices
                     )
@@ -571,9 +572,10 @@ class ObjBufferHelper:
             
             elif d3d11_element_name.startswith('COLOR'):
                 data = ObjBufferHelper._parse_color(mesh, mesh_loops_length, d3d11_element_name, d3d11_element)
-                # Only the GIMI preset restores the raw COLOR alpha component
-                # stored on import; all other presets keep the legacy result.
-                if GlobalConfig.logic_name == LogicName.GIMI:
+                # Only the raw-byte round-trip presets (GIMI and SRMI) restore
+                # the raw COLOR alpha component stored on import; all other
+                # presets keep the legacy result.
+                if LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name):
                     data = ObjBufferHelper._restore_raw_fourth_component(
                         mesh,
                         RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX + ":" + d3d11_element_name,
@@ -924,9 +926,10 @@ class ObjBufferHelper:
         normalized_normals = numpy.array([position_normal_dict[pos] for pos in positions])
 
         # Compute w and adjust the tangent's fourth component
-        if GlobalConfig.logic_name == LogicName.GIMI:
-            # GIMI path: decode/encode through the normalized-field helpers so
-            # that integer (SNORM/UNORM) TANGENT formats stay lossless.
+        if LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name):
+            # Raw-byte round-trip path (GIMI and SRMI): decode/encode through
+            # the normalized-field helpers so that integer (SNORM/UNORM)
+            # TANGENT formats stay lossless.
             tangent_dtype = vb['TANGENT'].dtype
             tangent_values = ObjBufferHelper._decode_normalized_field(vb['TANGENT'])
             w = numpy.where(tangent_values[:, 3] >= 0, -1.0, 1.0)
@@ -975,11 +978,12 @@ class ObjBufferHelper:
 
         positions = numpy.asarray(vb['POSITION'], dtype=numpy.float32)
 
-        # Only the GIMI preset handles integer (SNORM/UNORM) TANGENT formats
-        # through the lossless decode/encode helpers. Every other game preset
-        # must keep the legacy float-only behavior completely unchanged.
-        is_gimi = GlobalConfig.logic_name == LogicName.GIMI
-        if is_gimi:
+        # Only the raw-byte round-trip presets (GIMI and SRMI) handle integer
+        # (SNORM/UNORM) TANGENT formats through the lossless decode/encode
+        # helpers. Every other game preset must keep the legacy float-only
+        # behavior completely unchanged.
+        use_lossless_fields = LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name)
+        if use_lossless_fields:
             tangent_dtype = vb['TANGENT'].dtype
             tangents = ObjBufferHelper._decode_normalized_field(vb['TANGENT'])
         else:
@@ -1056,16 +1060,17 @@ class ObjBufferHelper:
         outline_vectors = tangents[:, 0:3].copy()
         outline_vectors[ib_data] = unit_vector(accumulated_normals[unique_inverse])
 
-        if is_gimi:
-            # GIMI path: re-encode through the normalized-field helper so that
-            # integer TANGENT formats round-trip without precision loss.
+        if use_lossless_fields:
+            # Raw-byte round-trip path (GIMI and SRMI): re-encode through the
+            # normalized-field helper so that integer TANGENT formats
+            # round-trip without precision loss.
             vb['TANGENT'][:, :3] = ObjBufferHelper._encode_normalized_field(outline_vectors, tangent_dtype)
         else:
             # Legacy path: write the float outline vectors back directly.
             vb['TANGENT'][:, :3] = outline_vectors
 
         if tangents.shape[1] >= 4:
-            if is_gimi:
+            if use_lossless_fields:
                 w = numpy.where(tangents[:, 3] >= 0, -1.0, 1.0)
                 vb['TANGENT'][:, 3] = ObjBufferHelper._encode_normalized_field(w, tangent_dtype)
             else:

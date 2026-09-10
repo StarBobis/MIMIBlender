@@ -90,11 +90,12 @@ class MeshCreateHelper:
             print("Current Element: " + element.ElementName)
             print("Shape before data conversion: " + str(data.shape))
 
-            # Only the GIMI preset preserves these raw vertex payload bytes.
+            # Only presets on the raw-byte round-trip channel (GIMI and SRMI)
+            # preserve these raw vertex payload bytes.
             # Blender has no native representation for these game-specific
             # components, but every other game preset must keep the legacy
             # import behavior unchanged (no extra mesh attributes created).
-            if logic_name == LogicName.GIMI:
+            if LogicName.uses_raw_vertex_attributes(logic_name):
                 if element.SemanticName == "TANGENT":
                     store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
                 elif data.ndim > 1 and data.shape[1] >= 4:

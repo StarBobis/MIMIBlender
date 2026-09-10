@@ -52,6 +52,18 @@ class LogicName:
     def is_zzmi_family(cls, logic_name: str) -> bool:
         return logic_name in {cls.ZZMI, cls.ZZMIDX12}
 
+    @classmethod
+    def uses_raw_vertex_attributes(cls, logic_name: str) -> bool:
+        # Presets on the lossless raw-byte round-trip channel: Blender has no
+        # native representation for the NORMAL w component or the full TANGENT
+        # payload (and the game-owned COLOR alpha), so the import stores the
+        # original bytes as POINT-domain mesh attributes and the export restores
+        # them instead of recomputing everything from Blender loop data.
+        # GIMI (Genshin Impact) and SRMI (Honkai: Star Rail) share this channel
+        # because both are miHoYo/HoYoverse games whose shaders read these
+        # game-specific vertex payload components directly.
+        return logic_name in {cls.GIMI, cls.SRMI}
+
 
 # Global config class: fields are by default the only globally accessible static variables, implementing global state
 class GlobalConfig:
