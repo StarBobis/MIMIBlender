@@ -906,7 +906,7 @@ class MIMIPanelModelProcess(bpy.types.Panel):
     So the panel also holds a copy for the convenience of beginners. Of course, it is collapsed by default so it does not affect the visuals, and once a beginner has used it enough to become an expert, they use the right-click menu options instead.
     '''
     bl_label = "Model Processing Panel" 
-    bl_idname = "mimi.PT_ModelProcess_Panel"
+    bl_idname = "MIMI_PT_model_process"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -964,7 +964,7 @@ class MIMICatterRightClickMenu(bpy.types.Menu):
     Keeping these only in the MIMITools panel is not enough either, because users with a lot of add-ons installed often cannot see the MIMITools panel at all
     So a copy is also placed in the right-click 3Dmigoto menu, which makes them easier to find.
     '''
-    bl_idname = "mimi.MT_object_3Dmigoto"
+    bl_idname = "MIMI_MT_object_3dmigoto"
     bl_label = "3Dmigoto"
     bl_description = "Common features for making 3Dmigoto Mods."
     

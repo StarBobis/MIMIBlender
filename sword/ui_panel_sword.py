@@ -432,7 +432,7 @@ class SWORD4RefreshReversedWorkspaceList(I18nOperator):
 @translatable
 class MIMISword_ImageMaterialPanel(Panel):
     bl_label = "Mod Reverse Panel"
-    bl_idname = "mimi.PT_image_material_panel"
+    bl_idname = "MIMI_PT_image_material"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -494,7 +494,7 @@ class MIMISword_ImageMaterialPanel(Panel):
 @translatable
 class MIMISword_SplitModel_Panel(Panel):
     bl_label = "Split Model by DrawIndexed After Manual Reverse"
-    bl_idname = "mimi.PT_Sword_SplitModel_By_DrawIndexed_Panel"
+    bl_idname = "MIMI_PT_sword_split_model_by_draw_indexed"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'

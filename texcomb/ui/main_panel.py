@@ -30,7 +30,7 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
     """
 
     bl_label = "Texture Combiner"
-    bl_idname = "mimi.PT_Main_Panel"
+    bl_idname = "MIMI_PT_texcomb_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI" if globs.is_blender_modern else "TOOLS"
     bl_category = "MIMITools"

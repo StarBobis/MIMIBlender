@@ -325,7 +325,7 @@ class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
 @translatable
 class MIMIPT_FrameProperties(bpy.types.Panel):
     '''Frame properties panel: with a Frame node selected, adjust its color, transparency, label, etc. from the sidebar'''
-    bl_idname = "MIMIPT_FrameProperties"
+    bl_idname = "MIMI_PT_frame_properties"
     bl_label = "Frame Properties"
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'

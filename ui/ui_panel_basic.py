@@ -35,7 +35,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
     This panel refreshes in real time and reads the paths from the global configuration file.
     '''
     bl_label = "Basic Information Panel"
-    bl_idname = "mimi.PT_CATTER_Buttons_panel"
+    bl_idname = "MIMI_PT_catter_buttons"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'

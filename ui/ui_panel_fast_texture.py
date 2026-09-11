@@ -77,6 +77,10 @@ class MIMIImportTexture_ImageListItem(PropertyGroup):
 
 # Custom UI list that displays images and thumbnails
 class MIMIUL_FastImportTextureList(UIList):
+    # Explicit idname that follows the Blender "_UL_" naming convention;
+    # otherwise the name derived from the class triggers a register warning.
+    bl_idname = "MIMI_UL_fast_import_texture_list"
+
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         pcoll = fast_preview_collections["main"]
         
@@ -217,7 +221,7 @@ class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
 @translatable
 class MIMIMT_ImageMaterialPanel(Panel):
     bl_label = "Quick Preview Texture"
-    bl_idname = "mimi.PT_fast_preview_texture"
+    bl_idname = "MIMI_PT_fast_preview_texture"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'MIMITools'
@@ -246,7 +250,7 @@ class MIMIMT_ImageMaterialPanel(Panel):
         if scene.mimi_image_list:
             row = layout.row()
             row.template_list(
-                "MIMIUL_FastImportTextureList",
+                MIMIUL_FastImportTextureList.bl_idname,
                 "Image List", 
                 scene, 
                 "mimi_image_list", 

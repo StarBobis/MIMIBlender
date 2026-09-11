@@ -303,10 +303,13 @@ class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
 def draw_objects_context_menu_add(self, context):
     layout = self.layout
     layout.separator()
-    layout.menu("MIMIMT_ObjectContextMenuSub", text=tr("SSMT Blueprint Graph"), icon='NODETREE')
+    layout.menu(MIMIMT_ObjectContextMenuSub.bl_idname, text=tr("SSMT Blueprint Graph"), icon='NODETREE')
 
 @translatable
 class MIMIMT_ObjectContextMenuSub(bpy.types.Menu):
+    # Explicit idname that follows the Blender "_MT_" naming convention;
+    # otherwise the name derived from the class triggers a register warning.
+    bl_idname = "MIMI_MT_object_context_menu_sub"
     bl_label = "SSMT Blueprint Graph"
     
     def draw(self, context):
