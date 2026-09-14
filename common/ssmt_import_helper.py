@@ -7,6 +7,7 @@ from .mesh_create_helper import MeshCreateHelper
 from ..workspace.submesh_json import SubmeshJson, SubmeshCategoryBuffer
 from .mimi_global_properties import MIMIGlobalProperties
 from ..utils.format_utils import Fatal, FormatUtils
+from ..utils.material_texture_utils import apply_image_texture_to_material, find_node
 
 
 class SSMTImportHelper:
@@ -84,6 +85,18 @@ class SSMTImportHelper:
 				segment_obj["3DMigoto:DrawCallIBIndex"] = segment_info["ib_index"]
 				segment_obj["3DMigoto:DrawCallIndexOffset"] = segment_info["index_offset"]
 				segment_obj["3DMigoto:DrawCallIndexCount"] = segment_info["index_count"]
+
+				# NanoCat (MMT) linkage: when the SubMeshJson records a preview texture
+				# on this segment's IndexBufferList entry, apply it right away so the
+				# Blender viewport shows the same per-part assignment as the MMT 3D
+				# preview (no manual texture picking needed after import).
+				nanocat_texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path(
+					submesh_json=submesh_json,
+					ib_entry_index=segment_info["ib_index"],
+				)
+				if nanocat_texture_path:
+					SSMTImportHelper.apply_nanocat_part_texture(segment_obj, nanocat_texture_path)
+
 				imported_obj_list.append(segment_obj)
 
 			if len(imported_obj_list) > 0:
@@ -92,7 +105,7 @@ class SSMTImportHelper:
 
 			print("DrawCallSegmentList: all segments were invalid, falling back to whole import")
 
-		return MeshCreateHelper.create_mesh_object(
+		imported_obj = MeshCreateHelper.create_mesh_object(
 			mesh_name=mesh_name,
 			source_path=submesh_json.JsonFilePath,
 			logic_name=logic_name,
@@ -114,6 +127,14 @@ class SSMTImportHelper:
 			wwmi_vg_map=wwmi_vg_map,
 			wwmi_vg_offset=submesh_json.VGOffset,
 		)
+
+		# Whole import merges every index buffer into a single mesh, so a precise
+		# per-segment mapping is impossible here; fall back to the first recorded
+		# NanoCat preview texture (segmented imports resolve per segment instead).
+		nanocat_texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path_for_whole_import(submesh_json)
+		if nanocat_texture_path:
+			SSMTImportHelper.apply_nanocat_part_texture(imported_obj, nanocat_texture_path)
+		return imported_obj
 
 	@staticmethod
 	def resolve_draw_call_segments(submesh_json:SubmeshJson, ib_data_list:list, ib_entry_array_indices:list, ib_data_full, vb_vertex_count:int):
@@ -539,3 +560,85 @@ class SSMTImportHelper:
 			else:
 				fields.append((d3d11_element.ElementName, numpy_type, size))
 		return numpy.dtype(fields)
+
+	@staticmethod
+	def resolve_nanocat_part_texture_path(submesh_json:SubmeshJson, ib_entry_index:int):
+		'''
+		Resolve the NanoCat (MMT) preview texture recorded on one IndexBufferList entry.
+
+		The MMT host writes "NanoCatPartTexture" into the SubMeshJson when the agent
+		assigns a base-color texture to a part. The value is a bare PNG file name and
+		the file itself lies flat in the reverse output root (the parent folder of the
+		variant folder holding the JSON), so both the JSON folder and its parent are
+		probed. Returns the absolute image path, or None when nothing usable is found.
+		'''
+		# A negative index is the DrawCallIndexList fallback (no IB entry mapping).
+		if ib_entry_index < 0 or ib_entry_index >= len(submesh_json.IndexBufferList):
+			return None
+
+		texture_name = str(submesh_json.IndexBufferList[ib_entry_index].NanoCatPartTexture or "").strip()
+		if not texture_name:
+			return None
+
+		# Only the bare file name is honored: paths inside the JSON stay untrusted.
+		texture_name = os.path.basename(texture_name)
+		for directory in (submesh_json.DirPath, os.path.dirname(submesh_json.DirPath)):
+			candidate = os.path.join(directory, texture_name)
+			if os.path.isfile(candidate):
+				return candidate
+		return None
+
+	@staticmethod
+	def resolve_nanocat_part_texture_path_for_whole_import(submesh_json:SubmeshJson):
+		'''
+		Pick a single NanoCat preview texture for the whole-import path (one mesh
+		merging every index buffer): the first entry with a resolvable texture wins.
+		'''
+		for entry_index in range(len(submesh_json.IndexBufferList)):
+			texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path(
+				submesh_json=submesh_json,
+				ib_entry_index=entry_index,
+			)
+			if texture_path:
+				return texture_path
+		return None
+
+	@staticmethod
+	def apply_nanocat_part_texture(obj, texture_path:str):
+		'''
+		Wire the NanoCat-assigned image into the imported object's material so the
+		Blender viewport preview matches the assignment made in the MMT 3D preview.
+
+		The shared apply_image_texture_to_material helper does the actual node
+		wiring; here we only guarantee the object owns a material and never clobber
+		a custom (e.g. GIMI high-fidelity) node tree with a plain Principled setup.
+		'''
+		if not texture_path or not os.path.isfile(texture_path):
+			return
+
+		# check_existing=True: re-imports share one image data-block per file path.
+		image_data = bpy.data.images.load(texture_path, check_existing=True)
+
+		# Reuse the first material slot when it exists; otherwise create a fresh
+		# preview material named after the texture file.
+		material = None
+		if obj.data.materials and obj.data.materials[0] is not None:
+			material = obj.data.materials[0]
+		if material is None:
+			material_name = os.path.splitext(os.path.basename(texture_path))[0] + "_Material"
+			material = bpy.data.materials.new(name=material_name)
+			if obj.data.materials:
+				obj.data.materials[0] = material
+			else:
+				obj.data.materials.append(material)
+
+		# A node tree that already renders something but has no Principled BSDF is
+		# a custom (e.g. high-fidelity) material: keep it intact and skip preview
+		# wiring instead of hijacking its material output.
+		if material.use_nodes and material.node_tree is not None and len(material.node_tree.nodes) > 0:
+			if find_node(material.node_tree.nodes, "ShaderNodeBsdfPrincipled") is None:
+				print("NanoCat part texture: custom material detected on " + obj.name + ", preview texture skipped: " + texture_path)
+				return
+
+		apply_image_texture_to_material(material, image_data)
+		print("NanoCat part texture applied: " + obj.name + " <- " + os.path.basename(texture_path))

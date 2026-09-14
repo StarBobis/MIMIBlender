@@ -10,6 +10,10 @@ class SubmeshIndexBuffer:
 	DXGI_FORMAT:str
 	FileName:str
 	FilePath:str = field(init=False)
+	# Preview base-color texture assigned by NanoCat (the MMT host agent).
+	# Written by MMT into the IndexBufferList entry as "NanoCatPartTexture";
+	# the value is a bare PNG file name lying flat in the reverse output root.
+	NanoCatPartTexture:str = ""
 
 	def bind_dir_path(self, dir_path:str):
 		self.FilePath = os.path.join(dir_path, self.FileName)
@@ -130,7 +134,9 @@ class SubmeshJson:
 		for index_buffer_json in self.JsonDict.get("IndexBufferList", []):
 			index_buffer = SubmeshIndexBuffer(
 				DXGI_FORMAT=index_buffer_json.get("DXGI_FORMAT", ""),
-				FileName=index_buffer_json.get("FileName", "")
+				FileName=index_buffer_json.get("FileName", ""),
+				# Optional MMT/NanoCat preview texture contract; absent means unassigned.
+				NanoCatPartTexture=index_buffer_json.get("NanoCatPartTexture", "")
 			)
 			index_buffer.bind_dir_path(self.DirPath)
 			self.IndexBufferList.append(index_buffer)
