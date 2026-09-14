@@ -37,6 +37,11 @@ def apply_image_texture_to_material(material, image_data):
     existing Principled BSDF and Material Output nodes (found by bl_idname)
     instead of creating new ones, so the image connects to the original
     node chain that is already tied to the material output.
+
+    The image alpha mode is forced to CHANNEL_PACKED: game base-color maps
+    pack data (emission / material masks) into the alpha channel, so alpha
+    must stay available as packed data and must NOT drive transparency.
+    For the same reason the Alpha output is deliberately left unlinked.
     """
     material.use_nodes = True
     nodes = material.node_tree.nodes
@@ -63,7 +68,16 @@ def apply_image_texture_to_material(material, image_data):
     tex_image.image = image_data
     tex_image.location = (-300, 0)
 
+    # Mark the alpha channel as packed data. Guarded: generated/UDIM images
+    # still expose alpha_mode, but a failed assignment must never abort the
+    # texture wiring itself.
+    if image_data is not None:
+        try:
+            image_data.alpha_mode = "CHANNEL_PACKED"
+        except (AttributeError, TypeError, ValueError):
+            pass
+
     # Connect the image to the shader. Socket names stay English in every
-    # language, so these lookups are stable identifiers.
+    # language, so these lookups are stable identifiers. Alpha stays
+    # unlinked: with CHANNEL_PACKED it carries mask data, not coverage.
     links.new(tex_image.outputs["Color"], bsdf_node.inputs["Base Color"])
-    links.new(tex_image.outputs["Alpha"], bsdf_node.inputs["Alpha"])

@@ -658,15 +658,17 @@ class MeshCreateHelper:
         return bsdf
 
     @staticmethod
-    def apply_diffuse_texture(node_tree, bsdf, texture_path:str, use_alpha:bool=True):
+    def apply_diffuse_texture(node_tree, bsdf, texture_path:str):
         tex_image = node_tree.nodes.new('ShaderNodeTexImage')
         tex_image.image = bpy.data.images.load(texture_path)
-        tex_image.image.alpha_mode = "NONE"
+        # Game diffuse maps pack data (emission / material masks) into the
+        # alpha channel: CHANNEL_PACKED keeps that data readable instead of
+        # letting Blender treat it as transparency. The Alpha output is left
+        # unlinked on purpose - packed data is not coverage.
+        tex_image.image.alpha_mode = "CHANNEL_PACKED"
         tex_image.location.x = bsdf.location.x - 400
         tex_image.location.y = bsdf.location.y
         node_tree.links.new(bsdf.inputs['Base Color'], tex_image.outputs['Color'])
-        if use_alpha:
-            node_tree.links.new(bsdf.inputs['Alpha'], tex_image.outputs['Alpha'])
         return tex_image
 
     @staticmethod
@@ -724,7 +726,6 @@ class MeshCreateHelper:
             node_tree=material.node_tree,
             bsdf=bsdf,
             texture_path=texture_path,
-            use_alpha=logic_name != LogicName.IdentityV,
         )
 
         MeshCreateHelper.assign_material(obj, material)

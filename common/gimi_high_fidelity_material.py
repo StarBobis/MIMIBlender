@@ -791,6 +791,14 @@ class GIMIHighFidelityMaterial:
                 node.image = bpy.data.images.load(image_path, check_existing=True)
             except Exception as error:
                 print(f"[GIMI Material] Cannot load {name}: {image_path}: {error}")
+        if node.image:
+            # These game textures pack data (masks / emission) into the alpha
+            # channel: CHANNEL_PACKED keeps the channel readable as data
+            # instead of letting Blender interpret it as transparency.
+            try:
+                node.image.alpha_mode = 'CHANNEL_PACKED'
+            except (AttributeError, TypeError, ValueError):
+                pass
         if node.image and non_color:
             try:
                 node.image.colorspace_settings.name = 'Non-Color'
@@ -817,7 +825,7 @@ class GIMIHighFidelityMaterial:
 
     @classmethod
     def configure_eye_alpha_emission(cls, material, diffuse_paths: list[str]) -> bool:
-        """Build SSMT4's eye pass: base + straight-alpha diffuse overlays."""
+        """Build SSMT4's eye pass: base + channel-packed-alpha diffuse overlays."""
         if material is None or not diffuse_paths:
             return False
         material.use_nodes = True
@@ -836,7 +844,11 @@ class GIMIHighFidelityMaterial:
             if texture.image is None:
                 continue
             try:
-                texture.image.alpha_mode = 'STRAIGHT'
+                # CHANNEL_PACKED (not STRAIGHT): the alpha channel is packed
+                # coverage data; the Alpha socket still outputs the same value,
+                # so the Source Over overlays below behave identically while
+                # the channel stays readable as data.
+                texture.image.alpha_mode = 'CHANNEL_PACKED'
             except (AttributeError, TypeError, ValueError):
                 pass
             links.new(uv.outputs['UV'], texture.inputs['Vector'])

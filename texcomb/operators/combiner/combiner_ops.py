@@ -1074,12 +1074,22 @@ def _configure_material_multi(  # noqa: PLR0915
     y_offset = 400
     y_spacing = 300
 
+    def _mark_channel_packed(node) -> None:
+        # Atlas textures pack data into the alpha channel: CHANNEL_PACKED keeps
+        # it available as data instead of letting Blender read it as coverage.
+        try:
+            if node.image is not None:
+                node.image.alpha_mode = "CHANNEL_PACKED"
+        except (AttributeError, TypeError, ValueError):
+            pass
+
     # Configure albedo texture
     if "albedo" in textures:
         node_albedo = node_tree.nodes.new(type="ShaderNodeTexImage")
         node_albedo.image = textures["albedo"].image
         node_albedo.label = "Diffuse Atlas"
         node_albedo.location = x_offset, y_offset
+        _mark_channel_packed(node_albedo)
 
         node_tree.links.new(
             node_albedo.outputs["Color"], node_bsdf.inputs["Base Color"]
@@ -1095,6 +1105,7 @@ def _configure_material_multi(  # noqa: PLR0915
         node_metallic.label = "Metallic Atlas"
         node_metallic.location = x_offset, y_offset - y_spacing
         node_metallic.image.colorspace_settings.name = "Non-Color"
+        _mark_channel_packed(node_metallic)
 
         node_tree.links.new(
             node_metallic.outputs["Color"], node_bsdf.inputs["Metallic"]
@@ -1107,6 +1118,7 @@ def _configure_material_multi(  # noqa: PLR0915
         node_roughness.label = "Roughness Atlas"
         node_roughness.location = x_offset, y_offset - y_spacing * 2
         node_roughness.image.colorspace_settings.name = "Non-Color"
+        _mark_channel_packed(node_roughness)
 
         node_tree.links.new(
             node_roughness.outputs["Color"], node_bsdf.inputs["Roughness"]
@@ -1119,6 +1131,7 @@ def _configure_material_multi(  # noqa: PLR0915
         node_specular.label = "Specular Atlas"
         node_specular.location = x_offset, y_offset - y_spacing * 3
         node_specular.image.colorspace_settings.name = "Non-Color"
+        _mark_channel_packed(node_specular)
 
         node_tree.links.new(
             node_specular.outputs["Color"], node_bsdf.inputs["Specular Tint"]
@@ -1130,6 +1143,7 @@ def _configure_material_multi(  # noqa: PLR0915
         node_emission.image = textures["emission"].image
         node_emission.label = "Emission Atlas"
         node_emission.location = x_offset, y_offset - y_spacing * 4
+        _mark_channel_packed(node_emission)
 
         node_tree.links.new(
             node_emission.outputs["Color"], node_bsdf.inputs["Emission Color"]
@@ -1144,6 +1158,7 @@ def _configure_material_multi(  # noqa: PLR0915
         node_normal_tex.label = "Normal Map Atlas"
         node_normal_tex.location = x_offset - 300, y_offset - y_spacing * 5
         node_normal_tex.image.colorspace_settings.name = "Non-Color"
+        _mark_channel_packed(node_normal_tex)
 
         # Add Normal Map node
         node_normal_map = node_tree.nodes.new(type="ShaderNodeNormalMap")

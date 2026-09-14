@@ -141,11 +141,17 @@ def test_helper_reuses_chinese_named_nodes():
     check("helper: image wired into the reused BSDF",
           img_node is not None and img_node.image is image)
     check("helper: output chain intact", output_surface_is_linked(mat))
-    check("helper: image alpha linked",
-          any(link.to_node.bl_idname == "ShaderNodeBsdfPrincipled"
-              and link.to_socket.name == "Alpha"
-              and link.from_node.bl_idname == "ShaderNodeTexImage"
-              for link in mat.node_tree.links))
+    # Game base-color maps pack data into alpha: the helper must tag the
+    # image as CHANNEL_PACKED and must not wire alpha into the BSDF Alpha
+    # socket (packed data is not coverage).
+    check("helper: image alpha mode is channel packed",
+          image.alpha_mode == "CHANNEL_PACKED",
+          f"alpha_mode={image.alpha_mode}")
+    check("helper: image alpha not linked",
+          not any(link.to_node.bl_idname == "ShaderNodeBsdfPrincipled"
+                  and link.to_socket.name == "Alpha"
+                  and link.from_node.bl_idname == "ShaderNodeTexImage"
+                  for link in mat.node_tree.links))
 
 
 def test_helper_builds_tree_from_scratch():
