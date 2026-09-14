@@ -41,6 +41,14 @@ class D3D11GameType:
     CategoryExtractTechniqueDict:Dict[str,str] =  field(init=False,repr=False)
     CategoryStrideDict:Dict[str,int] =  field(init=False,repr=False)
 
+    # Vertex decompression parameters carried by the SubmeshJson.
+    # Games like YYSLS quantize POSITION to UNORM in the VB and let the
+    # vertex shader restore real coordinates with these values, so both the
+    # importer (decode) and the exporter (re-encode) need them round-tripped.
+    LocalBoundingBoxMin:list = field(init=False, default_factory=list)
+    LocalBoundingBoxMax:list = field(init=False, default_factory=list)
+    VertexCompressionParams:list = field(init=False, default_factory=list)
+
     def __post_init__(self):
         self.FileName = os.path.basename(self.FilePath)
         self.GameTypeName = os.path.splitext(self.FileName)[0]
@@ -64,6 +72,11 @@ class D3D11GameType:
         self.GPU_PreSkinning = game_type_json.get("GPU-PreSkinning",False)
         self.GameTypeName = game_type_json.get("WorkGameType","")
         self.CategoryDrawCategoryDict = game_type_json.get("CategoryDrawCategoryMap",{})
+        # Optional vertex decompression parameters (only present when the
+        # extractor detected a quantized POSITION format for this mesh).
+        self.LocalBoundingBoxMin = list(game_type_json.get("LocalBoundingBoxMin",[]))
+        self.LocalBoundingBoxMax = list(game_type_json.get("LocalBoundingBoxMax",[]))
+        self.VertexCompressionParams = list(game_type_json.get("VertexCompressionParams",[]))
         d3d11_element_list_json = game_type_json.get("D3D11ElementList",[])
         aligned_byte_offset = 0
         for d3d11_element_json in d3d11_element_list_json:
@@ -102,6 +115,11 @@ class D3D11GameType:
             "WorkGameType": submesh_json_dict.get("WorkGameType", ""),
             "CategoryDrawCategoryMap": submesh_json_dict.get("CategoryDrawCategoryMap", {}),
             "D3D11ElementList": cls._collect_element_list_from_submesh_json(submesh_json_dict),
+            # Forward the vertex decompression parameters so the export side
+            # can re-quantize POSITION with the same bounding box.
+            "LocalBoundingBoxMin": submesh_json_dict.get("LocalBoundingBoxMin", []),
+            "LocalBoundingBoxMax": submesh_json_dict.get("LocalBoundingBoxMax", []),
+            "VertexCompressionParams": submesh_json_dict.get("VertexCompressionParams", []),
         }
 
         instance = cls.__new__(cls)

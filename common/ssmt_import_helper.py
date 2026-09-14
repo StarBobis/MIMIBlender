@@ -72,6 +72,12 @@ class SSMTImportHelper:
 					vb_vertex_count=vertex_max - vertex_min + 1,
 					ib_count=len(segment_ib_data),
 					ib_polygon_count=int(len(segment_ib_data) / 3),
+					# Quantized POSITION decode parameters must reach segment
+					# imports too, otherwise segmented meshes keep crushed
+					# [0,1] coordinates.
+					local_bounding_box_min=submesh_json.LocalBoundingBoxMin,
+					local_bounding_box_max=submesh_json.LocalBoundingBoxMax,
+					vertex_compression_params=submesh_json.VertexCompressionParams,
 					import_collection=import_collection,
 					shapekey_position_data=segment_shapekey_position_data if segment_shapekey_position_data else None,
 					# WWMI shape key trio: whole buffers + per-segment vertex window

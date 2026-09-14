@@ -108,6 +108,71 @@ class ObjBufferHelper:
         return positions
 
     @staticmethod
+    def _quantize_position_for_export(positions, d3d11_element, d3d11_game_type):
+        '''
+        Re-encode quantized POSITION formats (UNORM) with the bounding box
+        carried by the SubmeshJson.
+
+        The game shader decompresses positions as:
+            position = LocalBoundingBoxMin + quantized * (Max - Min) * scale
+        so the exporter must apply the inverse transform before packing:
+            quantized = (position - Min) / ((Max - Min) * scale)
+        Positions outside the original bounding box cannot be represented and
+        are clamped (with a warning), which keeps the buffer layout identical
+        to what the game expects.
+        '''
+        fmt = d3d11_element.Format
+        if fmt != 'R16G16B16A16_UNORM' and fmt != 'R8G8B8A8_UNORM':
+            return positions
+
+        bbox_min_list = getattr(d3d11_game_type, 'LocalBoundingBoxMin', [])
+        bbox_max_list = getattr(d3d11_game_type, 'LocalBoundingBoxMax', [])
+        if len(bbox_min_list) < 3 or len(bbox_max_list) < 3:
+            SSMTErrorUtils.raise_fatal(
+                "POSITION format " + fmt + " is quantized and requires "
+                "LocalBoundingBoxMin/Max in the SubmeshJson, but they are missing. "
+                "Please re-extract this model with a newer SSMT version."
+            )
+
+        # Mirror of the import-side scale handling in
+        # MeshCreateHelper.decompress_quantized_position.
+        scale = 1.0
+        compression_params = getattr(d3d11_game_type, 'VertexCompressionParams', [])
+        if len(compression_params) >= 1:
+            try:
+                scale = float(compression_params[0])
+            except (TypeError, ValueError):
+                scale = 1.0
+            if scale == 0.0:
+                scale = 1.0
+
+        bbox_min = numpy.array(bbox_min_list[:3], dtype=numpy.float32)
+        bbox_max = numpy.array(bbox_max_list[:3], dtype=numpy.float32)
+        extent = (bbox_max - bbox_min) * scale
+        if numpy.any(extent <= 0):
+            SSMTErrorUtils.raise_fatal(
+                "Invalid LocalBoundingBox extent for quantized POSITION export: "
+                "Min=" + str(bbox_min_list) + " Max=" + str(bbox_max_list)
+            )
+
+        positions = numpy.asarray(positions, dtype=numpy.float32)
+        quantized = numpy.zeros((positions.shape[0], 4), dtype=numpy.float32)
+        quantized[:, :3] = (positions[:, :3] - bbox_min) / extent
+        # POSITION.w is fixed to 0 for these quantized layouts (verified in
+        # YYSLS frame analysis dumps), so leave the 4th column as zeros.
+
+        out_of_range = numpy.count_nonzero((quantized[:, :3] < 0.0) | (quantized[:, :3] > 1.0))
+        if out_of_range > 0:
+            print("WARNING: " + str(out_of_range) + " position components exceed the original "
+                  "LocalBoundingBox and are clamped to [0,1]; vertices edited beyond the "
+                  "extracted bounding box will be squashed in game.")
+            numpy.clip(quantized, 0.0, 1.0, out=quantized)
+
+        if fmt == 'R16G16B16A16_UNORM':
+            return FormatUtils.convert_4x_float32_to_r16g16b16a16_unorm(quantized)
+        return FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm(quantized)
+
+    @staticmethod
     def _load_raw_point_element(mesh, prefix, d3d11_element, loop_vertex_indices):
         """Rebuild an imported element from its lossless point attributes."""
         raw_bytes = load_raw_bytes(mesh, prefix, d3d11_element.ByteWidth)
@@ -372,6 +437,12 @@ class ObjBufferHelper:
 
                 if d3d11_element.Format == D3D11Format.R16G16_FLOAT:
                     uvs_array = uvs_array.astype(numpy.float16)
+
+                elif d3d11_element.Format == D3D11Format.R16G16_UNORM:
+                    # Quantized UV layout (e.g. YYSLS compressed meshes):
+                    # UVs are already flipped into [0,1] above, so a direct
+                    # UNORM16 conversion is lossless enough.
+                    uvs_array = FormatUtils.convert_2x_float32_to_r16g16_unorm(uvs_array)
                 
                 # Reshape uvs_array into a 2-D array of shape (mesh_loops_length, 2)
                 # uvs_array = uvs_array.reshape(-1, 2)
@@ -532,6 +603,10 @@ class ObjBufferHelper:
 
             if d3d11_element_name == 'POSITION':
                 data = ObjBufferHelper._parse_position(mesh_vertices, mesh_vertices_length, loop_vertex_indices, d3d11_element)
+                # Quantized POSITION formats (UNORM) must be re-encoded with the
+                # same bounding box the game shader uses for decompression,
+                # otherwise the exported buffer is garbage in game.
+                data = ObjBufferHelper._quantize_position_for_export(data, d3d11_element, d3d11_game_type)
 
             elif d3d11_element_name == 'NORMAL':
                 if has_encoded_data and (GlobalConfig.logic_name == LogicName.EFMI ):
@@ -584,7 +659,7 @@ class ObjBufferHelper:
                         data,
                     )
 
-            elif d3d11_element_name.startswith('TEXCOORD') and d3d11_element.Format.endswith('FLOAT'):
+            elif d3d11_element_name.startswith('TEXCOORD') and (d3d11_element.Format.endswith('FLOAT') or d3d11_element.Format.endswith('UNORM')):
                 data = ObjBufferHelper._parse_texcoord(mesh, mesh_loops_length, d3d11_element_name, d3d11_element)
             
             elif d3d11_element_name.startswith('BLENDINDICES'):

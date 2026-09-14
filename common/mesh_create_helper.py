@@ -30,6 +30,48 @@ from .raw_vertex_attributes import (
 class MeshCreateHelper:
 
     @staticmethod
+    def decompress_quantized_position(data, fmt, local_bounding_box_min, local_bounding_box_max, vertex_compression_params):
+        '''
+        Restore real local-space coordinates from quantized UNORM positions.
+
+        Some games (e.g. YYSLS) store POSITION as UNORM values in [0,1] and let
+        the vertex shader decompress them with a local bounding box:
+            position = LocalBoundingBoxMin + quantized * (Max - Min) * scale
+        Without the bounding box the raw [0,1] data is useless (the mesh looks
+        crushed), so warn loudly and keep the raw data instead.
+        '''
+        if not (FormatUtils.unorm16_pattern.match(fmt) or FormatUtils.unorm8_pattern.match(fmt)):
+            return data
+
+        if local_bounding_box_min is None or local_bounding_box_max is None \
+                or len(local_bounding_box_min) < 3 or len(local_bounding_box_max) < 3:
+            print("WARNING: quantized POSITION (" + fmt + ") but SubmeshJson has no "
+                  "LocalBoundingBoxMin/Max; imported mesh keeps raw [0,1] coordinates. "
+                  "Please re-extract this model with a newer SSMT version.")
+            return data
+
+        # VertexCompressionParams[0] acts as an extra range scale (1.0 in all
+        # frames observed so far); tolerate its absence.
+        scale = 1.0
+        if vertex_compression_params is not None and len(vertex_compression_params) >= 1:
+            try:
+                scale = float(vertex_compression_params[0])
+            except (TypeError, ValueError):
+                scale = 1.0
+            if scale == 0.0:
+                scale = 1.0
+
+        bbox_min = numpy.array(local_bounding_box_min[:3], dtype=numpy.float32)
+        bbox_max = numpy.array(local_bounding_box_max[:3], dtype=numpy.float32)
+        extent = (bbox_max - bbox_min) * scale
+
+        # Copy before writing so the caller's vb_data stays untouched.
+        data = numpy.asarray(data, dtype=numpy.float32).copy()
+        for axis in range(3):
+            data[:, axis] = bbox_min[axis] + data[:, axis] * extent[axis]
+        return data
+
+    @staticmethod
     def create_mesh_object(
         mesh_name:str,
         source_path:str,
@@ -110,6 +152,16 @@ class MeshCreateHelper:
             print("Shape after data conversion: " + str(data.shape))
 
             if element.SemanticName == "POSITION":
+                # Some pipelines (e.g. YYSLS) quantize POSITION to UNORM values
+                # in the [0,1] range; restore real local coordinates with the
+                # bounding box parameters carried by the SubmeshJson.
+                data = MeshCreateHelper.decompress_quantized_position(
+                    data,
+                    element.Format,
+                    local_bounding_box_min,
+                    local_bounding_box_max,
+                    vertex_compression_params,
+                )
                 if len(data[0]) == 4:
                     if not all(x[3] in (0, 1) for x in data):
                         raise Fatal('Positions are 4D')
