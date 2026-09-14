@@ -282,13 +282,16 @@ class ExportUtils:
                     loop_vertex_indices=loop_vertex_indices,
                     d3d11_element=d3d11_element,
                 )
-                # Shape-key position buffers share the vertex POSITION layout,
-                # so quantized formats need the same re-encoding here.
-                data = ObjBufferHelper._quantize_position_for_export(
-                    positions=data,
-                    d3d11_element=d3d11_element,
-                    d3d11_game_type=d3d11_game_type,
-                )
+                # YYSLS shape-key position buffers share the vertex POSITION
+                # layout, so quantized formats need the same re-encoding here.
+                # Checked at the call site so other presets never pay for the
+                # extra call.
+                if GlobalConfig.logic_name == LogicName.YYSLS:
+                    data = ObjBufferHelper._quantize_position_for_export(
+                        positions=data,
+                        d3d11_element=d3d11_element,
+                        d3d11_game_type=d3d11_game_type,
+                    )
 
             elif elem_name == "NORMAL":
                 all_normals = ObjBufferHelper._parse_normal(

@@ -42,10 +42,9 @@ class MeshCreateHelper:
 
         This is YYSLS-specific behavior; other presets never carry bounding
         box parameters and must keep their legacy raw import untouched.
+        The caller is responsible for checking the preset before calling, so
+        no preset flag needs to be passed in here.
         '''
-        if GlobalConfig.logic_name != LogicName.YYSLS:
-            return data
-
         if not (FormatUtils.unorm16_pattern.match(fmt) or FormatUtils.unorm8_pattern.match(fmt)):
             return data
 
@@ -158,16 +157,18 @@ class MeshCreateHelper:
             print("Shape after data conversion: " + str(data.shape))
 
             if element.SemanticName == "POSITION":
-                # Some pipelines (e.g. YYSLS) quantize POSITION to UNORM values
-                # in the [0,1] range; restore real local coordinates with the
-                # bounding box parameters carried by the SubmeshJson.
-                data = MeshCreateHelper.decompress_quantized_position(
-                    data,
-                    element.Format,
-                    local_bounding_box_min,
-                    local_bounding_box_max,
-                    vertex_compression_params,
-                )
+                # YYSLS quantizes POSITION to UNORM values in the [0,1] range;
+                # restore real local coordinates with the bounding box
+                # parameters carried by the SubmeshJson. Checked at the call
+                # site so other presets never pay for the extra call.
+                if logic_name == LogicName.YYSLS:
+                    data = MeshCreateHelper.decompress_quantized_position(
+                        data,
+                        element.Format,
+                        local_bounding_box_min,
+                        local_bounding_box_max,
+                        vertex_compression_params,
+                    )
                 if len(data[0]) == 4:
                     if not all(x[3] in (0, 1) for x in data):
                         raise Fatal('Positions are 4D')

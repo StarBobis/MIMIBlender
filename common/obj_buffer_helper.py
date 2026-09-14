@@ -119,11 +119,9 @@ class ObjBufferHelper:
             quantized = (position - Min) / ((Max - Min) * scale)
         Positions outside the original bounding box cannot be represented and
         are clamped (with a warning), which keeps the buffer layout identical
-        to what the game expects. Other presets never reach this code path.
+        to what the game expects. The caller checks the preset before calling,
+        so no preset flag needs to be consulted in here.
         '''
-        if GlobalConfig.logic_name != LogicName.YYSLS:
-            return positions
-
         fmt = d3d11_element.Format
         if fmt != 'R16G16B16A16_UNORM' and fmt != 'R8G8B8A8_UNORM':
             return positions
@@ -606,10 +604,13 @@ class ObjBufferHelper:
 
             if d3d11_element_name == 'POSITION':
                 data = ObjBufferHelper._parse_position(mesh_vertices, mesh_vertices_length, loop_vertex_indices, d3d11_element)
-                # Quantized POSITION formats (UNORM) must be re-encoded with the
-                # same bounding box the game shader uses for decompression,
-                # otherwise the exported buffer is garbage in game.
-                data = ObjBufferHelper._quantize_position_for_export(data, d3d11_element, d3d11_game_type)
+                # YYSLS quantized POSITION formats (UNORM) must be re-encoded
+                # with the same bounding box the game shader uses for
+                # decompression, otherwise the exported buffer is garbage in
+                # game. Checked at the call site so other presets never pay
+                # for the extra call.
+                if GlobalConfig.logic_name == LogicName.YYSLS:
+                    data = ObjBufferHelper._quantize_position_for_export(data, d3d11_element, d3d11_game_type)
 
             elif d3d11_element_name == 'NORMAL':
                 if has_encoded_data and (GlobalConfig.logic_name == LogicName.EFMI ):
