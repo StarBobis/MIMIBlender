@@ -113,14 +113,17 @@ class ObjBufferHelper:
         Re-encode quantized POSITION formats (UNORM) with the bounding box
         carried by the SubmeshJson.
 
-        The game shader decompresses positions as:
+        YYSLS-specific: the game shader decompresses positions as
             position = LocalBoundingBoxMin + quantized * (Max - Min) * scale
         so the exporter must apply the inverse transform before packing:
             quantized = (position - Min) / ((Max - Min) * scale)
         Positions outside the original bounding box cannot be represented and
         are clamped (with a warning), which keeps the buffer layout identical
-        to what the game expects.
+        to what the game expects. Other presets never reach this code path.
         '''
+        if GlobalConfig.logic_name != LogicName.YYSLS:
+            return positions
+
         fmt = d3d11_element.Format
         if fmt != 'R16G16B16A16_UNORM' and fmt != 'R8G8B8A8_UNORM':
             return positions

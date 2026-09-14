@@ -34,12 +34,18 @@ class MeshCreateHelper:
         '''
         Restore real local-space coordinates from quantized UNORM positions.
 
-        Some games (e.g. YYSLS) store POSITION as UNORM values in [0,1] and let
-        the vertex shader decompress them with a local bounding box:
+        YYSLS stores POSITION as UNORM values in [0,1] and lets the vertex
+        shader decompress them with a local bounding box:
             position = LocalBoundingBoxMin + quantized * (Max - Min) * scale
         Without the bounding box the raw [0,1] data is useless (the mesh looks
         crushed), so warn loudly and keep the raw data instead.
+
+        This is YYSLS-specific behavior; other presets never carry bounding
+        box parameters and must keep their legacy raw import untouched.
         '''
+        if GlobalConfig.logic_name != LogicName.YYSLS:
+            return data
+
         if not (FormatUtils.unorm16_pattern.match(fmt) or FormatUtils.unorm8_pattern.match(fmt)):
             return data
 
