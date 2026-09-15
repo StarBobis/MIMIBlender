@@ -19,6 +19,7 @@ from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
+from .shapekeys import add_naraka_shapekey_ini_sections
 
 
 class Exporter(StandardExporter):
@@ -92,6 +93,20 @@ class Exporter(StandardExporter):
         sections.add_unity_cs_resource_vertexlimit(ini_builder=ini_builder, drawib_model=drawib_model)
         self.add_naraka_cs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
         sections.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+
+    def add_final_sections(self, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
+        # Branch keys stay on the shared helper; shape keys need the Naraka
+        # raw-buffer pipeline from games/naraka/shapekeys.py, because the
+        # generic one re-points the position resource at a structured copy
+        # that the game's skinning compute shader cannot read.
+        M_IniHelper.add_branch_key_sections(
+            ini_builder=ini_builder,
+            key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict,
+        )
+        add_naraka_shapekey_ini_sections(
+            ini_builder=ini_builder,
+            drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+        )
 
     def add_naraka_cs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # IB overrides: skip every original draw and re-emit it manually with
