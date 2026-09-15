@@ -292,12 +292,21 @@ class GlobalConfig:
         real folder is configured in the [Include] section of the d3dx.ini
         located next to the 3DMigoto DLL.  Fall back to ``Mods`` if the file
         or setting cannot be found.
+
+        Priority rule: d3dx.ini may configure several include_recursive
+        folders (either on separate lines or comma-separated), e.g. ``Core``
+        and ``Mods``.  When a folder named ``Mods`` is present, it always
+        wins because that is where users actually manage their mods;
+        otherwise the first configured folder is kept (previous behavior).
         """
         if not cls.current_game_migoto_folder:
             return "Mods"
         d3dx_ini_path = os.path.join(cls.current_game_migoto_folder, "d3dx.ini")
         try:
             with open(d3dx_ini_path, "r", encoding="utf-8-sig") as d3dx_ini_file:
+                # Collect every include_recursive component first: there may be
+                # several lines, and each line may hold several folder entries.
+                mod_folder_list = []
                 for raw_line in d3dx_ini_file:
                     line = raw_line.strip()
                     if not line or line.startswith(";") or line.startswith("#"):
@@ -306,15 +315,23 @@ class GlobalConfig:
                         continue
                     key, separator, value = line.partition("=")
                     if separator and key.strip().lower() == "include_recursive":
-                        mod_folder = value.strip().strip("\"'").strip()
-                        if mod_folder:
-                            # Keep only the first component if d3dx.ini uses
-                            # comma-separated recursive include directories.
-                            mod_folder = mod_folder.split(",")[0].strip().strip("\"'").strip()
+                        for component in value.split(","):
+                            mod_folder = component.strip().strip("\"'").strip()
                             mod_folder = mod_folder.rstrip("\\/")
                             if mod_folder:
-                                return mod_folder
-                return "Mods"
+                                mod_folder_list.append(mod_folder)
+
+                if not mod_folder_list:
+                    return "Mods"
+
+                # Prefer the folder literally named "Mods" (the last path
+                # segment is compared so subpaths like "SomeDir\\Mods" also match).
+                for mod_folder in mod_folder_list:
+                    last_segment = mod_folder.replace("/", "\\").split("\\")[-1]
+                    if last_segment.lower() == "mods":
+                        return mod_folder
+
+                return mod_folder_list[0]
         except (OSError, UnicodeDecodeError):
             return "Mods"
 
