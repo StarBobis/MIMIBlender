@@ -2,6 +2,7 @@
 import bpy
 
 from ..common.global_config import GlobalConfig
+from ..common.global_config import LogicName
 from ..i18n.i18n import I18nOperator, tr, translatable
 
 from .blueprint_export_helper import BlueprintExportHelper
@@ -762,6 +763,10 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
     layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
+    # The cross-IB render node only produces INI for the Naraka preset,
+    # so only offer it there to keep the other presets' menus clean.
+    if GlobalConfig.logic_name == LogicName.Naraka:
+        layout.operator("node.add_node", text=tr("Naraka Cross-IB Render"), icon='LINKED').type = "MIMINode_NarakaCrossIBRender"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper

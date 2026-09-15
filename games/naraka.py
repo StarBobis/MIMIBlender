@@ -31,6 +31,58 @@ class ExportNaraka:
         for drawib_model in self.drawib_model_list:
             drawib_model.apply_drawib_alias()
 
+    @staticmethod
+    def get_cross_ib_backup_resource_name(drawib_model, submesh_model, vb_slot: int) -> str:
+        # The name carries the Submesh identity and the VB slot directly, so
+        # any number of backups never collide (no auto-increment numbers),
+        # e.g. Resource_LOD0_fd1dede6_0_BK_VB0
+        return "Resource_" + drawib_model.get_submesh_unique_key(submesh_model) + "_BK_VB" + str(vb_slot)
+
+    @staticmethod
+    def submesh_has_cross_ib_draw_call(submesh_model) -> bool:
+        # A Submesh is a cross-IB guest when at least one of its draw calls
+        # is marked to be rendered inside another Submesh's section.
+        for draw_call_model in submesh_model.drawcall_model_list:
+            if draw_call_model.cross_render_at_submesh:
+                return True
+        return False
+
+    def collect_cross_ib_host_entries(self):
+        # Pre-scan every DrawIB and group cross-marked draw calls by their host
+        # Submesh, so the IB section generation can inject the cross blocks.
+        # Returns: host submesh_name -> list of guest entries.
+        submesh_lookup = {}
+        for drawib_model in self.drawib_model_list:
+            for submesh_model in drawib_model.submesh_model_list:
+                submesh_lookup[submesh_model.submesh_name] = submesh_model
+
+        cross_ib_host_entries = {}
+        for drawib_model in self.drawib_model_list:
+            for submesh_model in drawib_model.submesh_model_list:
+                # Group this Submesh's cross-marked draw calls by host,
+                # keeping the blueprint parse order inside each group.
+                crossed_per_host = {}
+                for draw_call_model in submesh_model.drawcall_model_list:
+                    host_submesh_name = draw_call_model.cross_render_at_submesh
+                    if host_submesh_name:
+                        draw_call_list = crossed_per_host.get(host_submesh_name, [])
+                        draw_call_list.append(draw_call_model)
+                        crossed_per_host[host_submesh_name] = draw_call_list
+
+                for host_submesh_name, draw_call_list in crossed_per_host.items():
+                    if host_submesh_name not in submesh_lookup:
+                        raise ValueError("Naraka Cross-IB Render: host Submesh '" + host_submesh_name + "' does not exist in this export")
+                    entry = {
+                        "guest_drawib_model": drawib_model,
+                        "guest_submesh_model": submesh_model,
+                        "draw_call_list": draw_call_list,
+                    }
+                    entry_list = cross_ib_host_entries.get(host_submesh_name, [])
+                    entry_list.append(entry)
+                    cross_ib_host_entries[host_submesh_name] = entry_list
+
+        return cross_ib_host_entries
+
     def add_naraka_texture_override_vlr_section(self, ini_builder: M_IniBuilder, drawib_model, include_uav_byte_stride: bool = True):
         # VertexLimitRaise: enlarge the game's original Position VB so the
         # compute shader has room to write the modded vertex data into it.
@@ -94,10 +146,12 @@ class ExportNaraka:
 
         ini_builder.append_section(texture_override_vb_section)
 
-    def add_naraka_cs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):
+    def add_naraka_cs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model, cross_ib_host_entries):
         # IB overrides: skip every original draw and re-emit it manually with
-        # the modded index buffer. Cross-IB rendering blocks (a guest submesh
-        # drawn during another DrawIB's call) will be injected here later.
+        # the modded index buffer. Cross-IB rendering is applied here:
+        # - guest draw calls are suppressed from their own Submesh section,
+        # - guest Submesh sections capture their DrawIB's VB bindings (backup),
+        # - host Submesh sections re-emit the guest draws after their own.
         texture_override_ib_section = M_IniSection(M_SectionType.TextureOverrideIB)
         draw_ib = drawib_model.draw_ib
         d3d11_game_type = drawib_model.d3d11_game_type
@@ -136,11 +190,40 @@ class ExportNaraka:
                     if texture_markup_info.mark_type in ("Slot", "SharedSlot"):
                         texture_override_ib_section.append(texture_markup_info.mark_slot + " = " + texture_markup_info.get_resource_name())
 
+            # Only draw calls without a cross-IB mark stay in this section;
+            # marked ones move into their host Submesh section instead.
+            normal_draw_call_list = []
+            for draw_call_model in submesh_model.drawcall_model_list:
+                if not draw_call_model.cross_render_at_submesh:
+                    normal_draw_call_list.append(draw_call_model)
+
             for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
-                submesh_model.drawcall_model_list,
+                normal_draw_call_list,
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,
             ):
                 texture_override_ib_section.append(drawindexed_str)
+
+            # Guest backup: capture this DrawIB's VB bindings while they are
+            # live (vb0 already holds the CS-written modded data and vb1 is
+            # the modded Texcoord buffer), so host sections can rebind them.
+            if self.submesh_has_cross_ib_draw_call(submesh_model):
+                texture_override_ib_section.append(self.get_cross_ib_backup_resource_name(drawib_model, submesh_model, 0) + " = ref vb0")
+                texture_override_ib_section.append(self.get_cross_ib_backup_resource_name(drawib_model, submesh_model, 1) + " = ref vb1")
+
+            # Host cross blocks: always appended after the host's own draws,
+            # so the host bindings never need to be restored afterwards.
+            for cross_entry in cross_ib_host_entries.get(submesh_model.submesh_name, []):
+                guest_drawib_model = cross_entry["guest_drawib_model"]
+                guest_submesh_model = cross_entry["guest_submesh_model"]
+                texture_override_ib_section.append("; Cross-IB: " + guest_submesh_model.display_str + " rendered at " + submesh_model.display_str)
+                texture_override_ib_section.append("ib = " + guest_drawib_model.get_submesh_ib_resource_name(guest_submesh_model))
+                texture_override_ib_section.append("vb0 = " + self.get_cross_ib_backup_resource_name(guest_drawib_model, guest_submesh_model, 0))
+                texture_override_ib_section.append("vb1 = " + self.get_cross_ib_backup_resource_name(guest_drawib_model, guest_submesh_model, 1))
+                for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
+                    cross_entry["draw_call_list"],
+                    obj_name_draw_offset_dict=guest_drawib_model.obj_name_draw_offset,
+                ):
+                    texture_override_ib_section.append(drawindexed_str)
 
             if not d3d11_game_type.GPU_PreSkinning:
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
@@ -169,6 +252,16 @@ class ExportNaraka:
             resource_vb_section.append("type = Buffer")
             resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
             resource_vb_section.append("filename = " + submesh_model.display_str + "-Index.buf")
+            resource_vb_section.new_line()
+
+        # Unified declaration area for cross-IB backup resources: one empty
+        # section per guest Submesh and VB slot (filled by "ref" at runtime).
+        for submesh_model in drawib_model.submesh_model_list:
+            if not self.submesh_has_cross_ib_draw_call(submesh_model):
+                continue
+            resource_vb_section.append("[" + self.get_cross_ib_backup_resource_name(drawib_model, submesh_model, 0) + "]")
+            resource_vb_section.new_line()
+            resource_vb_section.append("[" + self.get_cross_ib_backup_resource_name(drawib_model, submesh_model, 1) + "]")
             resource_vb_section.new_line()
 
         ini_builder.append_section(resource_vb_section)
@@ -209,13 +302,16 @@ class ExportNaraka:
         ini_builder = M_IniBuilder()
         drawib_drawibmodel_dict = {drawib_model.draw_ib: drawib_model for drawib_model in self.drawib_model_list}
 
+        # Cross-IB pre-scan: host submesh_name -> guest entries, shared by all DrawIBs.
+        cross_ib_host_entries = self.collect_cross_ib_host_entries()
+
         M_IniHelper.generate_hash_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
         M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
 
         for drawib_model in self.drawib_model_list:
             self.add_naraka_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_naraka_cs_texture_override_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
-            self.add_naraka_cs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+            self.add_naraka_cs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model, cross_ib_host_entries=cross_ib_host_entries)
             self.add_naraka_cs_resource_vertexlimit(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_naraka_cs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             self.add_naraka_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)

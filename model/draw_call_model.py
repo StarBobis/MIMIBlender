@@ -9,6 +9,12 @@ class DrawCallModel:
     obj_name:str
     submesh_name:str = ""
 
+    # Cross-IB rendering (Naraka only): when not empty, this draw call is not
+    # emitted in its own Submesh section; instead it is drawn inside the
+    # section of the Submesh named here (the host), with the guest IB/VB
+    # bindings switched in. Its own switch conditions always travel with it.
+    cross_render_at_submesh:str = ""
+
     # After obj_name is passed in, resolve these attributes for later use
     match_draw_ib:str = field(init=False,repr=False,default="") # DrawIB used for matching
     match_index_count:str = field(init=False,repr=False,default="") # IndexCount used for matching

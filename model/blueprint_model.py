@@ -13,9 +13,11 @@ from .draw_call_model import DrawCallModel
 from .submesh_model import SubMeshModel
 from .drawib_model import DrawIBModel
 from ..common.global_config import GlobalConfig
+from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
+from ..blueprint.blueprint_node_naraka import MIMINode_NarakaCrossIBRender
 
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
@@ -58,6 +60,76 @@ class BluePrintModel:
 
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])
+
+        # Cross-IB pairs are standalone config (no links required), so they are
+        # applied after the whole tree has been parsed into DrawCallModels.
+        self._apply_cross_ib_render_nodes(tree)
+
+    def _apply_cross_ib_render_nodes(self, tree):
+        '''
+        Scan the tree (and nested group trees) for NarakaCrossIBRender nodes and
+        mark the DrawCallModels of every source object with the host Submesh name.
+        The nodes are standalone: they are found by scanning, not by link parsing.
+        '''
+        cross_node_list = []
+        visited_trees = set()
+
+        def collect(node_tree):
+            if node_tree is None or id(node_tree) in visited_trees:
+                return
+            visited_trees.add(id(node_tree))
+            for node in getattr(node_tree, "nodes", []):
+                # Muted nodes are excluded everywhere else, so skip them here too.
+                if getattr(node, "mute", False):
+                    continue
+                if getattr(node, "bl_idname", "") == MIMINode_NarakaCrossIBRender.bl_idname:
+                    cross_node_list.append(node)
+                elif getattr(node, "bl_idname", "") == GROUP_NODE_IDNAME:
+                    collect(getattr(node, "node_tree", None))
+
+        collect(tree)
+        if not cross_node_list:
+            return
+
+        if GlobalConfig.logic_name != LogicName.Naraka:
+            raise ValueError("The Naraka Cross-IB Render node is only supported under the Naraka game preset")
+
+        for cross_node in cross_node_list:
+            for pair in getattr(cross_node, "pairs", []):
+                self._apply_cross_ib_pair(pair)
+
+    def _apply_cross_ib_pair(self, pair):
+        '''Mark every DrawCallModel of the source object with the target's Submesh name.'''
+        source_obj_name = str(getattr(pair, "source_object", "") or "").strip()
+        target_obj_name = str(getattr(pair, "target_object", "") or "").strip()
+
+        # Fully empty rows are editing leftovers; ignore them silently.
+        if not source_obj_name and not target_obj_name:
+            return
+        if not source_obj_name or not target_obj_name:
+            raise ValueError("Naraka Cross-IB Render: a pair needs both a source object and a target object")
+
+        # The host Submesh is resolved from the already parsed DrawCallModels of
+        # the target object, so every name-format fallback stays in one place.
+        host_submesh_name_set = set()
+        for draw_call_model in self.ordered_draw_obj_data_model_list:
+            if draw_call_model.obj_name == target_obj_name:
+                host_submesh_name_set.add(draw_call_model.match_submesh_name)
+
+        if len(host_submesh_name_set) == 0:
+            raise ValueError("Naraka Cross-IB Render: target object '" + target_obj_name + "' is not used by any Object Info node connected to the output")
+        if len(host_submesh_name_set) > 1:
+            raise ValueError("Naraka Cross-IB Render: target object '" + target_obj_name + "' maps to more than one Submesh: " + ", ".join(sorted(host_submesh_name_set)))
+        host_submesh_name = next(iter(host_submesh_name_set))
+
+        marked_count = 0
+        for draw_call_model in self.ordered_draw_obj_data_model_list:
+            if draw_call_model.obj_name == source_obj_name:
+                draw_call_model.cross_render_at_submesh = host_submesh_name
+                marked_count = marked_count + 1
+
+        if marked_count == 0:
+            raise ValueError("Naraka Cross-IB Render: source object '" + source_obj_name + "' is not used by any Object Info node connected to the output")
 
     @classmethod
     def _normalize_switch_key_alias(cls, switch_node: bpy.types.Node) -> str:

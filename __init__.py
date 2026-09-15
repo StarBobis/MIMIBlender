@@ -22,6 +22,7 @@ from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_base
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
+from .blueprint import blueprint_node_naraka
 
 from .blueprint import blueprint_node_face_mod
 from .blueprint import blueprint_node_group
@@ -78,6 +79,8 @@ def _register_steps():
     # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
     yield blueprint_node_shapekey.register
     yield blueprint_node_obj.register
+    # Naraka-only nodes register right after the base object nodes.
+    yield blueprint_node_naraka.register
     yield ui_func_export.register
     yield blueprint_node_menu.register
 
@@ -104,6 +107,7 @@ def unregister():
         blueprint_node_group.unregister,
         blueprint_node_menu.unregister,
         ui_func_export.unregister,
+        blueprint_node_naraka.unregister,
         blueprint_node_obj.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
