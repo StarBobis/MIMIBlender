@@ -16,7 +16,7 @@ from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
 from ..common.ssmt_import_helper import SSMTImportHelper
-from ..common.gimi_high_fidelity_material import GIMIHighFidelityMaterial
+from ..games.gimi.material import GIMIHighFidelityMaterial
 from ..workspace.ssmt_workspace import SSMTWorkSpace, WorkSpaceModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..i18n.i18n import I18nOperator, tr

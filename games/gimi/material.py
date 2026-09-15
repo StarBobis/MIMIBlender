@@ -9,7 +9,7 @@ import os
 
 import bpy
 
-from .global_config import GlobalConfig, LogicName
+from ...common.global_config import GlobalConfig, LogicName
 
 
 class GIMIHighFidelityMaterial:

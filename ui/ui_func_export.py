@@ -9,19 +9,7 @@ from ..utils.command_utils import CommandUtils
 from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 
-from ..games.efmi import ExportEFMI
-from ..games.gimi import ExportGIMI
-from ..games.himi import ExportHIMI
-from ..games.identityv import ExportIdentityV
-from ..games.naraka import ExportNaraka
-from ..games.snowbreak import ExportSnowBreak
-from ..games.srmi import ExportSRMI
-from ..games.unity import ExportUnity
-from ..games.wwmi import ExportWWMI
-from ..games.ntemi import ExportNTEMI
-from ..games.yysls import ExportYYSLS
-from ..games.zzmi import ExportZZMI
-from ..games.zzmidx12 import ExportZZMIDX12
+from ..games import get_exporter_class
 
 from ..model.blueprint_model import BluePrintModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
@@ -35,36 +23,10 @@ from ..i18n.i18n import I18nOperator, tr
 
 def _export_blueprint_model(blueprint_model):
     """Dispatch one parsed output layer to the selected game exporter."""
-    if GlobalConfig.logic_name == LogicName.EFMI:
-        ExportEFMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.GIMI:
-        ExportGIMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.HIMI:
-        ExportHIMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.IdentityV:
-        ExportIdentityV(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.SRMI:
-        ExportSRMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.ZZMIDX12:
-        ExportZZMIDX12(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.ZZMI:
-        ExportZZMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.WWMI:
-        ExportWWMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.NTEMI:
-        ExportNTEMI(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.SnowBreak:
-        ExportSnowBreak(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.YYSLS:
-        ExportYYSLS(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name == LogicName.Naraka:
-        ExportNaraka(blueprint_model=blueprint_model).export()
-    elif GlobalConfig.logic_name in {
-        LogicName.NarakaM, LogicName.GF2, LogicName.AILIMIT,
-    }:
-        ExportUnity(blueprint_model=blueprint_model).export()
-    else:
+    exporter_class = get_exporter_class(GlobalConfig.logic_name)
+    if exporter_class is None:
         raise ValueError(tr("The current game preset does not yet support generating Mods"))
+    exporter_class(blueprint_model=blueprint_model).export()
 
 
 _OUTPUT_NODE_IDS = {"MIMINode_Result_Output", "MIMINode_Face_Mod_Export"}

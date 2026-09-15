@@ -20,10 +20,10 @@ e.g. Resource_LOD0_fd1dede6_0_BK_VB0, so any number of pairs never collide.
 import bpy
 from bpy.types import PropertyGroup, UIList
 
-from ..common.global_config import GlobalConfig
-from ..common.global_config import LogicName
-from ..i18n.i18n import I18nOperator, tr, translatable
-from .blueprint_node_base import MIMINodeBase
+from ...common.global_config import GlobalConfig
+from ...common.global_config import LogicName
+from ...i18n.i18n import I18nOperator, tr, translatable
+from ...blueprint.blueprint_node_base import MIMINodeBase
 
 
 class MIMICrossIBPairItem(PropertyGroup):

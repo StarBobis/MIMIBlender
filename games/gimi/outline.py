@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import bpy
 
-from ..i18n.i18n import I18nOperator, tr
+from ...i18n.i18n import I18nOperator, tr
 
 
 class OutlineError(RuntimeError):

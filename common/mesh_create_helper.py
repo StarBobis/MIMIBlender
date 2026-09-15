@@ -16,8 +16,8 @@ from ..utils.vertexgroup_utils import VertexGroupUtils
 from .global_config import GlobalConfig
 from .mimi_global_properties import MIMIGlobalProperties
 from .global_config import LogicName
-from .gimi_high_fidelity_material import GIMIHighFidelityMaterial
-from .gimi_body_outline import GIMIBodyOutline, OutlineError
+from ..games.gimi.material import GIMIHighFidelityMaterial
+from ..games.gimi.outline import GIMIBodyOutline, OutlineError
 from .d3d11_element import D3D11Element
 from .raw_vertex_attributes import (
     RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX,

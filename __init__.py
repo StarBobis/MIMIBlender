@@ -8,7 +8,9 @@ MIMIBlender - Blender add-on for MIMITools (3Dmigoto modding).
 from .i18n import i18n
 
 from .common import mimi_global_properties
-from .common import gimi_body_outline
+
+# Game-specific feature modules (kept inside their game packages).
+from .games.gimi import outline as gimi_body_outline
 
 
 # UI panels
@@ -22,7 +24,7 @@ from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_base
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
-from .blueprint import blueprint_node_naraka
+from .games.naraka import nodes as blueprint_node_naraka
 
 from .blueprint import blueprint_node_face_mod
 from .blueprint import blueprint_node_group

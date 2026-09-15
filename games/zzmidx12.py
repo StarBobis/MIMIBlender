@@ -1,11 +1,24 @@
+"""
+ZZMIDX12 (Zenless Zone Zero, DirectX 12) mod exporter.
+
+DX12-specific pieces kept here:
+- the VB overrides match the compute-shader pre-skinning step by hash and
+  drive it with an explicit dispatch,
+- the IB overrides support the ZZZ slot-fix resources and the skin
+  texture command list (same idea as ZZMI, different matching).
+
+Everything else (pipeline, resource sections, texture sections) comes from
+the shared base.
+"""
+
 import math
-import os
 
 from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
-from ..common.global_config import GlobalConfig
-from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
+from ..common.m_ini_helper import M_IniHelper
+from .base.standard_exporter import StandardExporter
+from .base import sections
 
 
 class ZZMIDX12TextureMarkName:
@@ -16,7 +29,9 @@ class ZZMIDX12TextureMarkName:
     StockingMap = "StockingMap"
 
 
-class ExportZZMIDX12:
+class ExportZZMIDX12(StandardExporter):
+    """ZZMIDX12 exporter: shared pipeline, DX12-specific VB/IB overrides."""
+
     SLOT_FIX_RESOURCE_NAME_DICT = {
         ZZMIDX12TextureMarkName.DiffuseMap: r"Resource\ZZMI\Diffuse",
         ZZMIDX12TextureMarkName.NormalMap: r"Resource\ZZMI\NormalMap",
@@ -25,11 +40,11 @@ class ExportZZMIDX12:
         ZZMIDX12TextureMarkName.StockingMap: r"Resource\ZZMI\WengineFx",
     }
 
-    def __init__(self, blueprint_model):
-        self.blueprint_model = blueprint_model
-        self.drawib_model_list = blueprint_model.parse_drawib_model_list(combine_ib=False)
-        for drawib_model in self.drawib_model_list:
-            drawib_model.apply_drawib_alias()
+    def add_drawib_sections(self, ini_builder: M_IniBuilder, drawib_model):
+        self.add_unity_vs_texture_override_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+        self.add_unity_vs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+        sections.add_unity_vs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+        sections.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
 
     def add_unity_vs_texture_override_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
         d3d11_game_type = drawib_model.d3d11_game_type
@@ -85,6 +100,8 @@ class ExportZZMIDX12:
         ini_builder.append_section(texture_override_vb_section)
 
     def get_blend_match_cs(self, drawib_model) -> str:
+        # The compute shader hash of the pre-skinning step, read from the
+        # first Submesh that carries it.
         for submesh_model in drawib_model.submesh_model_list:
             match_cs = str(getattr(submesh_model, "match_cs", "") or "").strip()
             if match_cs:
@@ -92,6 +109,8 @@ class ExportZZMIDX12:
         return ""
 
     def get_blend_match_uav_bytes(self, drawib_model) -> int:
+        # The UAV byte size of the pre-skinning step, read from the first
+        # Submesh that carries a positive value.
         for submesh_model in drawib_model.submesh_model_list:
             try:
                 match_uav_bytes = int(getattr(submesh_model, "match_uav_bytes", 0) or 0)
@@ -102,6 +121,9 @@ class ExportZZMIDX12:
         return 0
 
     def add_unity_vs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):
+        # IB overrides with the optional ZZZ slot fix (same idea as ZZMI):
+        # marked textures can be redirected through the fixed Resource\ZZMI\*
+        # slots when the user enabled the slot-fix option.
         texture_override_ib_section = M_IniSection(M_SectionType.TextureOverrideIB)
         draw_ib = drawib_model.draw_ib
 
@@ -159,83 +181,3 @@ class ExportZZMIDX12:
                 texture_override_ib_section.append(drawindexed_str)
 
         ini_builder.append_section(texture_override_ib_section)
-
-    # def add_unity_vs_texture_override_vlr_section(self, ini_builder: M_IniBuilder, drawib_model, include_uav_byte_stride: bool = True):
-    #     d3d11_game_type = drawib_model.d3d11_game_type
-    #     if not d3d11_game_type.GPU_PreSkinning:
-    #         return
-
-    #     vertexlimit_section = M_IniSection(M_SectionType.TextureOverrideVertexLimitRaise)
-    #     vertexlimit_section_name_suffix = drawib_model.draw_ib + "_" + drawib_model.draw_ib_alias + "_VertexLimitRaise"
-    #     vertexlimit_section.append("[TextureOverride_" + vertexlimit_section_name_suffix + "]")
-    #     vertexlimit_section.append("hash = " + drawib_model.vertex_limit_hash)
-    #     vertexlimit_section.append("override_byte_stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
-    #     vertexlimit_section.append("override_vertex_count = " + str(drawib_model.draw_number))
-    #     if include_uav_byte_stride:
-    #         vertexlimit_section.append("uav_byte_stride = 4")
-    #     vertexlimit_section.new_line()
-    #     ini_builder.append_section(vertexlimit_section)
-
-    def add_unity_vs_resource_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        resource_vb_section = M_IniSection(M_SectionType.ResourceBuffer)
-        # Flat layout: buffers and textures sit next to the generated INI
-        for category_name in drawib_model.d3d11_game_type.OrderedCategoryNameList:
-            resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
-            resource_vb_section.append("type = Buffer")
-            resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-            resource_vb_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
-            resource_vb_section.new_line()
-
-        for submesh_model in drawib_model.submesh_model_list:
-            ib_resource_name = drawib_model.get_submesh_ib_resource_name(submesh_model)
-            resource_vb_section.append("[" + ib_resource_name + "]")
-            resource_vb_section.append("type = Buffer")
-            resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
-            resource_vb_section.append("filename = " + submesh_model.display_str + "-Index.buf")
-            resource_vb_section.new_line()
-
-        ini_builder.append_section(resource_vb_section)
-
-    def add_resource_texture_sections(self, ini_builder: M_IniBuilder, drawib_model):
-        if MIMIGlobalProperties.forbid_auto_texture_ini():
-            return
-
-        resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
-        appended_resource_names = set()
-        for idx, submesh_model in enumerate(drawib_model.submesh_model_list):
-            for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
-                if texture_markup_info.mark_type == "Slot":
-                    resource_name = texture_markup_info.get_resource_name()
-                    if resource_name in appended_resource_names:
-                        continue
-                    appended_resource_names.add(resource_name)
-                    slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
-                    resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
-                    resource_texture_section.append("filename = " + slot_filename)
-                    resource_texture_section.new_line()
-
-        ini_builder.append_section(resource_texture_section)
-
-    def export(self):
-        for drawib_model in self.drawib_model_list:
-            drawib_model.generate_buffer_files(GlobalConfig.path_generatemod_buffer_folder())
-        ini_builder = M_IniBuilder()
-        drawib_drawibmodel_dict = {drawib_model.draw_ib: drawib_model for drawib_model in self.drawib_model_list}
-
-        M_IniHelper.generate_hash_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
-        M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
-        for drawib_model in self.drawib_model_list:
-            # self.add_unity_vs_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model)
-            self.add_unity_vs_texture_override_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
-            self.add_unity_vs_texture_override_ib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
-            self.add_unity_vs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
-            self.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
-            M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
-            GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
-
-        M_IniHelper.add_branch_key_sections(ini_builder=ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
-        M_IniHelper.add_shapekey_ini_sections(ini_builder=ini_builder, drawib_drawibmodel_dict=drawib_drawibmodel_dict)
-        ini_builder.save_to_file(os.path.join(GlobalConfig.path_generate_mod_folder(), GlobalConfig.get_generated_mod_name() + ".ini"))
-
-
-ModModelZZMIDX12 = ExportZZMIDX12
