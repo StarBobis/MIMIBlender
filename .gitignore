@@ -2,6 +2,9 @@ __pycache__
 texcomb/libs/
 Logs/
 
+# Runtime staging/backup folder created by the addon updater engine.
+*_updater/
+
 test/
 references/
 .venv/

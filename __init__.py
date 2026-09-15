@@ -9,6 +9,10 @@ from .i18n import i18n
 
 from .common import mimi_global_properties
 
+# Auto-update feature (GitHub release checker). Imported before the updater
+# panel module, because the panel imports this module itself.
+from . import addon_updater_ops
+
 # Game-specific feature modules (kept inside their game packages).
 from .games.gimi import outline as gimi_body_outline
 
@@ -19,6 +23,7 @@ from .ui import ui_panel_model
 from .sword import ui_panel_sword
 from .ui import ui_func_import_mmt
 from .ui import ui_panel_fast_texture
+from .ui import ui_panel_updater
 
 from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_base
@@ -68,7 +73,16 @@ def _register_steps():
     yield mimi_global_properties.register
     yield gimi_body_outline.register
 
-    # 2. UI Panels & Logic
+    # 2. Addon Updater (engine configuration + sidebar panel).
+    # Registers after i18n so the updater preferences already exist, and
+    # after apply_language has run so the updater classes freeze their RNA
+    # labels in the saved language.
+    def _register_updater():
+        addon_updater_ops.register(bl_info)
+        ui_panel_updater.register()
+    yield _register_updater
+
+    # 3. UI Panels & Logic
     yield blueprint_node_base.register
     yield blueprint_node_group.register
     yield ui_panel_basic.register
@@ -100,6 +114,11 @@ def unregister():
     # state (for example a class that never registered successfully). Unregistering it
     # directly would raise RuntimeError and break all later unregister steps, causing
     # "already registered" failures and missing panels on the next enable.
+    def _unregister_updater():
+        # The panel class goes away before the updater operators it draws.
+        ui_panel_updater.unregister()
+        addon_updater_ops.unregister()
+
     steps = [
         gimi_body_outline.unregister,
         texcomb.unregister,
@@ -118,6 +137,7 @@ def unregister():
         ui_panel_model.unregister,
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
+        _unregister_updater,
         mimi_global_properties.unregister,
         # i18n unregisters last so the language preference outlives every UI class.
         i18n.unregister,

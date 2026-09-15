@@ -166,10 +166,64 @@ class MIMIAddonPreferences(bpy.types.AddonPreferences):
         update=_on_ui_language_update,
     )  # type: ignore
 
+    # ---- Addon updater settings ----
+    # These preferences are read by addon_updater_ops (check interval gating)
+    # and are always drawn with an explicit text=tr(...) override there, so
+    # their English RNA names below never show up in the UI directly.
+    auto_check_update: bpy.props.BoolProperty(
+        name="Auto-check for update",
+        description=(
+            "If enabled, automatically check for MIMIBlender updates in the "
+            "background at the configured interval"
+        ),
+        default=True,
+    )  # type: ignore
+
+    updater_interval_months: bpy.props.IntProperty(
+        name="Months",
+        description="Number of months between each background update check",
+        default=0,
+        min=0,
+    )  # type: ignore
+
+    updater_interval_days: bpy.props.IntProperty(
+        name="Days",
+        description="Number of days between each background update check",
+        default=1,
+        min=0,
+        max=31,
+    )  # type: ignore
+
+    updater_interval_hours: bpy.props.IntProperty(
+        name="Hours",
+        description="Number of hours between each background update check",
+        default=0,
+        min=0,
+        max=23,
+    )  # type: ignore
+
+    updater_interval_minutes: bpy.props.IntProperty(
+        name="Minutes",
+        description="Number of minutes between each background update check",
+        default=0,
+        min=0,
+        max=59,
+    )  # type: ignore
+
     def draw(self, context):
         # The same switch is also offered at the top of the Basic Information
         # panel; drawing it here keeps the add-on preferences page consistent.
         self.layout.prop(self, "ui_language", expand=True)
+
+        # Updater settings block. The import is deliberately lazy: the ops
+        # module already imports this module at load time, so a top-level
+        # import here would create a circular import.
+        try:
+            from ..addon_updater_ops import update_settings_ui
+        except Exception:
+            # Updater module missing or broken: preferences stay usable.
+            return
+        update_settings_ui(self, context)
 
 
 def register():
