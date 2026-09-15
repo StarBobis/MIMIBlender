@@ -107,6 +107,8 @@ class TestAtlasExtentAndAdjust:
     def test_auto_keeps_extent(self):
         assert layout.adjust_atlas_size("AUTO", (100, 300)) == (100, 300)
 
-    def test_custom_strategies_return_custom_size(self):
-        assert layout.adjust_atlas_size("CUST", (100, 300), (64, 64)) == (64, 64)
-        assert layout.adjust_atlas_size("STRICTCUST", (100, 300), (64, 64)) == (64, 64)
+    def test_custom_strategies_keep_natural_extent(self):
+        # CUST/STRICTCUST are applied after composition on the canvas, so the
+        # packed extent must pass through unchanged here.
+        assert layout.adjust_atlas_size("CUST", (100, 300)) == (100, 300)
+        assert layout.adjust_atlas_size("STRICTCUST", (100, 300)) == (100, 300)

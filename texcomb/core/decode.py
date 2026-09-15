@@ -31,12 +31,17 @@ def _load_pil():
     if _pil_image is not None:
         return _pil_image
     try:
-        from PIL import Image
+        from PIL import Image, ImageFile
     except ImportError as exc:
         raise RuntimeError(
             "Pillow is required to decode image bytes; install it or run "
             "inside Blender where the addon vendors it in texcomb/libs"
         ) from exc
+    # Game textures can be huge and occasionally truncated; be permissive.
+    # Applied lazily here so merely importing this module has no global
+    # side effects (the old code set these at import time).
+    Image.MAX_IMAGE_PIXELS = None
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
     _pil_image = Image
     return Image
 

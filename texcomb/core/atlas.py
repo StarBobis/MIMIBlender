@@ -41,10 +41,11 @@ def compose_atlas(
     return canvas
 
 
-def _fit_within(size: Tuple[int, int], limit: Tuple[int, int]) -> Tuple[int, int]:
+def fit_within(size: Tuple[int, int], limit: Tuple[int, int]) -> Tuple[int, int]:
     """Scale size down proportionally to fit inside limit (like PIL thumbnail).
 
-    Only shrinks, never enlarges; keeps the aspect ratio.
+    Only shrinks, never enlarges; keeps the aspect ratio. Public because the
+    per-material "custom size" option needs the same math.
     """
     width, height = size
     limit_w, limit_h = limit
@@ -68,7 +69,7 @@ def fit_canvas_to(
         return canvas
 
     current_size = (canvas.shape[1], canvas.shape[0])
-    target = _fit_within(current_size, custom_size)
+    target = fit_within(current_size, custom_size)
     if target != current_size:
         # One final whole-canvas resize; still float32 linear space.
         canvas = pixels.resize_plane(canvas, target[0], target[1], filter_name)

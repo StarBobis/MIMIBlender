@@ -14,7 +14,6 @@ Note: When running the operator directly (not from the addon's UI),
 the `directory` parameter is required to specify where the atlas image will be saved.
 """
 
-import io
 import itertools
 import math
 import os
@@ -33,6 +32,10 @@ from ...globs import (
     is_blender_modern,
 )
 from ....i18n.i18n import tr
+from ...blender import planes as plane_builder
+from ...core import atlas as core_atlas
+from ...core import export as core_export
+from ...core import layout as core_layout
 from ...type_annotations import (
     CombMats,
     Diffuse,
@@ -95,7 +98,10 @@ def initialize_pillow() -> bool:
         return False
 
 
-initialize_pillow()
+# NOTE: initialize_pillow() is intentionally NOT called at import time. It
+# remains available for the "Install Pillow" operator's availability check;
+# the actual decoding/encoding paths import Pillow lazily through
+# texcomb.core.decode / texcomb.core.export.
 
 atlas_prefix = "Atlas_"
 atlas_texture_prefix = "texture_atlas_"
@@ -304,20 +310,28 @@ def get_size(scn: Scene, data: Structure) -> Dict:
             get_alpha_texture_issue(mat, validate_pack=True) or ""
         )
         max_x, max_y = _get_max_uv_coordinates(item["uv"])
-        item["gfx"]["uv_size"] = (np.clip(max_x, 1, 25), np.clip(max_y, 1, 25))
-
+        # Clamp the UV repeat factor and degrade NaN to 1 (core helper).
+        uv_repeat = core_layout.clamp_uv_repeat(max_x, max_y)
         if not scn.mimi_smc_crop:
-            item["gfx"]["uv_size"] = tuple(
-                math.ceil(x) for x in item["gfx"]["uv_size"]
-            )
+            # Whole tiles only: round the repeat up before any sizing math.
+            uv_repeat = tuple(math.ceil(x) for x in uv_repeat)
+        item["gfx"]["uv_size"] = uv_repeat
 
         if packed_file:
             img_size = _get_image_size(mat, img)
-            item["gfx"]["size"] = _calculate_size(
-                img_size, item["gfx"]["uv_size"], scn.mimi_smc_gaps
+            item["gfx"]["size"] = core_layout.entry_box_size(
+                img_size,
+                uv_repeat,
+                scn.mimi_smc_gaps,
+                crop=scn.mimi_smc_crop,
             )
         else:
-            item["gfx"]["size"] = (scn.mimi_smc_diffuse_size + scn.mimi_smc_gaps,) * 2
+            item["gfx"]["size"] = core_layout.entry_box_size(
+                None,
+                uv_repeat,
+                scn.mimi_smc_gaps,
+                solid_size=scn.mimi_smc_diffuse_size,
+            )
             item["gfx"]["diagnostic"] = _get_texture_fallback_message(mat, img)
 
         if scn.mimi_smc_uniform_size:
@@ -448,25 +462,6 @@ def _get_max_uv_coordinates(
     return max_x, max_y
 
 
-def _calculate_size(
-    img_size: Tuple[int, int], uv_size: Tuple[int, int], gaps: int
-) -> Tuple[int, int]:
-    """Calculate the size needed for a texture in the atlas.
-
-    Args:
-        img_size: Original image dimensions.
-        uv_size: UV coordinate range.
-        gaps: Padding between textures.
-
-    Returns:
-        Tuple of (width, height) dimensions for the atlas texture.
-    """
-    return cast(
-        Tuple[int, int],
-        tuple(s * uv_s + gaps for s, uv_s in zip(img_size, uv_size)),
-    )
-
-
 def get_atlas_size(structure: Structure) -> Tuple[int, int]:
     """Calculate the total size needed for the atlas.
 
@@ -491,6 +486,9 @@ def calculate_adjusted_size(
 ) -> Tuple[int, int]:
     """Adjust atlas size based on the chosen sizing strategy.
 
+    PO2/QUAD are applied here; CUST/STRICTCUST keep the natural extent and
+    are applied after composition on the finished canvas (see get_atlas).
+
     Args:
         scn: Current scene with atlas size settings.
         size: Original calculated size.
@@ -498,23 +496,19 @@ def calculate_adjusted_size(
     Returns:
         Adjusted size based on the selected size strategy.
     """
-    if scn.mimi_smc_size == "PO2":
-        return cast(
-            Tuple[int, int], tuple(1 << int(x - 1).bit_length() for x in size)
-        )
-    elif scn.mimi_smc_size == "QUAD":
-        return (int(max(size)),) * 2
-    return size
+    return core_layout.adjust_atlas_size(scn.mimi_smc_size, size)
 
 
-def get_atlas(  # noqa: PLR0912
+def get_atlas(
     scn: Scene, data: Structure, atlas_size: Tuple[int, int]
-) -> Dict[str, ImageType]:
-    """Generate texture atlas images for all texture types.
+) -> Dict[str, np.ndarray]:
+    """Generate texture atlas planes for all texture types.
 
-    Creates new images with all textures positioned according to their
-    calculated fit positions. Creates separate atlases for albedo, metallic,
-    roughness, specular, normal_map, and emission.
+    All pixel math lives in the bpy-free core (texcomb.core): this function
+    only walks the structure, delegates per-material plane building to the
+    blender adapter (texcomb.blender.planes), and composes the canvases.
+    Creates separate atlases for albedo, metallic, roughness, specular,
+    normal_map, and emission.
 
     Args:
         scn: Current scene.
@@ -522,90 +516,76 @@ def get_atlas(  # noqa: PLR0912
         atlas_size: Dimensions for the atlas.
 
     Returns:
-        Dictionary of generated atlas images by texture type.
+        Dictionary of generated float32 atlas planes by texture type.
     """
-    mimi_smc_size = (scn.mimi_smc_size_width, scn.mimi_smc_size_height)
-    half_gaps = int(scn.mimi_smc_gaps / 2)
+    gaps = scn.mimi_smc_gaps
+    half_gaps = int(gaps / 2)
+    # Shared decode cache so the same texture is never decoded twice.
+    images: Dict[str, np.ndarray] = {}
 
-    albedo_atlas = Image.new("RGBA", atlas_size)
-
-    texture_types = [
-        "metallic",
-        "roughness",
-        "specular",
-        "normal_map",
-        "emission",
-    ]
-    extra_atlases = {}
-    materials_with_textures = {tex_type: [] for tex_type in texture_types}
+    albedo_items = []
+    extra_items = {tex_type: [] for tex_type in plane_builder.EXTRA_TEXTURE_TYPES}
 
     for mat, item in data.items():
         _set_image_or_color(item, mat)
-        _paste_gfx(
-            scn, item, mat, item["gfx"]["img_or_color"], albedo_atlas, half_gaps
+        fit = item["gfx"].get("fit")
+        if not fit:
+            continue
+
+        # Content rectangle: the packed box minus its padding.
+        content_size = cast(
+            Tuple[int, int],
+            tuple(int(size - gaps) for size in item["gfx"]["size"]),
         )
+        paste_x = int(fit["x"] + half_gaps)
+        paste_y = int(fit["y"] + half_gaps)
+
+        try:
+            plane = plane_builder.build_base_plane(mat, item, content_size, images)
+        except Exception as exc:
+            # A texture that fails to decode must not kill the whole merge:
+            # degrade the material to its diffuse color and record why (the
+            # old code crashed the whole operator in this situation).
+            item["gfx"]["diagnostic"] = tr(
+                "Material '{name}' texture failed to decode and will be treated as a solid color: {error}"
+            ).format(name=mat.name, error=exc)
+            fallback_item = dict(item)
+            fallback_item["gfx"] = dict(item["gfx"])
+            fallback_item["gfx"]["img_or_color"] = get_diffuse(mat)
+            fallback_item["gfx"]["alpha"] = None
+            plane = plane_builder.build_base_plane(
+                mat, fallback_item, content_size, images
+            )
+        albedo_items.append((plane, paste_x, paste_y))
 
         if scn.mimi_smc_include_extra_textures:
-            for tex_type in texture_types:
-                if item["gfx"].get(tex_type):
-                    materials_with_textures[tex_type].append((mat, item))
+            for tex_type in plane_builder.EXTRA_TEXTURE_TYPES:
+                packed = item["gfx"].get(tex_type)
+                if packed is None:
+                    continue
+                try:
+                    extra_plane = plane_builder.build_extra_plane(
+                        packed, content_size, tex_type, images
+                    )
+                except Exception as exc:
+                    item["gfx"]["diagnostic"] = tr(
+                        "Material '{name}' {type} texture failed to decode and was skipped: {error}"
+                    ).format(name=mat.name, type=tex_type, error=exc)
+                    continue
+                extra_items[tex_type].append((extra_plane, paste_x, paste_y))
 
-    if scn.mimi_smc_include_extra_textures:
-        for tex_type in texture_types:
-            if materials_with_textures[tex_type]:
-                atlas = Image.new("RGBA", atlas_size, (0, 0, 0, 0))
+    atlases = {"albedo": core_atlas.compose_atlas(albedo_items, atlas_size)}
+    for tex_type, items in extra_items.items():
+        if items:
+            atlases[tex_type] = core_atlas.compose_atlas(items, atlas_size)
 
-                for _mat, item in materials_with_textures[tex_type]:
-                    if item["gfx"].get(tex_type) and item["gfx"]["fit"]:
-                        packed_file = item["gfx"][tex_type]
-                        img = Image.open(io.BytesIO(packed_file.data)).convert(
-                            "RGBA"
-                        )
-
-                        size = cast(
-                            Tuple[int, int],
-                            tuple(
-                                int(size - scn.mimi_smc_gaps)
-                                for size in item["gfx"]["size"]
-                            ),
-                        )
-
-                        if img.size != size:
-                            img = img.resize(size, resampling)
-
-                        if max(item["gfx"]["uv_size"], default=0) > 1:
-                            img = _get_uv_image(item, img, size)
-
-                        atlas.paste(
-                            img,
-                            (
-                                int(item["gfx"]["fit"]["x"] + half_gaps),
-                                int(item["gfx"]["fit"]["y"] + half_gaps),
-                            ),
-                        )
-
-                extra_atlases[tex_type] = atlas
-
-    if scn.mimi_smc_size in ["CUST", "STRICTCUST"]:
-        albedo_atlas.thumbnail(mimi_smc_size, resampling)
-        for _tex_type, atlas in extra_atlases.items():
-            atlas.thumbnail(mimi_smc_size, resampling)
-
-    if scn.mimi_smc_size == "STRICTCUST":
-        canvas_img = Image.new("RGBA", mimi_smc_size)
-        canvas_img.paste(albedo_atlas)
-        result = {"albedo": canvas_img}
-
-        for tex_type, atlas in extra_atlases.items():
-            canvas = Image.new("RGBA", mimi_smc_size, (0, 0, 0, 0))
-            canvas.paste(atlas)
-            result[tex_type] = canvas
-
-        return result
-
-    result = {"albedo": albedo_atlas}
-    result.update(extra_atlases)
-    return result
+    # CUST/STRICTCUST strategies resize/pad the finished canvas at the very
+    # end (scale down keeping aspect; strict mode pads to the exact size).
+    custom_size = (scn.mimi_smc_size_width, scn.mimi_smc_size_height)
+    return {
+        tex_type: core_atlas.fit_canvas_to(canvas, scn.mimi_smc_size, custom_size)
+        for tex_type, canvas in atlases.items()
+    }
 
 
 def _set_image_or_color(item: StructureItem, mat: bpy.types.Material) -> None:
@@ -638,143 +618,6 @@ def _set_extra_maps(item: StructureItem, mat: bpy.types.Material) -> None:
     gfx_textures = get_gfx_textures(mat)
     for gfx_type, packed_file in gfx_textures.items():
         item["gfx"][gfx_type] = packed_file
-
-
-def _paste_gfx(  # noqa: PLR0913
-    scn: Scene,
-    item: StructureItem,
-    mat: bpy.types.Material,
-    img_or_color: Union[bpy.types.PackedFile, Tuple, None],
-    atlas_img: ImageType,
-    half_gaps: int,
-) -> None:
-    """Paste a material's graphics onto the atlas.
-
-    Args:
-        scn: Current scene.
-        item: Material metadata.
-        mat: Material providing the graphics.
-        img_or_color: Image data or color tuple.
-        atlas_img: Atlas image to paste onto.
-        half_gaps: Half the padding size between textures.
-    """
-    if not item["gfx"]["fit"]:
-        return
-
-    atlas_img.paste(
-        _get_gfx(scn, mat, item, img_or_color),
-        (
-            int(item["gfx"]["fit"]["x"] + half_gaps),
-            int(item["gfx"]["fit"]["y"] + half_gaps),
-        ),
-    )
-
-
-def _get_gfx(
-    scn: Scene,
-    mat: bpy.types.Material,
-    item: StructureItem,
-    img_or_color: Union[bpy.types.PackedFile, Tuple, None],
-) -> ImageType:
-    """Generate image data for a material.
-
-    Creates an appropriate image based on whether the material has a texture
-    or just a color.
-
-    Args:
-        scn: Current scene.
-        mat: Material to process.
-        item: Material metadata.
-        img_or_color: Image data or color tuple.
-
-    Returns:
-        PIL Image to paste onto the atlas.
-    """
-    size = cast(
-        Tuple[int, int],
-        tuple(int(size - scn.mimi_smc_gaps) for size in item["gfx"]["size"]),
-    )
-    alpha_texture = item["gfx"].get("alpha")
-
-    if not img_or_color:
-        img = Image.new("RGBA", size, (255, 255, 255, 255))
-        return _apply_alpha_texture(item, img, alpha_texture, size)
-
-    if isinstance(img_or_color, tuple):
-        img = Image.new("RGBA", size, img_or_color)
-        return _apply_alpha_texture(item, img, alpha_texture, size)
-
-    img = Image.open(io.BytesIO(img_or_color.data)).convert("RGBA")
-    if img.size != size:
-        img = img.resize(size, resampling)
-    if mat.mimi_smc_size:
-        img.thumbnail((mat.mimi_smc_size_width, mat.mimi_smc_size_height), resampling)
-    if max(item["gfx"]["uv_size"], default=0) > 1:
-        img = _get_uv_image(item, img, size)
-    if mat.mimi_smc_diffuse:
-        diffuse_img = Image.new(img.mode, size, get_diffuse(mat))
-        img = ImageChops.multiply(img, diffuse_img)
-
-    img = _apply_alpha_texture(item, img, alpha_texture, size)
-    return img
-
-
-def _apply_alpha_texture(
-    item: StructureItem,
-    img: ImageType,
-    alpha_texture: Optional[Tuple[bpy.types.PackedFile, str]],
-    size: Tuple[int, int],
-) -> ImageType:
-    """Apply a separate material alpha texture to an RGBA image."""
-    if not alpha_texture:
-        return img
-
-    packed_file, output_name = alpha_texture
-    try:
-        source_img = Image.open(io.BytesIO(packed_file.data)).convert("RGBA")
-        alpha_img = (
-            source_img.getchannel("A")
-            if output_name == "Alpha"
-            else source_img.convert("L")
-        )
-        if alpha_img.size != size:
-            alpha_img = alpha_img.resize(size, resampling)
-        if max(item["gfx"]["uv_size"], default=0) > 1:
-            alpha_img = _get_uv_image(item, alpha_img, size)
-        img.putalpha(alpha_img)
-    except Exception as e:
-        item["gfx"]["alpha_diagnostic"] = tr("Failed to apply the alpha texture: {error}").format(error=e)
-    return img
-
-
-def _get_uv_image(
-    item: StructureItem, img: ImageType, size: Tuple[int, int]
-) -> ImageType:
-    """Create a tiled image based on UV coordinates.
-
-    For UVs that extend beyond the 0-1 range, this creates a tiled image
-    that repeats the texture appropriately.
-
-    Args:
-        item: Material metadata.
-        img: Source image to tile.
-        size: Output size.
-
-    Returns:
-        Tiled image.
-    """
-    uv_img = Image.new(img.mode, size)
-    size_height = size[1]
-    img_width, img_height = img.size
-    uv_width, uv_height = (math.ceil(x) for x in item["gfx"]["uv_size"])
-
-    for h in range(uv_height):
-        y = size_height - img_height - h * img_height
-        for w in range(uv_width):
-            x = w * img_width
-            uv_img.paste(img, (x, y))
-
-    return uv_img
 
 
 def align_uvs(
@@ -847,13 +690,13 @@ def _get_scale_factors(
 
 
 def get_comb_mats(
-    scn: Scene, atlases: Dict[str, ImageType], mats_uv: MatsUV
+    scn: Scene, atlases: Dict[str, np.ndarray], mats_uv: MatsUV
 ) -> CombMats:
     """Create materials for the generated atlases.
 
     Args:
         scn: Current scene.
-        atlases: Dictionary of generated atlas images by texture type.
+        atlases: Dictionary of generated float32 atlas planes by texture type.
         mats_uv: Dictionary mapping object names to materials with UV coordinates.
 
     Returns:
@@ -964,13 +807,13 @@ def _add_ids_from_existing_files(scn: Scene, existed_ids: Set[int]) -> None:
 
 
 def _save_atlas_with_type(
-    scn: Scene, atlas: ImageType, tex_type: str, unique_id: str
+    scn: Scene, atlas: np.ndarray, tex_type: str, unique_id: str
 ) -> str:
-    """Save an atlas image to disk with texture type in the name.
+    """Save an atlas plane to disk with texture type in the name.
 
     Args:
         scn: Current scene.
-        atlas: Generated atlas image.
+        atlas: Generated float32 atlas plane.
         tex_type: Type of texture (albedo, metallic, etc.).
         unique_id: Unique ID for the atlas.
 
@@ -992,11 +835,15 @@ def _save_atlas_with_type(
     )
 
     path = os.path.join(scn.mimi_smc_save_path, filename)
-    # Ensure the output is always in RGBA mode, even if the source texture has no alpha (e.g. JPG)
-    # This way the output image always carries an alpha channel, ready for later transparency needs
-    if atlas.mode != "RGBA":
-        atlas = atlas.convert("RGBA")
-    atlas.save(path)
+    # Albedo is a color and gets the linear->sRGB conversion; every other
+    # map is data and is written with its values untouched. The core export
+    # performs the single 8-bit quantization step of the whole pipeline.
+    core_export.save_image(
+        atlas,
+        path,
+        image_format=scn.mimi_smc_image_format,
+        srgb=(tex_type == "albedo"),
+    )
     return path
 
 

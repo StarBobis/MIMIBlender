@@ -144,14 +144,14 @@ def atlas_extent(placements: Dict[str, Placement]) -> Tuple[int, int]:
 def adjust_atlas_size(
     strategy: str,
     size: Tuple[int, int],
-    custom_size: Optional[Tuple[int, int]] = None,
 ) -> Tuple[int, int]:
-    """Adjust the atlas size according to the chosen strategy.
+    """Adjust the packed atlas extent according to the sizing strategy.
 
-    PO2 rounds each axis up to a power of two, QUAD forces a square, AUTO
-    keeps the packed extent. CUST/STRICTCUST hand back the custom size; the
-    difference between them (scale vs. strict canvas) is applied when the
-    canvas is finalized in atlas.fit_canvas_to().
+    PO2 rounds each axis up to a power of two; QUAD forces a square;
+    everything else (AUTO and the custom strategies) keeps the natural
+    packed extent. CUST/STRICTCUST are intentionally NOT handled here: their
+    scale-down/pad step must happen AFTER composition, on the finished
+    canvas, which is what atlas.fit_canvas_to() does.
     """
     if strategy == SIZE_PO2:
         # Next power of two per axis (bit_length trick, exact for ints >= 1).
@@ -159,7 +159,4 @@ def adjust_atlas_size(
     if strategy == SIZE_QUAD:
         side = max(size)
         return side, side
-    if strategy in (SIZE_CUST, SIZE_STRICTCUST) and custom_size is not None:
-        return custom_size
-    # AUTO and any unknown strategy: keep the natural packed extent.
     return size
