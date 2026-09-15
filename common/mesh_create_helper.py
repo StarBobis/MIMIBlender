@@ -189,8 +189,11 @@ class MeshCreateHelper:
                 else:
                     colors_flat[:, 0] = data[loop_vertex_indices].astype(numpy.float32)
 
-                # WWMI/EFMI use FLOAT_COLOR; other games use BYTE_COLOR.
-                color_type = 'FLOAT_COLOR' if logic_name in (LogicName.WWMI, LogicName.EFMI) else 'BYTE_COLOR'
+                # The SubmeshJson annotates which Blender color attribute type
+                # each game preset needs (BlenderColorType); old extractions
+                # without the annotation fall back to the historical rule
+                # (WWMI/EFMI -> FLOAT_COLOR, other games -> BYTE_COLOR).
+                color_type = element.get_blender_color_type(logic_name)
                 color_attr = mesh.color_attributes.new(name=element.ElementName, type=color_type, domain='CORNER')
                 color_attr.data.foreach_set('color', colors_flat.ravel())
             elif element.SemanticName == "BLENDINDICES":

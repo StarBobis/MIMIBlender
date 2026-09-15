@@ -88,7 +88,10 @@ class D3D11GameType:
                 ExtractSlot=d3d11_element_json.get("ExtractSlot",""),
                 ExtractTechnique=d3d11_element_json.get("ExtractTechnique",""),
                 Category=d3d11_element_json.get("Category",""),
-                AlignedByteOffset=aligned_byte_offset
+                AlignedByteOffset=aligned_byte_offset,
+                # Optional Blender color attribute hint from new MMT/SSMT5
+                # extractions; absent on old data, resolved on demand.
+                BlenderColorType=d3d11_element_json.get("BlenderColorType",""),
             )
             aligned_byte_offset = aligned_byte_offset + d3d11_element.ByteWidth
             self.D3D11ElementList.append(d3d11_element)

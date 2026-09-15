@@ -24,6 +24,11 @@ class D3D11Element:
     AlignedByteOffset:int
     ElementName:str = field(init=False,default="")
 
+    # Blender color attribute type hint carried by the SubmeshJson
+    # ("BYTECOLOR" / "FLOATCOLOR"); empty on old extractions, in which case
+    # get_blender_color_type() falls back to the historical per-game rule.
+    BlenderColorType:str = field(default="")
+
     def __post_init__(self):
         self.ElementName = self.get_indexed_semantic_name()
 
@@ -32,4 +37,27 @@ class D3D11Element:
             return self.SemanticName
         else:
             return self.SemanticName + str(self.SemanticIndex)
-        
+
+    def get_blender_color_type(self, logic_name:str="")->str:
+        '''
+        Resolve which Blender color attribute data type to create for a COLOR
+        element: 'BYTE_COLOR' or 'FLOAT_COLOR'.
+
+        New MMT/SSMT5 extractions annotate COLOR elements explicitly via the
+        BlenderColorType field. Old extractions without the annotation keep
+        the historical behavior so existing workspaces import exactly as
+        before: WWMI/EFMI use FLOAT_COLOR (their shaders read high-precision
+        COLOR payloads such as smooth normals), other games use BYTE_COLOR.
+        '''
+        if self.BlenderColorType:
+            # Normalize so both "FLOATCOLOR" and "FLOAT_COLOR" spellings work.
+            normalized = self.BlenderColorType.strip().upper().replace("_", "")
+            if normalized == "FLOATCOLOR":
+                return 'FLOAT_COLOR'
+            return 'BYTE_COLOR'
+
+        # Lazy import keeps this pure data module free of bpy-side imports.
+        from .global_config import LogicName
+        if logic_name in (LogicName.WWMI, LogicName.EFMI):
+            return 'FLOAT_COLOR'
+        return 'BYTE_COLOR'

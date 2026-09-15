@@ -155,6 +155,9 @@ class SubmeshJson:
 					ExtractTechnique=d3d11_element_json.get("ExtractTechnique", ""),
 					Category=d3d11_element_json.get("Category", ""),
 					AlignedByteOffset=aligned_byte_offset,
+					# Optional Blender color attribute hint from new MMT/SSMT5
+					# extractions; absent on old data, resolved on demand.
+					BlenderColorType=d3d11_element_json.get("BlenderColorType", ""),
 				)
 				aligned_byte_offset += d3d11_element.ByteWidth
 				d3d11_element_list.append(d3d11_element)

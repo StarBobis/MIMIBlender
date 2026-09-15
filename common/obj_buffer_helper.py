@@ -46,7 +46,11 @@ class ObjBufferHelper:
             if d3d11_element_name.startswith(D3D11Semantic.COLOR):
                 color_coll = obj.data.color_attributes
                 if d3d11_element_name not in color_coll:
-                    obj.data.color_attributes.new(name=d3d11_element_name, type='BYTE_COLOR', domain='CORNER')
+                    # Auto-filled COLOR attributes use the same type resolution
+                    # as the import: SubmeshJson annotation first, then the
+                    # historical WWMI/EFMI -> FLOAT_COLOR fallback.
+                    color_type = d3d11_element.get_blender_color_type(GlobalConfig.logic_name)
+                    obj.data.color_attributes.new(name=d3d11_element_name, type=color_type, domain='CORNER')
                     print("Current obj ["+ obj.name +"] is missing the game-rendering COLOR: ["+  D3D11Semantic.COLOR + "], already auto-completed")
             
             # Check whether the TEXCOORD exists
