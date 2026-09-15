@@ -7,5 +7,7 @@ references/
 .venv/
 tmp/
 tests/
+# texcomb core unit tests are source code and must be tracked.
+!texcomb/tests/
 TheHerta4.zip
 MIMIBlender.zip
