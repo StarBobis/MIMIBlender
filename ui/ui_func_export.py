@@ -13,6 +13,7 @@ from ..games.efmi import ExportEFMI
 from ..games.gimi import ExportGIMI
 from ..games.himi import ExportHIMI
 from ..games.identityv import ExportIdentityV
+from ..games.naraka import ExportNaraka
 from ..games.snowbreak import ExportSnowBreak
 from ..games.srmi import ExportSRMI
 from ..games.unity import ExportUnity
@@ -56,8 +57,10 @@ def _export_blueprint_model(blueprint_model):
         ExportSnowBreak(blueprint_model=blueprint_model).export()
     elif GlobalConfig.logic_name == LogicName.YYSLS:
         ExportYYSLS(blueprint_model=blueprint_model).export()
+    elif GlobalConfig.logic_name == LogicName.Naraka:
+        ExportNaraka(blueprint_model=blueprint_model).export()
     elif GlobalConfig.logic_name in {
-        LogicName.Naraka, LogicName.NarakaM, LogicName.GF2, LogicName.AILIMIT,
+        LogicName.NarakaM, LogicName.GF2, LogicName.AILIMIT,
     }:
         ExportUnity(blueprint_model=blueprint_model).export()
     else:
