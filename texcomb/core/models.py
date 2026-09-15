@@ -101,3 +101,29 @@ class ChannelPlan:
                         self.alpha.channel, CHANNELS
                     )
                 )
+
+
+@dataclass
+class Placement:
+    """Where one material's content lands inside the atlas.
+
+    The "box" is the rectangle reserved by the bin packer; it includes the
+    padding (gap) area around the content. The "content" is the actual image
+    rectangle that pixels are pasted into. Keeping both makes the UV remap
+    math explicit instead of re-deriving margins at the paste site.
+    """
+
+    # Identifier chosen by the caller (usually the material name).
+    key: str
+    # Packer rectangle origin, including the padding area.
+    box_x: int
+    box_y: int
+    # Packer rectangle size, including the padding area.
+    box_width: int
+    box_height: int
+    # Pixel position of the content image inside the atlas.
+    paste_x: int
+    paste_y: int
+    # Content size without padding.
+    content_width: int
+    content_height: int
