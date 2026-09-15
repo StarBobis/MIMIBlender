@@ -126,12 +126,12 @@ def add_unity_vs_resource_vb_sections(ini_builder: M_IniBuilder, drawib_model, u
     pass False to keep the raw submesh name (their historical behavior).
     """
     resource_vb_section = M_IniSection(M_SectionType.ResourceBuffer)
-    # Flat layout: buffers and textures sit next to the generated INI
+    # Buffer files live in the Buffers subfolder; INI lines carry the prefix.
     for category_name in drawib_model.d3d11_game_type.OrderedCategoryNameList:
         resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
         resource_vb_section.append("type = Buffer")
         resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-        resource_vb_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
+        resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib_model.get_category_buffer_filename(category_name)))
         resource_vb_section.new_line()
 
     for submesh_model in drawib_model.submesh_model_list:
@@ -140,7 +140,7 @@ def add_unity_vs_resource_vb_sections(ini_builder: M_IniBuilder, drawib_model, u
         resource_vb_section.append("[" + ib_resource_name + "]")
         resource_vb_section.append("type = Buffer")
         resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
-        resource_vb_section.append("filename = " + file_stem + "-Index.buf")
+        resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(file_stem + "-Index.buf"))
         resource_vb_section.new_line()
 
     ini_builder.append_section(resource_vb_section)
@@ -162,7 +162,7 @@ def add_resource_texture_sections(ini_builder: M_IniBuilder, drawib_model):
                 appended_resource_names.add(resource_name)
                 slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, texture_markup_info)
                 resource_texture_section.append("[" + texture_markup_info.get_resource_name() + "]")
-                resource_texture_section.append("filename = " + slot_filename)
+                resource_texture_section.append("filename = " + GlobalConfig.ini_texture_filename(slot_filename))
                 resource_texture_section.new_line()
 
     ini_builder.append_section(resource_texture_section)
@@ -283,7 +283,7 @@ def build_unity_cs_resource_vb_section(drawib_model) -> M_IniSection:
     Naraka can add their own lines before handing it to the builder.
     """
     resource_vb_section = M_IniSection(M_SectionType.ResourceBuffer)
-    # Flat layout: buffers and textures sit next to the generated INI
+    # Buffer files live in the Buffers subfolder; INI lines carry the prefix.
     for category_name in drawib_model.d3d11_game_type.OrderedCategoryNameList:
         resource_vb_section.append("[Resource" + drawib_model.draw_ib + category_name + "]")
         # Position/Blend are read by the compute shader as raw bytes.
@@ -293,7 +293,7 @@ def build_unity_cs_resource_vb_section(drawib_model) -> M_IniSection:
             resource_vb_section.append("type = Buffer")
 
         resource_vb_section.append("stride = " + str(drawib_model.d3d11_game_type.CategoryStrideDict[category_name]))
-        resource_vb_section.append("filename = " + drawib_model.get_category_buffer_filename(category_name))
+        resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib_model.get_category_buffer_filename(category_name)))
         resource_vb_section.new_line()
 
     for submesh_model in drawib_model.submesh_model_list:
@@ -301,7 +301,7 @@ def build_unity_cs_resource_vb_section(drawib_model) -> M_IniSection:
         resource_vb_section.append("[" + ib_resource_name + "]")
         resource_vb_section.append("type = Buffer")
         resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
-        resource_vb_section.append("filename = " + submesh_model.display_str + "-Index.buf")
+        resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(submesh_model.display_str + "-Index.buf"))
         resource_vb_section.new_line()
 
     return resource_vb_section

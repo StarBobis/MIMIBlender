@@ -327,7 +327,7 @@ class M_IniHelper:
                         "[" + hash_style_resource_name + "]",
                     )
                     resource_texture_section.append(
-                        "filename = " + hash_style_texture_filename,
+                        "filename = " + GlobalConfig.ini_texture_filename(hash_style_texture_filename),
                     )
                     resource_texture_section.new_line()
                     resource_texture_section.append(
@@ -454,7 +454,7 @@ class M_IniHelper:
                     if resource_name not in appended_resource_names:
                         appended_resource_names.add(resource_name)
                         shared_slot_resource_section.append("[" + resource_name + "]")
-                        shared_slot_resource_section.append("filename = " + hash_style_texture_filename)
+                        shared_slot_resource_section.append("filename = " + GlobalConfig.ini_texture_filename(hash_style_texture_filename))
                         shared_slot_resource_section.new_line()
 
             if has_shared_slot:
@@ -676,7 +676,7 @@ class M_IniHelper:
             resource_section.append("[Resource" + drawib + "Position.1]")
             resource_section.append("type = buffer")
             resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
-            resource_section.append("filename = " + drawib_model.get_category_buffer_filename("Position"))
+            resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib_model.get_category_buffer_filename("Position")))
             resource_section.new_line()
 
             # Buffers for each shape key
@@ -690,7 +690,7 @@ class M_IniHelper:
                 resource_section.append("[Resource" + drawib + "Position." + shapekey_name + "]")
                 resource_section.append("type = buffer")
                 resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
-                resource_section.append("filename = " + drawib + "-" + "Position." + shapekey_name + ".buf")
+                resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib + "-" + "Position." + shapekey_name + ".buf"))
                 resource_section.new_line()
 
             ib_number += 1

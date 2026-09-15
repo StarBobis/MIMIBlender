@@ -85,6 +85,12 @@ class GlobalConfig:
     # The generated Mod directory itself must continue to use the workspace name.
     generated_mod_name_override: str = ""
 
+    # Output subfolders under the generated mod folder. The file-writing side
+    # and the INI filename lines both derive from these two names, so they
+    # can never drift apart.
+    BUFFER_OUTPUT_SUBFOLDER = "Buffers"
+    TEXTURE_OUTPUT_SUBFOLDER = "Textures"
+
     @classmethod
     def initialize_key_count(cls):
         cls.global_key_index = 0
@@ -415,17 +421,34 @@ class GlobalConfig:
     
     @staticmethod
     def path_generatemod_buffer_folder():
-        # Flat layout: buffer files are written next to the generated INI, no Meshes subfolder
-        buffer_path = GlobalConfig.path_generate_mod_folder()
+        # Buffer files live in a Buffers subfolder under the generated mod folder;
+        # INI filename lines get the matching prefix via ini_buffer_filename().
+        buffer_path = os.path.join(
+            GlobalConfig.path_generate_mod_folder(),
+            GlobalConfig.BUFFER_OUTPUT_SUBFOLDER + "\\",
+        )
         if not os.path.exists(buffer_path):
             os.makedirs(buffer_path)
-        return os.path.join(buffer_path, "")
+        return buffer_path
+
+    @staticmethod
+    def ini_buffer_filename(filename: str) -> str:
+        # 3Dmigoto resolves Resource filenames relative to the INI's own folder.
+        return GlobalConfig.BUFFER_OUTPUT_SUBFOLDER + "\\" + filename
+
+    @staticmethod
+    def ini_texture_filename(filename: str) -> str:
+        # 3Dmigoto resolves Resource filenames relative to the INI's own folder.
+        return GlobalConfig.TEXTURE_OUTPUT_SUBFOLDER + "\\" + filename
 
     @staticmethod
     def path_generatemod_texture_folder(draw_ib:str):
-
-        # Flat layout: texture files are written next to the generated INI, no Textures subfolder
-        texture_path = GlobalConfig.path_generate_mod_folder()
+        # Texture files live in a Textures subfolder under the generated mod folder;
+        # INI filename lines get the matching prefix via ini_texture_filename().
+        texture_path = os.path.join(
+            GlobalConfig.path_generate_mod_folder(),
+            GlobalConfig.TEXTURE_OUTPUT_SUBFOLDER + "\\",
+        )
         if not os.path.exists(texture_path):
             os.makedirs(texture_path)
             print("GlobalConfig: Texture output folder created: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")

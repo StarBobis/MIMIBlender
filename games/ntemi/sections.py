@@ -11,6 +11,7 @@ import hashlib
 
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_helper import M_IniHelper
+from ...common.global_config import GlobalConfig
 from .parts import resource_token, part_name
 
 # NTMIv1 compute shader slot bindings (standard for the NTMIv1 skinning framework)
@@ -79,14 +80,16 @@ def append_resource_sections(lines: list[str], drawib_model_list, source_suffix_
             position_float_count = vertex_count * 3
             normal_row_count = vertex_count * 2
 
-            palette_file = palette_filename(submesh_model)
+            # Buffer files live in the Buffers subfolder, so every INI filename
+            # below carries the subfolder prefix.
+            palette_file = GlobalConfig.ini_buffer_filename(palette_filename(submesh_model))
             buffers = {
-                "position": f"{name}-position.buf",
-                "blend": f"{name}-blend.buf",
-                "normal": f"{name}-normal.buf",
-                "texcoord": f"{name}-texcoord.buf",
-                "outline": f"{name}-outline.buf",
-                "ib": f"{name}-ib.buf",
+                "position": GlobalConfig.ini_buffer_filename(f"{name}-position.buf"),
+                "blend": GlobalConfig.ini_buffer_filename(f"{name}-blend.buf"),
+                "normal": GlobalConfig.ini_buffer_filename(f"{name}-normal.buf"),
+                "texcoord": GlobalConfig.ini_buffer_filename(f"{name}-texcoord.buf"),
+                "outline": GlobalConfig.ini_buffer_filename(f"{name}-outline.buf"),
+                "ib": GlobalConfig.ini_buffer_filename(f"{name}-ib.buf"),
             }
             ib_format = "DXGI_FORMAT_R16_UINT"
             ib = submesh_model.ib
@@ -398,7 +401,7 @@ def append_texture_resources(lines: list[str], drawib_model_list):
                 slot_filename = M_IniHelper._get_slot_style_texture_filename(drawib_model, idx, tmi)
                 tex_lines.extend([
                     f"[{rn}]",
-                    f"filename = {slot_filename}",
+                    f"filename = {GlobalConfig.ini_texture_filename(slot_filename)}",
                     "",
                 ])
 
