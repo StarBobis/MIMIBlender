@@ -44,6 +44,9 @@ _MATERIAL_PROPS = (
     "mimi_smc_size",
     "mimi_smc_size_width",
     "mimi_smc_size_height",
+    "mimi_smc_alpha_mode",
+    "mimi_smc_alpha_image",
+    "mimi_smc_alpha_channel",
 )
 
 _DEFAULT_ATLAS_SIZE = "QUAD"
@@ -76,6 +79,52 @@ def _get_atlas_size_items(self, context):
 
 
 _DEFAULT_PACKER_TYPE = "BINARY_TREE"
+
+
+def _get_alpha_mode_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    return [
+        (
+            "AUTO",
+            tr("Auto (Follow Node Links)"),
+            tr("Use the image linked to the Principled BSDF Alpha input when present; otherwise keep the base texture's own alpha"),
+        ),
+        (
+            "EMBEDDED",
+            tr("Embedded (Base Texture)"),
+            tr("Always keep the base texture's own alpha channel, ignoring any node-linked alpha"),
+        ),
+        (
+            "SEPARATE",
+            tr("Separate Image"),
+            tr("Replace the alpha channel with a channel of the chosen image"),
+        ),
+        (
+            "MULTIPLY",
+            tr("Multiply with Image"),
+            tr("Multiply the base texture's alpha with a channel of the chosen image (stacked masks)"),
+        ),
+        (
+            "OPAQUE",
+            tr("Opaque"),
+            tr("Force the alpha channel to fully opaque"),
+        ),
+    ]
+
+
+def _get_alpha_channel_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    return [
+        ("A", tr("Alpha"), tr("Use the image's alpha channel")),
+        ("R", tr("Red"), tr("Use the image's red channel")),
+        ("G", tr("Green"), tr("Use the image's green channel")),
+        ("B", tr("Blue"), tr("Use the image's blue channel")),
+        (
+            "LUM",
+            tr("Luminance"),
+            tr("Use the image's Rec.709 luminance computed in linear space"),
+        ),
+    ]
 
 
 def _get_packer_type_items(self, context):
@@ -284,6 +333,28 @@ def _register_material_properties() -> None:
     )
     bpy.types.Material.mimi_smc_size_height = IntProperty(
         name=tr("Height"), default=2048, **dimension_args
+    )
+
+    bpy.types.Material.mimi_smc_alpha_mode = EnumProperty(
+        name=tr("Alpha Source"),
+        items=_get_alpha_mode_items,
+        # Dynamic items only allow integer (0-based) defaults: 0 == "AUTO".
+        default=0,
+        description=tr("Where the merged atlas alpha channel comes from"),
+    )
+
+    bpy.types.Material.mimi_smc_alpha_image = PointerProperty(
+        name=tr("Alpha Image"),
+        type=bpy.types.Image,
+        description=tr("Image providing the alpha channel in Separate/Multiply mode"),
+    )
+
+    bpy.types.Material.mimi_smc_alpha_channel = EnumProperty(
+        name=tr("Alpha Channel"),
+        items=_get_alpha_channel_items,
+        # Dynamic items only allow integer (0-based) defaults: 0 == "A".
+        default=0,
+        description=tr("Which channel of the alpha image is used as the alpha value"),
     )
 
 

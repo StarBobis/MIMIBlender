@@ -16,7 +16,14 @@ import numpy as np
 from ...i18n.i18n import tr
 from ..core import channels, decode, pixels
 from ..core.atlas import fit_within
-from ..core.models import ALPHA_SEPARATE, ChannelPlan, ChannelSource
+from ..core.models import (
+    ALPHA_MULTIPLY,
+    ALPHA_OPAQUE,
+    ALPHA_SEPARATE,
+    ChannelPlan,
+    ChannelSource,
+)
+from ..utils.images import get_packed_file
 from ..utils.materials import get_diffuse
 
 # Extra texture types that get their own atlas when "Atlas PBR Textures" is
@@ -101,26 +108,9 @@ def build_base_plane(
         if getattr(mat, "mimi_smc_diffuse", False):
             plan.diffuse_color = _srgb255_to_linear(get_diffuse(mat))
 
-    # A separate alpha texture (image linked to the Principled Alpha input)
-    # replaces the base alpha: the old behavior, now explicit and optional.
-    alpha_info = item["gfx"].get("alpha")
-    if alpha_info:
-        packed_alpha, output_name = alpha_info
-        channel_name = "A" if output_name == "Alpha" else "LUM"
-        try:
-            alpha_key = "alpha:{}".format(packed_alpha.as_pointer())
-            # LUM needs linear colors; a plain alpha channel is raw data.
-            _decode_cached(
-                images, alpha_key, packed_alpha, srgb=(channel_name == "LUM")
-            )
-            plan.alpha_mode = ALPHA_SEPARATE
-            plan.alpha = ChannelSource(image_key=alpha_key, channel=channel_name)
-        except Exception as exc:
-            # A broken alpha texture must not kill the whole merge: keep the
-            # base alpha and record why (surfaced as a warning afterwards).
-            item["gfx"]["alpha_diagnostic"] = tr(
-                "Failed to apply the alpha texture: {error}"
-            ).format(error=exc)
+    # Resolve the alpha strategy: explicit per-material setting first, then
+    # the AUTO fallback that follows the Principled Alpha input link.
+    _apply_alpha_plan(mat, item, plan, images)
 
     plane = channels.build_material_plane(
         plan, images, size=content_size, filter_name=filter_name
@@ -139,6 +129,69 @@ def build_base_plane(
             plane = pixels.resize_plane(plane, target[0], target[1], filter_name)
 
     return plane
+
+
+def _apply_alpha_plan(
+    mat: bpy.types.Material,
+    item: dict,
+    plan: ChannelPlan,
+    images: Dict[str, np.ndarray],
+) -> None:
+    """Choose and apply the alpha strategy for one material's ChannelPlan.
+
+    Priority: the material's explicit "Alpha Source" setting wins; "AUTO"
+    reproduces the classic behavior (follow the image linked to the
+    Principled BSDF Alpha input, if any). Any failure degrades gracefully to
+    the embedded base alpha plus a diagnostic instead of killing the merge.
+    """
+    mode = getattr(mat, "mimi_smc_alpha_mode", "AUTO")
+
+    if mode == "OPAQUE":
+        plan.alpha_mode = ALPHA_OPAQUE
+        return
+
+    if mode == "EMBEDDED":
+        # The default ChannelPlan already keeps the base texture's alpha.
+        return
+
+    if mode in ("SEPARATE", "MULTIPLY"):
+        # Explicit user-chosen image + channel as the alpha source.
+        image = getattr(mat, "mimi_smc_alpha_image", None)
+        channel_name = getattr(mat, "mimi_smc_alpha_channel", "A")
+        packed = get_packed_file(image) if image else None
+        if packed is None:
+            item["gfx"]["alpha_diagnostic"] = tr(
+                "Alpha mode '{mode}' needs a readable alpha image; falling back to the base texture's alpha."
+            ).format(mode=mode)
+            return
+        key = "alpha-x:{}".format(packed.as_pointer())
+        # LUM needs linear colors; a plain channel is raw data.
+        _decode_cached(images, key, packed, srgb=(channel_name == "LUM"))
+        plan.alpha_mode = ALPHA_SEPARATE if mode == "SEPARATE" else ALPHA_MULTIPLY
+        plan.alpha = ChannelSource(image_key=key, channel=channel_name)
+        return
+
+    # AUTO: a separate alpha texture linked to the Principled Alpha input
+    # replaces the base alpha — the old behavior, now only one option.
+    alpha_info = item["gfx"].get("alpha")
+    if not alpha_info:
+        return
+    packed_alpha, output_name = alpha_info
+    channel_name = "A" if output_name == "Alpha" else "LUM"
+    try:
+        alpha_key = "alpha:{}".format(packed_alpha.as_pointer())
+        # LUM needs linear colors; a plain alpha channel is raw data.
+        _decode_cached(
+            images, alpha_key, packed_alpha, srgb=(channel_name == "LUM")
+        )
+        plan.alpha_mode = ALPHA_SEPARATE
+        plan.alpha = ChannelSource(image_key=alpha_key, channel=channel_name)
+    except Exception as exc:
+        # A broken alpha texture must not kill the whole merge: keep the
+        # base alpha and record why (surfaced as a warning afterwards).
+        item["gfx"]["alpha_diagnostic"] = tr(
+            "Failed to apply the alpha texture: {error}"
+        ).format(error=exc)
 
 
 def build_extra_plane(

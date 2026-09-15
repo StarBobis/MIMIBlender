@@ -101,6 +101,8 @@ class PropertyMenu(I18nOperator):
             self._show_diffuse_color(box_col, item, image)
             box_col.separator()
             self._show_size_settings(box_col, item)
+            box_col.separator()
+            self._show_alpha_settings(box_col, item.mat)
         else:
             self._show_size_row(
                 box_col, tr("Solid only"), 0, (scn.mimi_smc_diffuse_size,) * 2
@@ -114,6 +116,7 @@ class PropertyMenu(I18nOperator):
                 tr("Check that an Image Texture is connected to Base Color/Color and that this Material Output is the active output."),
             )
             self._show_alpha_status(box_col, item.mat)
+            self._show_alpha_settings(box_col, item.mat)
             box_col.separator()
             self._show_diffuse_color(box_col, item)
 
@@ -249,6 +252,19 @@ class PropertyMenu(I18nOperator):
                 text=tr("Alpha texture: {name}").format(name=alpha_image.name),
                 icon="IMAGE_DATA",
             )
+
+    @staticmethod
+    def _show_alpha_settings(col: bpy.types.UILayout, mat: bpy.types.Material) -> None:
+        """Draw the alpha merge settings for the material.
+
+        The "Alpha Source" setting controls where the atlas alpha channel
+        comes from. Separate/Multiply modes additionally need the user to
+        pick an image and which of its channels carries the mask.
+        """
+        col.prop(mat, "mimi_smc_alpha_mode")
+        if mat.mimi_smc_alpha_mode in ("SEPARATE", "MULTIPLY"):
+            col.prop(mat, "mimi_smc_alpha_image")
+            col.prop(mat, "mimi_smc_alpha_channel")
 
     @staticmethod
     def _show_warning(col: bpy.types.UILayout, text: str) -> None:

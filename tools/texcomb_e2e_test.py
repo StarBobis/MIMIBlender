@@ -4,17 +4,20 @@ Run with Blender 5.2:
     "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" ^
         -b --factory-startup --python tools/texcomb_e2e_test.py
 
-The test builds a small scene with three materials:
+The test builds a small scene with five materials:
   A: red base texture with embedded alpha 0.5
   B: green base texture + a SEPARATE alpha texture (gray 0.7) linked to the
-     Principled BSDF Alpha input
+     Principled BSDF Alpha input (AUTO mode follows the node link)
   C: solid blue, no texture (solid-color fallback path)
+  D: orange base texture + explicit Alpha Source = Separate Image (no node
+     link involved; the Phase 2 per-material setting)
+  E: purple base texture with embedded alpha 0.5 + explicit Alpha Source =
+     Multiply with Image (0.5 * 0.7 = 0.35 expected)
 
 Then it runs bpy.ops.mimi.combiner and verifies the generated atlas:
   - the atlas file exists on disk;
-  - the atlas contains red, green and blue regions;
-  - the alpha channel carries ~0.5 for A (embedded), ~0.7 for B (from the
-    separate alpha texture, NOT from B's opaque base), and 1.0 for C;
+  - the atlas contains red, green, blue, orange and purple regions;
+  - the alpha channel carries the expected value for each material;
   - the object was rebound to the generated atlas material.
 
 Exits with code 0 on success and 1 on the first failed assertion.
@@ -84,30 +87,50 @@ def main():
     workdir = tempfile.mkdtemp(prefix="texcomb_e2e_")
     base_a = os.path.join(workdir, "base_a.png")
     base_b = os.path.join(workdir, "base_b.png")
+    base_d = os.path.join(workdir, "base_d.png")
+    base_e = os.path.join(workdir, "base_e.png")
     alpha_b = os.path.join(workdir, "alpha_b.png")
     _write_png(base_a, (255, 0, 0, 128))    # red, embedded alpha ~0.5
     _write_png(base_b, (0, 255, 0, 255))    # opaque green
+    _write_png(base_d, (255, 128, 0, 255))  # opaque orange
+    _write_png(base_e, (128, 0, 255, 128))  # purple, embedded alpha ~0.5
     _write_png(alpha_b, (255, 255, 255, 179))  # white, alpha ~0.7
 
     # Enable the addon through Blender's addon system.
     bpy.ops.preferences.addon_enable(module="MIMIBlender")
 
-    # Clean scene, then add a 2x2-face grid (it comes with a UV map).
+    # Clean scene, then add a grid with 6 faces (it comes with a UV map).
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-    bpy.ops.mesh.primitive_grid_add(x_subdivisions=3, y_subdivisions=3)
+    bpy.ops.mesh.primitive_grid_add(x_subdivisions=4, y_subdivisions=3)
     obj = bpy.context.active_object
 
     mat_a = _make_textured_material("mat_a", base_a)
     mat_b = _make_textured_material("mat_b", base_b, alpha_b)
     mat_c = _make_solid_material("mat_c", (0.05, 0.1, 0.8, 1.0))
-    for mat in (mat_a, mat_b, mat_c):
+    mat_d = _make_textured_material("mat_d", base_d)
+    mat_e = _make_textured_material("mat_e", base_e)
+    for mat in (mat_a, mat_b, mat_c, mat_d, mat_e):
         obj.data.materials.append(mat)
-    # Faces 0,1 -> mat_a; face 2 -> mat_b; face 3 -> mat_c.
+
+    # Faces 0,1 -> mat_a; faces 2..5 -> mat_b..mat_e respectively.
     obj.data.polygons[0].material_index = 0
     obj.data.polygons[1].material_index = 0
     obj.data.polygons[2].material_index = 1
     obj.data.polygons[3].material_index = 2
+    obj.data.polygons[4].material_index = 3
+    obj.data.polygons[5].material_index = 4
+
+    # Phase 2 feature: explicit alpha sources with NO node link at all.
+    alpha_image = bpy.data.images.load(alpha_b)
+    # mat_d: replace alpha with the separate image's alpha channel (~0.7).
+    mat_d.mimi_smc_alpha_mode = "SEPARATE"
+    mat_d.mimi_smc_alpha_image = alpha_image
+    mat_d.mimi_smc_alpha_channel = "A"
+    # mat_e: multiply the embedded alpha (~0.5) with the image (~0.7) -> ~0.35.
+    mat_e.mimi_smc_alpha_mode = "MULTIPLY"
+    mat_e.mimi_smc_alpha_image = alpha_image
+    mat_e.mimi_smc_alpha_channel = "A"
 
     # Run the combiner. Uniform size keeps the atlas small for the test.
     scene = bpy.context.scene
@@ -126,12 +149,16 @@ def main():
     with Image.open(atlas_path) as opened:
         atlas = opened.convert("RGBA")
         pixels = list(atlas.getdata())
-    reds = [p for p in pixels if p[0] > 150 and p[1] < 100]
+    reds = [p for p in pixels if p[0] > 150 and p[1] < 100 and p[2] < 100]
     greens = [p for p in pixels if p[1] > 150 and p[0] < 150]
-    blues = [p for p in pixels if p[2] > 150 and p[0] < 100]
+    blues = [p for p in pixels if p[2] > 150 and p[0] < 100 and p[1] < 100]
+    oranges = [p for p in pixels if p[0] > 200 and 60 < p[1] < 200 and p[2] < 80]
+    purples = [p for p in pixels if 60 < p[0] < 200 and p[2] > 150 and p[1] < 100]
     check("atlas contains the red region (mat A)", len(reds) > 100)
     check("atlas contains the green region (mat B)", len(greens) > 100)
     check("atlas contains the blue region (mat C)", len(blues) > 100)
+    check("atlas contains the orange region (mat D)", len(oranges) > 100)
+    check("atlas contains the purple region (mat E)", len(purples) > 100)
 
     # --- Verify the alpha channel semantics -------------------------------
     check(
@@ -139,12 +166,22 @@ def main():
         any(abs(p[3] - 128) <= 4 for p in reds),
     )
     # mat B's own base texture is opaque (255): a value near 179 proves the
-    # alpha came from the SEPARATE alpha texture.
+    # alpha came from the SEPARATE alpha texture via the AUTO node link.
     check(
         "mat B alpha ~179 from the separate alpha texture",
         any(abs(p[3] - 179) <= 4 for p in greens),
     )
     check("mat C alpha fully opaque", all(p[3] == 255 for p in blues))
+    # mat D: explicit Separate Image, no node link; alpha must be ~179.
+    check(
+        "mat D alpha ~179 from the explicit separate image",
+        any(abs(p[3] - 179) <= 4 for p in oranges),
+    )
+    # mat E: embedded 0.5 * image 0.7 = 0.35 -> byte ~90.
+    check(
+        "mat E alpha ~90 from embedded x image multiply",
+        any(abs(p[3] - 90) <= 6 for p in purples),
+    )
 
     # --- Verify the object got the combined material ----------------------
     slot_names = [s.material.name for s in obj.material_slots if s.material]
@@ -154,7 +191,10 @@ def main():
     )
     check(
         "original materials removed from the object",
-        not any(name in slot_names for name in ("mat_a", "mat_b", "mat_c")),
+        not any(
+            name in slot_names
+            for name in ("mat_a", "mat_b", "mat_c", "mat_d", "mat_e")
+        ),
     )
 
     bpy.ops.preferences.addon_disable(module="MIMIBlender")
