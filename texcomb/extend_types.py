@@ -36,6 +36,9 @@ _SCENE_PROPS = (
     "mimi_smc_uniform_size",
     "mimi_smc_uniform_size_value",
     "mimi_smc_image_format",
+    "mimi_smc_dds_format",
+    "mimi_smc_dds_mipmaps",
+    "mimi_smc_texconv_path",
 )
 
 _MATERIAL_PROPS = (
@@ -64,6 +67,19 @@ def _get_image_format_items(self, context):
         ("TGA", "TGA", tr("Truevision Targa format, lossless, supports Alpha, widely supported by game engines"), 1),
         ("TIFF", "TIFF", tr("Tagged Image File format, lossless, supports Alpha, good for archiving"), 2),
         ("BMP", "BMP", tr("Windows Bitmap format, lossless, supports Alpha, but large in file size"), 3),
+        ("DDS", "DDS (texconv)", tr("DirectX Surface format via texconv.exe with explicit DXGI format control, for game modding pipelines"), 4),
+    ]
+
+
+def _get_dds_format_items(self, context):
+    # Dynamic items callback so the dropdown entries follow the UI language.
+    return [
+        ("R8G8B8A8_UNORM_SRGB", "R8G8B8A8_UNORM_SRGB", tr("Uncompressed 8-bit RGBA with sRGB tag; the default for WWMI/3DMigoto diffuse textures"), 0),
+        ("R8G8B8A8_UNORM", "R8G8B8A8_UNORM", tr("Uncompressed 8-bit RGBA without sRGB tag; for data textures"), 1),
+        ("BC7_UNORM_SRGB", "BC7_UNORM_SRGB", tr("BC7 block compression with sRGB tag; high quality, smaller files"), 2),
+        ("BC7_UNORM", "BC7_UNORM", tr("BC7 block compression without sRGB tag; for data textures"), 3),
+        ("BC3_UNORM_SRGB", "BC3_UNORM_SRGB", tr("BC3/DXT5 block compression with sRGB tag; broad engine compatibility"), 4),
+        ("BC3_UNORM", "BC3_UNORM", tr("BC3/DXT5 block compression without sRGB tag; for data textures"), 5),
     ]
 
 
@@ -289,6 +305,25 @@ def _register_scene_properties() -> None:
         # Dynamic items only allow integer (0-based) defaults; the first item
         # ("PNG") is the intended default, so the argument is omitted.
         description=tr("Format of the atlas output image; PNG supports the Alpha channel"),
+    )
+
+    bpy.types.Scene.mimi_smc_dds_format = EnumProperty(
+        name=tr("DDS Pixel Format"),
+        items=_get_dds_format_items,
+        description=tr("DXGI format written by texconv.exe for DDS output"),
+    )
+
+    bpy.types.Scene.mimi_smc_dds_mipmaps = BoolProperty(
+        name=tr("Generate Mipmaps"),
+        default=True,
+        description=tr("Generate the full mipmap chain for DDS output"),
+    )
+
+    bpy.types.Scene.mimi_smc_texconv_path = StringProperty(
+        name=tr("texconv.exe Path"),
+        default="",
+        subtype="FILE_PATH",
+        description=tr("Optional path to a custom texconv.exe; leave empty to use the bundled copy or the TEXCONV_PATH environment variable"),
     )
 
     bpy.types.Scene.mimi_smc_save_path = StringProperty(

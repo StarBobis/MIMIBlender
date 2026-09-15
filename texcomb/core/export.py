@@ -9,6 +9,7 @@ the PNG/TGA/TIFF/BMP path keeps working without external tools.
 
 import io
 import os
+import tempfile
 from typing import Optional
 
 import numpy as np
@@ -100,4 +101,38 @@ def save_image(
     data = encode_bytes(plane, image_format=image_format, srgb=srgb)
     with open(path, "wb") as handle:
         handle.write(data)
+    return path
+
+
+def save_dds(
+    plane: np.ndarray,
+    path: str,
+    dds_format: str,
+    mipmaps: bool = True,
+    srgb: bool = True,
+    texconv_path: str = "",
+) -> str:
+    """Save a float32 plane as a DDS file via texconv.exe.
+
+    The plane is first written to a temporary lossless 8-bit PNG (all DDS
+    output formats we support are 8-bit per channel, so no precision is
+    lost), then converted by texconv, which controls the exact DXGI format,
+    the sRGB tag, and mipmap generation. Raises RuntimeError when texconv is
+    unavailable so callers can fall back to PNG with a clear message.
+    """
+    from . import texconv
+
+    with tempfile.TemporaryDirectory(prefix="texcomb_dds_") as tmpdir:
+        # The PNG carries the exact final 8-bit values; texconv only
+        # repackages them into the requested DDS format.
+        png_path = os.path.join(tmpdir, "atlas.png")
+        save_image(plane, png_path, image_format="PNG", srgb=srgb)
+        texconv.convert_png_to_dds(
+            png_path,
+            path,
+            dds_format=dds_format,
+            mipmaps=mipmaps,
+            srgb=srgb,
+            explicit_path=texconv_path,
+        )
     return path

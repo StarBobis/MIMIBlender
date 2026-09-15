@@ -825,6 +825,7 @@ def _save_atlas_with_type(
         "TGA": "tga",
         "TIFF": "tif",
         "BMP": "bmp",
+        "DDS": "dds",
     }.get(scn.mimi_smc_image_format, "png")
 
     filename = "{}{}{}.{}".format(
@@ -838,6 +839,18 @@ def _save_atlas_with_type(
     # Albedo is a color and gets the linear->sRGB conversion; every other
     # map is data and is written with its values untouched. The core export
     # performs the single 8-bit quantization step of the whole pipeline.
+    if scn.mimi_smc_image_format == "DDS":
+        # DDS goes through texconv.exe, which controls the exact DXGI
+        # format, the sRGB tag, and mipmap generation.
+        core_export.save_dds(
+            atlas,
+            path,
+            dds_format=scn.mimi_smc_dds_format,
+            mipmaps=scn.mimi_smc_dds_mipmaps,
+            srgb=(tex_type == "albedo"),
+            texconv_path=scn.mimi_smc_texconv_path,
+        )
+        return path
     core_export.save_image(
         atlas,
         path,

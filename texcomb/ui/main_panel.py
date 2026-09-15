@@ -10,6 +10,7 @@ import bpy
 
 from ...i18n.i18n import tr, translatable
 from .. import globs
+from ..core import texconv
 
 _DISCORD_CONTACT_URL = "https://discordapp.com/users/275608234595713024"
 # Kept as a plain English constant; it is translated at the draw site below.
@@ -164,6 +165,29 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
             size_col.prop(scene, "mimi_smc_size_height", text=tr("Height"))
         layout.prop(scene, "mimi_smc_packer_type", text=tr("Packing Algorithm"))
         layout.prop(scene, "mimi_smc_image_format", text=tr("Output Format"))
+        if scene.mimi_smc_image_format == "DDS":
+            self._add_dds_section(layout, scene)
+
+    @staticmethod
+    def _add_dds_section(
+        layout: bpy.types.UILayout, scene: bpy.types.Scene
+    ) -> None:
+        """Add the DDS-specific options shown when the output format is DDS.
+
+        DDS conversion is done by texconv.exe; the section always shows
+        whether a usable exe was found so a failed combine never surprises.
+        """
+        dds_col = layout.column(align=True)
+        dds_col.prop(scene, "mimi_smc_dds_format", text=tr("DDS Pixel Format"))
+        dds_col.prop(scene, "mimi_smc_dds_mipmaps", text=tr("Generate Mipmaps"))
+        dds_col.prop(scene, "mimi_smc_texconv_path", text=tr("texconv.exe Path"))
+        if texconv.is_available(scene.mimi_smc_texconv_path):
+            dds_col.label(text=tr("texconv.exe found"), icon="CHECKMARK")
+        else:
+            dds_col.label(
+                text=tr("texconv.exe not found; DDS output unavailable"),
+                icon="ERROR",
+            )
 
     @staticmethod
     def _create_property_row(

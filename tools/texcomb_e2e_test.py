@@ -83,22 +83,8 @@ def _make_solid_material(name, color):
     return mat
 
 
-def main():
-    workdir = tempfile.mkdtemp(prefix="texcomb_e2e_")
-    base_a = os.path.join(workdir, "base_a.png")
-    base_b = os.path.join(workdir, "base_b.png")
-    base_d = os.path.join(workdir, "base_d.png")
-    base_e = os.path.join(workdir, "base_e.png")
-    alpha_b = os.path.join(workdir, "alpha_b.png")
-    _write_png(base_a, (255, 0, 0, 128))    # red, embedded alpha ~0.5
-    _write_png(base_b, (0, 255, 0, 255))    # opaque green
-    _write_png(base_d, (255, 128, 0, 255))  # opaque orange
-    _write_png(base_e, (128, 0, 255, 128))  # purple, embedded alpha ~0.5
-    _write_png(alpha_b, (255, 255, 255, 179))  # white, alpha ~0.7
-
-    # Enable the addon through Blender's addon system.
-    bpy.ops.preferences.addon_enable(module="MIMIBlender")
-
+def _build_scene(workdir, base_a, base_b, alpha_b, base_d, base_e):
+    """Build the five-material test scene; returns the mesh object."""
     # Clean scene, then add a grid with 6 faces (it comes with a UV map).
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
@@ -131,6 +117,56 @@ def main():
     mat_e.mimi_smc_alpha_mode = "MULTIPLY"
     mat_e.mimi_smc_alpha_image = alpha_image
     mat_e.mimi_smc_alpha_channel = "A"
+    return obj
+
+
+def _verify_dds_output(workdir):
+    """Run the combine with DDS output and verify the produced DDS file."""
+    import struct
+
+    from MIMIBlender.texcomb.core import texconv
+
+    if not texconv.is_available():
+        print("[E2E SKIP] texconv.exe unavailable; DDS output not tested")
+        return
+
+    scene = bpy.context.scene
+    scene.mimi_smc_image_format = "DDS"
+    bpy.ops.mimi.combiner(directory=workdir)
+
+    dds_files = [f for f in os.listdir(workdir) if f.endswith(".dds")]
+    check("DDS atlas file written", len(dds_files) == 1)
+    if not dds_files:
+        return
+    with open(os.path.join(workdir, dds_files[0]), "rb") as handle:
+        data = handle.read(148)
+    check("DDS magic bytes present", data[:4] == b"DDS ")
+    height, width = struct.unpack_from("<II", data, 12)
+    check("DDS dimensions are non-zero", width > 0 and height > 0)
+    # The default DDS format is R8G8B8A8_UNORM_SRGB (DXGI 29, DX10 header).
+    fourcc = data[84:88]
+    dxgi = struct.unpack_from("<I", data, 128)[0] if fourcc == b"DX10" else None
+    check("DDS pixel format is R8G8B8A8_UNORM_SRGB (29)", dxgi == 29)
+    scene.mimi_smc_image_format = "PNG"
+
+
+def main():
+    workdir = tempfile.mkdtemp(prefix="texcomb_e2e_")
+    base_a = os.path.join(workdir, "base_a.png")
+    base_b = os.path.join(workdir, "base_b.png")
+    base_d = os.path.join(workdir, "base_d.png")
+    base_e = os.path.join(workdir, "base_e.png")
+    alpha_b = os.path.join(workdir, "alpha_b.png")
+    _write_png(base_a, (255, 0, 0, 128))    # red, embedded alpha ~0.5
+    _write_png(base_b, (0, 255, 0, 255))    # opaque green
+    _write_png(base_d, (255, 128, 0, 255))  # opaque orange
+    _write_png(base_e, (128, 0, 255, 128))  # purple, embedded alpha ~0.5
+    _write_png(alpha_b, (255, 255, 255, 179))  # white, alpha ~0.7
+
+    # Enable the addon through Blender's addon system.
+    bpy.ops.preferences.addon_enable(module="MIMIBlender")
+
+    obj = _build_scene(workdir, base_a, base_b, alpha_b, base_d, base_e)
 
     # Run the combiner. Uniform size keeps the atlas small for the test.
     scene = bpy.context.scene
@@ -196,6 +232,12 @@ def main():
             for name in ("mat_a", "mat_b", "mat_c", "mat_d", "mat_e")
         ),
     )
+
+    # --- Second pass: DDS output via texconv.exe --------------------------
+    # Rebuild the same scene (the first pass consumed the materials) and
+    # combine again with DDS as the output format.
+    _build_scene(workdir, base_a, base_b, alpha_b, base_d, base_e)
+    _verify_dds_output(workdir)
 
     bpy.ops.preferences.addon_disable(module="MIMIBlender")
 

@@ -16,6 +16,7 @@ from bpy.props import BoolProperty, StringProperty
 
 from ... import globs
 from ....i18n.i18n import I18nOperator, tr
+from ...core import texconv
 from ...utils.packers import pack
 from .combiner_ops import (
     align_uvs,
@@ -95,6 +96,18 @@ class Combiner(I18nOperator):
 
         if not self.directory:
             return self._return_with_message("ERROR", tr("No save directory selected"))
+
+        # DDS output is produced by texconv.exe; refuse early with a clear
+        # message instead of crashing halfway through the pipeline.
+        if scn.mimi_smc_image_format == "DDS" and not texconv.is_available(
+            scn.mimi_smc_texconv_path
+        ):
+            return self._return_with_message(
+                "ERROR",
+                tr(
+                    "DDS output requires texconv.exe, but it could not be found. Set the texconv.exe path in the Output Format settings or the TEXCONV_PATH environment variable."
+                ),
+            )
 
         scn.mimi_smc_save_path = self.directory
         sized_structure = get_size(scn, self.structure)

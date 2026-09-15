@@ -743,4 +743,22 @@ TRANSLATIONS_ZH_CN = {
     "Alpha mode '{mode}' needs a readable alpha image; falling back to the base texture's alpha.": "Alpha 模式“{mode}”需要一张可读取的 Alpha 贴图；已回退为基础贴图自带的 Alpha。",
     "Material '{name}' texture failed to decode and will be treated as a solid color: {error}": "材质“{name}”的贴图解码失败，将作为纯色材质处理：{error}",
     "Material '{name}' {type} texture failed to decode and was skipped: {error}": "材质“{name}”的 {type} 贴图解码失败，已跳过：{error}",
+
+    # ---- Texture combiner: DDS output via texconv ----
+    "DirectX Surface format via texconv.exe with explicit DXGI format control, for game modding pipelines": "通过 texconv.exe 输出的 DirectX Surface 格式，可精确控制 DXGI 格式，适用于游戏 Mod 管线",
+    "DDS Pixel Format": "DDS 像素格式",
+    "DXGI format written by texconv.exe for DDS output": "DDS 输出时由 texconv.exe 写入的 DXGI 格式",
+    "Uncompressed 8-bit RGBA with sRGB tag; the default for WWMI/3DMigoto diffuse textures": "未压缩 8 位 RGBA，带 sRGB 标记；WWMI/3DMigoto 漫反射贴图的默认格式",
+    "Uncompressed 8-bit RGBA without sRGB tag; for data textures": "未压缩 8 位 RGBA，不带 sRGB 标记；用于数据贴图",
+    "BC7 block compression with sRGB tag; high quality, smaller files": "BC7 块压缩，带 sRGB 标记；质量高，文件更小",
+    "BC7 block compression without sRGB tag; for data textures": "BC7 块压缩，不带 sRGB 标记；用于数据贴图",
+    "BC3/DXT5 block compression with sRGB tag; broad engine compatibility": "BC3/DXT5 块压缩，带 sRGB 标记；引擎兼容性广",
+    "BC3/DXT5 block compression without sRGB tag; for data textures": "BC3/DXT5 块压缩，不带 sRGB 标记；用于数据贴图",
+    "Generate Mipmaps": "生成 Mipmap",
+    "Generate the full mipmap chain for DDS output": "为 DDS 输出生成完整的 Mipmap 链",
+    "texconv.exe Path": "texconv.exe 路径",
+    "Optional path to a custom texconv.exe; leave empty to use the bundled copy or the TEXCONV_PATH environment variable": "可选的自定义 texconv.exe 路径；留空则使用随插件附带的副本或 TEXCONV_PATH 环境变量",
+    "texconv.exe found": "已找到 texconv.exe",
+    "texconv.exe not found; DDS output unavailable": "未找到 texconv.exe；DDS 输出不可用",
+    "DDS output requires texconv.exe, but it could not be found. Set the texconv.exe path in the Output Format settings or the TEXCONV_PATH environment variable.": "DDS 输出需要 texconv.exe，但未找到。请在输出格式设置中指定 texconv.exe 路径，或设置 TEXCONV_PATH 环境变量。",
 }

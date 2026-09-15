@@ -46,6 +46,16 @@ def _load_pil():
     return Image
 
 
+def _decode_with_pillow(data: bytes) -> np.ndarray:
+    """Decode bytes with Pillow into a straight-alpha RGBA uint8 array."""
+    image = _load_pil()
+    with image.open(io.BytesIO(data)) as opened:
+        # Normalize every source mode (P, LA, CMYK, 16-bit, DDS codecs, ...)
+        # to straight-alpha 8-bit RGBA first.
+        rgba = opened.convert("RGBA")
+        return np.asarray(rgba, dtype=np.uint8)
+
+
 def decode_bytes(data: bytes, srgb: bool = True) -> np.ndarray:
     """Decode encoded image bytes (PNG/TGA/DDS/...) into a float32 plane.
 
@@ -57,13 +67,28 @@ def decode_bytes(data: bytes, srgb: bool = True) -> np.ndarray:
 
     Returns:
         A float32 plane of shape (H, W, 4), linear if srgb else raw.
+
+    Raises:
+        RuntimeError: when neither Pillow nor texconv can decode the bytes.
     """
-    image = _load_pil()
-    with image.open(io.BytesIO(data)) as opened:
-        # Normalize every source mode (P, LA, CMYK, 16-bit, DDS codecs, ...)
-        # to straight-alpha 8-bit RGBA first.
-        rgba = opened.convert("RGBA")
-        raw = np.asarray(rgba, dtype=np.uint8)
+    try:
+        raw = _decode_with_pillow(data)
+    except Exception as pillow_error:
+        # Pillow's DDS coverage stops at BC7; float DDS and future DXGI
+        # formats fall through here. texconv (if available) reads them all.
+        # This looks like a DDS file when the magic bytes say so.
+        if data[:4] == b"DDS ":
+            from . import texconv
+
+            if texconv.is_available():
+                raw = _decode_with_pillow(texconv.convert_dds_bytes_to_png(data))
+            else:
+                raise RuntimeError(
+                    "Pillow cannot decode this DDS and texconv.exe is not "
+                    "available for the fallback: {}".format(pillow_error)
+                ) from pillow_error
+        else:
+            raise
 
     plane = pixels.from_uint8(raw)
     if srgb:
