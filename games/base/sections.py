@@ -172,10 +172,16 @@ def add_resource_texture_sections(ini_builder: M_IniBuilder, drawib_model):
 # Compute shader (GPU pre-skinning) section builders
 # ----------------------------------------------------------------------
 
-def add_unity_cs_texture_override_vb_sections(ini_builder: M_IniBuilder, drawib_model, blueprint_model):
+def add_unity_cs_texture_override_vb_sections(ini_builder: M_IniBuilder, drawib_model, blueprint_model, position_pre_dispatch_run: str = ""):
     """VB overrides: Position runs a compute shader that fills the game's VB
     with the modded Position/Blend data; every other category bind (e.g.
-    Texcoord) is replaced by a resource buffer directly."""
+    Texcoord) is replaced by a resource buffer directly.
+
+    position_pre_dispatch_run optionally names a command list that is run at
+    the top of the Position VB override, before the skinning re-dispatch.
+    Naraka uses it to apply shape keys onto the position buffer right before
+    the game's skinning compute shader reads it.
+    """
     d3d11_game_type = drawib_model.d3d11_game_type
     draw_ib = drawib_model.draw_ib
 
@@ -190,6 +196,13 @@ def add_unity_cs_texture_override_vb_sections(ini_builder: M_IniBuilder, drawib_
 
         texture_override_vb_section.append("[TextureOverride_" + texture_override_vb_namesuffix + "]")
         texture_override_vb_section.append("hash = " + category_hash)
+
+        # The command list runs before any binding/dispatch below, so the
+        # game's skinning compute shader later reads the already-updated
+        # position buffer.
+        if (position_pre_dispatch_run
+                and category_name == d3d11_game_type.CategoryDrawCategoryDict.get("Position")):
+            texture_override_vb_section.append("run = " + position_pre_dispatch_run)
 
         for original_category_name, draw_category_name in d3d11_game_type.CategoryDrawCategoryDict.items():
             if category_name != draw_category_name:

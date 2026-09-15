@@ -6,29 +6,46 @@ Why Naraka cannot reuse the generic shape key pipeline
 
 - The generic pipeline finishes its compute work with
   "Resource<DrawIB>Position = ref cs-u5", re-pointing the position
-  resource at a *structured* buffer copy. CPU pre-skinning games bind that
-  resource as a vertex buffer, where the underlying view type does not
-  matter, so the generic pipeline works for them.
+  resource at a *structured* buffer copy, and it runs at [Present] time.
+  CPU pre-skinning games bind that resource as a vertex buffer, where the
+  underlying view type does not matter, so the generic pipeline works
+  there.
 - Naraka skins its meshes on the GPU: Resource<DrawIB>Position is fed
   into the game's own skinning compute shader, which reads it as a raw
   ByteAddressBuffer. Re-pointing it at a structured copy is incompatible
   with that raw view, so the shape keys never reach the rendered mesh.
 
-The Naraka variant keeps using the exact same Shapes.hlsl compute shader
-and the exact same structured working buffers; only the final step
-changes: instead of re-pointing the resource ("ref"), the accumulated
-result is *copied* ("copy") back into the original raw position buffer.
-CopyResource moves raw bytes between buffers of equal size regardless of
-their view types, so:
+The Naraka variant instead hooks the shape key compute into the Position
+VB override itself, so the whole sequence happens in one place, right
+ before the game re-dispatches its skinning compute shader:
 
-- Resource<DrawIB>Position keeps its identity and its raw views forever,
-  and the game's skinning compute shader always reads the layout it
-  expects.
-- Resource<DrawIB>Position.1 is a second resource declaration that points
-  at the same Position buffer file but with "type = buffer" (structured),
-  which is valid INI syntax; it acts as the pristine base the compute
-  shader starts from every frame, so hotkey driven weights apply
-  immediately and errors never accumulate across frames.
+    [TextureOverride_VB_<DrawIB>_<Alias>_Position]
+    hash = ...
+    run = CustomShaderComputeShapesNarakaN   ; shape keys applied here
+    cs-cb0 = Resource_<DrawIB>_VertexLimit
+    cs-t0 = Resource<DrawIB>Position         ; already holds the result
+    cs-t1 = Resource<DrawIB>Blend
+    handling = skip
+    dispatch = ...
+
+Inside the command list, the compute still uses the shared Shapes.hlsl
+and structured working buffers, but the result reaches the raw
+game-facing buffer through two small, individually proven steps:
+
+1. "Resource<DrawIB>PositionComputed = ref cs-u5" re-points an empty
+   declared resource at the structured compute result (same pattern as
+   the Naraka cross-IB VB backups).
+2. "Resource<DrawIB>Position = copy Resource<DrawIB>PositionComputed"
+   copies the raw bytes into the game-facing ByteAddressBuffer.
+   CopyResource moves raw bytes between buffers of equal size regardless
+   of their view types, so the game compute shader always reads the exact
+   layout it expects.
+
+The pristine base copy Resource<DrawIB>Position.1 is a second resource
+declaration that points at the same Position buffer file but with
+"type = buffer" (structured), which is valid INI syntax. Every run starts
+from it, so hotkey driven weights apply immediately and errors never
+accumulate, no matter how often the override fires per frame.
 """
 
 import os
@@ -89,16 +106,17 @@ def is_supported_position_layout(d3d11_game_type) -> bool:
     return True
 
 
-def collect_usable_drawib_list(drawib_drawibmodel_dict: dict) -> list:
-    """Collect the DrawIBs whose shape keys can run on the Naraka pipeline.
+def collect_usable_drawib_model_list(drawib_model_list: list) -> list:
+    """Collect the DrawIB models whose shape keys can run on Naraka.
 
-    Returns the list of DrawIB models that actually carry shape key buffers
-    and have a Position layout the compute shader understands. Other
-    DrawIBs are reported and skipped so the base mod keeps working.
+    Returns the DrawIB models that actually carry shape key buffers and
+    have a Position layout the compute shader understands. Other DrawIBs
+    are reported and skipped so the base mod keeps working.
     """
-    usable_drawib_list = []
+    usable_drawib_model_list = []
 
-    for drawib, drawib_model in drawib_drawibmodel_dict.items():
+    for drawib_model in drawib_model_list:
+        drawib = drawib_model.draw_ib
         shapekey_buffer_dict = getattr(drawib_model, "shapekey_name_bytelist_dict", {})
         if not shapekey_buffer_dict:
             continue
@@ -108,9 +126,23 @@ def collect_usable_drawib_list(drawib_drawibmodel_dict: dict) -> list:
                   + " has an unsupported Position category layout, its shape keys are skipped")
             continue
 
-        usable_drawib_list.append(drawib_model)
+        usable_drawib_model_list.append(drawib_model)
 
-    return usable_drawib_list
+    return usable_drawib_model_list
+
+
+def get_compute_command_list_name(drawib_index: int) -> str:
+    """Return the command list name of one usable DrawIB (0-based index).
+
+    The exporter injects "run = <name>" into the Position VB override, so
+    this name must stay in sync with the sections generated below.
+    """
+    return "CustomShaderComputeShapesNaraka" + str(drawib_index + 1)
+
+
+def get_computed_resource_name(drawib: str) -> str:
+    """Return the empty staging resource that receives the compute result."""
+    return "Resource" + drawib + "PositionComputed"
 
 
 def copy_shapes_hlsl_to_mod_folder():
@@ -124,14 +156,25 @@ def copy_shapes_hlsl_to_mod_folder():
     shutil.copy2(src, os.path.join(dst_dir, "Shapes.hlsl"))
 
 
-def add_naraka_shapekey_ini_sections(ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
-    """Append every shape key section of a Naraka mod to the INI builder."""
+def add_naraka_shapekey_ini_sections(
+    ini_builder: M_IniBuilder,
+    drawib_drawibmodel_dict: dict,
+    usable_drawib_model_list: list = None,
+):
+    """Append every shape key section of a Naraka mod to the INI builder.
+
+    usable_drawib_model_list: precomputed result of
+    collect_usable_drawib_model_list from the exporter, so the command
+    list names match the "run = ..." lines injected into the Position VB
+    overrides. When omitted, it is computed from drawib_drawibmodel_dict.
+    """
     shapekeyname_mkey_dict = BlueprintExportHelper.get_current_shapekeyname_mkey_dict()
     if len(shapekeyname_mkey_dict.keys()) == 0:
         return
 
-    usable_drawib_list = collect_usable_drawib_list(drawib_drawibmodel_dict)
-    if not usable_drawib_list:
+    if usable_drawib_model_list is None:
+        usable_drawib_model_list = collect_usable_drawib_model_list(drawib_drawibmodel_dict.values())
+    if not usable_drawib_model_list:
         return
 
     copy_shapes_hlsl_to_mod_folder()
@@ -145,23 +188,16 @@ def add_naraka_shapekey_ini_sections(ini_builder: M_IniBuilder, drawib_drawibmod
         constants_section.new_line()
     ini_builder.append_section(constants_section)
 
-    # [Present]: re-run the compute command lists every frame, so hotkey
-    # weight changes take effect at once. Each command list starts from the
-    # pristine base copy, so no explicit restore step is needed here.
-    present_section = M_IniSection(M_SectionType.Present)
-    present_section.append("[Present]")
-    for drawib_index, drawib_model in enumerate(usable_drawib_list):
-        present_section.append("run = CustomShaderComputeShapesNaraka" + str(drawib_index + 1))
-    ini_builder.append_section(present_section)
-
-    # [CustomShaderComputeShapesNarakaN]: one command list per DrawIB.
+    # [CustomShaderComputeShapesNarakaN]: one command list per DrawIB. It
+    # is run from the top of the Position VB override, right before the
+    # game's skinning compute shader is re-dispatched there.
     customshader_section = M_IniSection(M_SectionType.CommandList)
-    for drawib_index, drawib_model in enumerate(usable_drawib_list):
+    for drawib_index, drawib_model in enumerate(usable_drawib_model_list):
         drawib = drawib_model.draw_ib
         shapekey_buffer_dict = getattr(drawib_model, "shapekey_name_bytelist_dict", {})
         draw_number = getattr(drawib_model, "draw_number", getattr(drawib_model, "vertex_count", 0))
 
-        customshader_section.append("[CustomShaderComputeShapesNaraka" + str(drawib_index + 1) + "]")
+        customshader_section.append("[" + get_compute_command_list_name(drawib_index) + "]")
         customshader_section.append("cs = Shapes.hlsl")
         # u5 is a fresh structured copy of the pristine base buffer; every
         # shape key dispatch accumulates its weighted difference onto it.
@@ -182,11 +218,13 @@ def add_naraka_shapekey_ini_sections(ini_builder: M_IniBuilder, drawib_drawibmod
             customshader_section.append("dispatch = " + str(draw_number) + ",1,1")
             customshader_section.new_line()
 
-        # The crucial difference from the generic pipeline: copy the result
-        # back into the original raw position buffer instead of re-pointing
-        # the resource at the structured copy, so the game's skinning
-        # compute shader keeps reading the ByteAddressBuffer it expects.
-        customshader_section.append("Resource" + drawib + "Position = copy cs-u5")
+        # Hand the result to the raw game-facing position buffer in two
+        # steps: re-point the empty staging resource at the compute result,
+        # then byte-copy it into the ByteAddressBuffer the game's skinning
+        # compute shader reads. The raw buffer keeps its identity and its
+        # raw views, which a plain "ref cs-u5" would destroy.
+        customshader_section.append(get_computed_resource_name(drawib) + " = ref cs-u5")
+        customshader_section.append("Resource" + drawib + "Position = copy " + get_computed_resource_name(drawib))
 
         # Unbind everything so later game work never sees our buffers; the
         # temporary copy behind cs-u5 is released, its bytes already live
@@ -197,13 +235,14 @@ def add_naraka_shapekey_ini_sections(ini_builder: M_IniBuilder, drawib_drawibmod
         customshader_section.new_line()
     ini_builder.append_section(customshader_section)
 
-    # [Resource...]: the pristine base copy plus one buffer per shape key.
-    # Both are declared with "type = buffer" (structured, stride 40), which
-    # is what the compute shader's StructuredBuffer views require; the raw
-    # game-facing buffer keeps its own separate ByteAddressBuffer
-    # declaration from the base pipeline.
+    # [Resource...]: the pristine base copy, one buffer per shape key, and
+    # the empty staging resource. The working buffers are declared with
+    # "type = buffer" (structured, stride 40), which is what the compute
+    # shader's StructuredBuffer views require; the raw game-facing buffer
+    # keeps its own separate ByteAddressBuffer declaration from the base
+    # pipeline.
     resource_section = M_IniSection(M_SectionType.ResourceBuffer)
-    for drawib_model in usable_drawib_list:
+    for drawib_model in usable_drawib_model_list:
         drawib = drawib_model.draw_ib
         shapekey_buffer_dict = getattr(drawib_model, "shapekey_name_bytelist_dict", {})
         position_stride = drawib_model.d3d11_game_type.CategoryStrideDict["Position"]
@@ -228,6 +267,12 @@ def add_naraka_shapekey_ini_sections(ini_builder: M_IniBuilder, drawib_drawibmod
             resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(
                 drawib + "-Position." + shapekey_name + ".buf"))
             resource_section.new_line()
+
+        # The staging resource starts empty and is filled by "ref" every
+        # time the compute command list runs (same pattern as the Naraka
+        # cross-IB VB backups).
+        resource_section.append("[" + get_computed_resource_name(drawib) + "]")
+        resource_section.new_line()
     ini_builder.append_section(resource_section)
 
     # [Key_ShapeKey_...]: press-to-cycle hotkeys, one per configured key;
