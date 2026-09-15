@@ -7,7 +7,7 @@ import bpy.utils.previews
 
 from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
-from ..common.ssmt_import_helper import SSMTImportHelper
+from ..common.mmt_import_helper import MMTImportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
@@ -343,7 +343,7 @@ class SwordImportAllReversed(I18nOperator):
 
                 try:
                     # Call the ssmt_fmt format import function
-                    SSMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection)
+                    MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection)
                     imported_count += 1
                 except Exception as e:
                     error_msg = tr("Import failed, skipped: {path} | Error: {error}").format(path=json_filepath, error=e)

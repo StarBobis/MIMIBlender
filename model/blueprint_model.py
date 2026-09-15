@@ -335,7 +335,7 @@ class BluePrintModel:
         Returns:
             [(submesh_name, temp_split_object), ...]
         """
-        from ..workspace.ssmt_workspace import SSMTWorkSpace
+        from ..workspace.mmt_workspace import MMTWorkSpace
         from ..workspace.submesh_json import SubmeshJson
 
         # Derive draw_ib from the node's submesh_name
@@ -358,7 +358,7 @@ class BluePrintModel:
             return []
 
         # Get the names of all Submeshes under this DrawIB
-        all_submesh_names = SSMTWorkSpace.get_ordered_submesh_name_list_by_drawib(draw_ib)
+        all_submesh_names = MMTWorkSpace.get_ordered_submesh_name_list_by_drawib(draw_ib)
         if not all_submesh_names:
             LOG.warning(f"BluePrintModel: no Submesh found under DrawIB '{draw_ib}'")
             return []
@@ -371,7 +371,7 @@ class BluePrintModel:
 
         for sm_name in all_submesh_names:
             try:
-                sm_path = SSMTWorkSpace.check_and_get_submesh_json_path(sm_name)
+                sm_path = MMTWorkSpace.check_and_get_submesh_json_path(sm_name)
                 sm_json = SubmeshJson(sm_path)
                 vg_map = sm_json.VGMap  # {local_idx: global_bone_id}
                 LOG.info(f"BluePrintModel:   Submesh '{sm_name}' VGMap = {dict(vg_map)}")
@@ -445,7 +445,7 @@ class BluePrintModel:
         Parse a SubMeshModel list out of the current BluePrintModel.
         DrawCallModels sharing the same submesh_name are grouped together, with one SubMeshModel per group.
         """
-        from ..workspace.ssmt_workspace import WorkSpaceModel
+        from ..workspace.mmt_workspace import WorkSpaceModel
 
         submesh_model_list: list[SubMeshModel] = []
         draw_call_model_dict: dict[str, list[DrawCallModel]] = {}

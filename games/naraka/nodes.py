@@ -52,7 +52,7 @@ class MIMI_UL_CrossIBPairList(UIList):
             layout.label(text="", icon='LINKED')
 
 
-class SSMT_OT_CrossIBPairAdd(I18nOperator):
+class MMT_OT_CrossIBPairAdd(I18nOperator):
     '''Add a new cross-IB pair to the node'''
     bl_idname = "mimi.cross_ib_pair_add"
     bl_label = "Add Pair"
@@ -73,7 +73,7 @@ class SSMT_OT_CrossIBPairAdd(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_CrossIBPairRemove(I18nOperator):
+class MMT_OT_CrossIBPairRemove(I18nOperator):
     '''Remove the active cross-IB pair from the node'''
     bl_idname = "mimi.cross_ib_pair_remove"
     bl_label = "Remove Pair"
@@ -139,10 +139,10 @@ class MIMINode_NarakaCrossIBRender(MIMINodeBase):
             rows=4,
         )
         col = row.column(align=True)
-        op_add = col.operator(SSMT_OT_CrossIBPairAdd.bl_idname, text="", icon='ADD')
+        op_add = col.operator(MMT_OT_CrossIBPairAdd.bl_idname, text="", icon='ADD')
         op_add.node_name = self.name
         op_add.tree_name = self.id_data.name if self.id_data else ""
-        op_remove = col.operator(SSMT_OT_CrossIBPairRemove.bl_idname, text="", icon='REMOVE')
+        op_remove = col.operator(MMT_OT_CrossIBPairRemove.bl_idname, text="", icon='REMOVE')
         op_remove.node_name = self.name
         op_remove.tree_name = self.id_data.name if self.id_data else ""
 
@@ -150,8 +150,8 @@ class MIMINode_NarakaCrossIBRender(MIMINodeBase):
 classes = (
     MIMICrossIBPairItem,
     MIMI_UL_CrossIBPairList,
-    SSMT_OT_CrossIBPairAdd,
-    SSMT_OT_CrossIBPairRemove,
+    MMT_OT_CrossIBPairAdd,
+    MMT_OT_CrossIBPairRemove,
     MIMINode_NarakaCrossIBRender,
 )
 

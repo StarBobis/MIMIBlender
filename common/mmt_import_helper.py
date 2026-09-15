@@ -10,14 +10,14 @@ from ..utils.format_utils import Fatal, FormatUtils
 from ..utils.material_texture_utils import apply_image_texture_to_material, find_node
 
 
-class SSMTImportHelper:
+class MMTImportHelper:
 	@staticmethod
 	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None):
 		submesh_json = SubmeshJson(json_file_path)
 
-		elements, vb_data, vb_vertex_count, shapekey_buffers = SSMTImportHelper.parse_category_buffers(submesh_json)
-		ib_data_list, ib_entry_array_indices, ib_data, ib_count, ib_polygon_count = SSMTImportHelper.parse_index_buffers(submesh_json)
-		shapekey_position_data = SSMTImportHelper.parse_shapekey_position_buffers(submesh_json)
+		elements, vb_data, vb_vertex_count, shapekey_buffers = MMTImportHelper.parse_category_buffers(submesh_json)
+		ib_data_list, ib_entry_array_indices, ib_data, ib_count, ib_polygon_count = MMTImportHelper.parse_index_buffers(submesh_json)
+		shapekey_position_data = MMTImportHelper.parse_shapekey_position_buffers(submesh_json)
 
 		mesh_name = os.path.splitext(submesh_json.FileName)[0]
 		logic_name = submesh_json.GamePreset
@@ -29,7 +29,7 @@ class SSMTImportHelper:
 		# Reverse-engineered products may carry a DrawCallSegmentList (one segment per drawindexed).
 		# When valid segments exist, create one mesh object per segment (per-segment model creation,
 		# consistent with the per-slice split semantics of classic fmt output); otherwise import the whole IB as a single mesh.
-		draw_call_segments = SSMTImportHelper.resolve_draw_call_segments(
+		draw_call_segments = MMTImportHelper.resolve_draw_call_segments(
 			submesh_json=submesh_json,
 			ib_data_list=ib_data_list,
 			ib_entry_array_indices=ib_entry_array_indices,
@@ -96,12 +96,12 @@ class SSMTImportHelper:
 				# on this segment's IndexBufferList entry, apply it right away so the
 				# Blender viewport shows the same per-part assignment as the MMT 3D
 				# preview (no manual texture picking needed after import).
-				nanocat_texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path(
+				nanocat_texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
 					submesh_json=submesh_json,
 					ib_entry_index=segment_info["ib_index"],
 				)
 				if nanocat_texture_path:
-					SSMTImportHelper.apply_nanocat_part_texture(segment_obj, nanocat_texture_path)
+					MMTImportHelper.apply_nanocat_part_texture(segment_obj, nanocat_texture_path)
 
 				imported_obj_list.append(segment_obj)
 
@@ -137,9 +137,9 @@ class SSMTImportHelper:
 		# Whole import merges every index buffer into a single mesh, so a precise
 		# per-segment mapping is impossible here; fall back to the first recorded
 		# NanoCat preview texture (segmented imports resolve per segment instead).
-		nanocat_texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path_for_whole_import(submesh_json)
+		nanocat_texture_path = MMTImportHelper.resolve_nanocat_part_texture_path_for_whole_import(submesh_json)
 		if nanocat_texture_path:
-			SSMTImportHelper.apply_nanocat_part_texture(imported_obj, nanocat_texture_path)
+			MMTImportHelper.apply_nanocat_part_texture(imported_obj, nanocat_texture_path)
 		return imported_obj
 
 	@staticmethod
@@ -309,7 +309,7 @@ class SSMTImportHelper:
 			if category_buffer.Type not in STRUCTURED_BUFFER_TYPES:
 				continue
 
-			category_elements, category_vb_data, category_vertex_count = SSMTImportHelper.parse_normal_category_buffer(
+			category_elements, category_vb_data, category_vertex_count = MMTImportHelper.parse_normal_category_buffer(
 				category_buffer, vertex_slice_offset, vertex_slice_count
 			)
 
@@ -338,7 +338,7 @@ class SSMTImportHelper:
 					shapekey_buffers[category_buffer.Type] = numpy.fromfile(category_buffer.FilePath, dtype=numpy.uint8)
 				continue
 
-			category_elements, category_vb_data, category_vertex_count = SSMTImportHelper.parse_special_category_buffer(
+			category_elements, category_vb_data, category_vertex_count = MMTImportHelper.parse_special_category_buffer(
 				category_buffer=category_buffer,
 				vb_vertex_count=vb_vertex_count,
 			)
@@ -412,7 +412,7 @@ class SSMTImportHelper:
 			shapekey_category_buffer.bind_dir_path(submesh_json.DirPath)
 			shapekey_category_buffer.calc_stride()
 
-			_, shapekey_vb_data, _ = SSMTImportHelper.parse_normal_category_buffer(
+			_, shapekey_vb_data, _ = MMTImportHelper.parse_normal_category_buffer(
 				shapekey_category_buffer,
 				vertex_slice_offset=submesh_json.VertexOffset,
 				vertex_slice_count=submesh_json.VertexCount,
@@ -444,7 +444,7 @@ class SSMTImportHelper:
 			raise Fatal("Category buffer file size is not aligned with stride: " + category_buffer.FileName)
 
 		vertex_count = int(file_size / category_buffer.Stride)
-		category_dtype = SSMTImportHelper.create_dtype_from_elements(category_buffer.D3D11ElementList)
+		category_dtype = MMTImportHelper.create_dtype_from_elements(category_buffer.D3D11ElementList)
 		category_buffer_data = numpy.fromfile(category_buffer.FilePath, dtype=category_dtype, count=vertex_count)
 
 		if vertex_slice_count > 0:
@@ -460,7 +460,7 @@ class SSMTImportHelper:
 	@staticmethod
 	def parse_special_category_buffer(category_buffer:SubmeshCategoryBuffer, vb_vertex_count:int):
 		if category_buffer.Type == "DynamicBlend":
-			return SSMTImportHelper.parse_dynamic_blend_category_buffer(
+			return MMTImportHelper.parse_dynamic_blend_category_buffer(
 				category_buffer=category_buffer,
 				vb_vertex_count=vb_vertex_count,
 			)
@@ -601,7 +601,7 @@ class SSMTImportHelper:
 		merging every index buffer): the first entry with a resolvable texture wins.
 		'''
 		for entry_index in range(len(submesh_json.IndexBufferList)):
-			texture_path = SSMTImportHelper.resolve_nanocat_part_texture_path(
+			texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
 				submesh_json=submesh_json,
 				ib_entry_index=entry_index,
 			)

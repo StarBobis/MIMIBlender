@@ -162,7 +162,7 @@ class CollectionUtils:
         return new_collection
     
     @staticmethod
-    def is_valid_ssmt_workspace_collection(workspace_collection) -> str:
+    def is_valid_mmt_workspace_collection(workspace_collection) -> str:
         '''
         After the Generate Mod button is pressed, verify whether the selected collection is a workspace collection and provide an error message if not
         The check is done here: return the corresponding error message if there is a problem, otherwise return an empty string
@@ -188,7 +188,7 @@ class CollectionUtils:
         return ""
     
     @staticmethod
-    def is_valid_ssmt_workspace_collection_v2(workspace_collection) -> str:
+    def is_valid_mmt_workspace_collection_v2(workspace_collection) -> str:
         '''
         After the Generate Mod button is pressed, verify whether the selected collection is a workspace collection and provide an error message if not
         The check is done here: return the corresponding error message if there is a problem, otherwise return an empty string

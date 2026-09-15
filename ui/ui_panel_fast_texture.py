@@ -37,8 +37,8 @@ def _refresh_lod_enum_cache():
     global _lod_enum_cache
     _lod_enum_cache.clear()
     try:
-        from ..workspace.ssmt_workspace import SSMTWorkSpace
-        lod_folder_paths = SSMTWorkSpace.get_lod_folderpath_list()
+        from ..workspace.mmt_workspace import MMTWorkSpace
+        lod_folder_paths = MMTWorkSpace.get_lod_folderpath_list()
         if lod_folder_paths:
             _lod_enum_cache = [
                 (os.path.basename(p), os.path.basename(p), "")
@@ -52,7 +52,7 @@ def _refresh_lod_enum_cache():
 
 
 def get_workspace_preview_texture_folder(lod_name: str = ""):
-    GlobalConfig.read_from_main_json_ssmt4()
+    GlobalConfig.read_from_main_json()
 
     workspace_folder_path = GlobalConfig.path_workspace_folder()
     folder_name = "DedupedTextures"
@@ -102,7 +102,7 @@ class MIMIUL_FastImportTextureList(UIList):
 
 
 # Refresh LOD list
-class SSMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
+class MMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
     bl_idname = "mimi.refresh_lod_list"
     bl_label = "Refresh LOD List"
     bl_description = "Rescan the LOD folders under the current workspace"
@@ -118,7 +118,7 @@ class SSMT_ImportTexture_WM_OT_RefreshLODList(I18nOperator):
 
 
 # Auto-detect and set the DedupedTextures folder
-class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
+class MMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
     bl_idname = "mimi.auto_detect_texture_folder"
     bl_label = "Load DedupedTextures"
     
@@ -165,7 +165,7 @@ class SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder(I18nOperator):
     
 
 # Operator that applies an image to materials
-class SSMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
+class MMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
     bl_idname = "mimi.apply_image_to_material"
     bl_label = "Apply Texture to Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
@@ -285,9 +285,9 @@ def register():
 
     bpy.utils.register_class(MIMIImportTexture_ImageListItem)
     bpy.utils.register_class(MIMIUL_FastImportTextureList)
-    bpy.utils.register_class(SSMT_ImportTexture_WM_OT_ApplyImageToMaterial)
-    bpy.utils.register_class(SSMT_ImportTexture_WM_OT_RefreshLODList)
-    bpy.utils.register_class(SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
+    bpy.utils.register_class(MMT_ImportTexture_WM_OT_ApplyImageToMaterial)
+    bpy.utils.register_class(MMT_ImportTexture_WM_OT_RefreshLODList)
+    bpy.utils.register_class(MMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
     bpy.utils.register_class(MIMIMT_ImageMaterialPanel)
 
     bpy.types.Scene.mimi_image_list = CollectionProperty(type=MIMIImportTexture_ImageListItem)
@@ -318,8 +318,8 @@ def unregister():
     fast_preview_collections.clear()
 
     bpy.utils.unregister_class(MIMIMT_ImageMaterialPanel)
-    bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
-    bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_RefreshLODList)
-    bpy.utils.unregister_class(SSMT_ImportTexture_WM_OT_ApplyImageToMaterial)
+    bpy.utils.unregister_class(MMT_ImportTexture_WM_OT_AutoDetectTextureFolder)
+    bpy.utils.unregister_class(MMT_ImportTexture_WM_OT_RefreshLODList)
+    bpy.utils.unregister_class(MMT_ImportTexture_WM_OT_ApplyImageToMaterial)
     bpy.utils.unregister_class(MIMIUL_FastImportTextureList)
     bpy.utils.unregister_class(MIMIImportTexture_ImageListItem)

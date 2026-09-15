@@ -8,17 +8,17 @@ from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable, get_preferences
 
-from .ui_func_export import SSMTGenerateSelectedBlueprintMod
-from .ui_func_import_ssmt import SSMT4ImportAllFromCurrentWorkSpaceBlueprint, SSMT4ImportRaw
+from .ui_func_export import MMTGenerateSelectedBlueprintMod
+from .ui_func_import_mmt import MMTImportAllFromCurrentWorkSpaceBlueprint, MMTImportRaw
 
 
-class SSMT4RefreshWorkspaceList(I18nOperator):
+class MMTRefreshWorkspaceList(I18nOperator):
     bl_idname = "mimi.refresh_workspace_list"
     bl_label = "Refresh Workspace List"
     bl_description = "Refresh the workspace list of the current game configuration"
 
     def execute(self, context):
-        GlobalConfig.read_from_main_json_ssmt4()
+        GlobalConfig.read_from_main_json()
 
         for window in context.window_manager.windows:
             for area in window.screen.areas:
@@ -50,7 +50,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         if prefs is not None:
             layout.prop(prefs, "ui_language", expand=True)
         
-        GlobalConfig.read_from_main_json_ssmt4()
+        GlobalConfig.read_from_main_json()
 
         preferred_blueprint_name = BlueprintExportHelper.get_preferred_blueprint_name(
             selected_name=getattr(mimi_global_properties, "selected_blueprint_name", ""),
@@ -61,7 +61,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         # action buttons below. Operators/import callbacks remain responsible
         # for persisting an explicit selection.
 
-        layout.label(text=tr("MMT Cache Folder: ") + GlobalConfig.ssmtlocation)
+        layout.label(text=tr("MMT Cache Folder: ") + GlobalConfig.cache_location)
         layout.label(text=tr("Current Config Name: ") + GlobalConfig.gamename)
         layout.label(text=tr("Current Game Preset: ") + GlobalConfig.logic_name)
         layout.label(text=tr("Current Workspace: ") + GlobalConfig.get_workspace_name())
@@ -70,7 +70,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         if mimi_global_properties.workspace_source_mode == "SPECIFIC":
             workspace_row = layout.row(align=True)
             workspace_row.prop(mimi_global_properties, "specific_workspace_name", text=tr("Specified Workspace"))
-            workspace_row.operator(SSMT4RefreshWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
+            workspace_row.operator(MMTRefreshWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
         elif mimi_global_properties.workspace_source_mode == "CUSTOM":
             layout.prop(mimi_global_properties, "custom_workspace_folder_path", text=tr("Custom Folder"))
 
@@ -92,9 +92,9 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
             layout.label(text=tr("Recalculate COLOR: ") + str(recalculate_color))
 
         # Manually import an MMT model
-        layout.operator(SSMT4ImportRaw.bl_idname, text=tr(SSMT4ImportRaw.bl_label), icon='IMPORT')
+        layout.operator(MMTImportRaw.bl_idname, text=tr(MMTImportRaw.bl_label), icon='IMPORT')
         # One-click import of the current MMT workspace contents
-        layout.operator(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_idname, text=tr(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_label), icon='IMPORT')
+        layout.operator(MMTImportAllFromCurrentWorkSpaceBlueprint.bl_idname, text=tr(MMTImportAllFromCurrentWorkSpaceBlueprint.bl_label), icon='IMPORT')
 
         # MMT blueprint dropdown list
         blueprint_row = layout.row(align=True)
@@ -123,7 +123,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
 
         # Quick Generate Mod button, to avoid opening the blueprint editor for it
         quick_generate_row = layout.row()
-        quick_generate_row.operator(SSMTGenerateSelectedBlueprintMod.bl_idname, text=tr("Generate Mod"), icon='EXPORT')
+        quick_generate_row.operator(MMTGenerateSelectedBlueprintMod.bl_idname, text=tr("Generate Mod"), icon='EXPORT')
 
 
 
@@ -150,9 +150,9 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
 
 
 def register():
-    bpy.utils.register_class(SSMT4RefreshWorkspaceList)
+    bpy.utils.register_class(MMTRefreshWorkspaceList)
     bpy.utils.register_class(MIMIPanelBasicInformation)
 
 def unregister():
-    bpy.utils.unregister_class(SSMT4RefreshWorkspaceList)
+    bpy.utils.unregister_class(MMTRefreshWorkspaceList)
     bpy.utils.unregister_class(MIMIPanelBasicInformation)

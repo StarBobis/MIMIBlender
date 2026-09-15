@@ -70,7 +70,7 @@ class GlobalConfig:
     # Global static variables: the value accessed from anywhere is always the same one
     gamename = ""
     workspacename = ""
-    ssmtlocation = ""
+    cache_location = ""
     current_game_migoto_folder = ""
     logic_name = ""
 
@@ -97,11 +97,11 @@ class GlobalConfig:
         return cls.generated_mod_name_override or cls.get_workspace_name()
 
     @classmethod
-    def read_from_main_json_ssmt4(cls) :
+    def read_from_main_json(cls) :
         try:
             # SSMT5/ProjectBunny panel must read its own settings only,
             # never fall back to MMT / MIMITools settings here.
-            main_settings = GlobalConfig._ssmt_settings()
+            main_settings = GlobalConfig._project_bunny_settings()
             cls.gamename = main_settings.get("CurrentGameName", "")
             # MMT records the workspace name per game in CurrentWorkSpaceByGame,
             # which has higher priority than the global CurrentWorkSpace.
@@ -116,12 +116,12 @@ class GlobalConfig:
             # SSMT5/ProjectBunny writes its cache folder path under the legacy key
             # "DBMTWorkFolder" in ProjectBunnyGlobalConfigs/settings.json.
             # When the key is empty, fall back to the legacy SSMT4CachedFolder.
-            ssmt_work_folder = str(main_settings.get("DBMTWorkFolder", "") or "").strip()
-            if not ssmt_work_folder:
-                ssmt_work_folder = os.path.join(
+            cache_work_folder = str(main_settings.get("DBMTWorkFolder", "") or "").strip()
+            if not cache_work_folder:
+                cache_work_folder = os.path.join(
                     GlobalConfig.path_appdata_local(), "SSMT4CachedFolder"
                 )
-            cls.ssmtlocation = ssmt_work_folder + "\\"
+            cls.cache_location = cache_work_folder + "\\"
 
             # SSMT5/ProjectBunny panel only trusts the game config written by
             # the host itself; MMT / MIMITools game configs must not leak here.
@@ -144,7 +144,7 @@ class GlobalConfig:
             
     @classmethod
     def base_path(cls):
-        return cls.ssmtlocation
+        return cls.cache_location
     
     @staticmethod
     def path_drawib_config_json_path():
@@ -213,7 +213,7 @@ class GlobalConfig:
         return {}
 
     @staticmethod
-    def _ssmt_settings():
+    def _project_bunny_settings():
         # Read SSMT5/ProjectBunny's settings.json first, then fall back to the
         # legacy SSMT4GlobalConfigs/settings.json for older installs.
         settings = GlobalConfig._load_json_dict(
@@ -436,15 +436,10 @@ class GlobalConfig:
     @staticmethod
     def path_appdata_local():
         return os.path.join(os.environ['LOCALAPPDATA'])
-    
-    @staticmethod
-    def path_ssmt4_global_configs_folder():
-        # SSMT5/ProjectBunny's settings.json now lives in ProjectBunnyGlobalConfigs.
-        return GlobalConfig.path_project_bunny_global_configs_folder()
 
     # Define the base JSON file paths
     @staticmethod
-    def path_main_json_ssmt4():
+    def path_main_json():
         legacy_ssmt4 = os.path.join(GlobalConfig.path_appdata_local(), "SSMT4GlobalConfigs\\")
         legacy_mmt = os.path.join(GlobalConfig.path_appdata_local(), "MMTGlobalConfigs\\")
         for folder, filename in (

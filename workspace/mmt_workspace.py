@@ -2,7 +2,7 @@ from ..common.global_config import GlobalConfig
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
-from ..utils.ssmt_error_utils import SSMTErrorUtils
+from ..utils.mmt_error_utils import MMTErrorUtils
 import os
 import bpy
 from typing import List, Dict, Union
@@ -282,7 +282,7 @@ class WorkSpaceModel:
             return self.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
 
         # Fallback: treat as old format and build the path directly
-        lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
+        lod_name, bare_name = MMTWorkSpace.parse_lod_submesh_name(submesh_name)
         if lod_name:
             return os.path.join(self.workspace_path, lod_name, bare_name)
         return os.path.join(self.workspace_path, bare_name)
@@ -351,7 +351,7 @@ class WorkSpaceModel:
             return result
 
         # Fall back to old format: parse via parse_object_name_to_folder_info and look it up
-        lod, folder_name, draw_ib = SSMTWorkSpace.parse_object_name_to_folder_info(name)
+        lod, folder_name, draw_ib = MMTWorkSpace.parse_object_name_to_folder_info(name)
         if not draw_ib:
             return None
 
@@ -406,7 +406,7 @@ class WorkSpaceModel:
         return result
 
 
-class SSMTWorkSpace:
+class MMTWorkSpace:
 
     @staticmethod
     def get_object_display_name(submesh_folder_name: str, drawib_aliasname_dict: Dict[str, str] | None = None) -> str:
@@ -414,7 +414,7 @@ class SSMTWorkSpace:
         if not normalized_folder_name:
             return ""
 
-        drawib_aliasname_dict = drawib_aliasname_dict or SSMTWorkSpace.get_drawib_aliasname_dict()
+        drawib_aliasname_dict = drawib_aliasname_dict or MMTWorkSpace.get_drawib_aliasname_dict()
         folder_prefix, _, folder_alias = normalized_folder_name.partition(".")
         draw_ib = folder_prefix.split("-")[0]
 
@@ -436,7 +436,7 @@ class SSMTWorkSpace:
         if not normalized_folder_name:
             return ""
 
-        alias_name = SSMTWorkSpace.get_object_display_name(
+        alias_name = MMTWorkSpace.get_object_display_name(
             normalized_folder_name,
             drawib_aliasname_dict=drawib_aliasname_dict,
         )
@@ -549,7 +549,7 @@ class SSMTWorkSpace:
                 return folder_path
 
         # Fall back to old format
-        lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
+        lod_name, bare_name = MMTWorkSpace.parse_lod_submesh_name(submesh_name)
         if lod_name:
             return os.path.join(workspace_folder, lod_name, bare_name)
         return os.path.join(workspace_folder, bare_name)
@@ -600,9 +600,9 @@ class SSMTWorkSpace:
         Returns a {lod_name: [submesh_folder_path, ...]} dict, sorted by LOD.
         '''
         result: Dict[str, List[str]] = {}
-        for lod_folder_path in SSMTWorkSpace.get_lod_folderpath_list():
+        for lod_folder_path in MMTWorkSpace.get_lod_folderpath_list():
             lod_name = os.path.basename(lod_folder_path)
-            result[lod_name] = SSMTWorkSpace._get_submesh_folderpath_list_from(lod_folder_path)
+            result[lod_name] = MMTWorkSpace._get_submesh_folderpath_list_from(lod_folder_path)
         return result
 
     @staticmethod
@@ -742,7 +742,7 @@ class SSMTWorkSpace:
         """
         Finds the SubmeshJson file path corresponding to submesh_name.
         Supports both the new format (DrawIB-ComponentIndex) and the old format (DrawIB-IndexCount-FirstIndex).
-        Returns the path when found; raises an SSMTErrorUtils error otherwise.
+        Returns the path when found; raises an MMTErrorUtils error otherwise.
         """
         workspace_folder = GlobalConfig.path_workspace_folder()
 
@@ -757,15 +757,15 @@ class SSMTWorkSpace:
                 bare_name = old_folder_name
             else:
                 # New-format parsing succeeded but the lookup failed; fall back to the old logic
-                lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
-                submesh_folder = SSMTWorkSpace.get_submesh_folder_path(submesh_name)
+                lod_name, bare_name = MMTWorkSpace.parse_lod_submesh_name(submesh_name)
+                submesh_folder = MMTWorkSpace.get_submesh_folder_path(submesh_name)
         else:
             # Old format
-            lod_name, bare_name = SSMTWorkSpace.parse_lod_submesh_name(submesh_name)
-            submesh_folder = SSMTWorkSpace.get_submesh_folder_path(submesh_name)
+            lod_name, bare_name = MMTWorkSpace.parse_lod_submesh_name(submesh_name)
+            submesh_folder = MMTWorkSpace.get_submesh_folder_path(submesh_name)
 
         if not os.path.exists(submesh_folder):
-            SSMTErrorUtils.raise_fatal(
+            MMTErrorUtils.raise_fatal(
                 f"submesh_name '{submesh_name}' has no corresponding extracted data.\n"
                 + "Please make sure the model has been extracted from the game and run the \"One-Click Import Current Workspace Content\" operation."
             )
@@ -799,12 +799,12 @@ class SSMTWorkSpace:
             return found_type_paths[0]
 
         if len(found_type_paths) > 1:
-            SSMTErrorUtils.raise_fatal(
+            MMTErrorUtils.raise_fatal(
                 f"submesh_name '{submesh_name}' found the following Data Types but they were not recorded in Import.json: {', '.join(found_types)}\n"
                 + "Please try running the \"One-Click Import Current Workspace Content\" operation again."
             )
 
-        SSMTErrorUtils.raise_fatal(
+        MMTErrorUtils.raise_fatal(
             f"submesh_name '{submesh_name}' has no corresponding SubmeshJson.\n"
             + "Please make sure the model has been extracted from the game and run the \"One-Click Import Current Workspace Content\" operation."
         )
@@ -822,7 +822,7 @@ class SSMTWorkSpace:
     @staticmethod
     def get_hash_deduped_texture_info_dict(submesh_folder_name:str) -> Dict[str,DedupedTextureInfo]:
 
-        draw_ib_folder_path = os.path.dirname(SSMTWorkSpace.get_submesh_folder_path(submesh_folder_name)) + "\\"
+        draw_ib_folder_path = os.path.dirname(MMTWorkSpace.get_submesh_folder_path(submesh_folder_name)) + "\\"
         # Next compute the ComponentList: the counts of all Components of the current DrawIB that use this texture, starting from 1
         component_name__drawcall_indexlist_json_path = os.path.join(draw_ib_folder_path,"ComponentName_DrawCallIndexList.json")
         trianglelist_deduped_filename_json_path = os.path.join(draw_ib_folder_path,"TrianglelistDedupedFileName.json")

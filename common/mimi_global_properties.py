@@ -25,7 +25,7 @@ def _get_workspace_enum_items(self, context):
     try:
         from .global_config import GlobalConfig
 
-        GlobalConfig.read_from_main_json_ssmt4()
+        GlobalConfig.read_from_main_json()
         workspace_root = GlobalConfig.path_current_game_total_workspace_folder()
         if not workspace_root or not os.path.isdir(workspace_root):
             return [("", tr("No workspace available"), tr("No workspace found for the current game configuration"))]

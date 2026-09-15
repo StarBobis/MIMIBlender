@@ -10,7 +10,7 @@ from ..common.global_config import LogicName
 from ..common.global_config import GlobalConfig
 from ..common.d3d11_gametype import D3D11GameType
 from ..common.obj_buffer_helper import ObjBufferHelper
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
 
 
@@ -79,7 +79,7 @@ class SubMeshModel:
         start at -1 and are parsed from WorkSpaceModel's legacy folder name.
         Old-format names already carry correct values, so never overwritten.
         '''
-        from ..workspace.ssmt_workspace import WorkSpaceModel
+        from ..workspace.mmt_workspace import WorkSpaceModel
 
         # If match_index_count is already >= 0, this is an old-format name that needs no fix
         if self.match_index_count >= 0 and self.match_first_index >= 0:
@@ -104,7 +104,7 @@ class SubMeshModel:
     def calc_buffer(self):
         # Process each obj through its own temporary object so the original ones stay untouched
 
-        submesh_json_path = SSMTWorkSpace.check_and_get_submesh_json_path(self.submesh_name)
+        submesh_json_path = MMTWorkSpace.check_and_get_submesh_json_path(self.submesh_name)
         submesh_json = SubmeshJson(submesh_json_path)
         self.match_cs = submesh_json.MatchCS
         self.match_uav_bytes = submesh_json.MatchUAVBytes

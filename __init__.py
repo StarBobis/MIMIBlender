@@ -17,7 +17,7 @@ from .games.gimi import outline as gimi_body_outline
 from .ui import ui_panel_basic
 from .ui import ui_panel_model
 from .sword import ui_panel_sword
-from .ui import ui_func_import_ssmt
+from .ui import ui_func_import_mmt
 from .ui import ui_panel_fast_texture
 
 from .blueprint import blueprint_node_obj
@@ -74,7 +74,7 @@ def _register_steps():
     yield ui_panel_basic.register
     yield ui_panel_model.register
     yield ui_panel_sword.register
-    yield ui_func_import_ssmt.register
+    yield ui_func_import_mmt.register
     yield ui_panel_fast_texture.register
 
     # Blueprint system
@@ -113,7 +113,7 @@ def unregister():
         blueprint_node_obj.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
-        ui_func_import_ssmt.unregister,
+        ui_func_import_mmt.unregister,
         ui_panel_sword.unregister,
         ui_panel_model.unregister,
         ui_panel_basic.unregister,

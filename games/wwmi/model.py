@@ -26,7 +26,7 @@ from ...utils.vertexgroup_utils import VertexGroupUtils
 from ...workspace.wwmi_info import WWMIInfoObject, WWMIInfoHelper
 from ...common.buffer_export_helper import BufferExportHelper
 from ...common.obj_buffer_helper import ObjBufferHelper
-from ...workspace.ssmt_workspace import SSMTWorkSpace
+from ...workspace.mmt_workspace import MMTWorkSpace
 from ...common.d3d11_gametype import D3D11GameType
 from ...model.blueprint_model import BluePrintModel
 from ...model.draw_call_model import DrawCallModel
@@ -68,7 +68,7 @@ class DrawIBModelWWMI:
 
     def __post_init__(self):
         # Get the alias name list from the workspace
-        drawib_aliasname_dict: dict[str, str] = SSMTWorkSpace.get_drawib_aliasname_dict()
+        drawib_aliasname_dict: dict[str, str] = MMTWorkSpace.get_drawib_aliasname_dict()
 
         # Set the alias
         self.draw_ib_alias = drawib_aliasname_dict.get(self.draw_ib, self.draw_ib)
@@ -86,19 +86,19 @@ class DrawIBModelWWMI:
         # Get the SubmeshJson of the first DrawCallModel to resolve the Data Type of the current DrawIB
         # The first one is used because for WWMI the whole DrawIB shares one single common Data Type
         first_submesh_name = self.ordered_drawcall_model_list[0].get_submesh_name()
-        first_json_path = SSMTWorkSpace.check_and_get_submesh_json_path(first_submesh_name)
+        first_json_path = MMTWorkSpace.check_and_get_submesh_json_path(first_submesh_name)
         first_submesh_json = SubmeshJson(first_json_path)
         self.d3d11_game_type = D3D11GameType.from_submesh_json_dict(first_submesh_json.JsonDict, first_json_path)
 
         self.submesh_drawcall_groups = []
 
         # Get the ordered list of all submeshes of the current DrawIB from the workspace
-        ordered_submesh_name_list = SSMTWorkSpace.get_ordered_submesh_name_list_by_drawib(self.draw_ib)
+        ordered_submesh_name_list = MMTWorkSpace.get_ordered_submesh_name_list_by_drawib(self.draw_ib)
 
         # Preload SubmeshJson and build the groups + wwmi_info in sorted order
         ordered_submesh_json_list: list[SubmeshJson] = []
         for submesh_name in ordered_submesh_name_list:
-            ordered_submesh_json_list.append(SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name)))
+            ordered_submesh_json_list.append(SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_name)))
             # Collect all DrawCalls that belong to the current submesh
             drawcall_group = []
             for drawcall_model in self.ordered_drawcall_model_list:
@@ -526,7 +526,7 @@ class DrawIBModelWWMI:
 
     def apply_drawib_alias(self):
         """Read the current DrawIB alias from the workspace and apply it (WWMI version)."""
-        alias_name = SSMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
+        alias_name = MMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
         if alias_name:
             self.draw_ib_alias = alias_name
 

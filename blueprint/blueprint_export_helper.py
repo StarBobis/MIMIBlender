@@ -3,7 +3,7 @@ import os
 import bpy
 from ..common.global_config import GlobalConfig
 from ..common.m_key import M_Key
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 
 class BlueprintExportHelper:
 
@@ -274,7 +274,7 @@ class BlueprintExportHelper:
         if not BlueprintExportHelper._is_valid_blueprint_tree(current_tree):
             return []
 
-        from ..workspace.ssmt_workspace import WorkSpaceModel
+        from ..workspace.mmt_workspace import WorkSpaceModel
         ws_model = WorkSpaceModel()
         all_display_names = ws_model.get_all_display_names()
 

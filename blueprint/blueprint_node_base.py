@@ -93,7 +93,7 @@ class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
     
     def execute(self, context):
         # 1. Get or create the blueprint tree
-        GlobalConfig.read_from_main_json_ssmt4()
+        GlobalConfig.read_from_main_json()
         requested_tree_name = str(self.blueprint_name or "").strip()
         tree_name = requested_tree_name or GlobalConfig.get_workspace_name()
         
@@ -404,7 +404,7 @@ class MIMIPT_FrameProperties(bpy.types.Panel):
             op.tree_name = frame.id_data.name if frame.id_data else ""
 
 
-class SSMT_OT_ApplyFramePropertiesToAll(I18nOperator):
+class MMT_OT_ApplyFramePropertiesToAll(I18nOperator):
     '''Copy all properties of the first selected Frame to the other selected Frames'''
     bl_idname = "mimi.apply_frame_properties_to_all"
     bl_label = "Apply to All Selected Frames"
@@ -443,7 +443,7 @@ def register():
     bpy.utils.register_class(THEHERTA3_OT_DeletePersistentBlueprint)
     bpy.utils.register_class(THEHERTA3_OT_RenamePersistentBlueprint)
     bpy.utils.register_class(MIMIPT_FrameProperties)
-    bpy.utils.register_class(SSMT_OT_ApplyFramePropertiesToAll)
+    bpy.utils.register_class(MMT_OT_ApplyFramePropertiesToAll)
     MIMIBlueprintTree.ssmt_submesh_items = bpy.props.CollectionProperty(type=MIMISubmeshListItem) # type: ignore[attr-defined]
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.register_workspace_tree_sync_timer()
@@ -453,7 +453,7 @@ def unregister():
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.unregister_workspace_tree_sync_timer()
     del MIMIBlueprintTree.ssmt_submesh_items
-    bpy.utils.unregister_class(SSMT_OT_ApplyFramePropertiesToAll)
+    bpy.utils.unregister_class(MMT_OT_ApplyFramePropertiesToAll)
     bpy.utils.unregister_class(MIMIPT_FrameProperties)
     bpy.utils.unregister_class(THEHERTA3_OT_RenamePersistentBlueprint)
     bpy.utils.unregister_class(THEHERTA3_OT_DeletePersistentBlueprint)

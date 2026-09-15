@@ -66,11 +66,11 @@ def main():
     )
 
     # An I18nOperator description classmethod must translate live.
-    from MIMIBlender.ui.ui_func_export import SSMTGenerateModBlueprint
-    operator_description = SSMTGenerateModBlueprint.description(bpy.context, None)
+    from MIMIBlender.ui.ui_func_export import MMTGenerateModBlueprint
+    operator_description = MMTGenerateModBlueprint.description(bpy.context, None)
     check(
         "operator description translates live",
-        operator_description == i18n.tr(SSMTGenerateModBlueprint.bl_description),
+        operator_description == i18n.tr(MMTGenerateModBlueprint.bl_description),
     )
 
     # A dynamic enum items callback must return translated display names while

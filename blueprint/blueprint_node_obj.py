@@ -12,7 +12,7 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_base import MIMINodeBase
 from .blueprint_node_shapekey import MIMIShapeKeyListItem
-from ..workspace.ssmt_workspace import WorkSpaceModel
+from ..workspace.mmt_workspace import WorkSpaceModel
 
 OBJECT_PERSISTENT_ID_KEY = "_ssmt_object_uuid"
 
@@ -134,7 +134,7 @@ class ObjectPersistentIdManager:
         return summary
 
 
-class SSMT_OT_RefreshNodeObjectIDs(I18nOperator):
+class MMT_OT_RefreshNodeObjectIDs(I18nOperator):
     '''Refresh the object reference info of every object node in blueprints'''
     bl_idname = "mimi.refresh_node_object_ids"
     bl_label = "Refresh Object Node Info"
@@ -153,7 +153,7 @@ class SSMT_OT_RefreshNodeObjectIDs(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_SelectNodeObject(I18nOperator):
+class MMT_OT_SelectNodeObject(I18nOperator):
     '''Select this object in 3D View'''
     bl_idname = "mimi.select_node_object"
     bl_label = "Select Object"
@@ -186,7 +186,7 @@ class SSMT_OT_SelectNodeObject(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_StartPickObject(I18nOperator):
+class MMT_OT_StartPickObject(I18nOperator):
     '''Start picking an object from 3D View'''
     bl_idname = "mimi.start_pick_object"
     bl_label = "Pick Object"
@@ -217,7 +217,7 @@ class SSMT_OT_StartPickObject(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_PickObjectModal(I18nOperator):
+class MMT_OT_PickObjectModal(I18nOperator):
     '''Modal operator for picking objects in 3D View'''
     bl_idname = "mimi.pick_object_modal"
     bl_label = "Pick Object"
@@ -449,7 +449,7 @@ class MIMINode_Object_Group(MIMINodeBase):
 
 
 
-class SSMT_OT_SwitchKey_AddSocket(I18nOperator):
+class MMT_OT_SwitchKey_AddSocket(I18nOperator):
     '''Add a new socket to the switch node'''
     bl_idname = "mimi.switch_add_socket"
     bl_label = "Add Socket"
@@ -467,7 +467,7 @@ class SSMT_OT_SwitchKey_AddSocket(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_SwitchKey_RemoveSocket(I18nOperator):
+class MMT_OT_SwitchKey_RemoveSocket(I18nOperator):
     '''Remove the last socket from the switch node'''
     bl_idname = "mimi.switch_remove_socket"
     bl_label = "Remove Socket"
@@ -601,7 +601,7 @@ class MIMINode_Result_Output(MIMINodeBase):
              self.inputs.remove(self.inputs[-1])
 
 
-class SSMT_OT_View_Group_Objects(I18nOperator):
+class MMT_OT_View_Group_Objects(I18nOperator):
     '''Recursively resolve all objects under the current group and display them in the current 3D View; clicking toggles local view. Note: group nodes should preferably not contain Switch Key, otherwise all switch branches are shown at once'''
     bl_idname = "mimi.view_group_objects"
     bl_label = "View Objects in Group"
@@ -752,7 +752,7 @@ class SSMT_OT_View_Group_Objects(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
+class MMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
     '''Choose the target folder for the generated Mod'''
     bl_idname = "mimi.select_generate_mod_folder"
     bl_label = "Select Generate Mod Folder"
@@ -780,18 +780,18 @@ class SSMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
         return {'FINISHED'}
 
 classes = (
-    SSMT_OT_SelectGenerateModFolder,
-    SSMT_OT_RefreshNodeObjectIDs,
-    SSMT_OT_SelectNodeObject,
-    SSMT_OT_StartPickObject,
-    SSMT_OT_PickObjectModal,
-    SSMT_OT_View_Group_Objects,
+    MMT_OT_SelectGenerateModFolder,
+    MMT_OT_RefreshNodeObjectIDs,
+    MMT_OT_SelectNodeObject,
+    MMT_OT_StartPickObject,
+    MMT_OT_PickObjectModal,
+    MMT_OT_View_Group_Objects,
     MIMINode_Object_Info,
     MIMINode_Object_Group,
     MIMINode_Result_Output,
     MIMINode_SwitchKey,
-    SSMT_OT_SwitchKey_AddSocket,
-    SSMT_OT_SwitchKey_RemoveSocket,
+    MMT_OT_SwitchKey_AddSocket,
+    MMT_OT_SwitchKey_RemoveSocket,
 )
 
 def register():

@@ -127,7 +127,7 @@ def _cleanup_unico_temp_objects(blueprint_model: BluePrintModel):
     print(f"[UniComponent] Cleaned up {len(temp_objects)} temporary split objects")
 
 
-class SSMTGenerateModBlueprint(I18nOperator):
+class MMTGenerateModBlueprint(I18nOperator):
     bl_idname = "mimi.generate_mod_blueprint"
     bl_label = "Generate Mod"
     bl_description = "Generate the Mod files from the blueprint architecture for the current workspace"
@@ -151,7 +151,7 @@ class SSMTGenerateModBlueprint(I18nOperator):
         return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
 
 
-class SSMTGenerateSelectedBlueprintMod(I18nOperator):
+class MMTGenerateSelectedBlueprintMod(I18nOperator):
     bl_idname = "mimi.generate_selected_blueprint_mod"
     bl_label = "Generate Mod"
     bl_description = "Quickly generate the Mod files from the currently selected blueprint"
@@ -175,11 +175,11 @@ class SSMTGenerateSelectedBlueprintMod(I18nOperator):
         return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
     
 def register():
-    bpy.utils.register_class(SSMTGenerateModBlueprint)
-    bpy.utils.register_class(SSMTGenerateSelectedBlueprintMod)
+    bpy.utils.register_class(MMTGenerateModBlueprint)
+    bpy.utils.register_class(MMTGenerateSelectedBlueprintMod)
 
 
 def unregister():
-    bpy.utils.unregister_class(SSMTGenerateSelectedBlueprintMod)
-    bpy.utils.unregister_class(SSMTGenerateModBlueprint)
+    bpy.utils.unregister_class(MMTGenerateSelectedBlueprintMod)
+    bpy.utils.unregister_class(MMTGenerateModBlueprint)
 

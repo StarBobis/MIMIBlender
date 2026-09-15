@@ -257,7 +257,7 @@ def _get_outline_width_mode_items(self, context):
     ]
 
 
-class SSMT_OT_build_gimi_body_outline(I18nOperator):
+class MMT_OT_build_gimi_body_outline(I18nOperator):
     bl_idname = "mimi.build_gimi_body_outline"
     bl_label = "Build GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}
@@ -280,7 +280,7 @@ class SSMT_OT_build_gimi_body_outline(I18nOperator):
         return {"FINISHED"}
 
 
-class SSMT_OT_remove_gimi_body_outline(I18nOperator):
+class MMT_OT_remove_gimi_body_outline(I18nOperator):
     bl_idname = "mimi.remove_gimi_body_outline"
     bl_label = "Remove GIMI Body Outline"
     bl_options = {"REGISTER", "UNDO"}
@@ -299,10 +299,10 @@ class SSMT_OT_remove_gimi_body_outline(I18nOperator):
 
 
 def register():
-    bpy.utils.register_class(SSMT_OT_build_gimi_body_outline)
-    bpy.utils.register_class(SSMT_OT_remove_gimi_body_outline)
+    bpy.utils.register_class(MMT_OT_build_gimi_body_outline)
+    bpy.utils.register_class(MMT_OT_remove_gimi_body_outline)
 
 
 def unregister():
-    bpy.utils.unregister_class(SSMT_OT_remove_gimi_body_outline)
-    bpy.utils.unregister_class(SSMT_OT_build_gimi_body_outline)
+    bpy.utils.unregister_class(MMT_OT_remove_gimi_body_outline)
+    bpy.utils.unregister_class(MMT_OT_build_gimi_body_outline)

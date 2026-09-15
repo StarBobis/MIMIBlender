@@ -209,7 +209,7 @@ def test_apply_operator_reuses_original_material():
         # execute() is a plain method that only uses self.report(), so it
         # can be invoked with a lightweight fake "self".
         fake_self = SimpleNamespace(report=lambda *args, **kwargs: None)
-        result = ft.SSMT_ImportTexture_WM_OT_ApplyImageToMaterial.execute(
+        result = ft.MMT_ImportTexture_WM_OT_ApplyImageToMaterial.execute(
             fake_self, fake_context)
 
         check("operator: finished",
@@ -259,7 +259,7 @@ def test_apply_operator_creates_material_when_missing():
         )
 
         fake_self = SimpleNamespace(report=lambda *args, **kwargs: None)
-        result = ft.SSMT_ImportTexture_WM_OT_ApplyImageToMaterial.execute(
+        result = ft.MMT_ImportTexture_WM_OT_ApplyImageToMaterial.execute(
             fake_self, fake_context)
 
         check("operator: (no material) finished",

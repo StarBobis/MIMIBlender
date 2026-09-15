@@ -8,7 +8,7 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
 
 
-class SSMT_OT_CreateGroupFromSelection(I18nOperator):
+class MMT_OT_CreateGroupFromSelection(I18nOperator):
     '''Create nodes from selected objects and group them under a new Group node'''
     bl_idname = "mimi.create_group_from_selection"
     bl_label = "Create Group from Selected Objects"
@@ -46,7 +46,7 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
         
         # 3. If still not found, fall back to the default workspace blueprint
         if not node_tree:
-            GlobalConfig.read_from_main_json_ssmt4()
+            GlobalConfig.read_from_main_json()
             workspace_name = f"{GlobalConfig.get_workspace_name()}" if GlobalConfig.get_workspace_name() else "SSMT_Mod_Logic"
             node_tree = bpy.data.node_groups.get(workspace_name)
         
@@ -88,7 +88,7 @@ class SSMT_OT_CreateGroupFromSelection(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_CreateInternalSwitch(I18nOperator):
+class MMT_OT_CreateInternalSwitch(I18nOperator):
     '''Create Object Info nodes from selected objects and connect them to a Switch Key node'''
     bl_idname = "mimi.create_internal_switch"
     bl_label = "Create Internal Switch"
@@ -151,7 +151,7 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
         
         # 3. If still not found, fall back to the default workspace blueprint
         if not node_tree:
-            GlobalConfig.read_from_main_json_ssmt4()
+            GlobalConfig.read_from_main_json()
             workspace_name = f"{GlobalConfig.get_workspace_name()}" if GlobalConfig.get_workspace_name() else "SSMT_Mod_Logic"
             node_tree = bpy.data.node_groups.get(workspace_name)
         
@@ -197,7 +197,7 @@ class SSMT_OT_CreateInternalSwitch(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
+class MMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
     bl_idname = "mimi.refresh_blueprint_submesh_list"
     bl_label = "Refresh Submesh List"
     bl_options = {'REGISTER', 'UNDO'}
@@ -213,7 +213,7 @@ class SSMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
         return {'FINISHED'}
 
 
-class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
+class MMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
     bl_idname = "mimi.batch_set_selected_object_node_submesh"
     bl_label = "Batch Set Selected Nodes to Submesh"
     bl_options = {'REGISTER', 'UNDO'}
@@ -259,7 +259,7 @@ class SSMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
         return self.invoke(context, None)
 
 
-class SSMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
+class MMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
     bl_idname = "mimi.apply_selected_object_node_submesh"
     bl_label = "Set to Specified Submesh"
     bl_options = {'REGISTER', 'UNDO'}
@@ -319,7 +319,7 @@ class MIMIMT_ObjectContextMenuSub(bpy.types.Menu):
         layout.operator("mimi.create_internal_switch", text=tr("Create Internal Switch"), icon='ARROW_LEFTRIGHT')
 
 
-class SSMT_OT_AlignNodes(I18nOperator):
+class MMT_OT_AlignNodes(I18nOperator):
     '''Align the selected nodes in a grid layout'''
     bl_idname = "mimi.align_nodes"
     bl_label = "Align Nodes in Grid"
@@ -496,7 +496,7 @@ class SSMT_OT_AlignNodes(I18nOperator):
             ))
 
 
-class SSMT_OT_BatchConnectNodes(I18nOperator):
+class MMT_OT_BatchConnectNodes(I18nOperator):
     '''Batch connect the selected nodes: supports one-to-one or many-to-one connections'''
     bl_idname = "mimi.batch_connect_nodes"
     bl_label = "Batch Connect Nodes"
@@ -795,13 +795,13 @@ def draw_node_context_menu(self, context):
 
 
 def register():
-    bpy.utils.register_class(SSMT_OT_CreateGroupFromSelection)
-    bpy.utils.register_class(SSMT_OT_CreateInternalSwitch)
-    bpy.utils.register_class(SSMT_OT_RefreshBlueprintSubmeshList)
-    bpy.utils.register_class(SSMT_OT_BatchSetSelectedObjectNodeSubmesh)
-    bpy.utils.register_class(SSMT_OT_ApplySelectedObjectNodeSubmesh)
-    bpy.utils.register_class(SSMT_OT_AlignNodes)
-    bpy.utils.register_class(SSMT_OT_BatchConnectNodes)
+    bpy.utils.register_class(MMT_OT_CreateGroupFromSelection)
+    bpy.utils.register_class(MMT_OT_CreateInternalSwitch)
+    bpy.utils.register_class(MMT_OT_RefreshBlueprintSubmeshList)
+    bpy.utils.register_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
+    bpy.utils.register_class(MMT_OT_ApplySelectedObjectNodeSubmesh)
+    bpy.utils.register_class(MMT_OT_AlignNodes)
+    bpy.utils.register_class(MMT_OT_BatchConnectNodes)
     bpy.utils.register_class(MIMIMT_ObjectContextMenuSub)
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
     # Add to the 3D viewport object context menu
@@ -837,10 +837,10 @@ def unregister():
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
 
     bpy.utils.unregister_class(MIMIMT_ObjectContextMenuSub)
-    bpy.utils.unregister_class(SSMT_OT_BatchConnectNodes)
-    bpy.utils.unregister_class(SSMT_OT_AlignNodes)
-    bpy.utils.unregister_class(SSMT_OT_ApplySelectedObjectNodeSubmesh)
-    bpy.utils.unregister_class(SSMT_OT_BatchSetSelectedObjectNodeSubmesh)
-    bpy.utils.unregister_class(SSMT_OT_RefreshBlueprintSubmeshList)
-    bpy.utils.unregister_class(SSMT_OT_CreateInternalSwitch)
-    bpy.utils.unregister_class(SSMT_OT_CreateGroupFromSelection)
+    bpy.utils.unregister_class(MMT_OT_BatchConnectNodes)
+    bpy.utils.unregister_class(MMT_OT_AlignNodes)
+    bpy.utils.unregister_class(MMT_OT_ApplySelectedObjectNodeSubmesh)
+    bpy.utils.unregister_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
+    bpy.utils.unregister_class(MMT_OT_RefreshBlueprintSubmeshList)
+    bpy.utils.unregister_class(MMT_OT_CreateInternalSwitch)
+    bpy.utils.unregister_class(MMT_OT_CreateGroupFromSelection)

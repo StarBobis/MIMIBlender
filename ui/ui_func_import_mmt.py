@@ -15,9 +15,9 @@ from ..utils.collection_utils import CollectionUtils, CollectionColor
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
-from ..common.ssmt_import_helper import SSMTImportHelper
+from ..common.mmt_import_helper import MMTImportHelper
 from ..games.gimi.material import GIMIHighFidelityMaterial
-from ..workspace.ssmt_workspace import SSMTWorkSpace, WorkSpaceModel
+from ..workspace.mmt_workspace import MMTWorkSpace, WorkSpaceModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..i18n.i18n import I18nOperator, tr
 from math import pi
@@ -415,7 +415,7 @@ def ImprotFromWorkSpaceFull(self, context):
     ws_model = WorkSpaceModel()
 
     # First create the collection named after the current workspace and link it to the scene, ensuring it exists
-    workspace_collection = SSMTWorkSpace.create_and_get_workspace_collection()
+    workspace_collection = MMTWorkSpace.create_and_get_workspace_collection()
 
     if not ws_model.lod_components:
         self.report({'ERROR'}, tr("No LOD directories (LOD0, LOD1, ...) were found in the current workspace. Please check the workspace structure."))
@@ -454,7 +454,7 @@ def ImprotFromWorkSpaceFull(self, context):
                 print("Import FolderName: " + folder_path)
 
                 # Get the ordered data-type folder path list to import from
-                final_import_folder_path_list = SSMTWorkSpace.get_ordered_gpu_cpu_import_folderpath_list(folder_path)
+                final_import_folder_path_list = MMTWorkSpace.get_ordered_gpu_cpu_import_folderpath_list(folder_path)
                 print("Final Import Folder Path List: " + str(final_import_folder_path_list))
 
                 # Now import, trying every data type of the current DrawIB
@@ -465,7 +465,7 @@ def ImprotFromWorkSpaceFull(self, context):
                         print("Attempting import path: " + import_folder_path)
 
                         json_file_path = os.path.join(import_folder_path, old_folder_name + ".json")
-                        imported_obj = SSMTImportHelper.create_mesh_from_json(
+                        imported_obj = MMTImportHelper.create_mesh_from_json(
                             json_file_path=json_file_path,
                             import_collection=lod_collection,
                         )
@@ -568,7 +568,7 @@ def ImprotFromWorkSpaceFull(self, context):
     
 
 
-class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
+class MMTImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
     bl_idname = "mimi.import_all_from_workspace"
     bl_label = "Import All From MMT Workspace"
     bl_description = "Import everything from the current workspace folder with one click."
@@ -589,7 +589,7 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
         return {'FINISHED'}
     
 
-class SSMT4ImportRaw(I18nOperator, ImportHelper):
+class MMTImportRaw(I18nOperator, ImportHelper):
     bl_idname = "mimi.import_raw"
     bl_label = "Import MMT Model"
     bl_description = "Import an MMT model file. You only need to select the .json file."
@@ -633,7 +633,7 @@ class SSMT4ImportRaw(I18nOperator, ImportHelper):
                 json_file_path = json_file_name
             else:
                 json_file_path = os.path.join(dirname, json_file_name)
-            SSMTImportHelper.create_mesh_from_json(json_file_path=json_file_path, import_collection=collection)
+            MMTImportHelper.create_mesh_from_json(json_file_path=json_file_path, import_collection=collection)
 
         CollectionUtils.deselect_collection_objects(collection)
 
@@ -670,7 +670,7 @@ def _get_or_create_workspace_collection():
         if ws_coll.name not in bpy.context.scene.collection.children:
             bpy.context.scene.collection.children.link(ws_coll)
         return ws_coll
-    return SSMTWorkSpace.create_and_get_workspace_collection()
+    return MMTWorkSpace.create_and_get_workspace_collection()
 
 
 def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_gametype_name=None):
@@ -731,7 +731,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
                     os.path.join(submesh_folder_path, "TYPE_" + force_gametype_name)
                 ]
             else:
-                final_import_folder_path_list = SSMTWorkSpace.get_ordered_gpu_cpu_import_folderpath_list(submesh_folder_path)
+                final_import_folder_path_list = MMTWorkSpace.get_ordered_gpu_cpu_import_folderpath_list(submesh_folder_path)
             print("Re-Import Folder Path List: " + str(final_import_folder_path_list))
 
             for import_folder_path in final_import_folder_path_list:
@@ -744,7 +744,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
                     print("Attempting import path: " + import_folder_path)
 
                     json_file_path = os.path.join(import_folder_path, submesh_folder_name + ".json")
-                    imported_obj = SSMTImportHelper.create_mesh_from_json(
+                    imported_obj = MMTImportHelper.create_mesh_from_json(
                         json_file_path=json_file_path,
                         import_collection=lod_collection,
                     )
@@ -901,7 +901,7 @@ def _show_last_type_warning(submesh_folder_name: str):
 # =============================================================================
 # Operator - the DrawIB data type is incorrect
 # =============================================================================
-class SSMT4FixDrawIBDataType(I18nOperator):
+class MMTFixDrawIBDataType(I18nOperator):
     bl_idname = "mimi.fix_drawib_datatype"
     bl_label = "Fix DrawIB Data Type"
     bl_description = "The DrawIB data type is incorrect: delete all matching data-type folders under this DrawIB, delete the related meshes, and re-import"
@@ -913,7 +913,7 @@ class SSMT4FixDrawIBDataType(I18nOperator):
             self.report({'ERROR'}, tr("Please select one or more objects first"))
             return {'CANCELLED'}
 
-        from ..workspace.ssmt_workspace import SSMTWorkSpace
+        from ..workspace.mmt_workspace import MMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
@@ -1027,7 +1027,7 @@ class SSMT4FixDrawIBDataType(I18nOperator):
 # =============================================================================
 # Operator - the Submesh data type is incorrect
 # =============================================================================
-class SSMT4FixSubmeshDataType(I18nOperator):
+class MMTFixSubmeshDataType(I18nOperator):
     bl_idname = "mimi.fix_submesh_datatype"
     bl_label = "Fix Submesh Data Type"
     bl_description = "The Submesh data type is incorrect: delete the matching data-type folder, delete this mesh, and re-import"
@@ -1039,7 +1039,7 @@ class SSMT4FixSubmeshDataType(I18nOperator):
             self.report({'ERROR'}, tr("Please select one or more objects first"))
             return {'CANCELLED'}
 
-        from ..workspace.ssmt_workspace import SSMTWorkSpace
+        from ..workspace.mmt_workspace import MMTWorkSpace
 
         workspace_folder = GlobalConfig.path_workspace_folder()
         if not workspace_folder or not os.path.exists(workspace_folder):
@@ -1112,14 +1112,14 @@ class SSMT4FixSubmeshDataType(I18nOperator):
 
 
 def register():
-    bpy.utils.register_class(SSMT4ImportRaw)
-    bpy.utils.register_class(SSMT4ImportAllFromCurrentWorkSpaceBlueprint)
-    bpy.utils.register_class(SSMT4FixDrawIBDataType)
-    bpy.utils.register_class(SSMT4FixSubmeshDataType)
+    bpy.utils.register_class(MMTImportRaw)
+    bpy.utils.register_class(MMTImportAllFromCurrentWorkSpaceBlueprint)
+    bpy.utils.register_class(MMTFixDrawIBDataType)
+    bpy.utils.register_class(MMTFixSubmeshDataType)
 
 
 def unregister():
-    bpy.utils.unregister_class(SSMT4ImportRaw)
-    bpy.utils.unregister_class(SSMT4ImportAllFromCurrentWorkSpaceBlueprint)
-    bpy.utils.unregister_class(SSMT4FixDrawIBDataType)
-    bpy.utils.unregister_class(SSMT4FixSubmeshDataType)
+    bpy.utils.unregister_class(MMTImportRaw)
+    bpy.utils.unregister_class(MMTImportAllFromCurrentWorkSpaceBlueprint)
+    bpy.utils.unregister_class(MMTFixDrawIBDataType)
+    bpy.utils.unregister_class(MMTFixSubmeshDataType)

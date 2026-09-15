@@ -8,7 +8,7 @@ from ..common.global_config import GlobalConfig
 from ..utils.json_utils import JsonUtils
 from ..workspace.texture_metadata_helper import TextureMetadataResolver
 from ..workspace.submesh_json import SubmeshJson
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 from ..common.buffer_export_helper import BufferExportHelper
 
 import numpy
@@ -89,7 +89,7 @@ class DrawIBModel:
         folder_name = first_submesh.submesh_name
         print("DrawIBModel: Start reading export metadata, DrawIB: " + self.draw_ib + ", submesh_name: " + folder_name)
 
-        submesh_json = SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(folder_name))
+        submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(folder_name))
         self.import_json_path = submesh_json.JsonFilePath
         self.import_json_dict = dict(submesh_json.JsonDict)
         print("DrawIBModel: SubmeshJson read: " + self.import_json_path)
@@ -113,7 +113,7 @@ class DrawIBModel:
     def load_cs_output_vertex_limit_hash(self) -> str:
         for submesh_model in self.submesh_model_list:
             try:
-                submesh_json = SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(submesh_model.submesh_name))
+                submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_model.submesh_name))
             except Exception as ex:
                 print(
                     "DrawIBModel: failed to read CSOutputVertexLimitVB, Submesh: "
@@ -285,7 +285,7 @@ class DrawIBModel:
 
     def apply_drawib_alias(self):
         '''Read the current DrawIB alias from the workspace and apply it.'''
-        alias_name = SSMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
+        alias_name = MMTWorkSpace.get_drawib_aliasname_dict().get(self.draw_ib, "").strip()
         if alias_name:
             self.draw_ib_alias = alias_name
 

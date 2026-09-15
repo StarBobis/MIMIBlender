@@ -5,7 +5,7 @@ class Fatal(Exception):
     pass
 
 
-class SSMTErrorUtils:
+class MMTErrorUtils:
 
     @staticmethod
     def raise_fatal(error_message:str):

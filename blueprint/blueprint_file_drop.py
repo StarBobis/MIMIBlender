@@ -13,7 +13,7 @@ import os
 import bpy
 
 from ..i18n.i18n import I18nOperator, tr, translatable
-from ..workspace.ssmt_workspace import WorkSpaceModel
+from ..workspace.mmt_workspace import WorkSpaceModel
 
 
 MESH_EXTENSIONS = {".ib", ".buf", ".txt"}
@@ -21,7 +21,7 @@ MESH_EXTENSIONS = {".ib", ".buf", ".txt"}
 DROP_STACK_OFFSET_Y = 60.0
 
 
-def is_ssmt_blueprint_context(context) -> bool:
+def is_mmt_blueprint_context(context) -> bool:
     '''Whether the current context is a node editor showing an MMT Blueprint.'''
     area = getattr(context, "area", None)
     if not area or area.type != 'NODE_EDITOR':
@@ -55,7 +55,7 @@ def parse_mesh_filename(filepath: str) -> str:
     return base_name
 
 
-class SSMT_OT_BlueprintFileDrop(I18nOperator):
+class MMT_OT_BlueprintFileDrop(I18nOperator):
     '''Drop files onto the MMT Blueprint, creating matching nodes at the release position'''
     bl_idname = "mimi.blueprint_file_drop"
     bl_label = "Drop Files onto the MMT Blueprint"
@@ -150,7 +150,7 @@ class SSMT_OT_BlueprintFileDrop(I18nOperator):
         return {'FINISHED'}
 
 
-classes = [SSMT_OT_BlueprintFileDrop]
+classes = [MMT_OT_BlueprintFileDrop]
 
 @translatable
 class MIMI_FH_BlueprintFileDrop(bpy.types.FileHandler):
@@ -162,7 +162,7 @@ class MIMI_FH_BlueprintFileDrop(bpy.types.FileHandler):
 
     @classmethod
     def poll_drop(cls, context):
-        return is_ssmt_blueprint_context(context)
+        return is_mmt_blueprint_context(context)
 
 classes.append(MIMI_FH_BlueprintFileDrop)
 

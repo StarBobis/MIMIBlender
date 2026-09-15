@@ -520,7 +520,7 @@ def ungroup_node(parent_tree, group_node):
 
 
 @translatable
-class SSMTBlueprintGroupNode(MIMINodeBase):
+class MMTBlueprintGroupNode(MIMINodeBase):
     bl_idname = GROUP_NODE_IDNAME
     bl_label = "Group"
     bl_icon = "NODETREE"
@@ -558,7 +558,7 @@ class SSMTBlueprintGroupNode(MIMINodeBase):
         op.node_name = self.name
 
 
-class SSMT_OT_MakeGroup(I18nOperator):
+class MMT_OT_MakeGroup(I18nOperator):
     bl_idname = "mimi.make_group"
     bl_label = "Make Group"
     bl_options = {"REGISTER", "UNDO"}
@@ -582,7 +582,7 @@ class SSMT_OT_MakeGroup(I18nOperator):
         return {"FINISHED"}
 
 
-class SSMT_OT_Ungroup(I18nOperator):
+class MMT_OT_Ungroup(I18nOperator):
     bl_idname = "mimi.ungroup"
     bl_label = "Ungroup"
     bl_options = {"REGISTER", "UNDO"}
@@ -605,7 +605,7 @@ class SSMT_OT_Ungroup(I18nOperator):
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupEnter(I18nOperator):
+class MMT_OT_GroupEnter(I18nOperator):
     bl_idname = "mimi.group_enter"
     bl_label = "Enter Group"
     bl_options = {"REGISTER", "UNDO"}
@@ -632,7 +632,7 @@ class SSMT_OT_GroupEnter(I18nOperator):
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupExit(I18nOperator):
+class MMT_OT_GroupExit(I18nOperator):
     bl_idname = "mimi.group_exit"
     bl_label = "Exit Group"
     bl_options = {"REGISTER", "UNDO"}
@@ -649,7 +649,7 @@ class SSMT_OT_GroupExit(I18nOperator):
         return {"FINISHED"}
 
 
-class SSMT_OT_GroupTab(I18nOperator):
+class MMT_OT_GroupTab(I18nOperator):
     """Navigate MMT groups with context-sensitive Tab behavior."""
     bl_idname = "mimi.group_tab"
     bl_label = "Toggle Group Navigation"
@@ -693,12 +693,12 @@ class SSMT_OT_GroupTab(I18nOperator):
 
 
 classes = (
-    SSMTBlueprintGroupNode,
-    SSMT_OT_MakeGroup,
-    SSMT_OT_Ungroup,
-    SSMT_OT_GroupEnter,
-    SSMT_OT_GroupExit,
-    SSMT_OT_GroupTab,
+    MMTBlueprintGroupNode,
+    MMT_OT_MakeGroup,
+    MMT_OT_Ungroup,
+    MMT_OT_GroupEnter,
+    MMT_OT_GroupExit,
+    MMT_OT_GroupTab,
 )
 
 

@@ -11,7 +11,7 @@ from ..common.global_config import GlobalConfig
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 
 import os
 

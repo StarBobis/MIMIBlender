@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, field
 
 from .submesh_json import SubmeshJson
-from .ssmt_workspace import SSMTWorkSpace
+from .mmt_workspace import MMTWorkSpace
 
 
 @dataclass
@@ -111,7 +111,7 @@ class TextureMetadataResolver:
         submesh_name = submesh_model.submesh_name
 
         try:
-            submesh_json = SubmeshJson(SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
+            submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
         except Exception as ex:
             print("TextureMetadataResolver: Skipping texture markup reading; failed to parse SubmeshJson: " + submesh_name + ", error: " + str(ex))
             return submesh_name, []

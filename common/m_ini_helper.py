@@ -11,7 +11,7 @@ from ..utils.json_utils import JsonUtils
 from ..utils.format_utils import Fatal
 from .global_config import GlobalConfig
 from .mimi_global_properties import MIMIGlobalProperties
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.texture_metadata_helper import TextureMetadataResolver, TextureMarkUpInfo
 
@@ -42,7 +42,7 @@ class M_IniHelper:
             d3d11_game_type = getattr(first_submesh_model, "d3d11_game_type", None)
             if submesh_name and d3d11_game_type is not None:
                 return os.path.join(
-                    SSMTWorkSpace.get_submesh_folder_path(submesh_name),
+                    MMTWorkSpace.get_submesh_folder_path(submesh_name),
                     "TYPE_" + d3d11_game_type.GameTypeName,
                     "",
                 )
@@ -70,7 +70,7 @@ class M_IniHelper:
         if d3d11_game_type is None or submesh_name == "":
             return ""
 
-        submesh_folder = SSMTWorkSpace.get_submesh_folder_path(submesh_name)
+        submesh_folder = MMTWorkSpace.get_submesh_folder_path(submesh_name)
         return os.path.join(submesh_folder, "TYPE_" + d3d11_game_type.GameTypeName, "")
 
     @classmethod
@@ -92,7 +92,7 @@ class M_IniHelper:
                 continue
 
             candidate_source_path = os.path.join(
-                SSMTWorkSpace.get_submesh_folder_path(submesh_name),
+                MMTWorkSpace.get_submesh_folder_path(submesh_name),
                 "TYPE_" + d3d11_game_type.GameTypeName,
                 texture_markup_info.mark_filename,
             )
@@ -120,7 +120,7 @@ class M_IniHelper:
             if not submesh_folder_name:
                 continue
 
-            hash_deduped_texture_info_dict = SSMTWorkSpace.get_hash_deduped_texture_info_dict(submesh_folder_name=submesh_folder_name)
+            hash_deduped_texture_info_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(submesh_folder_name=submesh_folder_name)
             deduped_texture_info = hash_deduped_texture_info_dict.get(mark_hash, None)
             if deduped_texture_info is not None:
                 print(
@@ -258,7 +258,7 @@ class M_IniHelper:
                     continue
 
                 # Read this SubMesh's hash dedupe info dict
-                hash_deduped_texture_info_dict = SSMTWorkSpace.get_hash_deduped_texture_info_dict(
+                hash_deduped_texture_info_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
                     submesh_folder_name=submesh_folder_name,
                 )
 
@@ -294,7 +294,7 @@ class M_IniHelper:
                             sm_folder = getattr(sm, "submesh_name", "")
                             if not sm_folder:
                                 continue
-                            sm_deduped_dict = SSMTWorkSpace.get_hash_deduped_texture_info_dict(
+                            sm_deduped_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
                                 submesh_folder_name=sm_folder,
                             )
                             deduped_texture_info = sm_deduped_dict.get(
@@ -388,7 +388,7 @@ class M_IniHelper:
                     print("M_IniHelper: Skipping SharedSlot texture processing, submesh_name not found, Part: " + str(part_name))
                     continue
 
-                hash_deduped_texture_info_dict = SSMTWorkSpace.get_hash_deduped_texture_info_dict(
+                hash_deduped_texture_info_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
                     submesh_folder_name=submesh_folder_name,
                 )
 
@@ -419,7 +419,7 @@ class M_IniHelper:
                                 sm_folder = getattr(sm, "submesh_name", "")
                                 if not sm_folder:
                                     continue
-                                sm_deduped_dict = SSMTWorkSpace.get_hash_deduped_texture_info_dict(
+                                sm_deduped_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
                                     submesh_folder_name=sm_folder,
                                 )
                                 deduped_texture_info = sm_deduped_dict.get(

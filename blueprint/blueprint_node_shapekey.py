@@ -11,7 +11,7 @@ class MIMIShapeKeyListItem(bpy.types.PropertyGroup):
 
 
 # Refresh shape key list
-class SSMT_OT_RefreshShapeKeyList(I18nOperator):
+class MMT_OT_RefreshShapeKeyList(I18nOperator):
     bl_idname = "mimi.refresh_shapekey_list"
     bl_label = "Refresh Shape Key List"
     bl_description = "Scans all object nodes in the blueprint and collects their shape keys"
@@ -88,7 +88,7 @@ def draw_shapekey_settings(node, layout):
 
 classes = (
     MIMIShapeKeyListItem,
-    SSMT_OT_RefreshShapeKeyList,
+    MMT_OT_RefreshShapeKeyList,
 )
 
 

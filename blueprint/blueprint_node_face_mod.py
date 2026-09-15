@@ -10,7 +10,7 @@ from bpy_extras.io_utils import ImportHelper
 from ..common.global_config import GlobalConfig, LogicName
 from ..i18n.i18n import I18nOperator, tr, translatable
 from ..utils.gimi_face_mod import FACE_VERTEX_STRIDE, FaceModPart, build_key_bytes, gimi_face_local_to_game_positions, parse_face_index_hashes, slice_face_base_buffer, write_face_mod
-from ..workspace.ssmt_workspace import SSMTWorkSpace
+from ..workspace.mmt_workspace import MMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
 from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_base import MIMINodeBase
@@ -101,7 +101,7 @@ def _build_face_part(object_node) -> FaceModPart:
     if not submesh_name:
         raise FaceModExportError(tr("Object '{name}' has no associated Submesh.").format(name=obj.name))
 
-    source_path = SSMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
+    source_path = MMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
     submesh_json = SubmeshJson(source_path)
     index_hashes = _get_workspace_face_index_hashes(submesh_json, source_path)
     if not index_hashes:
@@ -213,7 +213,7 @@ class MIMINode_Face_Mod_Export(MIMINodeBase):
         layout.prop(self, "open_folder", text=tr("Open Folder After Export"))
 
 
-class SSMT_OT_ExportFaceMod(I18nOperator):
+class MMT_OT_ExportFaceMod(I18nOperator):
     bl_idname = "mimi.export_face_mod"
     bl_label = "Export Face Mod"
     bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an MMT workspace"
@@ -235,7 +235,7 @@ class SSMT_OT_ExportFaceMod(I18nOperator):
         return generate_mod_from_output_node(tree, context, node, self.report)
 
 
-class SSMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
+class MMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
     bl_idname = "mimi.select_face_mod_export_folder"
     bl_label = "Select Face Mod Output Folder"
     bl_options = {"INTERNAL"}
@@ -263,8 +263,8 @@ class SSMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
 
 _CLASSES = (
     MIMINode_Face_Mod_Export,
-    SSMT_OT_ExportFaceMod,
-    SSMT_OT_SelectFaceModExportFolder,
+    MMT_OT_ExportFaceMod,
+    MMT_OT_SelectFaceModExportFolder,
 )
 
 

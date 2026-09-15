@@ -1,4 +1,4 @@
-from ..utils.ssmt_error_utils import SSMTErrorUtils
+from ..utils.mmt_error_utils import MMTErrorUtils
 from ..common.m_key import M_Key
 
 from dataclasses import dataclass, field
@@ -54,15 +54,15 @@ class DrawCallModel:
         self.comment_alias_name = ".".join(obj_name_total_split[1:]) if len(obj_name_total_split) > 1 else ""
 
         if "." not in self.obj_name:
-            SSMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
+            MMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
 
         obj_name_total_split = self.obj_name.split(".")
         obj_name_split = obj_name_total_split[0].split("-")
 
         if len(obj_name_total_split) < 2:
-            SSMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
+            MMTErrorUtils.raise_fatal("Object name parsing error: " + self.obj_name + "  does not contain a '.' separator\n" + objname_parse_error_tips)
         if len(obj_name_split) < 2:
-            SSMTErrorUtils.raise_fatal(
+            MMTErrorUtils.raise_fatal(
                 "Object name parsing error: " + self.obj_name + "  '-' separator count is insufficient, at least 1 is required\n" + objname_parse_error_tips
             )
 
