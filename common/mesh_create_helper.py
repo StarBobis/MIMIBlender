@@ -52,7 +52,7 @@ class MeshCreateHelper:
                 or len(local_bounding_box_min) < 3 or len(local_bounding_box_max) < 3:
             print("WARNING: quantized POSITION (" + fmt + ") but SubmeshJson has no "
                   "LocalBoundingBoxMin/Max; imported mesh keeps raw [0,1] coordinates. "
-                  "Please re-extract this model with a newer SSMT version.")
+                  "Please re-extract this model with a newer MMT version.")
             return data
 
         # VertexCompressionParams[0] acts as an extra range scale (1.0 in all

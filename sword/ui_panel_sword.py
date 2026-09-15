@@ -22,7 +22,7 @@ def _get_sword_reversed_workspace_items(self, context):
     global sword_reversed_workspace_items_cache
 
     try:
-        # MIMITools reverse panel reads MMT toolchain only, never the SSMT cache folder.
+        # MIMITools reverse panel reads MMT toolchain only, never the legacy SSMT cache folder.
         reversed_root = GlobalConfig.path_mimitools_reversed_root()
         if not reversed_root or not os.path.isdir(reversed_root):
             sword_reversed_workspace_items_cache = [
@@ -264,14 +264,14 @@ class SwordImportAllReversed(I18nOperator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def _resolve_reverse_output_folder_path(self, context):
-        # Reversed paths come from MMT settings only, no SSMT config needed.
+        # Reversed paths come from MMT settings only, no legacy SSMT config needed.
         source_mode = context.scene.mimi_sword_reverse_source_mode
         if source_mode == "SPECIFIC":
             selected_workspace_name = context.scene.mimi_sword_specific_reversed_workspace_name
             if not selected_workspace_name:
                 self.report({"ERROR"}, tr("No specific workspace selected, please select a subfolder under Reversed first"))
                 return ""
-            # MIMITools reverse panel reads MMT toolchain only, never the SSMT cache folder.
+            # MIMITools reverse panel reads MMT toolchain only, never the legacy SSMT cache folder.
             reversed_root = GlobalConfig.path_mimitools_reversed_root()
             if not reversed_root:
                 self.report({"ERROR"}, tr("MMT Reversed folder not found, please run the one-click reverse in MMT first"))
@@ -298,7 +298,7 @@ class SwordImportAllReversed(I18nOperator):
         print("Test import")
 
         # After a successful MMT reverse, the ReverseOutputFormat key is written (symmetric to ReverseOutputFolder)
-        # ib_vb_fmt goes through the old .fmt parsing import, ssmt_fmt goes through the SSMT Json import
+        # ib_vb_fmt goes through the old .fmt parsing import, ssmt_fmt goes through the MMT Json import
         # If the key cannot be found, it is treated as the ib_vb_fmt format
         reverse_output_format = GlobalConfig.reverse_output_format()
         if reverse_output_format == "ssmt_fmt":
@@ -342,7 +342,7 @@ class SwordImportAllReversed(I18nOperator):
                 datatype_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + datatype_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
                 try:
-                    # Call the SSMT format import function
+                    # Call the ssmt_fmt format import function
                     SSMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection)
                     imported_count += 1
                 except Exception as e:

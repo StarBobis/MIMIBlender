@@ -17,7 +17,7 @@ as with the WWMI COLOR1 vs TEXCOORD issue, the popular choice should be respecte
 After all, most people in this world are ordinary, and ordinary people do not want to think; the simpler the better.
 It can also be read as: if most people misunderstand a concept, the correct understanding of that concept no longer matters;
 what matters is how most people misunderstand that concept.
-What SSMT essentially is does not matter; what matters is what SSMT looks like in most people's eyes.
+What MMT essentially is does not matter; what matters is what MMT looks like in most people's eyes.
 '''
 class LogicName:
     # Popular games, kept under ongoing maintenance
@@ -103,7 +103,7 @@ class GlobalConfig:
             # never fall back to MMT / MIMITools settings here.
             main_settings = GlobalConfig._ssmt_settings()
             cls.gamename = main_settings.get("CurrentGameName", "")
-            # SSMT records the workspace name per game in CurrentWorkSpaceByGame,
+            # MMT records the workspace name per game in CurrentWorkSpaceByGame,
             # which has higher priority than the global CurrentWorkSpace.
             workspace_by_game = main_settings.get("CurrentWorkSpaceByGame", {})
             if not isinstance(workspace_by_game, dict):
@@ -403,8 +403,8 @@ class GlobalConfig:
             return MIMIGlobalProperties.generate_mod_folder_path()
         else:
             # Make sure the caller directly receives an already-existing directory
-            ssmt_generated_mod_folder_path = os.path.join(GlobalConfig.path_mods_folder(),"SSMTGeneratedMod\\")
-            generate_mod_folder_path = os.path.join(ssmt_generated_mod_folder_path, cls.get_workspace_name() + "\\")
+            mmt_generated_mod_folder_path = os.path.join(GlobalConfig.path_mods_folder(),"MMTGeneratedMod\\")
+            generate_mod_folder_path = os.path.join(mmt_generated_mod_folder_path, cls.get_workspace_name() + "\\")
             if not os.path.exists(generate_mod_folder_path):
                 os.makedirs(generate_mod_folder_path)
             return generate_mod_folder_path

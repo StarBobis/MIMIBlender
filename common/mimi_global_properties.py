@@ -45,7 +45,7 @@ def _get_workspace_source_mode_items(self, context):
     # Dynamic items callback so the dropdown entries follow the UI language.
     # Only the display name/description are translated; identifiers stay fixed.
     return [
-        ("SYNC", tr("Sync with SSMT Option"), tr("Use the workspace currently synced in the SSMT configuration file")),
+        ("SYNC", tr("Sync with MMT Option"), tr("Use the workspace currently synced in the MMT configuration file")),
         ("SPECIFIC", tr("Use Specified Workspace"), tr("Manually select from the workspace list of the current game configuration")),
         ("CUSTOM", tr("Use Custom Folder"), tr("Directly use the workspace folder you specified")),
     ]

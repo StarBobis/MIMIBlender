@@ -136,7 +136,7 @@ class ObjBufferHelper:
             SSMTErrorUtils.raise_fatal(
                 "POSITION format " + fmt + " is quantized and requires "
                 "LocalBoundingBoxMin/Max in the SubmeshJson, but they are missing. "
-                "Please re-extract this model with a newer SSMT version."
+                "Please re-extract this model with a newer MMT version."
             )
 
         # Mirror of the import-side scale handling in

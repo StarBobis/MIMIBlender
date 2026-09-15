@@ -1,4 +1,4 @@
-"""Blueprint node that exports a GIMI face morph mod from SSMT workspace data."""
+"""Blueprint node that exports a GIMI face morph mod from MMT workspace data."""
 from __future__ import annotations
 
 import os
@@ -84,7 +84,7 @@ def _get_workspace_face_index_hashes(submesh_json: SubmeshJson, source_path: str
         if hashes:
             return hashes
 
-    # SSMT's canonical SubMesh folder is ``{DrawIB}-{indexCount}-{firstIndex}``.
+    # MMT's canonical SubMesh folder is ``{DrawIB}-{indexCount}-{firstIndex}``.
     # It is workspace-derived metadata, not a game-specific fallback constant.
     submesh_folder = os.path.basename(os.path.dirname(os.path.dirname(source_path)))
     return parse_face_index_hashes(submesh_folder.split("-", 1)[0])
@@ -95,7 +95,7 @@ def _build_face_part(object_node) -> FaceModPart:
     if obj is None:
         raise FaceModExportError(tr("Object node '{name}' has no usable Blender object.").format(name=object_node.name))
 
-    # SSMT4 will eventually provide face-model classification metadata.  Use
+    # MMT will eventually provide face-model classification metadata.  Use
     # it here to validate or automatically select compatible face submeshes.
     submesh_name = object_node._get_effective_parse_name()
     if not submesh_name:
@@ -216,7 +216,7 @@ class MIMINode_Face_Mod_Export(MIMINodeBase):
 class SSMT_OT_ExportFaceMod(I18nOperator):
     bl_idname = "mimi.export_face_mod"
     bl_label = "Export Face Mod"
-    bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an SSMT workspace"
+    bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an MMT workspace"
     bl_options = {"REGISTER"}
 
     node_name: bpy.props.StringProperty()  # type: ignore

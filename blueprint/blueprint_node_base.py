@@ -1,5 +1,5 @@
 '''
-Base nodes used to build the SSMT blueprint architecture.
+Base nodes used to build the MMT blueprint architecture.
 Each node type lives in its own py file
 so the code is easy to read and understand.
 '''
@@ -33,9 +33,9 @@ class MIMISocketObject(NodeSocket):
 
 @translatable
 class MIMIBlueprintTree(NodeTree):
-    '''SSMT Mod Logic Blueprint'''
+    '''MMT Mod Logic Blueprint'''
     bl_idname = 'MIMIBlueprintTreeType'
-    bl_label = 'SSMT Blueprint'
+    bl_label = 'MMT Blueprint'
     bl_icon = 'NODETREE'
 
 
@@ -329,11 +329,11 @@ class MIMIPT_FrameProperties(bpy.types.Panel):
     bl_label = "Frame Properties"
     bl_space_type = 'NODE_EDITOR'
     bl_region_type = 'UI'
-    bl_category = "SSMT"
+    bl_category = "MMT"
 
     @classmethod
     def poll(cls, context):
-        # Show only inside an SSMT blueprint tree
+        # Show only inside an MMT blueprint tree
         space = context.space_data
         if space.type != 'NODE_EDITOR':
             return False

@@ -262,7 +262,7 @@ def _clone_node(source, target_tree):
     target.location = source.location
     target["ssmt_uuid"] = uuid.uuid4().hex
 
-    # Dynamic SSMT nodes need their collections/socket count established first.
+    # Dynamic MMT nodes need their collections/socket count established first.
     if len(getattr(source, "inputs", ())) > len(getattr(target, "inputs", ())):
         for sock in list(source.inputs)[len(target.inputs):]:
             try:
@@ -344,7 +344,7 @@ def sync_group_node_sockets(group_node):
 def make_group_from_selection(context, group_name="Group"):
     parent_tree = _tree_from_context(context)
     if parent_tree is None or parent_tree.bl_idname != TREE_IDNAME:
-        raise GroupingError(tr("The current tree is not an editable SSMT blueprint tree"))
+        raise GroupingError(tr("The current tree is not an editable MMT blueprint tree"))
     selected = _expand_frame_selection(node for node in parent_tree.nodes if node.select)
     if not selected:
         raise GroupingError(tr("No nodes are selected"))
@@ -650,7 +650,7 @@ class SSMT_OT_GroupExit(I18nOperator):
 
 
 class SSMT_OT_GroupTab(I18nOperator):
-    """Navigate SSMT groups with context-sensitive Tab behavior."""
+    """Navigate MMT groups with context-sensitive Tab behavior."""
     bl_idname = "mimi.group_tab"
     bl_label = "Toggle Group Navigation"
 

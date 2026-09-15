@@ -62,7 +62,7 @@ class ExportZZMI(StandardExporter):
             category_slot = d3d11_game_type.CategoryExtractSlotDict[category_name]
 
             # now almost all ZZMI game type's Position category use Blend as it's draw category
-            # so we need to update SSMT's game type to let Blend become draw category so here can be matched.
+            # so we need to update MMT's game type to let Blend become draw category so here can be matched.
             # or we have a more simple solution, we just use Blend as draw category
             # and ignore the gametype's defenition, because most of the time the draw category will not change
 

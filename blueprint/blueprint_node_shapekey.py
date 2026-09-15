@@ -30,7 +30,7 @@ class SSMT_OT_RefreshShapeKeyList(I18nOperator):
     def execute(self, context):
         tree = context.space_data.edit_tree
         if not tree or getattr(tree, 'bl_idname', '') != 'MIMIBlueprintTreeType':
-            self.report({'WARNING'}, tr("Please run this inside the SSMT blueprint editor"))
+            self.report({'WARNING'}, tr("Please run this inside the MMT blueprint editor"))
             return {'CANCELLED'}
 
         output_node = None

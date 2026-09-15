@@ -88,7 +88,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def reveal_tree_in_node_editors(context, tree):
-        '''Switch every open SSMT Blueprint node editor to the specified blueprint tree.'''
+        '''Switch every open MMT Blueprint node editor to the specified blueprint tree.'''
         if not BlueprintExportHelper._is_valid_blueprint_tree(tree):
             return
 
@@ -144,7 +144,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def _bind_workspace_tree_to_space(space):
-        """Bind the workspace blueprint of the same name when an area has just switched to the SSMT tree type."""
+        """Bind the workspace blueprint of the same name when an area has just switched to the MMT tree type."""
         if getattr(space, "tree_type", "") != 'MIMIBlueprintTreeType':
             return None
         workspace_name = str(GlobalConfig.get_workspace_name() or "").strip()
@@ -160,7 +160,7 @@ class BlueprintExportHelper:
 
     @staticmethod
     def _sync_workspace_tree_timer():
-        """Bind the workspace blueprint only once, when an area switches to the SSMT Blueprint type."""
+        """Bind the workspace blueprint only once, when an area switches to the MMT Blueprint type."""
         current_tree_type_by_space = {}
         for window in getattr(bpy.context.window_manager, "windows", []):
             for area in getattr(window.screen, "areas", []):

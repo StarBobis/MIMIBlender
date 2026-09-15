@@ -32,7 +32,7 @@ _NECK_ANCHOR_SEARCH_RADIUS = 0.06
 
 
 def _read_submesh_role(json_path: str) -> str:
-    """Read the SSMT role contract; absent/unknown values are unmarked."""
+    """Read the SSMT:SubMeshRole contract; absent/unknown values are unmarked."""
     try:
         data = JsonUtils.LoadFromFile(json_path)
     except Exception:
@@ -63,7 +63,7 @@ def _get_eye_diffuse_paths(json_path: str) -> list[str]:
 
 
 def _get_face_shader_metadata(json_path: str) -> tuple[list[str], str, str, str | None]:
-    """Read SSMT4's face texture roles from the target JSON metadata."""
+    """Read MMT's face texture roles from the target JSON metadata."""
     diffuse_paths = _get_eye_diffuse_paths(json_path)
     try:
         data = JsonUtils.LoadFromFile(json_path)
@@ -174,7 +174,7 @@ def _apply_face_neck_object_alignment(imported_objects: dict) -> bool:
 def _extract_texture_marks(submesh_json: dict) -> list:
     """Extract the texture mark list from a Submesh JSON.
 
-    SSMT4 uses the flat TextureMarkUpInfoList;
+    MMT uses the flat TextureMarkUpInfoList;
     some older data only has the per-component ComponentTextureMarkUpInfoListDict,
     in which case the marks of every component are flattened and returned
     (identical hashes are deduplicated later).
@@ -570,7 +570,7 @@ def ImprotFromWorkSpaceFull(self, context):
 
 class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
     bl_idname = "mimi.import_all_from_workspace"
-    bl_label = "Import All From SSMT Workspace"
+    bl_label = "Import All From MMT Workspace"
     bl_description = "Import everything from the current workspace folder with one click."
     bl_options = {'REGISTER','UNDO'}
 
@@ -578,9 +578,9 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
         # print("Current WorkSpace: " + GlobalConfig.get_workspace_name())
         # print("Current Game: " + GlobalConfig.gamename)
         if GlobalConfig.get_workspace_name() == "":
-            self.report({"ERROR"}, tr("Please select the current workspace in SSMT before importing."))
+            self.report({"ERROR"}, tr("Please select the current workspace in MMT before importing."))
         elif not os.path.exists(GlobalConfig.path_workspace_folder()):
-            self.report({"ERROR"}, tr("Workspace folder does not exist. Please create a workspace in SSMT first: {path}").format(path=GlobalConfig.path_workspace_folder()))
+            self.report({"ERROR"}, tr("Workspace folder does not exist. Please create a workspace in MMT first: {path}").format(path=GlobalConfig.path_workspace_folder()))
         else:
             TimerUtils.Start("ImportFromWorkSpaceBlueprint")
             ImprotFromWorkSpaceFull(self, context)
@@ -591,8 +591,8 @@ class SSMT4ImportAllFromCurrentWorkSpaceBlueprint(I18nOperator):
 
 class SSMT4ImportRaw(I18nOperator, ImportHelper):
     bl_idname = "mimi.import_raw"
-    bl_label = "Import SSMT Model"
-    bl_description = "Import an SSMT model file. You only need to select the .json file."
+    bl_label = "Import MMT Model"
+    bl_description = "Import an MMT model file. You only need to select the .json file."
     bl_options = {'REGISTER','UNDO'}
 
     filter_glob: bpy.props.StringProperty(
@@ -677,7 +677,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
     '''
     Import only the given list of submeshes.
     submesh_lod_info_list: [(lod_name, submesh_folder_path), ...]
-    e.g. [("LOD0", "D:/SSMTCacheFolder/WorkSpace/GF2/Default/LOD0/3ed2b2ba-2592-76086"), ...]
+    e.g. [("LOD0", "D:/MMTCacheFolder/WorkSpace/GF2/Default/LOD0/3ed2b2ba-2592-76086"), ...]
     force_gametype_name: when given (e.g. "CPU_P12_N12_TA16_C16_T4_"),
       forces every submesh to try only that data type (used for the DrawIB
       unified data-type scenario).
@@ -809,7 +809,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         print(f"Existing blueprint '{tree_name}' not found; skipping the blueprint update")
         return
     if not BlueprintExportHelper._is_valid_blueprint_tree(tree):
-        print(f"Existing node group '{tree_name}' is not a valid SSMT blueprint; skipping")
+        print(f"Existing node group '{tree_name}' is not a valid MMT blueprint; skipping")
         return
 
     try:
@@ -893,7 +893,7 @@ def _show_last_type_warning(submesh_folder_name: str):
             text=tr("Submesh '{name}' is down to its last data-type folder;").format(name=submesh_folder_name)
         )
         self.layout.label(
-            text=tr("That type cannot be deleted. If no correct data type exists, contact the SSMT developer to add one.")
+            text=tr("That type cannot be deleted. If no correct data type exists, contact the MMT developer to add one.")
         )
     bpy.context.window_manager.popup_menu(draw_popup, title=tr("Warning"), icon='ERROR')
 

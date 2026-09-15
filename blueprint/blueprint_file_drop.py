@@ -22,7 +22,7 @@ DROP_STACK_OFFSET_Y = 60.0
 
 
 def is_ssmt_blueprint_context(context) -> bool:
-    '''Whether the current context is a node editor showing an SSMT Blueprint.'''
+    '''Whether the current context is a node editor showing an MMT Blueprint.'''
     area = getattr(context, "area", None)
     if not area or area.type != 'NODE_EDITOR':
         return False
@@ -56,9 +56,9 @@ def parse_mesh_filename(filepath: str) -> str:
 
 
 class SSMT_OT_BlueprintFileDrop(I18nOperator):
-    '''Drop files onto the SSMT Blueprint, creating matching nodes at the release position'''
+    '''Drop files onto the MMT Blueprint, creating matching nodes at the release position'''
     bl_idname = "mimi.blueprint_file_drop"
-    bl_label = "Drop Files onto the SSMT Blueprint"
+    bl_label = "Drop Files onto the MMT Blueprint"
     bl_options = {'UNDO'}
 
     # FileHandler writes a single file into filepath; to receive multiple files,
@@ -154,9 +154,9 @@ classes = [SSMT_OT_BlueprintFileDrop]
 
 @translatable
 class MIMI_FH_BlueprintFileDrop(bpy.types.FileHandler):
-    '''Handle files dropped from the OS into the SSMT Blueprint editor'''
+    '''Handle files dropped from the OS into the MMT Blueprint editor'''
     bl_idname = "MIMI_FH_BlueprintFileDrop"
-    bl_label = "Drop Files onto the SSMT Blueprint"
+    bl_label = "Drop Files onto the MMT Blueprint"
     bl_import_operator = "mimi.blueprint_file_drop"
     bl_file_extensions = ".ib;.buf;.txt"
 

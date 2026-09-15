@@ -20,15 +20,30 @@ class GIMIHighFidelityMaterial:
     separate builders and use the same small importer dispatch point.
     """
 
-    GROUP_PREFIX = "SSMT GIMI v12 "
+    GROUP_PREFIX = "MMT GIMI v12 "
     SHADER_SCHEMA_VERSION = 12
-    PREVIEW_COLLECTION_NAME = "SSMT GIMI Preview"
-    VIRTUAL_SUN_NAME = "SSMT GIMI Virtual Sun"
-    PREVIEW_CAMERA_NAME = "SSMT GIMI Preview Camera"
+    PREVIEW_COLLECTION_NAME = "MMT GIMI Preview"
+    VIRTUAL_SUN_NAME = "MMT GIMI Virtual Sun"
+    PREVIEW_CAMERA_NAME = "MMT GIMI Preview Camera"
+    # Pre-rename (SSMT-era) data names; old .blend files still hold these, so
+    # every get-or-create lookup below migrates them to the new name first.
+    LEGACY_GROUP_PREFIX = "SSMT GIMI v12 "
+    LEGACY_PREVIEW_COLLECTION_NAME = "SSMT GIMI Preview"
+    LEGACY_VIRTUAL_SUN_NAME = "SSMT GIMI Virtual Sun"
+    LEGACY_PREVIEW_CAMERA_NAME = "SSMT GIMI Preview Camera"
+
+    @staticmethod
+    def _rename_legacy_data(data_collection, new_name: str, legacy_name: str) -> None:
+        """Rename SSMT-era Blender data to its MMT name when the new name is free."""
+        if data_collection.get(new_name) is not None:
+            return
+        legacy_data = data_collection.get(legacy_name)
+        if legacy_data is not None:
+            legacy_data.name = new_name
 
     @staticmethod
     def is_genshin_workspace(logic_name: str | None = None, game_name: str | None = None) -> bool:
-        """Accept both the SSMT preset and the two common workspace labels."""
+        """Accept both the MMT preset and the two common workspace labels."""
         logic_name = str(logic_name if logic_name is not None else GlobalConfig.logic_name).strip()
         game_name = str(game_name if game_name is not None else GlobalConfig.gamename).strip()
         normalized_game_name = game_name.casefold().replace(" ", "").replace("_", "")
@@ -60,6 +75,11 @@ class GIMIHighFidelityMaterial:
     def _ensure_preview_objects(cls):
         """Create reusable scene helpers required by the virtual-light shader."""
         scene = bpy.context.scene
+        # Migrate SSMT-era names before the get-or-create lookups below.
+        cls._rename_legacy_data(bpy.data.collections, cls.PREVIEW_COLLECTION_NAME, cls.LEGACY_PREVIEW_COLLECTION_NAME)
+        cls._rename_legacy_data(bpy.data.objects, cls.VIRTUAL_SUN_NAME, cls.LEGACY_VIRTUAL_SUN_NAME)
+        cls._rename_legacy_data(bpy.data.cameras, cls.PREVIEW_CAMERA_NAME, cls.LEGACY_PREVIEW_CAMERA_NAME)
+        cls._rename_legacy_data(bpy.data.objects, cls.PREVIEW_CAMERA_NAME, cls.LEGACY_PREVIEW_CAMERA_NAME)
         collection = bpy.data.collections.get(cls.PREVIEW_COLLECTION_NAME)
         if collection is None:
             collection = bpy.data.collections.new(cls.PREVIEW_COLLECTION_NAME)
@@ -96,6 +116,7 @@ class GIMIHighFidelityMaterial:
     @classmethod
     def _bind_virtual_sun_drivers(cls, group):
         """Bind every virtual-sun group input to the scene helper object."""
+        cls._rename_legacy_data(bpy.data.objects, cls.VIRTUAL_SUN_NAME, cls.LEGACY_VIRTUAL_SUN_NAME)
         light_object = bpy.data.objects.get(cls.VIRTUAL_SUN_NAME)
         if light_object is None:
             return
@@ -130,7 +151,7 @@ class GIMIHighFidelityMaterial:
         scene.use_nodes = True
         tree = getattr(scene, 'compositing_node_group', None)
         if tree is None:
-            tree = bpy.data.node_groups.new('SSMT GIMI Preview Compositor', 'CompositorNodeTree')
+            tree = bpy.data.node_groups.new('MMT GIMI Preview Compositor', 'CompositorNodeTree')
             scene.compositing_node_group = tree
 
         nodes, links = tree.nodes, tree.links
@@ -208,6 +229,8 @@ class GIMIHighFidelityMaterial:
     @classmethod
     def _group(cls, suffix: str, inputs: list[tuple[str, str]], outputs: list[tuple[str, str]]):
         name = cls.GROUP_PREFIX + suffix
+        # Reuse SSMT-era groups from old .blend files instead of duplicating them.
+        cls._rename_legacy_data(bpy.data.node_groups, name, cls.LEGACY_GROUP_PREFIX + suffix)
         group = bpy.data.node_groups.get(name)
         if group is not None:
             return group
@@ -808,6 +831,9 @@ class GIMIHighFidelityMaterial:
 
     @classmethod
     def _default_lookup_image(cls, name: str, color: tuple[float, float, float, float]):
+        # These names are built from GROUP_PREFIX, so apply the same migration.
+        if name.startswith(cls.GROUP_PREFIX):
+            cls._rename_legacy_data(bpy.data.images, name, cls.LEGACY_GROUP_PREFIX + name[len(cls.GROUP_PREFIX):])
         image = bpy.data.images.get(name)
         if image is None:
             image = bpy.data.images.new(name, width=1, height=1, alpha=True, float_buffer=False)
@@ -825,7 +851,7 @@ class GIMIHighFidelityMaterial:
 
     @classmethod
     def configure_eye_alpha_emission(cls, material, diffuse_paths: list[str]) -> bool:
-        """Build SSMT4's eye pass: base + channel-packed-alpha diffuse overlays."""
+        """Build MMT's eye pass: base + channel-packed-alpha diffuse overlays."""
         if material is None or not diffuse_paths:
             return False
         material.use_nodes = True
@@ -837,7 +863,7 @@ class GIMIHighFidelityMaterial:
         uv.uv_map = 'TEXCOORD.xy'
         uv.location = (-1000, 0)
         diffuse_color = None
-        # SSMT4 exposes four authored diffuse-layer uniforms.  Do not silently
+        # MMT exposes four authored diffuse-layer uniforms.  Do not silently
         # reinterpret later layers with a different blend equation.
         for index, path in enumerate(diffuse_paths[:4]):
             texture = cls._make_image_node(nodes, path, f'Eye DiffuseMap{index}', (-780, -index * 260))
@@ -860,7 +886,7 @@ class GIMIHighFidelityMaterial:
 
             overlay = nodes.new('ShaderNodeMixRGB')
             overlay.name = f'Eye DiffuseMap{index} Source Over'
-            overlay.label = 'SSMT4 overlay alpha coverage'
+            overlay.label = 'MMT overlay alpha coverage'
             overlay.blend_type = 'MIX'
             overlay.location = (-300, -index * 260)
             links.new(texture.outputs['Alpha'], overlay.inputs[0])
@@ -874,14 +900,14 @@ class GIMIHighFidelityMaterial:
         output.location = (300, 0)
         try:
             emission = nodes.new('ShaderNodeEmission')
-            emission.name = 'SSMT4 Eye Unlit Output'
+            emission.name = 'MMT Eye Unlit Output'
             emission.location = (60, 0)
             emission.inputs['Strength'].default_value = 1.0
             links.new(diffuse_color, emission.inputs['Color'])
             links.new(emission.outputs['Emission'], output.inputs['Surface'])
         except RuntimeError:
             emission = nodes.new('ShaderNodeBsdfPrincipled')
-            emission.name = 'SSMT4 Eye Unlit Output'
+            emission.name = 'MMT Eye Unlit Output'
             emission.location = (60, 0)
             emission.inputs['Base Color'].default_value = (0.0, 0.0, 0.0, 1.0)
             emission.inputs['Emission Strength'].default_value = 1.0
@@ -897,7 +923,7 @@ class GIMIHighFidelityMaterial:
     def configure_face_sdf_material(
         cls, material, diffuse_paths: list[str], face_sdf_path: str, face_sdf_channel: str = 'R', face_shadow_path: str | None = None,
     ) -> bool:
-        """Build SSMT4's FaceSDF unlit pass (separate from Body/Clothes)."""
+        """Build MMT's FaceSDF unlit pass (separate from Body/Clothes)."""
         if material is None or not diffuse_paths or not face_sdf_path:
             return False
         material.use_nodes = True
@@ -940,7 +966,7 @@ class GIMIHighFidelityMaterial:
             if diffuse_color is None:
                 diffuse_color = texture.outputs['Color']
                 continue
-            # SSMT4: map 0 is the base; later DiffuseMaps are straight-alpha overlays.
+            # MMT: map 0 is the base; later DiffuseMaps are straight-alpha overlays.
             overlay = nodes.new('ShaderNodeMixRGB')
             overlay.name = f'Face DiffuseMap{index} Source Over'
             overlay.label = 'Overlay Alpha coverage'
@@ -969,7 +995,7 @@ class GIMIHighFidelityMaterial:
             return False
         # Face shadows use the virtual sun projected onto the face X/Y plane.
         # In that plane Z rotation is the horizontal azimuth: (sin(z), cos(z)).
-        # This is the same front/side split that SSMT4 feeds to FaceSDF.
+        # This is the same front/side split that MMT feeds to FaceSDF.
         face_front = nodes.new('ShaderNodeValue')
         face_front.name = 'Face Light Front Dot'
         face_front.label = 'Virtual Sun · Face Forward'
@@ -1021,7 +1047,7 @@ class GIMIHighFidelityMaterial:
             links.new(sdf.outputs['Color'], separate.inputs['Color'])
             sdf_value = separate.outputs[{'R': 'Red', 'G': 'Green', 'B': 'Blue'}.get(channel, 'Red')]
 
-        # threshold = saturate(0.5 - 0.5 * frontDot), exactly as SSMT4.
+        # threshold = saturate(0.5 - 0.5 * frontDot), exactly as MMT.
         threshold = nodes.new('ShaderNodeMath')
         threshold.name = 'FaceSDF Shadow Threshold'
         threshold.label = '0.5 - 0.5 × Face Forward'
@@ -1086,14 +1112,14 @@ class GIMIHighFidelityMaterial:
         output.location = (600, 40)
         try:
             emission = nodes.new('ShaderNodeEmission')
-            emission.name = 'SSMT Face Unlit Output'
+            emission.name = 'MMT Face Unlit Output'
             emission.location = (390, 40)
             emission.inputs['Strength'].default_value = 1.0
             links.new(final_color, emission.inputs['Color'])
             links.new(emission.outputs['Emission'], output.inputs['Surface'])
         except RuntimeError:
             emission = nodes.new('ShaderNodeBsdfPrincipled')
-            emission.name = 'SSMT Face Unlit Output'
+            emission.name = 'MMT Face Unlit Output'
             emission.location = (390, 40)
             emission.inputs['Emission Strength'].default_value = 1.0
             links.new(final_color, emission.inputs['Emission Color'])
@@ -1188,7 +1214,7 @@ class GIMIHighFidelityMaterial:
             links.new(uv_map.outputs['UV'], texture.inputs['Vector'])
         coordinates = nodes.new('ShaderNodeGroup')
         coordinates.name = 'GIMI Shared Coordinates'
-        coordinates.label = 'SSMT GIMI v12 NTclothes Coordinates'
+        coordinates.label = 'MMT GIMI v12 NTclothes Coordinates'
         coordinates.node_tree = cls._body_coordinates_group()
         coordinates.location = (-700, -220)
         links.new(normal.outputs['Color'], coordinates.inputs['Normal Color'])
@@ -1196,7 +1222,7 @@ class GIMIHighFidelityMaterial:
 
         master = nodes.new('ShaderNodeGroup')
         master.name = 'GIMI Body/Clothes Shared Shader'
-        master.label = 'SSMT GIMI v12 NTclothes Body Master'
+        master.label = 'MMT GIMI v12 NTclothes Body Master'
         master.node_tree = cls._body_shader_group()
         master.location = (-450, 80)
         links.new(diffuse.outputs['Color'], master.inputs['Diffuse Color'])

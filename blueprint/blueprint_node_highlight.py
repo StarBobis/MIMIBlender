@@ -1,4 +1,4 @@
-"""Synchronize SSMT blueprint Object Info node colors with Blender selection state."""
+"""Synchronize MMT blueprint Object Info node colors with Blender selection state."""
 
 import bpy
 
@@ -128,7 +128,7 @@ def _highlight_timer():
     except Exception as error:
         # The timer must never disrupt Blender interaction. Registration can
         # briefly expose restricted bpy data, which is retried on the next tick.
-        print(f"[SSMT Node Highlight] {error}")
+        print(f"[MMT Node Highlight] {error}")
     return 0.2
 
 

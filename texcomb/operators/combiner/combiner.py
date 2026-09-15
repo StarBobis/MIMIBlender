@@ -240,14 +240,14 @@ class Combiner(I18nOperator):
             return
 
         for message in new_diagnostics[:5]:
-            print("SSMT TextureCombiner:", message)
+            print("MMT TextureCombiner:", message)
             self.report({"WARNING"}, message)
             reported.add(message)
 
         remaining = len(new_diagnostics) - 5
         if remaining > 0:
             print(
-                "SSMT TextureCombiner: {} more material diagnostics hidden".format(
+                "MMT TextureCombiner: {} more material diagnostics hidden".format(
                     remaining
                 )
             )

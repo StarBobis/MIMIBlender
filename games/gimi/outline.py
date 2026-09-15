@@ -12,12 +12,25 @@ class OutlineError(RuntimeError):
 
 class GIMIBodyOutline:
     SCHEMA_VERSION = 1
-    MODIFIER_NAME = "SSMT GIMI Body Outline"
-    MATERIAL_NAME = "SSMT GIMI Outline Black v1"
+    MODIFIER_NAME = "MMT GIMI Body Outline"
+    MATERIAL_NAME = "MMT GIMI Outline Black v1"
+    # Pre-rename (SSMT-era) data names; old .blend files still hold these, so
+    # every lookup below migrates them to the new name first.
+    LEGACY_MODIFIER_NAME = "SSMT GIMI Body Outline"
+    LEGACY_MATERIAL_NAME = "SSMT GIMI Outline Black v1"
     PROP_MANAGED = "SSMT:BodyOutlineManaged"
     PROP_SCHEMA_VERSION = "SSMT:BodyOutlineSchemaVersion"
     PROP_BASE_MATERIAL_COUNT = "SSMT:BodyOutlineBaseMaterialCount"
     PROP_SLOT_COUNT = "SSMT:BodyOutlineSlotCount"
+
+    @staticmethod
+    def _rename_legacy_data(data_collection, new_name: str, legacy_name: str) -> None:
+        """Rename SSMT-era Blender data to its MMT name when the new name is free."""
+        if data_collection.get(new_name) is not None:
+            return
+        legacy_data = data_collection.get(legacy_name)
+        if legacy_data is not None:
+            legacy_data.name = new_name
 
     @classmethod
     def ensure(
@@ -42,6 +55,8 @@ class GIMIBodyOutline:
 
         original_slots = list(obj.data.materials)
         original_props = dict(obj.items())
+        # Migrate the SSMT-era modifier name so old .blend files keep working.
+        cls._rename_legacy_data(obj.modifiers, cls.MODIFIER_NAME, cls.LEGACY_MODIFIER_NAME)
         modifier = obj.modifiers.get(cls.MODIFIER_NAME)
         modifier_existed = modifier is not None
         modifier_state = cls._modifier_state(modifier) if modifier else None
@@ -97,6 +112,9 @@ class GIMIBodyOutline:
     @classmethod
     def remove(cls, obj) -> None:
         cls._validate_object(obj)
+        # Migrate the SSMT-era names so removal also finds old modifiers/materials.
+        cls._rename_legacy_data(obj.modifiers, cls.MODIFIER_NAME, cls.LEGACY_MODIFIER_NAME)
+        cls._rename_legacy_data(bpy.data.materials, cls.MATERIAL_NAME, cls.LEGACY_MATERIAL_NAME)
         modifier = obj.modifiers.get(cls.MODIFIER_NAME)
         if modifier is not None:
             if modifier.type != "SOLIDIFY":
@@ -116,6 +134,8 @@ class GIMIBodyOutline:
 
     @classmethod
     def _ensure_outline_material(cls):
+        # Migrate the SSMT-era material name so old .blend files keep working.
+        cls._rename_legacy_data(bpy.data.materials, cls.MATERIAL_NAME, cls.LEGACY_MATERIAL_NAME)
         material = bpy.data.materials.get(cls.MATERIAL_NAME)
         if material is None:
             material = bpy.data.materials.new(cls.MATERIAL_NAME)

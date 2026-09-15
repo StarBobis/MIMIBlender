@@ -281,7 +281,7 @@ class BluePrintModel:
             return
 
     def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):
-        """Expand an SSMT group through its Group Output nodes."""
+        """Expand an MMT group through its Group Output nodes."""
         group_tree = getattr(group_node, "node_tree", None)
         if group_tree is None:
             return

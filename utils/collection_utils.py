@@ -202,7 +202,7 @@ class CollectionUtils:
                 "The selected collection's name is not the workspace collection name. Please check whether you selected the workspace collection correctly.\nSelected collection name: " 
                 + clean_workspace_collection_name  + "\n"
                 + "A valid workspace collection should use the current workspace name " + GlobalConfig.get_workspace_name() + " as its name prefix" + "\n"
-                + "1.The workspace collection is the red, workspace-named collection obtained from the one-click import after extracting a model in the SSMT workbench" + "\n"
+                + "1.The workspace collection is the red, workspace-named collection obtained from the one-click import after extracting a model in the MMT workbench" + "\n"
                 + "2.The workspace collection's color is fixed to red; please check whether you selected the wrong one" + "\n"
                 + "3.You must manually select the workspace collection so the system knows which collection's contents you want to generate a Mod for"
             )

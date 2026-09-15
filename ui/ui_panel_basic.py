@@ -61,7 +61,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         # action buttons below. Operators/import callbacks remain responsible
         # for persisting an explicit selection.
 
-        layout.label(text=tr("SSMT Cache Folder: ") + GlobalConfig.ssmtlocation)
+        layout.label(text=tr("MMT Cache Folder: ") + GlobalConfig.ssmtlocation)
         layout.label(text=tr("Current Config Name: ") + GlobalConfig.gamename)
         layout.label(text=tr("Current Game Preset: ") + GlobalConfig.logic_name)
         layout.label(text=tr("Current Workspace: ") + GlobalConfig.get_workspace_name())
@@ -91,14 +91,14 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
             layout.label(text=tr("Recalculate TANGENT: ") + str(recalculate_tangent))
             layout.label(text=tr("Recalculate COLOR: ") + str(recalculate_color))
 
-        # Manually import an SSMT model
+        # Manually import an MMT model
         layout.operator(SSMT4ImportRaw.bl_idname, text=tr(SSMT4ImportRaw.bl_label), icon='IMPORT')
-        # One-click import of the current SSMT workspace contents
+        # One-click import of the current MMT workspace contents
         layout.operator(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_idname, text=tr(SSMT4ImportAllFromCurrentWorkSpaceBlueprint.bl_label), icon='IMPORT')
-        
-        # SSMT blueprint dropdown list
+
+        # MMT blueprint dropdown list
         blueprint_row = layout.row(align=True)
-        blueprint_row.prop(mimi_global_properties, "selected_blueprint_name", text=tr("SSMT Blueprint"))
+        blueprint_row.prop(mimi_global_properties, "selected_blueprint_name", text=tr("MMT Blueprint"))
 
         rename_blueprint_operator = blueprint_row.operator(
             "mimi.rename_persistent_blueprint",

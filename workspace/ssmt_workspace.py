@@ -691,7 +691,7 @@ class SSMTWorkSpace:
             if drawib_aliasname_dict:
                 return drawib_aliasname_dict
 
-        # Strategy 2: read from Config\\Tabs\\*.json (SSMT4 new format)
+        # Strategy 2: read from Config\\Tabs\\*.json (MMT new format)
         tabs_dir = os.path.join(workspace_folder, "Config", "Tabs")
         if os.path.isdir(tabs_dir):
             for filename in os.listdir(tabs_dir):

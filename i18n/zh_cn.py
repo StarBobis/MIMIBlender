@@ -10,7 +10,7 @@ Rules for editing this file:
   load it with plain Python.
 - Keys must match the English literals in the source EXACTLY, including
   leading/trailing spaces and placeholder names such as ``{name}``.
-- Do not translate brand names (SSMT, 3Dmigoto, GIMI, WWMI, ...), technical
+- Do not translate brand names (MMT, 3Dmigoto, GIMI, WWMI, ...), technical
   field names (TANGENT, COLOR, DrawIB, IndexCount, ...), or identifiers;
   only translate the surrounding human-readable text.
 - Run ``python tools/check_i18n.py`` after editing to verify coverage.
@@ -33,6 +33,7 @@ TRANSLATIONS_ZH_CN = {
     "Add Socket": "添加接口",
     "Align Face": "对齐脸部",
     "All": "全部",
+    "Alpha": "Alpha",
     "Alpha Issue": "Alpha 问题",
     "Alpha Texture": "Alpha 贴图",
     "Appearance": "外观",
@@ -43,6 +44,7 @@ TRANSLATIONS_ZH_CN = {
     "Auto Shrink": "自动收缩",
     "Base Material": "基础材质",
     "Blend Diffuse Color": "混合漫反射颜色",
+    "Blue": "蓝",
     "Comment": "备注",
     "Component": "组件",
     "Custom": "自定义",
@@ -58,6 +60,7 @@ TRANSLATIONS_ZH_CN = {
     "Font Size": "字号",
     "Frame": "框",
     "Generate Mod": "生成 Mod",
+    "Green": "绿",
     "Group": "分组",
     "Height": "高度",
     "Hide": "隐藏",
@@ -123,6 +126,7 @@ TRANSLATIONS_ZH_CN = {
     "Possible solutions:": "可能的解决办法：",
     "Python Imaging Library (Pillow) is required": "需要 Python 图像库（Pillow）",
     "Re-check whether the Pillow library is installed; refreshes the status without a restart.": "重新检查 Pillow 库是否已安装；无需重启即可刷新状态。",
+    "Red": "红",
     "Retry Install": "重试安装",
     "Retry Installation": "重试安装",
     "pip install timed out (over 180 seconds), please check your network and retry": "pip 安装超时（超过 180 秒），请检查网络后重试",
@@ -138,8 +142,8 @@ TRANSLATIONS_ZH_CN = {
     "Recalculate TANGENT: ": "重算 TANGENT：",
     "Refresh Workspace List": "刷新工作空间列表",
     "Refresh the workspace list of the current game configuration": "刷新当前游戏配置的工作空间列表",
-    "SSMT Blueprint": "SSMT 蓝图",
-    "SSMT Cache Folder: ": "SSMT 缓存文件夹：",
+    "MMT Blueprint": "MMT 蓝图",
+    "MMT Cache Folder: ": "MMT 缓存文件夹：",
     "Specified Workspace": "指定工作空间",
     "Workspace list refreshed": "工作空间列表已刷新",
 
@@ -165,7 +169,7 @@ TRANSLATIONS_ZH_CN = {
     "Open Mod Folder After Generating Mod": "生成 Mod 后打开 Mod 文件夹",
     "Select the blueprint to open or to quickly generate a Mod": "选择要打开的蓝图或用于快速生成 Mod 的蓝图",
     "Skip Empty Vertex Groups": "跳过空顶点组",
-    "Sync with SSMT Option": "与 SSMT 选项同步",
+    "Sync with MMT Option": "与 MMT 选项同步",
     "The selected folder path for Mod generation": "用于生成 Mod 的所选文件夹路径",
     "Use Custom Folder": "使用自定义文件夹",
     "Use Non-Mirrored Workflow": "使用非镜像工作流",
@@ -174,7 +178,7 @@ TRANSLATIONS_ZH_CN = {
     "Use Slot Fix": "使用槽位修复",
     "Use SlotFix for Slot-Style Textures": "对槽位式贴图使用 SlotFix",
     "Use Specified Workspace": "使用指定工作空间",
-    "Use the workspace currently synced in the SSMT configuration file": "使用 SSMT 配置文件中当前同步的工作空间",
+    "Use the workspace currently synced in the MMT configuration file": "使用 MMT 配置文件中当前同步的工作空间",
     "Vertex Group Mode": "顶点组模式",
     "When enabled, Mod generation automatically reorders vertex groups and fills the gaps between numbered vertex groups": "启用后，生成 Mod 时会自动重排顶点组并填补数字顶点组之间的空缺",
     "When enabled, all modifiers are automatically applied to objects before the Mod is generated": "启用后，生成 Mod 前会自动将修改器全部应用到物体上",
@@ -183,7 +187,7 @@ TRANSLATIONS_ZH_CN = {
     "When enabled, the Mod folder is opened automatically once Mod generation is complete": "启用后，Mod 生成完成时会自动打开 Mod 文件夹",
     "When enabled, the Mod is generated into the folder you specified": "启用后，Mod 会生成到你指定的文件夹中",
     "Workspace Mode": "工作空间模式",
-    "Workspace folder does not exist. Please create a workspace in SSMT first: {path}": "工作空间文件夹不存在。请先在 SSMT 中创建工作空间：{path}",
+    "Workspace folder does not exist. Please create a workspace in MMT first: {path}": "工作空间文件夹不存在。请先在 MMT 中创建工作空间：{path}",
     "Workspace folder does not exist. Please set the workspace first.": "工作空间文件夹不存在。请先设置工作空间。",
     "Default is False. When enabled, imported and exported models will no longer be mirrored. Currently, 3Dmigoto models being imported mirrored is purely due to a historical legacy issue, which is wrong. However, once the mistakes have piled up into a giant mess, people's habits and old projects are hard to change, so the non-mirrored workflow is only available when this option is enabled": "默认为关闭。启用后，导入和导出的模型将不再镜像。目前 3Dmigoto 模型以镜像方式导入纯属历史遗留问题，是错误的行为。然而错误积重难返，人们的习惯和旧项目难以改变，因此只有启用此选项后才会使用非镜像工作流",
     "Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export": "导入合并后的统一顶点组；导出时使用 ComputeShader 运行时映射",
@@ -332,11 +336,11 @@ TRANSLATIONS_ZH_CN = {
     "{name!r} outline material tail was modified": "{name!r} 的描边材质尾部被修改过",
 
     # ---- Import / export ----
-    "Import All From SSMT Workspace": "从 SSMT 工作空间全部导入",
-    "Import SSMT Model": "导入 SSMT 模型",
+    "Import All From MMT Workspace": "从 MMT 工作空间全部导入",
+    "Import MMT Model": "导入 MMT 模型",
     "Import everything from the current workspace folder with one click.": "一键导入当前工作空间文件夹中的全部内容。",
-    "Import an SSMT model file. You only need to select the .json file.": "导入一个 SSMT 模型文件。你只需选择 .json 文件即可。",
-    "Please select the current workspace in SSMT before importing.": "导入前请先在 SSMT 中选择当前工作空间。",
+    "Import an MMT model file. You only need to select the .json file.": "导入一个 MMT 模型文件。你只需选择 .json 文件即可。",
+    "Please select the current workspace in MMT before importing.": "导入前请先在 MMT 中选择当前工作空间。",
     "Successfully imported ": "成功导入 ",
     "Could not find the submesh folder for object '{name}'; skipped": "找不到物体“{name}”对应的子网格文件夹；已跳过",
     "Could not parse the name of object '{name}'; skipped": "无法解析物体“{name}”的名称；已跳过",
@@ -353,7 +357,7 @@ TRANSLATIONS_ZH_CN = {
     "The Submesh data type is incorrect: delete the matching data-type folder, delete this mesh, and re-import": "子网格数据类型不正确：删除匹配的数据类型文件夹、删除此网格并重新导入",
     "Submesh '{name}' is down to its last data-type folder;": "子网格“{name}”只剩下最后一个数据类型文件夹；",
     "Submesh '{name}' has only its last data type left; operation aborted": "子网格“{name}”只剩最后一种数据类型；操作已中止",
-    "That type cannot be deleted. If no correct data type exists, contact the SSMT developer to add one.": "该类型不能被删除。如果不存在正确的数据类型，请联系 SSMT 开发者添加。",
+    "That type cannot be deleted. If no correct data type exists, contact the MMT developer to add one.": "该类型不能被删除。如果不存在正确的数据类型，请联系 MMT 开发者添加。",
     "No submeshes need to be re-imported.": "没有需要重新导入的子网格。",
     "No submeshes were found to process.": "没有找到需要处理的子网格。",
     "No matching submesh folders were found.": "没有找到匹配的子网格文件夹。",
@@ -462,7 +466,7 @@ TRANSLATIONS_ZH_CN = {
     "Description Text": "描述文本",
 
     # ---- Blueprint: nodes and menus ----
-    "SSMT Blueprint Graph": "SSMT 蓝图",
+    "MMT Blueprint Graph": "MMT 蓝图",
     "Create Group from Selected Objects": "从选中物体创建分组",
     "Create Internal Switch": "创建内部开关",
     "These objects do not have sequence numbers: {names}": "以下物体没有序号：{names}",
@@ -544,7 +548,7 @@ TRANSLATIONS_ZH_CN = {
     # ---- Blueprint: shape keys ----
     "Refresh Shape Key List": "刷新形态键列表",
     "Scans all object nodes in the blueprint and collects their shape keys": "扫描蓝图中的所有物体节点并收集它们的形态键",
-    "Please run this inside the SSMT blueprint editor": "请在 SSMT 蓝图编辑器中运行此功能",
+    "Please run this inside the MMT blueprint editor": "请在 MMT 蓝图编辑器中运行此功能",
     "Refreshed {count} shape keys": "已刷新 {count} 个形态键",
     "Generate Shape Key Mod": "生成形态键 Mod",
     "Refresh List": "刷新列表",
@@ -563,7 +567,7 @@ TRANSLATIONS_ZH_CN = {
     "Cannot create group interface {name} ({idname}): {error}": "无法创建分组接口 {name}（{idname}）：{error}",
     "This Blender build does not support Group Input/Output nodes in custom trees": "此 Blender 版本不支持在自定义节点树中使用分组输入/输出节点",
     "Interface {name} has no usable socket type": "接口 {name} 没有可用的接口类型",
-    "The current tree is not an editable SSMT blueprint tree": "当前节点树不是可编辑的 SSMT 蓝图树",
+    "The current tree is not an editable MMT blueprint tree": "当前节点树不是可编辑的 MMT 蓝图树",
     "No nodes are selected": "未选中任何节点",
     "Group Input/Output nodes cannot be grouped again": "分组输入/输出节点不能再次分组",
     "The group node has no child tree": "该分组节点没有子节点树",
@@ -588,7 +592,7 @@ TRANSLATIONS_ZH_CN = {
     "Object '{name}' vertex count has changed (originally {before}, now {after}). Face Mods can only export edits that do not change topology.": "物体“{name}”的顶点数量发生了变化（原来 {before} 个，现在 {after} 个）。脸部 Mod 只能导出不改变拓扑结构的修改。",
     "Exporting a Face Mod is only supported in a GIMI / Genshin Impact workspace.": "只有 GIMI / 原神工作空间才支持导出脸部 Mod。",
     "Connect at least one \"Object Info\" node to the \"Export Face Mod\" node.": "请至少将一个“物体信息”节点连接到“导出脸部 Mod”节点。",
-    "Generates a position-delta Face Mod from the GIMI face vb0 in an SSMT workspace": "从 SSMT 工作空间中的 GIMI 脸部 vb0 生成位置差量脸部 Mod",
+    "Generates a position-delta Face Mod from the GIMI face vb0 in an MMT workspace": "从 MMT 工作空间中的 GIMI 脸部 vb0 生成位置差量脸部 Mod",
     "Face Mod export node not found.": "未找到脸部 Mod 导出节点。",
     "Output Folder": "输出文件夹",
     "When empty, outputs to the Face folder under the regular Mod directory": "留空时输出到常规 Mod 目录下的 Face 文件夹",
@@ -597,7 +601,7 @@ TRANSLATIONS_ZH_CN = {
     "Optional. Only acts as a character scope restriction; it does not modify the diffuse texture": "可选项。仅作为角色范围限制，不会修改漫反射贴图",
     "Open Folder After Export": "导出后打开文件夹",
     "Select Face Mod Output Folder": "选择脸部 Mod 输出文件夹",
-    "Drop Files onto the SSMT Blueprint": "将文件拖放到 SSMT 蓝图",
+    "Drop Files onto the MMT Blueprint": "将文件拖放到 MMT 蓝图",
     "Created node from file: {name}": "已从文件创建节点：{name}",
     "Created {count} nodes from files": "已从文件创建 {count} 个节点",
 
