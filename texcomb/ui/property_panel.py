@@ -11,7 +11,6 @@ import bpy
 from bpy.props import IntProperty
 
 from ...i18n.i18n import I18nOperator, tr
-from .. import globs
 from ..utils.images import get_image_pack_issue
 from ..utils.materials import (
     get_alpha_texture_image,
@@ -164,7 +163,7 @@ class PropertyMenu(I18nOperator):
             col: UI column to add the image display to.
             image: Image to display information for.
         """
-        if globs.is_blender_3_plus and not image.preview:
+        if not image.preview:
             image.preview_ensure()
 
         # Truncate image name if too long
@@ -290,14 +289,6 @@ class PropertyMenu(I18nOperator):
         """
         mat = item.mat
 
-        if globs.is_blender_legacy:
-            col.prop(mat, "mimi_smc_diffuse")
-            if not mat.mimi_smc_diffuse:
-                return
-
-            col.prop(mat, "diffuse_color", text="")
-            return
-
         shader = get_shader_type(mat)
         if not shader:
             return
@@ -393,8 +384,4 @@ class PropertyMenu(I18nOperator):
         Returns:
             System DPI value for dialog sizing.
         """
-        return (
-            context.preferences.system.dpi
-            if globs.is_blender_modern
-            else context.user_preferences.system.dpi
-        )
+        return context.preferences.system.dpi

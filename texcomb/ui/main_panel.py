@@ -33,7 +33,7 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
     bl_label = "Texture Combiner"
     bl_idname = "MIMI_PT_texcomb_main"
     bl_space_type = "VIEW_3D"
-    bl_region_type = "UI" if globs.is_blender_modern else "TOOLS"
+    bl_region_type = "UI"
     bl_category = "MIMITools"
     bl_order = 10
 
@@ -143,8 +143,7 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
             uniform_row.prop(scene, "mimi_smc_uniform_size_value", text="")
         layout.prop(scene, "mimi_smc_crop", text=tr("Crop to UV Bounds"))
         layout.prop(scene, "mimi_smc_pixel_art", text=tr("Disable Anti-Aliasing Scaling"))
-        if globs.is_blender_modern:
-            layout.prop(scene, "mimi_smc_include_extra_textures", text=tr("Atlas PBR Textures"))
+        layout.prop(scene, "mimi_smc_include_extra_textures", text=tr("Atlas PBR Textures"))
 
     def _add_packing_section(
         self, layout: bpy.types.UILayout, scene: bpy.types.Scene

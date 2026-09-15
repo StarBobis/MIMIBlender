@@ -82,14 +82,10 @@ def refresh_pil_availability() -> bool:
         # If the refresh errors out, keep the existing state
         return pil_available
 
-is_blender_legacy = False
-is_blender_modern = True
-is_blender_2_92_plus = True
-is_blender_3_plus = True
-
-ICON_OBJECT = "META_CUBE" if is_blender_modern else "VIEW3D"
-ICON_PROPERTIES = "PREFERENCES" if is_blender_modern else "SCRIPT"
-ICON_DROPDOWN = "THREE_DOTS" if is_blender_modern else "DOWNARROW_HLT"
+# Icons used by the combiner UI (Blender 5.x icon names).
+ICON_OBJECT = "META_CUBE"
+ICON_PROPERTIES = "PREFERENCES"
+ICON_DROPDOWN = "THREE_DOTS"
 
 
 class CombineListTypes:

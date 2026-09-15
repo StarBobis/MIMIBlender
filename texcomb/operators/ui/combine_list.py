@@ -18,7 +18,7 @@ import bpy
 from bpy.props import IntProperty
 
 from ....i18n.i18n import I18nOperator, tr
-from ...globs import CombineListTypes, is_blender_3_plus
+from ...globs import CombineListTypes
 from ...type_annotations import CombineListData, Scene
 from ...utils.materials import get_materials
 
@@ -159,7 +159,7 @@ class MaterialListRefreshOperator(I18nOperator):
         Args:
             material: Material to ensure preview for.
         """
-        if is_blender_3_plus and not material.preview:
+        if not material.preview:
             material.preview_ensure()
 
     @staticmethod

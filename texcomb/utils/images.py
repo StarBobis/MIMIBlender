@@ -1,7 +1,7 @@
 """Image handling utilities for Material Combiner.
 
-This module provides functions for retrieving and managing images associated
-with Blender textures and materials, including handling packed and unpacked images.
+This module provides functions for managing images associated with
+materials, including handling packed and unpacked images.
 """
 
 import os
@@ -10,18 +10,6 @@ from typing import Optional
 import bpy
 
 from ...i18n.i18n import tr
-
-
-def get_image(tex: bpy.types.Texture) -> Optional[bpy.types.Image]:
-    """Extract image from a Blender texture.
-
-    Args:
-        tex: Blender texture object to extract image from.
-
-    Returns:
-        The image associated with the texture or None if not found.
-    """
-    return tex.image if tex and hasattr(tex, "image") and tex.image else None
 
 
 def get_packed_file(

@@ -10,8 +10,6 @@ from typing import DefaultDict, Dict, List, Tuple, Union
 import bpy
 from mathutils import Vector
 
-from . import globs
-
 # Blender class types that can be registered
 BlClasses = Union[
     bpy.types.Panel,
@@ -34,8 +32,8 @@ SMCIcons = Union[
     None,
 ]
 
-# Scene type that handles version differences
-Scene = bpy.types.ViewLayer if globs.is_blender_modern else bpy.types.Scene
+# Scene type alias: the combiner operates on the view layer (Blender 2.8+).
+Scene = bpy.types.ViewLayer
 
 # Object data structure for material mapping
 SMCObDataItem = Dict[bpy.types.Material, int]

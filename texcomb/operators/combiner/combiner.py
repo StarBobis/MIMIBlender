@@ -14,7 +14,6 @@ from typing import Set
 import bpy
 from bpy.props import BoolProperty, StringProperty
 
-from ... import globs
 from ....i18n.i18n import I18nOperator, tr
 from ...core import texconv
 from ...utils.packers import pack
@@ -170,7 +169,7 @@ class Combiner(I18nOperator):
             scn.mimi_smc_gaps = 0
 
         set_ob_mode(
-            context.view_layer if globs.is_blender_modern else scn,
+            context.view_layer,
             scn.mimi_smc_ob_data,
         )
         self.data = get_data(scn.mimi_smc_ob_data)
@@ -182,9 +181,6 @@ class Combiner(I18nOperator):
         clear_empty_mats(scn, self.data, self.mats_uv)
         get_duplicates(self.mats_uv)
         self.structure = get_structure(scn, self.data, self.mats_uv)
-
-        if globs.is_blender_legacy:
-            context.space_data.viewport_shade = "MATERIAL"
 
         # Check if we're only dealing with duplicate materials
         total_unique_mats = len(self.structure)

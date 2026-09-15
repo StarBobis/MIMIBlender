@@ -11,11 +11,9 @@ from typing import Dict, List, Optional, Set, Tuple, ValuesView, cast
 import bpy
 import numpy as np
 
-from .. import globs
 from ...i18n.i18n import tr
 from ..type_annotations import Diffuse, MatDict, MatDictItem
-from .images import get_image, get_image_pack_issue, get_packed_file
-from .textures import get_texture
+from .images import get_image_pack_issue, get_packed_file
 
 # Color space conversion constants (sRGB)
 GAMMA = 2.4
@@ -213,9 +211,6 @@ def get_image_from_material(
     Returns:
         The albedo/diffuse image or None if no valid texture found.
     """
-    if globs.is_blender_legacy:
-        return get_image(get_texture(mat))
-
     if not mat.node_tree or not mat.node_tree.nodes:
         return None
 
@@ -248,9 +243,6 @@ def get_diffuse(mat: bpy.types.Material) -> Tuple[int, int, int, int]:
     """
     if not mat:
         return DEFAULT_DIFFUSE
-
-    if globs.is_blender_legacy:
-        return _rgb_to_srgb255(mat.diffuse_color)
 
     if not mat.node_tree or not mat.node_tree.nodes:
         return DEFAULT_DIFFUSE

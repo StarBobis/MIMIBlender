@@ -26,11 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 import bpy
 import numpy as np
 
-from ...globs import (
-    CombineListTypes,
-    is_blender_legacy,
-    is_blender_modern,
-)
+from ...globs import CombineListTypes
 from ....i18n.i18n import tr
 from ...blender import planes as plane_builder
 from ...core import atlas as core_atlas
@@ -38,7 +34,6 @@ from ...core import export as core_export
 from ...core import layout as core_layout
 from ...type_annotations import (
     CombMats,
-    Diffuse,
     MatsUV,
     ObMats,
     Scene,
@@ -47,7 +42,7 @@ from ...type_annotations import (
     Structure,
     StructureItem,
 )
-from ...utils.images import get_image, get_image_pack_issue, get_packed_file
+from ...utils.images import get_image_pack_issue, get_packed_file
 from ...utils.materials import (
     get_alpha_texture,
     get_alpha_texture_issue,
@@ -57,7 +52,6 @@ from ...utils.materials import (
     sort_materials,
 )
 from ...utils.objects import align_uv, get_polys, get_uv
-from ...utils.textures import get_texture
 
 Image = None
 ImageChops = None
@@ -209,10 +203,7 @@ def _delete_material(ob: bpy.types.Object, name: str) -> None:
     if ob.type == "MESH":
         mat_idx = ob.data.materials.find(name)
         if mat_idx >= 0:
-            if is_blender_modern:
-                ob.data.materials.pop(index=mat_idx)
-            else:
-                ob.data.materials.pop(index=mat_idx, update_data=True)
+            ob.data.materials.pop(index=mat_idx)
 
 
 def get_duplicates(mats_uv: MatsUV) -> None:
@@ -378,32 +369,22 @@ def _get_texture_fallback_message(
     )
 
 
-def _size_sorting(
-    item: Sequence[StructureItem],
-) -> Tuple[int, int, int, Union[str, Diffuse, None]]:
-    """Key function for sorting materials by size.
+def _size_sorting(item: Sequence[StructureItem]) -> Tuple[int, int, int]:
+    """Key function for sorting materials by size, largest first.
 
-    Args:
-        item: Material and its metadata.
+    Python's sort is stable, so entries with equal sizes keep their
+    insertion order and the packing stays deterministic.
 
-    Returns:
-        Tuple of sorting keys (max dimension, area, width, name/color).
+    NOTE: a 4th key based on gfx["img_or_color"] used to be returned here,
+    but that field is only populated later inside get_atlas(), so at sort
+    time it was always None — dead code, removed (Phase 4 cleanup).
     """
-    gfx = item[1]["gfx"]
-    size_x, size_y = gfx["size"]
-
-    img_or_color = gfx["img_or_color"]
-    name_or_color = None
-    if isinstance(img_or_color, tuple):
-        name_or_color = gfx["img_or_color"]
-    elif isinstance(img_or_color, bpy.types.PackedFile):
-        name_or_color = img_or_color.id_data.name
-
-    return max(size_x, size_y), size_x * size_y, size_x, name_or_color
+    size_x, size_y = item[1]["gfx"]["size"]
+    return max(size_x, size_y), size_x * size_y, size_x
 
 
 def _get_image(mat: bpy.types.Material) -> Union[bpy.types.Image, None]:
-    """Get image from a material, handling different Blender versions.
+    """Get the main image from a material's node tree.
 
     Args:
         mat: Material to extract image from.
@@ -411,9 +392,6 @@ def _get_image(mat: bpy.types.Material) -> Union[bpy.types.Image, None]:
     Returns:
         Image from the material or None if not found.
     """
-    if is_blender_legacy:
-        return get_image(get_texture(mat))
-
     return get_image_from_material(mat)
 
 
@@ -595,14 +573,9 @@ def _set_image_or_color(item: StructureItem, mat: bpy.types.Material) -> None:
         item: Material metadata.
         mat: Material to extract image or color from.
     """
-    if is_blender_modern:
-        image = get_image_from_material(mat)
-        item["gfx"]["img_or_color"] = get_packed_file(image) if image else None
-        item["gfx"]["alpha"] = get_alpha_texture(mat)
-    else:
-        item["gfx"]["img_or_color"] = get_packed_file(
-            get_image(get_texture(mat))
-        )
+    image = get_image_from_material(mat)
+    item["gfx"]["img_or_color"] = get_packed_file(image) if image else None
+    item["gfx"]["alpha"] = get_alpha_texture(mat)
 
     if not item["gfx"]["img_or_color"]:
         item["gfx"]["img_or_color"] = get_diffuse(mat)
@@ -901,10 +874,7 @@ def _create_material_multi(
     mat = bpy.data.materials.new(
         name="{}{}_{}".format(atlas_material_prefix, unique_id, idx)
     )
-    if is_blender_modern:
-        _configure_material_multi(mat, textures)
-    elif "albedo" in textures:
-        _configure_material_legacy(mat, textures["albedo"])
+    _configure_material_multi(mat, textures)
     return mat
 
 
@@ -1030,25 +1000,6 @@ def _configure_material_multi(  # noqa: PLR0915
         node_tree.links.new(
             node_normal_map.outputs["Normal"], node_bsdf.inputs["Normal"]
         )
-
-
-def _configure_material_legacy(
-    mat: bpy.types.Material, texture: bpy.types.Texture
-) -> None:
-    """Configure a legacy (Blender Internal) material with the atlas texture.
-
-    Args:
-        mat: Material to configure.
-        texture: Atlas texture.
-    """
-    mat.alpha = 0
-    mat.use_transparency = True
-    mat.diffuse_color = (1, 1, 1)
-    mat.use_shadeless = True
-
-    tex = mat.texture_slots.add()
-    tex.texture = texture
-    tex.use_map_alpha = True
 
 
 def assign_comb_mats(scn: Scene, data: SMCObData, comb_mats: CombMats) -> None:
