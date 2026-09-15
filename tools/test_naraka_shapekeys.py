@@ -270,18 +270,45 @@ def main():
     # No [Present] involvement: everything happens inside the VB override.
     check("[Present]" not in ini_text, "no Present section is emitted for shape keys")
 
-    # The raw game-facing buffer must receive a byte copy of the result via
-    # the staging resource, never a direct reference re-point.
-    check("Resource65b9cf5aPositionComputed = ref cs-u5" in ini_text,
-          "staging resource re-points at the compute result")
-    check("Resource65b9cf5aPosition = copy Resource65b9cf5aPositionComputed" in ini_text,
-          "cloth position buffer receives the computed bytes via copy")
-    check("Resourced58050d1Position = copy Resourced58050d1PositionComputed" in ini_text,
-          "body position buffer receives the computed bytes via copy")
-    check("Resource65b9cf5aPosition = ref" not in ini_text,
-          "the game-facing buffer is never re-pointed directly")
-    check("[Resource65b9cf5aPositionComputed]" in ini_text,
-          "the empty staging resource is declared")
+    # A copy recreates the destination using the source descriptor. A raw
+    # type alone ADDS a flag; misc_flags must REPLACE the structured flag.
+    # Check every DrawIB rather than accepting one matching line anywhere.
+    for model in usable_list:
+        prefix = "Resource" + model.draw_ib
+        command = extract_ini_block(ini_text, "[" + shapekeys.get_compute_command_list_name(
+            usable_list.index(model)) + "]")
+        raw_block = extract_ini_block(ini_text, "[" + prefix + "PositionComputed]")
+        check(prefix + "PositionComputed = copy cs-u5" in command,
+              model.draw_ib + " copies the structured result into raw staging")
+        check(prefix + "Position = ref " + prefix + "PositionComputed" in command,
+              model.draw_ib + " binds the explicitly raw result by reference")
+        check("type = ByteAddressBuffer" in raw_block,
+              model.draw_ib + " declares raw staging")
+        check("misc_flags = buffer_allow_raw_views" in raw_block,
+              model.draw_ib + " replaces inherited structured flags with raw only")
+        check("stride = 40" in raw_block,
+              model.draw_ib + " preserves the game-facing byte layout")
+        # Resource-to-resource reference chains are parse-order dependent.
+        # Explicit bind flags guarantee that cs-t0 can create its raw SRV.
+        check("bind_flags = shader_resource" in raw_block,
+              model.draw_ib + " enables raw SRV binding independently of parse order")
+
+        # Upstream CustomShader only saves shaders and OM state, not CS slots.
+        # A null cleanup would corrupt any live game bindings in these slots.
+        for slot in ("cs-u5", "cs-t50", "cs-t51"):
+            backup = prefix + "ShapeBackup_" + slot
+            save = backup + " = ref " + slot
+            restore = slot + " = ref " + backup
+            check("[" + backup + "]" in ini_text,
+                  model.draw_ib + " declares backup for " + slot)
+            check(save in command and command.index(save) < command.index("cs-u5 = copy"),
+                  model.draw_ib + " saves " + slot + " before modifying bindings")
+            check(restore in command and command.index(restore) > command.rindex("dispatch ="),
+                  model.draw_ib + " restores " + slot + " after computing shapes")
+
+    # Never hand the structured UAV directly to the game's raw shader.
+    check("Position = ref cs-u5" not in ini_text,
+          "no direct structured-to-raw reference is emitted")
 
     # Per-key dispatches: body only has "Smile", so "Blink" must be absent there.
     check("cs-t51 = Resource65b9cf5aPosition.Smile" in ini_text, "cloth binds Smile buffer")
@@ -291,7 +318,13 @@ def main():
 
     # Resource declarations: structured buffers with the Position stride.
     check("[Resource65b9cf5aPosition.1]" in ini_text, "cloth pristine base copy declared")
-    check("type = buffer" in ini_text, "working buffers are structured (type = buffer)")
+    # Buffer with stride 40 is NOT StructuredBuffer in 3Dmigoto's type enum.
+    # Inputs are bound by reference, so no copy-time coercion can fix them.
+    for model in usable_list:
+        for name in ["1"] + list(model.shapekey_name_bytelist_dict):
+            block = extract_ini_block(ini_text, "[Resource" + model.draw_ib + "Position." + name + "]")
+            check("type = StructuredBuffer" in block,
+                  model.draw_ib + " " + name + " explicitly uses StructuredBuffer")
     check("stride = 40" in ini_text, "working buffers carry the 40-byte stride")
     check("Buffers\\LOD0.65b9cf5a-Position.buf" in ini_text, "base copy points at the position file")
     check("Buffers\\65b9cf5a-Position.Smile.buf" in ini_text, "shape key buffer file name matches the exporter")

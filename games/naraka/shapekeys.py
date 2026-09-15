@@ -28,24 +28,24 @@ VB override itself, so the whole sequence happens in one place, right
     handling = skip
     dispatch = ...
 
-Inside the command list, the compute still uses the shared Shapes.hlsl
-and structured working buffers, but the result reaches the raw
-game-facing buffer through two small, individually proven steps:
+Inside the command list, the compute uses the shared Shapes.hlsl and
+explicit StructuredBuffer inputs. "Buffer" is a different 3Dmigoto type;
+adding a stride does not make a referenced SRV a structured buffer.
 
-1. "Resource<DrawIB>PositionComputed = ref cs-u5" re-points an empty
-   declared resource at the structured compute result (same pattern as
-   the Naraka cross-IB VB backups).
-2. "Resource<DrawIB>Position = copy Resource<DrawIB>PositionComputed"
-   copies the raw bytes into the game-facing ByteAddressBuffer.
-   CopyResource moves raw bytes between buffers of equal size regardless
-   of their view types, so the game compute shader always reads the exact
-   layout it expects.
+1. "Resource<DrawIB>PositionComputed = copy cs-u5" copies the result into
+   a ByteAddressBuffer with "misc_flags = buffer_allow_raw_views".
+   3Dmigoto rebuilds copy destinations from the source descriptor, so the
+   explicit misc_flags override is essential: type alone only ADDS the
+   raw flag and would leave the incompatible structured flag inherited.
+2. "Resource<DrawIB>Position = ref Resource<DrawIB>PositionComputed"
+   binds that raw result for the game's skinning shader. A reference is
+   safe here because the intermediate resource already has raw views.
 
-The pristine base copy Resource<DrawIB>Position.1 is a second resource
-declaration that points at the same Position buffer file but with
-"type = buffer" (structured), which is valid INI syntax. Every run starts
-from it, so hotkey driven weights apply immediately and errors never
-accumulate, no matter how often the override fires per frame.
+The pristine Resource<DrawIB>Position.1 is explicitly a StructuredBuffer
+loaded from the same Position file. Every run starts from it so weights
+never accumulate across repeated overrides. Scratch compute resource slots
+are saved and restored because CustomShader only restores shaders and OM
+output state, not CS SRVs or CS UAVs.
 """
 
 import os
@@ -141,7 +141,7 @@ def get_compute_command_list_name(drawib_index: int) -> str:
 
 
 def get_computed_resource_name(drawib: str) -> str:
-    """Return the empty staging resource that receives the compute result."""
+    """Return the raw staging resource that receives the compute result."""
     return "Resource" + drawib + "PositionComputed"
 
 
@@ -199,6 +199,10 @@ def add_naraka_shapekey_ini_sections(
 
         customshader_section.append("[" + get_compute_command_list_name(drawib_index) + "]")
         customshader_section.append("cs = Shapes.hlsl")
+        # CustomShader restores shaders and OM state, not CS SRVs or UAVs.
+        # Preserve borrowed slots instead of leaving the game's bindings null.
+        for slot in ("cs-u5", "cs-t50", "cs-t51"):
+            customshader_section.append("Resource" + drawib + "ShapeBackup_" + slot + " = ref " + slot)
         # u5 is a fresh structured copy of the pristine base buffer; every
         # shape key dispatch accumulates its weighted difference onto it.
         customshader_section.append("cs-u5 = copy Resource" + drawib + "Position.1")
@@ -218,29 +222,23 @@ def add_naraka_shapekey_ini_sections(
             customshader_section.append("dispatch = " + str(draw_number) + ",1,1")
             customshader_section.new_line()
 
-        # Hand the result to the raw game-facing position buffer in two
-        # steps: re-point the empty staging resource at the compute result,
-        # then byte-copy it into the ByteAddressBuffer the game's skinning
-        # compute shader reads. The raw buffer keeps its identity and its
-        # raw views, which a plain "ref cs-u5" would destroy.
-        customshader_section.append(get_computed_resource_name(drawib) + " = ref cs-u5")
-        customshader_section.append("Resource" + drawib + "Position = copy " + get_computed_resource_name(drawib))
+        # A 3Dmigoto copy recreates its destination from the source descriptor.
+        # PositionComputed explicitly replaces the structured misc flag with
+        # the raw flag before the copy; the final reference is therefore raw.
+        customshader_section.append(get_computed_resource_name(drawib) + " = copy cs-u5")
+        customshader_section.append("Resource" + drawib + "Position = ref " + get_computed_resource_name(drawib))
 
-        # Unbind everything so later game work never sees our buffers; the
-        # temporary copy behind cs-u5 is released, its bytes already live
-        # in the game-facing position buffer.
-        customshader_section.append("cs-u5 = null")
-        customshader_section.append("cs-t50 = null")
-        customshader_section.append("cs-t51 = null")
+        # Restore every borrowed slot before the game dispatch resumes.
+        # Restoring u5 also unbinds the temporary shape accumulation buffer.
+        for slot in ("cs-u5", "cs-t50", "cs-t51"):
+            customshader_section.append(slot + " = ref Resource" + drawib + "ShapeBackup_" + slot)
         customshader_section.new_line()
     ini_builder.append_section(customshader_section)
 
-    # [Resource...]: the pristine base copy, one buffer per shape key, and
-    # the empty staging resource. The working buffers are declared with
-    # "type = buffer" (structured, stride 40), which is what the compute
-    # shader's StructuredBuffer views require; the raw game-facing buffer
-    # keeps its own separate ByteAddressBuffer declaration from the base
-    # pipeline.
+    # [Resource...]: structured inputs, a raw result, and scratch backups.
+    # Explicit StructuredBuffer types make reference-bound SRVs valid.
+    # The raw intermediate overrides all misc flags, not just the type:
+    # D3D11 forbids combining structured and raw flags on the same buffer.
     resource_section = M_IniSection(M_SectionType.ResourceBuffer)
     for drawib_model in usable_drawib_model_list:
         drawib = drawib_model.draw_ib
@@ -250,7 +248,7 @@ def add_naraka_shapekey_ini_sections(
         # The pristine base copy: same Position file as the game-facing
         # buffer, just declared as a structured buffer.
         resource_section.append("[Resource" + drawib + "Position.1]")
-        resource_section.append("type = buffer")
+        resource_section.append("type = StructuredBuffer")
         resource_section.append("stride = " + str(position_stride))
         resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(
             drawib_model.get_category_buffer_filename("Position")))
@@ -262,17 +260,29 @@ def add_naraka_shapekey_ini_sections(
             if shapekey_buffer_dict.get(shapekey_name, None) is None:
                 continue
             resource_section.append("[Resource" + drawib + "Position." + shapekey_name + "]")
-            resource_section.append("type = buffer")
+            resource_section.append("type = StructuredBuffer")
             resource_section.append("stride = " + str(position_stride))
             resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(
                 drawib + "-Position." + shapekey_name + ".buf"))
             resource_section.new_line()
 
-        # The staging resource starts empty and is filled by "ref" every
-        # time the compute command list runs (same pattern as the Naraka
-        # cross-IB VB backups).
+        # CopyResource can move bytes between equal-sized buffer types.
+        # 3Dmigoto first recreates the destination, so discard the inherited
+        # structured flag explicitly instead of merely adding the raw flag.
         resource_section.append("[" + get_computed_resource_name(drawib) + "]")
+        resource_section.append("type = ByteAddressBuffer")
+        resource_section.append("misc_flags = buffer_allow_raw_views")
+        # Do not depend on parse-order propagation through Position = ref.
+        # The raw result is only consumed through the game's shader SRV.
+        resource_section.append("bind_flags = shader_resource")
+        resource_section.append("stride = " + str(position_stride))
         resource_section.new_line()
+
+        # Empty resources hold references to the game's original CS bindings.
+        # Keep backups per DrawIB so separate compute lists cannot collide.
+        for slot in ("cs-u5", "cs-t50", "cs-t51"):
+            resource_section.append("[Resource" + drawib + "ShapeBackup_" + slot + "]")
+            resource_section.new_line()
     ini_builder.append_section(resource_section)
 
     # [Key_ShapeKey_...]: press-to-cycle hotkeys, one per configured key;
