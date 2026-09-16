@@ -40,13 +40,41 @@ class M_Key:
     initialize_value: int = 0
     initialize_vk_str: str = ""  # Virtual-key combination following 3Dmigoto's parsing format
 
+    # Optional animation control, separate from shape-weight cycle hotkeys.
+    # Empty bindings preserve the existing injection-relative autoplay path.
+    # Runtime toggle state resets to start_enabled when the INI is reloaded.
+    toggle_key: str = ""
+    start_enabled: bool = True
+
     # Used for passing data through chain_key_list
     tmp_value: int = 0
 
     # Remarks
     comment: str = ""
 
-    def timeline_expression(self):
+    def configure_animation_toggle(self, node):
+        """Read optional node properties without breaking older blend files.
+
+        A blank binding always means autoplay. Reject INI delimiters before
+        normalizing whitespace, so a pasted multiline value cannot add commands.
+        Shared-alias comparison uses this normalized binding and default state.
+        """
+        binding = str(getattr(node, "toggle_key", "") or "")
+        if any(char in binding for char in "\r\n;=[]"):
+            raise ValueError("Animation toggle key must be a single key binding, such as F6 or CTRL F6")
+        self.toggle_key = " ".join(binding.upper().split())
+        self.start_enabled = bool(getattr(node, "start_enabled", True)) if self.toggle_key else True
+        # Shape weights have a real zero/off state, unlike draw-frame indices.
+        # Initialize it before the first Present so disabled exports start at Basis.
+        if self.key_type == "time_shapekey" and not self.start_enabled:
+            self.initialize_value = 0
+
+    def animation_control_name(self):
+        # Exporter-reserved names avoid collisions with user timeline aliases.
+        # Shape and mesh timelines already have distinct variable identifiers.
+        return "$mimi_anim_" + self.key_name.lstrip("$")
+
+    def timeline_expression(self, clock="time"):
         """Validate a timeline and return a bounded 3Dmigoto expression.
 
         CommandList operators evaluate float32, not Python doubles. Rounding
@@ -69,7 +97,9 @@ class M_Key:
             if len(self.weight_list) != count or not all(math.isfinite(w) and abs(w) <= 3.4e38 for w in self.weight_list):
                 raise ValueError("Time Shape Key needs one finite float32 weight per frame")
         step = repr(1.0 / self.fps)
-        return "((time % (" + step + " * " + str(count) + ")) // " + step + ") % " + str(count)
+        # clock is generated internally: either the legacy engine time or
+        # elapsed time since the optional toggle was last enabled.
+        return "((" + clock + " % (" + step + " * " + str(count) + ")) // " + step + ") % " + str(count)
 
     def __str__(self):
         return (f"M_Key(key_name='{self.key_name}', key_value='{self.key_value}', "

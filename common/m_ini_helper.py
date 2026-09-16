@@ -556,7 +556,71 @@ class M_IniHelper:
         print("=" * 60)
     
     @staticmethod
-    def append_time_shapekey_weight_lines(section: M_IniSection, m_key: M_Key, indent: str = ""):
+    def add_time_animation_sections(ini_builder, present_section, m_key):
+        """Emit one timeline, optionally controlled by a keyboard switch.
+
+        Untoggled nodes retain their exact legacy Present expression. Toggled
+        nodes update after input events, before Position copies/shape compute.
+        A rising enable edge captures a new epoch, so each activation starts
+        at frame zero rather than resuming an invisible wall-clock phase.
+        """
+        expression = m_key.timeline_expression()
+        is_shape = m_key.key_type == "time_shapekey"
+        if not m_key.toggle_key:
+            if is_shape:
+                M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+            else:
+                present_section.append(m_key.key_name + " = " + expression)
+            return
+
+        control = m_key.animation_control_name()
+        enabled = control + "_enabled"
+        previous = control + "_previous"
+        epoch = control + "_start"
+        suffix = m_key.key_name.lstrip("$")
+        command_name = "CommandListMimiAnimation_" + suffix
+        constants = M_IniSection(M_SectionType.Constants)
+        # Do not persist the switch or clock: reload honors the node default
+        # and must never restore an epoch from a previous injection session.
+        constants.append("global " + enabled + " = " + str(int(m_key.start_enabled)))
+        constants.append("global " + previous + " = 0")
+        constants.append("global " + epoch + " = 0")
+        ini_builder.append_section(constants)
+
+        key_section = M_IniSection(M_SectionType.Key)
+        key_section.append("[KeyMimiAnimation_" + suffix + "]")
+        key_section.append("key = " + m_key.toggle_key)
+        key_section.append("type = cycle")
+        # Smart cycling matches the current value before advancing. The first
+        # press must toggle correctly for BOTH enabled and disabled defaults.
+        # No visibility gate: users can always turn an animation back on.
+        key_section.append("smart = true")
+        key_section.append(enabled + " = 0,1")
+        ini_builder.append_section(key_section)
+
+        commands = M_IniSection(M_SectionType.CommandList)
+        commands.append("[" + command_name + "]")
+        commands.append("if " + enabled)
+        commands.append("  if !" + previous)
+        commands.append("    " + epoch + " = time")
+        commands.append("  endif")
+        clock = "(time - " + epoch + ")"
+        if is_shape:
+            M_IniHelper.append_time_shapekey_weight_lines(commands, m_key, "  ", clock)
+        else:
+            commands.append("  " + m_key.key_name + " = " + m_key.timeline_expression(clock))
+        commands.append("else")
+        # Draw switching selects branch zero. Shape switching removes only
+        # this shape's influence. Position uses an additional enable condition
+        # when choosing a resource, so it restores the separate base buffer.
+        commands.append("  " + m_key.key_name + " = 0")
+        commands.append("endif")
+        commands.append(previous + " = " + enabled)
+        ini_builder.append_section(commands)
+        present_section.append("post run = " + command_name)
+
+    @staticmethod
+    def append_time_shapekey_weight_lines(section: M_IniSection, m_key: M_Key, indent: str = "", clock: str = "time"):
         '''Append the wall-clock weight timeline of a Time Shape Key variable.
 
         Emits a local frame counter recomputed from 3Dmigoto's built-in
@@ -579,7 +643,7 @@ class M_IniHelper:
         frame_var_name = m_key.key_name + "_frame"
         # Validate before emitting any lines: malformed weights must not
         # silently fall back to zero or leave a stale weight active.
-        expression = m_key.timeline_expression()
+        expression = m_key.timeline_expression(clock)
         section.append(indent + "local " + frame_var_name)
         section.append(indent + frame_var_name + " = " + expression)
         for index, frame_value in enumerate(m_key.value_list):
@@ -650,7 +714,7 @@ class M_IniHelper:
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
             if getattr(m_key, 'key_type', 'key') == "time_shapekey":
                 present_section.append("; ShapeKey time timeline: " + shapekey_name)
-                M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+                M_IniHelper.add_time_animation_sections(ini_builder, present_section, m_key)
 
         ib_number = 1
         for drawib, drawib_model in drawib_drawibmodel_dict.items():
@@ -774,7 +838,8 @@ class M_IniHelper:
         # Keys for press testing; can also serve as hotkeys to toggle shape keys when no panel exists
         key_section = M_IniSection(M_SectionType.Key)
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
-            # Time-driven weights have no hotkey, so they never get a [Key].
+            # Time weights do not get a classic weight-cycle key. Optional
+            # playback toggles were already emitted by the timeline writer.
             if getattr(m_key, 'key_type', 'key') == "time_shapekey":
                 continue
             if m_key.initialize_vk_str != "":
@@ -842,20 +907,19 @@ class M_IniHelper:
             # selected index in range. Modulo cannot restore uptime precision
             # already lost by the engine's float32 wall-clock operand.
             for mkey in time_mkey_list:
-                # Both mesh and weight timelines use the same float32-safe
-                # expression and reject malformed frame data consistently.
-                expression = mkey.timeline_expression()
+                # The shared writer keeps autoplay compatible and schedules
+                # optional switch updates after input, before Position copies.
                 if mkey.comment:
                     present_section.append("; " + mkey.comment)
-                present_section.append(mkey.key_name + " = " + expression)
+                M_IniHelper.add_time_animation_sections(ini_builder, present_section, mkey)
             ini_builder.append_section(present_section)
         
         key_number = 0
         if len(key_name_mkey_dict.keys()) != 0:
 
             for mkey in key_name_mkey_dict.values():
-                # Time-driven variables have no hotkey, so they never get a
-                # [Key] section; only hotkey-driven variables are listed here.
+                # Only classic branch-cycle keys belong here. Optional time
+                # playback toggles were already emitted by the common driver.
                 if getattr(mkey, 'key_type', 'key') == "time":
                     continue
 

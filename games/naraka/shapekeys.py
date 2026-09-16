@@ -209,7 +209,9 @@ def add_naraka_shapekey_ini_sections(
         if getattr(m_key, 'key_type', 'key') != "time_shapekey":
             continue
         present_section.append("; ShapeKey time timeline: " + shapekey_name)
-        M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+        # The common driver also emits optional toggle keys and restart state.
+        # Its post-Present update finishes before the next skinning dispatch.
+        M_IniHelper.add_time_animation_sections(ini_builder, present_section, m_key)
         present_section.new_line()
         present_has_lines = True
     if present_has_lines:
@@ -325,7 +327,8 @@ def add_naraka_shapekey_ini_sections(
     # also useful for quick testing when no toggle panel exists.
     key_section = M_IniSection(M_SectionType.Key)
     for shapekey_name, m_key in shapekeyname_mkey_dict.items():
-        # Time-driven weights have no hotkey, so they never get a [Key].
+        # Time weights use the common optional playback toggle, not this
+        # classic key that cycles through individual weight values.
         if getattr(m_key, 'key_type', 'key') == "time_shapekey":
             continue
         if m_key.initialize_vk_str == "":

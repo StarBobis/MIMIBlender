@@ -390,7 +390,8 @@ class BluePrintModel:
         to value k of the node's variable. The only difference is the driver:
         the variable is declared with key_type "time" so the INI writer
         recomputes it from wall-clock time in the [Present] command list
-        instead of emitting a hotkey [Key] section.
+        rather than cycling individual frames with a hotkey. An optional
+        playback toggle is emitted separately by the shared timeline writer.
 
         is_position_switch marks the variable name as a position timeline:
         after parsing, every DrawCallModel carrying it is reclassified as a
@@ -407,7 +408,10 @@ class BluePrintModel:
         if not is_any_socket_linked:
             return
 
-        if len(valid_input_sockets) == 1 and not is_position_switch:
+        # Keep even a one-frame node's configured control in the export.
+        # Older one-frame draw nodes without a toggle remain pass-throughs.
+        has_toggle = bool(str(getattr(time_node, "toggle_key", "") or "").strip())
+        if len(valid_input_sockets) == 1 and not is_position_switch and not has_toggle:
             # A one-frame draw switch is a pass-through. A position provider
             # must still replace the separate base object, never draw twice.
             for link in valid_input_sockets[0].links:
@@ -431,6 +435,7 @@ class BluePrintModel:
         m_key.key_type = "time"
         m_key.fps = fps
         m_key.initialize_value = 0  # Used until the first Present update.
+        m_key.configure_animation_toggle(time_node)
         m_key.timeline_expression()
 
         # Set the comment field
@@ -451,6 +456,10 @@ class BluePrintModel:
                     "Time Switch nodes sharing alias '" + m_key.key_name
                     + "' must use the same FPS"
                 )
+            # One alias owns one runtime switch. Conflicting node settings
+            # must not make the chosen hotkey depend on traversal order.
+            if (existing_key.toggle_key, existing_key.start_enabled) != (m_key.toggle_key, m_key.start_enabled):
+                raise ValueError("Time Switch nodes sharing alias '" + m_key.key_name + "' must use the same animation toggle key and start state")
             m_key = existing_key
 
         # Tag only draw calls reached through this position node. A shared

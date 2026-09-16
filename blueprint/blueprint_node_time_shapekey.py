@@ -274,6 +274,18 @@ class MIMINode_TimeShapeKey(MIMINodeBase):
         update=update_fps,
     ) # type: ignore
     weights: bpy.props.CollectionProperty(type=MIMINodeTimeShapeKeyWeightItem) # type: ignore
+    # This key controls playback, not a cycle of individual weight values.
+    # A disabled time shape contributes zero; other shapes remain untouched.
+    toggle_key: bpy.props.StringProperty(
+        name=tr("Animation Toggle Key"),
+        description=tr("Optional key, such as F6 or CTRL F6. Leave blank for autoplay. Enabling restarts at frame 0."),
+        default="",
+    ) # type: ignore
+    start_enabled: bpy.props.BoolProperty(
+        name=tr("Start Enabled"),
+        description=tr("Initial animation state on load or reload; only used when a toggle key is set."),
+        default=True,
+    ) # type: ignore
     comment: bpy.props.StringProperty(
         name=tr("Comment"),
         description=tr("Comment text; written into the config table as comments"),
@@ -295,6 +307,13 @@ class MIMINode_TimeShapeKey(MIMINodeBase):
         layout.prop(self, "shapekey_name", text=tr("Shape Key Name"))
         layout.prop(self, "fps", text=tr("FPS"))
         layout.prop(self, "comment", text=tr("Comment"))
+        # Reset only this timeline's weight when the switch is disabled.
+        layout.prop(self, "toggle_key", text=tr("Animation Toggle Key"))
+        controls = layout.column()
+        controls.enabled = bool(self.toggle_key.strip())
+        controls.prop(self, "start_enabled", text=tr("Start Enabled"))
+        if self.toggle_key.strip():
+            layout.label(text=tr("When off: set shape weight to 0"), icon='INFO')
 
         row = layout.row(align=True)
         op_add = row.operator("mimi.time_shapekey_add_weight", text=tr("Add"), icon='ADD')

@@ -38,6 +38,8 @@ Rules (enforced at export time with clear error messages):
   Naraka/NarakaM/AILIMIT/ZZMIDX12 shared Position skinning paths are allowed.
 - Shape keys use a separate animated seed; the shape reference stays fixed.
   Empty frames and disabled gates restore the original Position buffer.
+- An optional playback key restores the base while off. Re-enabling starts
+  at frame zero; leaving the key blank preserves the original autoplay mode.
 
 The frame-rate independence relies on the same 3Dmigoto facts as the Time
 Switch node (wall-clock "time" operand, exact "//" floor division, plain
@@ -88,6 +90,18 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
         default="",
         update=update_time_alias,
     ) # type: ignore
+    # Use the same control contract as draw and shape timelines.
+    # Defaults keep existing node trees playing without keyboard setup.
+    toggle_key: bpy.props.StringProperty(
+        name=tr("Animation Toggle Key"),
+        description=tr("Optional key, such as F6 or CTRL F6. Leave blank for autoplay. Enabling restarts at frame 0."),
+        default="",
+    ) # type: ignore
+    start_enabled: bpy.props.BoolProperty(
+        name=tr("Start Enabled"),
+        description=tr("Initial animation state on load or reload; only used when a toggle key is set."),
+        default=True,
+    ) # type: ignore
     comment: bpy.props.StringProperty(
         name=tr("Comment"),
         description=tr("Comment text; written into the config table as comments"),
@@ -108,6 +122,14 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
         layout.prop(self, "fps", text=tr("FPS"))
         layout.prop(self, "time_alias", text=tr("Time Variable Alias"))
         layout.prop(self, "comment", text=tr("Comment"))
+        # Expose the off behavior beside the key so it is not confused with
+        # hiding the model or freezing its last deformed frame.
+        layout.prop(self, "toggle_key", text=tr("Animation Toggle Key"))
+        controls = layout.column()
+        controls.enabled = bool(self.toggle_key.strip())
+        controls.prop(self, "start_enabled", text=tr("Start Enabled"))
+        if self.toggle_key.strip():
+            layout.label(text=tr("When off: restore base Position"), icon='INFO')
 
         # The socket add/remove operators of the Time Switch node are generic
         # (they only append/remove "Frame N" input sockets by node name), so

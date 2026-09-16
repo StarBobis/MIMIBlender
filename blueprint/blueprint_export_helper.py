@@ -362,9 +362,10 @@ class BlueprintExportHelper:
             if not shapekey_name:
                 continue
             weight_list = [float(item.weight) for item in getattr(node, "weights", [])]
-            if len(weight_list) < 2:
-                # A timeline with fewer than 2 frames never animates; skip it
-                # so a half-configured node does not break the export.
+            if not weight_list or (len(weight_list) == 1 and not str(getattr(node, "toggle_key", "") or "").strip()):
+                # Preserve the old incomplete-node behavior without a toggle.
+                # A single configured weight can still be switched on/off,
+                # matching single-frame draw and Position playback controls.
                 continue
             if shapekey_name in shapekey_name_mkey_dict:
                 raise ValueError(
@@ -382,6 +383,9 @@ class BlueprintExportHelper:
             # per-frame weights (same length, enforced by the node UI).
             m_key.value_list = list(range(len(weight_list)))
             m_key.weight_list = weight_list
+            # Time toggles are independent of the classic per-weight hotkey.
+            # This also initializes disabled animations with zero influence.
+            m_key.configure_animation_toggle(node)
             m_key.timeline_expression()
             # These exporters have no time-weight consumer. Reject rather than
             # accepting a node that can only produce a static mesh there.

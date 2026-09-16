@@ -5,7 +5,8 @@ Every input socket of the node stands for one frame (time slice) of a looping
 timeline. While Switch Key cycles a variable through a [Key] hotkey section,
 this node lets the [Present] command list recompute the variable every frame
 from 3Dmigoto's built-in "time" operand, so playback speed only depends on
-real time and never on the game's frame rate.
+real time and never on the game's frame rate. An optional toggle key switches
+playback on/off: off selects frame zero, and re-enabling starts a fresh loop.
 
 3Dmigoto source facts backing this design (bo3b/3Dmigoto, DirectX11):
 - "time" keyword -> ParamOverrideType::TIME (CommandList.h), evaluated as
@@ -109,6 +110,18 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         default="",
         update=update_time_alias,
     ) # type: ignore
+    # Optional runtime control; an empty key preserves legacy autoplay.
+    # Keeping these as native RNA properties also stores them in blend files.
+    toggle_key: bpy.props.StringProperty(
+        name=tr("Animation Toggle Key"),
+        description=tr("Optional key, such as F6 or CTRL F6. Leave blank for autoplay. Enabling restarts at frame 0."),
+        default="",
+    ) # type: ignore
+    start_enabled: bpy.props.BoolProperty(
+        name=tr("Start Enabled"),
+        description=tr("Initial animation state on load or reload; only used when a toggle key is set."),
+        default=True,
+    ) # type: ignore
     comment: bpy.props.StringProperty(
         name=tr("Comment"),
         description=tr("Comment text; written into the config table as comments"),
@@ -129,6 +142,13 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         layout.prop(self, "fps", text=tr("FPS"))
         layout.prop(self, "time_alias", text=tr("Time Variable Alias"))
         layout.prop(self, "comment", text=tr("Comment"))
+        # Disable the default-state widget when no runtime switch is generated.
+        layout.prop(self, "toggle_key", text=tr("Animation Toggle Key"))
+        controls = layout.column()
+        controls.enabled = bool(self.toggle_key.strip())
+        controls.prop(self, "start_enabled", text=tr("Start Enabled"))
+        if self.toggle_key.strip():
+            layout.label(text=tr("When off: show frame 0"), icon='INFO')
 
         row = layout.row(align=True)
         op_add = row.operator("mimi.time_switch_add_socket", text=tr("Add"), icon='ADD')

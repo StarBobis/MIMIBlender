@@ -133,6 +133,61 @@ def test_graph_provenance():
     print("PASS: graph provenance, aliases, single frames and invalid composition")
 
 
+def test_toggle_aliases_and_shape_config():
+    """Check the real graph/configuration path, not just handcrafted M_Keys.
+
+    Shared aliases must emit one switch, and incompatible defaults or bindings
+    must fail in either traversal order instead of choosing an arbitrary node.
+    """
+    model = new_blueprint()
+    draw = time_node(prefix="draw")
+    draw.toggle_key, draw.start_enabled = " ctrl f6 ", False
+    position = time_node(prefix="position")
+    position.toggle_key, position.start_enabled = "CTRL F6", False
+    model._parse_time_switch_node(draw, [])
+    model._parse_time_switch_node(position, [], True)
+    assert len(model.keyname_mkey_dict) == 1
+    key = model.keyname_mkey_dict["$shared"]
+    assert key.toggle_key == "CTRL F6" and not key.start_enabled
+    from animation_test_addon.common.m_ini_builder import M_IniBuilder
+    from animation_test_addon.common.m_ini_helper import M_IniHelper
+    builder = M_IniBuilder()
+    M_IniHelper.add_branch_key_sections(builder, model.keyname_mkey_dict)
+    lines = [line for section in builder.ini_section_list for line in section.SectionLineList]
+    assert lines.count("[KeyMimiAnimation_shared]") == 1
+    for binding, enabled in (("F7", False), ("CTRL F6", True), ("", False)):
+        position.toggle_key, position.start_enabled = binding, enabled
+        rejects(lambda: model._parse_time_switch_node(position, [], True), "same animation toggle")
+    # Single-frame draw nodes keep a configured switch; blank-key legacy
+    # nodes are still allowed to use their old pass-through optimization.
+    single = new_blueprint()
+    node = time_node(count=1)
+    node.toggle_key, node.start_enabled = "F8", False
+    single._parse_time_switch_node(node, [])
+    assert single.keyname_mkey_dict["$shared"].toggle_key == "F8"
+
+    from animation_test_addon.blueprint.blueprint_export_helper import BlueprintExportHelper
+    output = types.SimpleNamespace(bl_idname="MIMINode_Result_Output", enable_shapekey=True, shapekey_items=[])
+    shape_node = types.SimpleNamespace(bl_idname="MIMINode_TimeShapeKey", shapekey_name="blink", fps=12,
+                                      weights=[types.SimpleNamespace(weight=w) for w in (0.75, 1.0)],
+                                      toggle_key="f7", start_enabled=False)
+    tree = types.SimpleNamespace(nodes=[output, shape_node])
+    # Discovery is mocked; the actual output/shape configuration reader runs.
+    # A nonzero first sample makes accidental initialization visibly wrong.
+    with patch.object(BlueprintExportHelper, "get_current_blueprint_tree", return_value=tree), patch.object(BlueprintExportHelper, "runtime_output_node", None):
+        parsed = BlueprintExportHelper.get_current_shapekeyname_mkey_dict()["blink"]
+    assert parsed.toggle_key == "F7" and parsed.initialize_value == 0
+    assert parsed.weight_list == [0.75, 1.0]
+    # A single manually entered weight is useful as an on/off shape. It is
+    # only exported when a toggle is configured, preserving legacy defaults.
+    shape_node.weights = shape_node.weights[:1]
+    with patch.object(BlueprintExportHelper, "get_current_blueprint_tree", return_value=tree), patch.object(BlueprintExportHelper, "runtime_output_node", None):
+        assert BlueprintExportHelper.get_current_shapekeyname_mkey_dict()["blink"].weight_list == [0.75]
+        shape_node.toggle_key = ""
+        assert BlueprintExportHelper.get_current_shapekeyname_mkey_dict() == {}
+    print("PASS: shared toggle aliases, single-frame controls and shape node configuration")
+
+
 def submesh(name, offset):
     """Use explicit byte arrays so slice corruption is easy to detect."""
     draw = DrawCallModel(name + ".base", name)
@@ -293,6 +348,8 @@ def test_wwmi_time_weights():
     from animation_test_addon.common.m_ini_builder import M_IniBuilder
     from animation_test_addon.common.m_ini_helper import M_IniHelper
     key = M_Key(key_name="$shapekey0", key_type="time_shapekey", value_list=[0, 1], weight_list=[0.0, 1.0])
+    # WWMI must use the same keyboard driver as the shared shape path.
+    key.configure_animation_toggle(types.SimpleNamespace(toggle_key="F7", start_enabled=False))
     model = types.SimpleNamespace(mesh_vertex_count=65, draw_ib="abcd1234")
     builder = M_IniBuilder()
     with patch.object(shapekeys, "get_wwmi_shapekey_entries", return_value=[("blink", "blink", key)]), patch.object(shapekeys, "copy_wwmi_shapekey_shaders_to_mod_folder"):
@@ -307,17 +364,89 @@ def test_wwmi_time_weights():
     assert text.count("[Present]") == text.count("[Constants]") == 1
     assert "global $shapekey0" in text and "persist $shapekey0" not in text
     assert "[Key_ShapeKey_blink]" not in text
+    assert "[KeyMimiAnimation_shapekey0]" in text and "key = F7" in text
+    assert "post run = CommandListMimiAnimation_shapekey0" in text
+    assert "global $mimi_anim_shapekey0_enabled = 0" in text
     for slot in ("cs-u5", "cs-t50", "cs-t51"):
         assert text.count(slot + " = ref ResourceShapeBackup_" + slot) == 2
         assert slot + " = null" not in text
     print("PASS: WWMI timelines, singleton sections and CS state restoration")
 
 
+def test_naraka_toggle_weights():
+    """Dedicated Naraka exports must include the common time toggle as well.
+
+    The compute still runs at the skinning hook, while the post-Present driver
+    prepares a zero weight on disable and restarts the clock on reactivation.
+    """
+    from animation_test_addon.games.naraka import shapekeys
+    from animation_test_addon.common.m_ini_builder import M_IniBuilder
+    key = M_Key(key_name="$shapekey0", key_type="time_shapekey", value_list=[0, 1], weight_list=[0.4, 1.0])
+    key.configure_animation_toggle(types.SimpleNamespace(toggle_key="F8", start_enabled=False))
+    model = types.SimpleNamespace(draw_ib="abcd1234", vertex_count=65, shapekey_name_bytelist_dict={"blink": b"x"},
+                                  d3d11_game_type=types.SimpleNamespace(CategoryStrideDict={"Position": 40}),
+                                  get_category_buffer_filename=lambda category: "base.buf")
+    builder = M_IniBuilder()
+    with patch.object(shapekeys.BlueprintExportHelper, "get_current_shapekeyname_mkey_dict", return_value={"blink": key}), patch.object(shapekeys, "copy_shapes_hlsl_to_mod_folder"):
+        shapekeys.add_naraka_shapekey_ini_sections(builder, {model.draw_ib: model}, [model])
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "naraka.ini")
+        builder.save_to_file(path)
+        text = Path(path).read_text()
+    assert text.count("[KeyMimiAnimation_shapekey0]") == 1
+    assert "post run = CommandListMimiAnimation_shapekey0" in text
+    assert "key = F8" in text and "global $mimi_anim_shapekey0_enabled = 0" in text
+    assert "[Key_ShapeKey_blink]" not in text
+    print("PASS: Naraka shape-key toggle emission")
+
+
+def test_toggle_rna_roundtrip():
+    """Register real Blender nodes and round-trip their controls in a library.
+
+    This catches missing RNA annotations and confirms old defaults, node copy
+    behavior and saved blend data without loading or replacing a user scene.
+    """
+    from animation_test_addon.blueprint.blueprint_node_base import MIMISocketObject, MIMIBlueprintTree
+    from animation_test_addon.blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
+    from animation_test_addon.blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
+    from animation_test_addon.blueprint.blueprint_node_time_shapekey import MIMINode_TimeShapeKey, MIMINodeTimeShapeKeyWeightItem
+    classes = [MIMISocketObject, MIMIBlueprintTree, MIMINodeTimeShapeKeyWeightItem,
+               MIMINode_TimeSwitch, MIMINode_TimePosSwitch, MIMINode_TimeShapeKey]
+    trees = []
+    try:
+        for cls in classes:
+            bpy.utils.register_class(cls)
+        tree = bpy.data.node_groups.new("toggle_roundtrip", "MIMIBlueprintTreeType")
+        trees.append(tree)
+        for cls in classes[-3:]:
+            node = tree.nodes.new(cls.bl_idname)
+            assert node.toggle_key == "" and node.start_enabled
+            node.toggle_key, node.start_enabled = "CTRL F6", False
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "toggles.blend")
+            bpy.data.libraries.write(path, {tree})
+            with bpy.data.libraries.load(path, link=False) as (source, target):
+                target.node_groups = source.node_groups
+            trees.extend(target.node_groups)
+        for node in trees[-1].nodes:
+            assert node.toggle_key == "CTRL F6" and not node.start_enabled
+        print("PASS: all three Blender RNA controls and blend-library roundtrip")
+    finally:
+        # Remove only test-created trees before unregistering their node types.
+        for tree in trees:
+            bpy.data.node_groups.remove(tree)
+        for cls in reversed(classes):
+            bpy.utils.unregister_class(cls)
+
+
 GlobalConfig.logic_name = LogicName.GIMI
 test_graph_provenance()
+test_toggle_aliases_and_shape_config()
 test_position_pipeline()
 test_validation()
 test_bake_and_rollback()
 test_rebake_wiring_and_large_ranges()
 test_wwmi_time_weights()
+test_naraka_toggle_weights()
+test_toggle_rna_roundtrip()
 print("ALL DYNAMIC ANIMATION BLENDER TESTS PASSED")

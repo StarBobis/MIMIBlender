@@ -17,6 +17,14 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # ---- Optional animation playback switches ----
+    "Animation Toggle Key": "动画开关键",
+    "Start Enabled": "默认开启",
+    "Optional key, such as F6 or CTRL F6. Leave blank for autoplay. Enabling restarts at frame 0.": "可选按键，例如 F6 或 CTRL F6。留空则自动播放；每次开启从第 0 帧重新播放。",
+    "Initial animation state on load or reload; only used when a toggle key is set.": "加载或重新加载时的动画初始状态；仅设置了开关键时生效。",
+    "When off: show frame 0": "关闭时：显示第 0 帧",
+    "When off: restore base Position": "关闭时：恢复基础 Position",
+    "When off: set shape weight to 0": "关闭时：形态键权重归零",
     # ---- Fragments (leading/trailing spaces are significant) ----
     " (LOD: {lod})": "（LOD：{lod}）",
     " Success!": " 成功！",
@@ -867,7 +875,7 @@ TRANSLATIONS_ZH_CN = {
     "Time Variable Alias": "时间变量别名",
     "FPS": "FPS",
     "Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate": "每秒显示的帧数（基于真实时间）；播放速度不受游戏帧率影响",
-    "Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple Time Switch nodes": "只允许英文字母和数字；相同别名会在多个时间切换节点之间共享同一时间轴变量",
+    "Start with an ASCII letter or underscore; use letters, digits or underscores. Aliases are case-insensitive and share one timeline.": "以英文字母或下划线开头，仅使用英文字母、数字或下划线；别名不区分大小写，相同别名共享时间轴。",
 
     # ---- Time Switch animation baker ----
     "Bake Animation to Frames": "烘焙动画到帧",
@@ -892,7 +900,6 @@ TRANSLATIONS_ZH_CN = {
 
     # ---- Time Position Switch node (Position.buf switching on a time line) ----
     "Time Position Switch": "时间位置切换",
-    "Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple time switch nodes": "只允许英文字母和数字；相同别名会在多个时间切换类节点之间共享同一时间轴变量",
     "The base object must also be connected normally": "基础对象也必须正常连接到输出",
 
     # ---- Time Shape Key node (shape key weight animation on a time line) ----

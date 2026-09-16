@@ -243,7 +243,9 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
         if getattr(m_key, 'key_type', 'key') != "time_shapekey":
             continue
         present_section.append("; ShapeKey time timeline: " + shapekey_name)
-        M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+        # Share exactly the same keyboard and restart behavior as slot-style
+        # and Naraka shape animation, despite this separate resource pipeline.
+        M_IniHelper.add_time_animation_sections(ini_builder, present_section, m_key)
         present_section.new_line()
         present_has_lines = True
     if present_has_lines:
@@ -251,7 +253,8 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
 
     key_section = M_IniSection(M_SectionType.Key)
     for shapekey_name, _safe_name, m_key in shapekey_entries:
-        # Time-driven weights have no hotkey, so they never get a [Key].
+        # Time weights use the common optional playback toggle, not this
+        # classic key that cycles through individual weight values.
         if getattr(m_key, 'key_type', 'key') == "time_shapekey":
             continue
         if m_key.initialize_vk_str == "":
