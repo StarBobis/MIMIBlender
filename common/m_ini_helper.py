@@ -720,6 +720,11 @@ class M_IniHelper:
 
     @staticmethod
     def add_branch_key_sections(ini_builder:M_IniBuilder,key_name_mkey_dict:dict[str,M_Key]):
+        # Split the variables by their driver kind:
+        # - "key"  : cycled by a hotkey [Key] section (classic Switch Key node).
+        # - "time" : recomputed every frame from 3Dmigoto's built-in wall-clock
+        #            "time" operand in the [Present] command list (Time Switch).
+        time_mkey_list = [mkey for mkey in key_name_mkey_dict.values() if getattr(mkey, 'key_type', 'key') == "time"]
 
         if len(key_name_mkey_dict.keys()) != 0:
             constants_section = M_IniSection(M_SectionType.Constants)
@@ -729,8 +734,16 @@ class M_IniHelper:
                 constants_section.append("global $active" + str(i))
 
             for mkey in key_name_mkey_dict.values():
-                key_str = "global persist " + mkey.key_name + " = " + str(mkey.initialize_value)
-                constants_section.append(key_str) 
+                if getattr(mkey, 'key_type', 'key') == "time":
+                    # Time variables change every frame, so they must stay plain
+                    # globals: a "persist" variable is written back to
+                    # d3dx_user.ini whenever a command list alters it
+                    # (3Dmigoto CommandList.cpp, VariableAssignment::run), which
+                    # would mean a disk write every frame.
+                    constants_section.append("global " + mkey.key_name + " = " + str(mkey.initialize_value))
+                else:
+                    key_str = "global persist " + mkey.key_name + " = " + str(mkey.initialize_value)
+                    constants_section.append(key_str) 
 
             ini_builder.append_section(constants_section)
 
@@ -741,12 +754,42 @@ class M_IniHelper:
 
             for i in range(GlobalConfig.generated_mod_number):
                 present_section.append("post $active" + str(i) + " = 0")
+
+            # Recompute every time-driven variable once per frame.  [Present]
+            # is a command list run at every DXGI::Present call (3Dmigoto
+            # HackerDXGI.cpp, RunFrameActions), and "time" evaluates to
+            # wall-clock seconds since injection (CommandList.cpp,
+            # ParamOverrideType::TIME), so the animation speed never depends
+            # on the game's frame rate.
+            #
+            # Formula: (time % (step * count)) // step
+            # - "%" is fmod and "//" is floor division floor(lhs / rhs)
+            #   (CommandList.cpp operator definitions), so the result is an
+            #   exact integer-valued float in [0, count); doing fmod first
+            #   keeps the value bounded no matter how long the session runs.
+            # - The integer-valued result makes "== N" frame conditions exact,
+            #   so the regular condition writer can be reused unchanged.
+            for mkey in time_mkey_list:
+                frame_count = len(mkey.value_list)
+                if frame_count < 1:
+                    continue
+                step_str = repr(1.0 / mkey.fps)
+                if mkey.comment:
+                    present_section.append("; " + mkey.comment)
+                present_section.append(
+                    mkey.key_name + " = (time % (" + step_str + " * " + str(frame_count) + ")) // " + step_str
+                )
             ini_builder.append_section(present_section)
         
         key_number = 0
         if len(key_name_mkey_dict.keys()) != 0:
 
             for mkey in key_name_mkey_dict.values():
+                # Time-driven variables have no hotkey, so they never get a
+                # [Key] section; only hotkey-driven variables are listed here.
+                if getattr(mkey, 'key_type', 'key') == "time":
+                    continue
+
                 key_section = M_IniSection(M_SectionType.Key)
                 key_section.append("[KeySwap_" + str(key_number) + "]")
                 

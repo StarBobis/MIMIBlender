@@ -29,6 +29,8 @@ from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_base
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
+from .blueprint import blueprint_node_time_switch
+from .blueprint import blueprint_time_bake
 from .games.naraka import nodes as blueprint_node_naraka
 
 from .blueprint import blueprint_node_face_mod
@@ -95,6 +97,9 @@ def _register_steps():
     # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
     yield blueprint_node_shapekey.register
     yield blueprint_node_obj.register
+    # Time Switch node and its animation baker register right after the base object nodes.
+    yield blueprint_node_time_switch.register
+    yield blueprint_time_bake.register
     # Naraka-only nodes register right after the base object nodes.
     yield blueprint_node_naraka.register
     yield ui_func_export.register
@@ -129,6 +134,8 @@ def unregister():
         blueprint_node_menu.unregister,
         ui_func_export.unregister,
         blueprint_node_naraka.unregister,
+        blueprint_time_bake.unregister,
+        blueprint_node_time_switch.unregister,
         blueprint_node_obj.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,

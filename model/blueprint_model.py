@@ -16,6 +16,7 @@ from ..common.global_config import GlobalConfig
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
+from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
 
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
@@ -49,6 +50,10 @@ class BluePrintModel:
         # is the LCM of the participating nodes' branch counts.
         self._switch_alias_state_counts = self._collect_switch_alias_state_counts(tree)
 
+        # Auto-allocated Time Switch variables use their own $dyntime counter,
+        # kept apart from the $swapkey namespace of hotkey-driven switches.
+        self._time_key_index = 0
+
         print(tree)
         output_node = output_node or BlueprintExportHelper.get_node_from_bl_idname(
             tree, MIMINode_Result_Output.bl_idname
@@ -75,6 +80,31 @@ class BluePrintModel:
         if cls._KEY_ALIAS_PATTERN.fullmatch(alias) is None:
             raise ValueError("The variable alias of a key switch node may only contain English letters and digits: " + alias)
         return "$" + alias
+
+    @classmethod
+    def _normalize_time_alias(cls, time_node: bpy.types.Node) -> str:
+        alias = str(getattr(time_node, "time_alias", "") or "").strip()
+        if alias == "":
+            return ""
+        if cls._KEY_ALIAS_PATTERN.fullmatch(alias) is None:
+            raise ValueError("The time variable alias of a Time Switch node may only contain English letters and digits: " + alias)
+        return "$" + alias
+
+    def _allocate_time_key_name(self, time_node: bpy.types.Node) -> str:
+        # An explicit alias names the shared timeline variable directly;
+        # otherwise allocate the next free $dyntimeN name.
+        key_alias = self._normalize_time_alias(time_node)
+        if key_alias:
+            return key_alias
+
+        key_name = "$dyntime" + str(self._time_key_index)
+        while (
+            key_name in self.keyname_mkey_dict
+            or key_name in self._switch_alias_state_counts
+        ):
+            self._time_key_index = self._time_key_index + 1
+            key_name = "$dyntime" + str(self._time_key_index)
+        return key_name
 
     def _allocate_switch_key_name(self, switch_node: bpy.types.Node) -> tuple[str, bool]:
         key_alias = self._normalize_switch_key_alias(switch_node)
@@ -105,6 +135,13 @@ class BluePrintModel:
             for node in getattr(tree, "nodes", []):
                 if getattr(node, "bl_idname", "") == MIMINode_SwitchKey.bl_idname:
                     alias = cls._normalize_switch_key_alias(node)
+                    branch_count = len(getattr(node, "inputs", []))
+                    if alias and branch_count > 1:
+                        counts.setdefault(alias, []).append(branch_count)
+                # Time Switch aliases live in the same variable namespace:
+                # one shared timeline variable per alias, LCM period included.
+                if getattr(node, "bl_idname", "") == MIMINode_TimeSwitch.bl_idname:
+                    alias = cls._normalize_time_alias(node)
                     branch_count = len(getattr(node, "inputs", []))
                     if alias and branch_count > 1:
                         counts.setdefault(alias, []).append(branch_count)
@@ -145,21 +182,18 @@ class BluePrintModel:
             # If it is a key switch node, take all of its branch nodes and process them one by one.
             # Here we iterate over all inputs directly instead of using get_connected_nodes,
             # because get_connected_nodes ignores unconnected (empty) sockets and would compute a wrong branch count.
-            
-            # Get the effective branches (excluding the trailing empty socket kept for easier editing).
-            # The last socket counts only when it is truly unconnected; the Node definition says so, but check the links anyway.
-            # valid_input_sockets = unknown_node.inputs[:-1] if (len(unknown_node.inputs) > 1 and not unknown_node.inputs[-1].is_linked) else unknown_node.inputs[:]
-            
-            # Correction: every Input of a SwitchKey node is an effective branch, since sockets can be added/removed manually and an empty socket means an empty state (nothing is shown)
+
+            # Every Input of a SwitchKey node is an effective branch, since sockets can be
+            # added/removed manually and an empty socket means an empty state (nothing is shown)
             valid_input_sockets = unknown_node.inputs[:]
-            
+
             # If no sockets are connected at all, skip this node entirely
             is_all_socket_linked = False
             for sock in valid_input_sockets:
                 if sock.is_linked:
                     is_all_socket_linked = True
                     break
-            
+
             if not is_all_socket_linked:
                 # If nothing is connected, do nothing
                 return
@@ -200,34 +234,12 @@ class BluePrintModel:
                     GlobalConfig.global_key_index = GlobalConfig.global_key_index + 1
 
                 # Process each branch socket in turn (including empty branches)
-                for branch_index, socket in enumerate(valid_input_sockets):
-                    # Whether a socket is connected to a node or left empty, it always maps to one key value
-                    
-                    if socket.is_linked:
-                        # If a socket is connected to a node, propagate the key for this value downstream for parsing
-                        matching_states = range(branch_index, state_count, len(valid_input_sockets))
-                        for state in matching_states:
-                            # Nested nodes with the same alias intersect the
-                            # existing state instead of emitting contradictions.
-                            existing_state = next(
-                                (key.tmp_value for key in chain_key_list if key.key_name == m_key.key_name),
-                                None,
-                            )
-                            if existing_state is not None and existing_state != state:
-                                continue
-                            for link in socket.links:
-                                tmp_chain_key_list = copy.deepcopy(chain_key_list)
-                                if existing_state is None:
-                                    chain_tmp_key = copy.deepcopy(m_key)
-                                    chain_tmp_key.tmp_value = state
-                                    tmp_chain_key_list.append(chain_tmp_key)
-                                self.parse_single_node(link.from_node, tmp_chain_key_list)
-                    else:
-                        # An empty (unconnected) socket means this value maps to an empty object
-                        # No parsing is needed here because no obj has to be generated under this condition
-                        # The key value stays in key.value_list, yet no obj condition will ever match it
-                        # This achieves the effect of "switching to this branch displays nothing"
-                        pass
+                self._parse_branch_sockets(valid_input_sockets, m_key, state_count, chain_key_list)
+
+        elif unknown_node.bl_idname == MIMINode_TimeSwitch.bl_idname:
+            # Time Switch: a Switch Key variant whose variable is recomputed
+            # from wall-clock time every frame instead of a hotkey.
+            self._parse_time_switch_node(unknown_node, chain_key_list)
 
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
@@ -279,6 +291,106 @@ class BluePrintModel:
             # Result Output.  Parsing its mesh inputs here would duplicate
             # them in the regular output layer.
             return
+
+    def _parse_branch_sockets(self, branch_sockets, m_key: M_Key, state_count: int, chain_key_list: list[M_Key]):
+        """
+        Process each branch socket of a switch-style node in turn (including
+        empty branches, which map to a key value that draws nothing).
+        Shared by the Switch Key node and the Time Switch node.
+        """
+        for branch_index, socket in enumerate(branch_sockets):
+            # Whether a socket is connected to a node or left empty, it always maps to one key value
+            if not socket.is_linked:
+                # An empty (unconnected) socket means this value maps to an empty object
+                # No parsing is needed here because no obj has to be generated under this condition
+                # The key value stays in key.value_list, yet no obj condition will ever match it
+                # This achieves the effect of "switching to this branch displays nothing"
+                continue
+
+            # If a socket is connected to a node, propagate the key for this value downstream for parsing
+            matching_states = range(branch_index, state_count, len(branch_sockets))
+            for state in matching_states:
+                # Nested nodes with the same alias intersect the
+                # existing state instead of emitting contradictions.
+                existing_state = next(
+                    (key.tmp_value for key in chain_key_list if key.key_name == m_key.key_name),
+                    None,
+                )
+                if existing_state is not None and existing_state != state:
+                    continue
+                for link in socket.links:
+                    tmp_chain_key_list = copy.deepcopy(chain_key_list)
+                    if existing_state is None:
+                        chain_tmp_key = copy.deepcopy(m_key)
+                        chain_tmp_key.tmp_value = state
+                        tmp_chain_key_list.append(chain_tmp_key)
+                    self.parse_single_node(link.from_node, tmp_chain_key_list)
+
+    def _parse_time_switch_node(self, time_node: bpy.types.Node, chain_key_list: list[M_Key]):
+        """
+        Parse a Time Switch node.
+
+        The branch handling is identical to the Switch Key node: branch k maps
+        to value k of the node's variable. The only difference is the driver:
+        the variable is declared with key_type "time" so the INI writer
+        recomputes it from wall-clock time in the [Present] command list
+        instead of emitting a hotkey [Key] section.
+        """
+        valid_input_sockets = time_node.inputs[:]
+
+        # If no sockets are connected at all, skip this node entirely
+        is_any_socket_linked = False
+        for sock in valid_input_sockets:
+            if sock.is_linked:
+                is_any_socket_linked = True
+                break
+        if not is_any_socket_linked:
+            return
+
+        if len(valid_input_sockets) == 1:
+            # A single frame never switches; treat the node as a pass-through.
+            for link in valid_input_sockets[0].links:
+                self.parse_single_node(link.from_node, chain_key_list)
+            return
+
+        fps = float(getattr(time_node, 'fps', 0.0) or 0.0)
+        if fps <= 0.0:
+            raise ValueError(
+                "Time Switch node '" + time_node.name + "' has an invalid FPS (must be greater than 0)"
+            )
+
+        m_key = M_Key()
+        m_key.key_name = self._allocate_time_key_name(time_node)
+
+        state_count = self._switch_alias_state_counts.get(
+            m_key.key_name, len(valid_input_sockets)
+        )
+        m_key.value_list = list(range(state_count))
+
+        m_key.key_type = "time"
+        m_key.fps = fps
+        m_key.initialize_value = 0  # Always starts on the first frame
+
+        # Set the comment field
+        m_key.comment = getattr(time_node, 'comment', '')
+
+        # Nodes sharing an explicit alias share one timeline variable.
+        existing_key = self.keyname_mkey_dict.get(m_key.key_name)
+        if existing_key is None:
+            self.keyname_mkey_dict[m_key.key_name] = m_key
+        else:
+            if existing_key.key_type != "time":
+                raise ValueError(
+                    "The alias '" + m_key.key_name + "' is shared by both a Switch Key node and a Time Switch node; please use different aliases"
+                )
+            if abs(existing_key.fps - fps) > 1e-6:
+                LOG.warning(
+                    "BluePrintModel: Time Switch nodes sharing alias '" + m_key.key_name
+                    + "' have different FPS values; the first one (" + str(existing_key.fps) + ") wins"
+                )
+            m_key = existing_key
+
+        self._parse_branch_sockets(valid_input_sockets, m_key, state_count, chain_key_list)
 
     def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):
         """Expand an MMT group through its Group Output nodes."""

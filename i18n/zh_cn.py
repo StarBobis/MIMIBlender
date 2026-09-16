@@ -861,4 +861,32 @@ TRANSLATIONS_ZH_CN = {
     "Restore addon backup ({date})": "还原插件备份（{date}）",
     "Last update check: {time}": "最近一次检查：{time}",
     "Last update check: Never": "最近一次检查：从未",
+
+    # ---- Time Switch node (wall-clock driven dynamic mod) ----
+    "Time Switch": "时间切换",
+    "Time Variable Alias": "时间变量别名",
+    "FPS": "FPS",
+    "Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate": "每秒显示的帧数（基于真实时间）；播放速度不受游戏帧率影响",
+    "Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple Time Switch nodes": "只允许英文字母和数字；相同别名会在多个时间切换节点之间共享同一时间轴变量",
+
+    # ---- Time Switch animation baker ----
+    "Bake Animation to Frames": "烘焙动画到帧",
+    "Source Object": "源对象",
+    "Animated mesh object to sample (shape keys, armature, constraints and transforms are baked in)": "要采样的动画网格对象（形态键、骨骼、约束和变换都会被烘焙进去）",
+    "Submesh the baked frames belong to; written onto every created Object Info node": "烘焙帧所属的 Submesh；会写入每个创建的 Object Info 节点",
+    "Start Frame": "起始帧",
+    "End Frame": "结束帧",
+    "Frame Step": "帧步长",
+    "Sample one frame every N frames; larger steps produce fewer frames": "每 N 帧采样一帧；步长越大产出的帧越少",
+    "Sync Node FPS with Scene": "节点 FPS 与场景同步",
+    "Set the Time Switch node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline": "将时间切换节点的 FPS 设为 场景帧率 / 帧步长，使 Mod 播放速度与 Blender 时间线一致",
+    "Will bake {count} frames": "将烘焙 {count} 帧",
+    "At least 2 frames are required for a time switch animation": "时间切换动画至少需要 2 帧",
+    "Too many frames ({count}); please increase the frame step": "帧数过多（{count}）；请增大帧步长",
+    "Please run this from a Time Switch node": "请从时间切换节点上运行此功能",
+    "Please choose a valid mesh object as the animation source": "请选择一个有效的网格对象作为动画源",
+    "Please choose a Submesh for the baked frames": "请为烘焙帧选择一个 Submesh",
+    "Target Time Switch node not found": "未找到目标时间切换节点",
+    "Baking produced no objects": "烘焙未产出任何对象",
+    "Baked {count} frames and wired them into the Time Switch node": "已烘焙 {count} 帧并连线到时间切换节点",
 }
