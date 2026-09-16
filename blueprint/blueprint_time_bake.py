@@ -192,13 +192,16 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
                 for vertex_group in source_obj.vertex_groups:
                     new_obj.vertex_groups.new(name=vertex_group.name)
 
+                # The object must enter the view layer before hide_set() can
+                # touch it, so link it to the collection first.
+                collection.objects.link(new_obj)
+
                 # Baked frames overlap at the same location; hide them so the
                 # viewport stays usable.  Export reads the datablocks directly
                 # and does not depend on visibility.
                 new_obj.hide_set(True)
                 new_obj.hide_render = True
 
-                collection.objects.link(new_obj)
                 baked_objects.append((frame_number, new_obj))
                 window_manager.progress_update(index + 1)
         finally:
