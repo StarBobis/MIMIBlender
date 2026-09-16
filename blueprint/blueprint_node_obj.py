@@ -487,7 +487,7 @@ class MMT_OT_SwitchKey_RemoveSocket(I18nOperator):
 
 @translatable
 class MIMINode_SwitchKey(MIMINodeBase):
-    '''Switch Key assigns each connected branch to its own separate variable'''
+    '''Switch Key assigns each connected branch to one state of a shared variable; nodes bound to the same key merge into that variable automatically'''
     bl_idname = 'MIMINode_SwitchKey'
     bl_label = 'Switch Key'
     bl_icon = 'GROUP'
@@ -508,8 +508,18 @@ class MIMINode_SwitchKey(MIMINodeBase):
     def update_comment(self, context):
         self.update_node_width([self.key_name, self.key_alias, self.comment])
     
-    key_name: bpy.props.StringProperty(name=tr("Key Name"), default="", update=update_key_name) # type: ignore
-    key_alias: bpy.props.StringProperty(name=tr("Variable Alias"), description=tr("Only ASCII letters and digits are allowed; the same alias shares a variable and different branch counts expand by least common multiple"), default="", update=update_key_alias) # type: ignore
+    key_name: bpy.props.StringProperty(
+        name=tr("Key Name"),
+        description=tr("Hotkey that cycles this switch; Switch Key nodes bound to the same key automatically share one variable, and different branch counts expand by least common multiple"),
+        default="",
+        update=update_key_name,
+    ) # type: ignore
+    key_alias: bpy.props.StringProperty(
+        name=tr("Variable Alias"),
+        description=tr("Only ASCII letters and digits are allowed; the same alias shares a variable and different branch counts expand by least common multiple; takes precedence over automatic same-key merging"),
+        default="",
+        update=update_key_alias,
+    ) # type: ignore
     comment: bpy.props.StringProperty(name=tr("Comment"), description=tr("Comment text; written into the config table as comments"), default="", update=update_comment) # type: ignore
     
     def init(self, context):

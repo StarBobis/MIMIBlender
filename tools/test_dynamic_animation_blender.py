@@ -51,6 +51,8 @@ def new_blueprint():
     model.time_pos_frame_models = []
     model.time_pos_key_names = set()
     model._switch_alias_state_counts = {}
+    model._key_group_state_counts = {}
+    model._key_group_var_names = {}
     model._time_key_index = 0
     model._time_node_key_names = {}
     model._group_instance_stack = []
@@ -186,6 +188,94 @@ def test_toggle_aliases_and_shape_config():
         shape_node.toggle_key = ""
         assert BlueprintExportHelper.get_current_shapekeyname_mkey_dict() == {}
     print("PASS: shared toggle aliases, single-frame controls and shape node configuration")
+
+
+def switch_node(key="VK_F1", alias="", count=2, prefix="branch"):
+    # Same socket layout as a real Switch Key node: one leaf per branch,
+    # so the real hotkey parsing and branch-state writer run end to end.
+    sockets = []
+    for index in range(count):
+        leaf = types.SimpleNamespace(obj_name="abcd1234-0." + prefix + str(index), submesh_name="abcd1234-0")
+        sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf)]))
+    return types.SimpleNamespace(
+        inputs=sockets, key_name=key, key_alias=alias, name=prefix, comment="", mute=False,
+        bl_idname=sys.modules[BluePrintModel.__module__].MIMINode_SwitchKey.bl_idname,
+    )
+
+
+def test_switch_key_merging():
+    """Same hotkey without an alias merges into one cycled variable.
+
+    Two Switch Key nodes bound to the same key used to emit two [Key]
+    sections cycling two independent variables; now the pre-scan computes
+    the LCM period and both nodes share a single $swapkeyN variable.
+    """
+    from animation_test_addon.common.m_ini_builder import M_IniBuilder
+    from animation_test_addon.common.m_ini_helper import M_IniHelper
+
+    # Two nodes share "VK_F1" written in different case/whitespace forms;
+    # branch counts 2 and 3 expand to 6 states by least common multiple.
+    GlobalConfig.global_key_index = 0
+    first = switch_node(key="VK_F1", count=2, prefix="first")
+    second = switch_node(key=" vk_f1  ", count=3, prefix="second")
+    model = new_blueprint()
+    model._key_group_state_counts = BluePrintModel._collect_key_group_state_counts(
+        types.SimpleNamespace(nodes=[first, second]))
+    assert model._key_group_state_counts == {"VK_F1": 6}
+    BluePrintModel.parse_single_node(model, first, [])
+    BluePrintModel.parse_single_node(model, second, [])
+    assert list(model.keyname_mkey_dict) == ["$swapkey0"]
+    merged = model.keyname_mkey_dict["$swapkey0"]
+    assert merged.value_list == [0, 1, 2, 3, 4, 5]
+    # The first parsed node provides the [Key] section's binding string.
+    assert merged.initialize_vk_str == "VK_F1"
+
+    # Every leaf keeps its branch index modulo its own socket count:
+    # branch k of a 2-socket node shows on states k, k+2, k+4 and branch k
+    # of a 3-socket node on states k, k+3.
+    states_by_leaf = {}
+    for draw in model.ordered_draw_obj_data_model_list:
+        states = [key.tmp_value for key in draw.work_key_list if key.key_name == "$swapkey0"]
+        states_by_leaf.setdefault(draw.obj_name, []).extend(states)
+    assert states_by_leaf["abcd1234-0.first0"] == [0, 2, 4]
+    assert states_by_leaf["abcd1234-0.first1"] == [1, 3, 5]
+    assert states_by_leaf["abcd1234-0.second0"] == [0, 3]
+    assert states_by_leaf["abcd1234-0.second1"] == [1, 4]
+    assert states_by_leaf["abcd1234-0.second2"] == [2, 5]
+
+    # The INI writer emits exactly one cycled variable for the hotkey.
+    builder = M_IniBuilder()
+    M_IniHelper.add_branch_key_sections(builder, model.keyname_mkey_dict)
+    lines = [line for section in builder.ini_section_list for line in section.SectionLineList]
+    assert [line for line in lines if line.startswith("key = ")] == ["key = VK_F1"]
+    assert "global persist $swapkey0 = 0" in lines
+    assert "$swapkey0 = 0,1,2,3,4,5" in lines
+
+    # Different hotkeys keep independent variables and [Key] sections.
+    GlobalConfig.global_key_index = 0
+    model = new_blueprint()
+    BluePrintModel.parse_single_node(model, switch_node(key="VK_F1", count=2, prefix="a"), [])
+    BluePrintModel.parse_single_node(model, switch_node(key="VK_F2", count=2, prefix="b"), [])
+    assert sorted(model.keyname_mkey_dict) == ["$swapkey0", "$swapkey1"]
+    assert all(len(key.value_list) == 2 for key in model.keyname_mkey_dict.values())
+
+    # Blank keys never merge: each switch keeps its own variable.
+    GlobalConfig.global_key_index = 0
+    model = new_blueprint()
+    BluePrintModel.parse_single_node(model, switch_node(key="", count=2, prefix="a"), [])
+    BluePrintModel.parse_single_node(model, switch_node(key="   ", count=2, prefix="b"), [])
+    assert sorted(model.keyname_mkey_dict) == ["$swapkey0", "$swapkey1"]
+
+    # An explicit alias wins over same-key merging: the aliased node keeps
+    # its named variable while the plain node gets an anonymous one.
+    GlobalConfig.global_key_index = 0
+    model = new_blueprint()
+    model._key_group_state_counts = BluePrintModel._collect_key_group_state_counts(
+        types.SimpleNamespace(nodes=[switch_node(key="VK_F1", count=2)]))
+    BluePrintModel.parse_single_node(model, switch_node(key="VK_F1", alias="hero", count=2, prefix="a"), [])
+    BluePrintModel.parse_single_node(model, switch_node(key="VK_F1", count=2, prefix="b"), [])
+    assert sorted(model.keyname_mkey_dict) == ["$hero", "$swapkey0"]
+    print("PASS: same-hotkey merge, LCM states, blank/different keys and alias precedence")
 
 
 def submesh(name, offset):
@@ -442,6 +532,7 @@ def test_toggle_rna_roundtrip():
 GlobalConfig.logic_name = LogicName.GIMI
 test_graph_provenance()
 test_toggle_aliases_and_shape_config()
+test_switch_key_merging()
 test_position_pipeline()
 test_validation()
 test_bake_and_rollback()

@@ -53,6 +53,17 @@ class BluePrintModel:
         # is the LCM of the participating nodes' branch counts.
         self._switch_alias_state_counts = self._collect_switch_alias_state_counts(tree)
 
+        # Switch Key nodes bound to the same hotkey (and without an explicit
+        # alias) also merge into one shared variable: the INI then emits a
+        # single [Key] section that cycles all of them in sync.  The merged
+        # variable's period is the LCM of the participating branch counts,
+        # exactly like an alias group.  This maps normalized key binding ->
+        # LCM state count, pre-scanned before parsing starts.
+        self._key_group_state_counts = self._collect_key_group_state_counts(tree)
+        # Normalized key binding -> allocated shared $swapkeyN variable name,
+        # filled lazily while parsing so every group member reuses one name.
+        self._key_group_var_names: dict[str, str] = {}
+
         # Auto-allocated Time Switch variables use their own $dyntime counter,
         # kept apart from the $swapkey namespace of hotkey-driven switches.
         self._time_key_index = 0
@@ -145,11 +156,46 @@ class BluePrintModel:
         self._time_node_key_names[identity] = key_name
         return key_name
 
-    def _allocate_switch_key_name(self, switch_node: bpy.types.Node) -> tuple[str, bool]:
-        key_alias = self._normalize_switch_key_alias(switch_node)
-        if key_alias:
-            return key_alias, False
+    @classmethod
+    def _normalize_switch_key_binding(cls, key_name: str) -> str:
+        # 3Dmigoto parses key bindings case-insensitively and ignores extra
+        # whitespace, so group Switch Key nodes by this normalized form:
+        # "ctrl f6", "CTRL  F6" and "Ctrl F6" all mean the same hotkey.
+        return " ".join(str(key_name or "").upper().split())
 
+    @classmethod
+    def _collect_key_group_state_counts(cls, root_tree) -> dict[str, int]:
+        # Pre-scan every reachable tree for Switch Key nodes without an
+        # explicit alias: nodes bound to the same normalized hotkey merge
+        # into one variable whose period is the LCM of their branch counts.
+        # Nodes with an alias are skipped here; they merge by alias instead.
+        counts: dict[str, list[int]] = {}
+        visited_trees = set()
+
+        def visit(tree):
+            if tree is None or id(tree) in visited_trees:
+                return
+            visited_trees.add(id(tree))
+            for node in getattr(tree, "nodes", []):
+                if getattr(node, "bl_idname", "") == MIMINode_SwitchKey.bl_idname:
+                    key_binding = cls._normalize_switch_key_binding(getattr(node, "key_name", ""))
+                    branch_count = len(getattr(node, "inputs", []))
+                    if key_binding and not cls._normalize_switch_key_alias(node) and branch_count > 1:
+                        counts.setdefault(key_binding, []).append(branch_count)
+                if getattr(node, "bl_idname", "") == GROUP_NODE_IDNAME:
+                    visit(getattr(node, "node_tree", None))
+
+        visit(root_tree)
+        # Reuse the alias-group cap: LCM expansion can explode for relatively
+        # prime branch counts, so bound it before lists are built.
+        periods = {binding: math.lcm(*sizes) for binding, sizes in counts.items()}
+        if any(period > 10000 for period in periods.values()):
+            raise ValueError("Switch Key nodes sharing one hotkey may expand to at most 10000 states")
+        return periods
+
+    def _next_free_switch_key_name(self) -> str:
+        # Allocate the next unused $swapkeyN name; aliases and already shared
+        # key-group variables occupy the same namespace and must be skipped.
         key_name = "$swapkey" + str(GlobalConfig.global_key_index)
         while (
             key_name in self.keyname_mkey_dict
@@ -160,7 +206,32 @@ class BluePrintModel:
 
         if key_name in self.keyname_mkey_dict:
             raise ValueError("Duplicate variable name of a key switch node: " + key_name)
-        return key_name, True
+        return key_name
+
+    def _allocate_switch_key_name(self, switch_node: bpy.types.Node) -> tuple[str, bool]:
+        key_alias = self._normalize_switch_key_alias(switch_node)
+        if key_alias:
+            return key_alias, False
+
+        # Without an explicit alias, nodes bound to the same hotkey merge
+        # into one shared variable, so the INI emits a single [Key] section
+        # that cycles every participating node in sync.  An empty key keeps
+        # the legacy behavior: every node gets its own variable.
+        key_binding = self._normalize_switch_key_binding(getattr(switch_node, "key_name", ""))
+        if key_binding:
+            shared_key_name = self._key_group_var_names.get(key_binding)
+            if shared_key_name is not None:
+                return shared_key_name, False
+            key_name = self._next_free_switch_key_name()
+            self._key_group_var_names[key_binding] = key_name
+            # Key the pre-scanned LCM state count by the allocated variable
+            # name so the parser sizes value_list exactly like an alias group.
+            state_count = self._key_group_state_counts.get(key_binding)
+            if state_count is not None:
+                self._switch_alias_state_counts[key_name] = state_count
+            return key_name, True
+
+        return self._next_free_switch_key_name(), True
 
     @classmethod
     def _collect_switch_alias_state_counts(cls, root_tree) -> dict[str, int]:
