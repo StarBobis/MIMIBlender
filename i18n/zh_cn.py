@@ -871,14 +871,18 @@ TRANSLATIONS_ZH_CN = {
     "Last update check: {time}": "最近一次检查：{time}",
     "Last update check: Never": "最近一次检查：从未",
 
-    # ---- Time Switch node (wall-clock driven dynamic mod) ----
+    # ---- DrawIndex Based Dynamic Mod node (wall-clock driven dynamic mod) ----
+    # The three node titles below are also referenced by the node title
+    # migration in blueprint/blueprint_node_base.py, which has to recognise
+    # the titles that older versions wrote into existing blueprints.
+    "DrawIndex Based Dynamic Mod": "基于DrawIndexed切换的动态Mod",
     "Time Switch": "时间切换",
     "Time Variable Alias": "时间变量别名",
     "FPS": "FPS",
     "Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate": "每秒显示的帧数（基于真实时间）；播放速度不受游戏帧率影响",
     "Start with an ASCII letter or underscore; use letters, digits or underscores. Aliases are case-insensitive and share one timeline.": "以英文字母或下划线开头，仅使用英文字母、数字或下划线；别名不区分大小写，相同别名共享时间轴。",
 
-    # ---- Time Switch animation baker ----
+    # ---- Animation baker shared by the DrawIndexed and Position.buf timelines ----
     "Bake Animation to Frames": "烘焙动画到帧",
     "Source Object": "源对象",
     "Animated mesh object to sample (shape keys, armature, constraints and transforms are baked in)": "要采样的动画网格对象（形态键、骨骼、约束和变换都会被烘焙进去）",
@@ -888,22 +892,24 @@ TRANSLATIONS_ZH_CN = {
     "Frame Step": "帧步长",
     "Sample one frame every N frames; larger steps produce fewer frames": "每 N 帧采样一帧；步长越大产出的帧越少",
     "Sync Node FPS with Scene": "节点 FPS 与场景同步",
-    "Set the Time Switch node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline": "将时间切换节点的 FPS 设为 场景帧率 / 帧步长，使 Mod 播放速度与 Blender 时间线一致",
+    "Set this node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline": "将此节点的 FPS 设为 场景帧率 / 帧步长，使 Mod 播放速度与 Blender 时间线一致",
     "Will bake {count} frames": "将烘焙 {count} 帧",
-    "At least 2 frames are required for a time switch animation": "时间切换动画至少需要 2 帧",
+    "At least 2 frames are required for a dynamic mod timeline": "动态Mod时间轴至少需要 2 帧",
     "Too many frames ({count}); please increase the frame step": "帧数过多（{count}）；请增大帧步长",
-    "Please run this from a Time Switch node": "请从时间切换节点上运行此功能",
+    "Please run this from a DrawIndex Based or Position.buf Based Dynamic Mod node": "请从基于DrawIndexed切换或基于Position.buf切换的动态Mod节点上运行此功能",
     "Please choose a valid mesh object as the animation source": "请选择一个有效的网格对象作为动画源",
     "Please choose a Submesh for the baked frames": "请为烘焙帧选择一个 Submesh",
-    "Target Time Switch node not found": "未找到目标时间切换节点",
+    "Target dynamic mod node not found": "未找到目标动态Mod节点",
     "Baking produced no objects": "烘焙未产出任何对象",
-    "Baked {count} frames and wired them into the Time Switch node": "已烘焙 {count} 帧并连线到时间切换节点",
+    "Baked {count} frames and wired them into this node": "已烘焙 {count} 帧并连线到此节点",
 
-    # ---- Time Position Switch node (Position.buf switching on a time line) ----
+    # ---- Position.buf Based Dynamic Mod node (Position.buf switching on a time line) ----
+    "Position.buf Based Dynamic Mod": "基于Position.buf切换的动态Mod",
     "Time Position Switch": "时间位置切换",
     "The base object must also be connected normally": "基础对象也必须正常连接到输出",
 
-    # ---- Time Shape Key node (shape key weight animation on a time line) ----
+    # ---- ShapeKey Real-time Based Dynamic Mod node (shape key weight animation) ----
+    "ShapeKey Real-time Based Dynamic Mod": "基于ShapeKey实时计算的动态Mod",
     "Time Shape Key": "时间形态键",
     "Weight": "权重",
     "Shape key weight while this frame is active (0 means Basis, 1 means full shape key)": "该帧生效时的形态键权重（0 为基础形态，1 为完整形态键）",
@@ -913,11 +919,11 @@ TRANSLATIONS_ZH_CN = {
     "Bake Shape Key Weights": "烘焙形态键权重",
     "Mesh object whose animated shape key value is sampled": "要采样其动画形态键数值的网格对象",
     "Set the node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline": "将节点的 FPS 设为 场景帧率 / 帧步长，使 Mod 播放速度与 Blender 时间线一致",
-    "Please run this from a Time Shape Key node": "请从时间形态键节点上运行此功能",
-    "Target Time Shape Key node not found": "未找到目标时间形态键节点",
+    "Please run this from a ShapeKey Real-time Based Dynamic Mod node": "请从基于ShapeKey实时计算的动态Mod节点上运行此功能",
+    "Target ShapeKey Real-time Based Dynamic Mod node not found": "未找到目标基于ShapeKey实时计算的动态Mod节点",
     "Please fill in the Shape Key Name first": "请先填写形态键名称",
     "Object '{name}' has no shape key named '{shapekey}'": "对象“{name}”没有名为“{shapekey}”的形态键",
-    "At least 2 frames are required for a time shape key animation": "时间形态键动画至少需要 2 帧",
-    "Baked {count} weight frames into the Time Shape Key node": "已烘焙 {count} 个权重帧到时间形态键节点",
+    "At least 2 frames are required for a shape key timeline": "形态键时间轴至少需要 2 帧",
+    "Baked {count} weight frames into the ShapeKey Real-time Based Dynamic Mod node": "已烘焙 {count} 个权重帧到基于ShapeKey实时计算的动态Mod节点",
     "Frame {count}": "帧 {count}",
 }

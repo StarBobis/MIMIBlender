@@ -2,7 +2,7 @@
 
 ## Scope and verification level
 
-Reviewed the DrawIndexed Time Switch, Position-buffer Time Switch, and Time Shape Key paths, including shared, Naraka and WWMI shape emission. Changes cover graph parsing, baking, buffer generation, resource declarations, command ordering, shader layouts and regression tests.
+Reviewed the DrawIndex Based Dynamic Mod (DrawIndexed switching), the Position.buf Based Dynamic Mod and the ShapeKey Real-time Based Dynamic Mod paths, including shared, Naraka and WWMI shape emission. Changes cover graph parsing, baking, buffer generation, resource declarations, command ordering, shader layouts and regression tests.
 
 The original implementation was examined against the local bo3b/3Dmigoto source checkout at revision `8f329bd94fecc9bbcb9211ffd42a95dd7fe6b43e`. Validation includes real Blender 5.1 mesh evaluation and real D3D11 WARP shader compilation/dispatch/readback. It does **not** include injection into a running game or a complete extracted-character export for every preset.
 
@@ -76,6 +76,7 @@ Source links below point to the exact revision inspected locally:
 - `python tools/test_naraka_shapekeys.py`: Naraka skinning hook order, raw conversion, input declarations and borrowed-slot restoration.
 - `python tools/test_naraka_shapekey_gpu.py`: real HLSL compilation and D3D11 WARP execution for 12-byte and 40-byte layouts; weights 0/0.3/1/reset/multiple additions; animated seeds; partial work groups; 65,537 vertices. Also reproduces three invalid legacy descriptor combinations.
 - `blender -b --factory-startup --python-exit-code 1 --python tools/test_dynamic_animation_blender.py`: real model traversal/grouping/assembly with mocked external workspace lookups, byte-slice preservation, topology/attribute rejection, actual Blender mesh evaluation, world transforms, fractional-frame restoration, failed-sampling cleanup, replacement wiring, lazy ranges and WWMI time-weight emission.
+- `blender -b --factory-startup --python-exit-code 1 --python tools/test_dynamic_mod_titles.py`: dynamic mod node titles in both languages, node width, the legacy title migration (English and Simplified Chinese spellings, user-chosen titles preserved, idempotent) and the renamed report translations.
 - Python compilation of `blueprint`, `common`, `model`, `games`, and `tools`; Git whitespace validation.
 
 ## Remaining limits and migration

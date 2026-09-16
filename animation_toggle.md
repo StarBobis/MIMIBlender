@@ -1,10 +1,10 @@
 # Animation Playback Toggles
 
-All three animation nodes now support an optional keyboard switch:
+All three dynamic mod nodes now support an optional keyboard switch:
 
-- Time Switch (DrawIndexed)
-- Time Position Switch (Position buffer replacement)
-- Time Shape Key (shared, Naraka and WWMI exporters)
+- DrawIndex Based Dynamic Mod (switches whole DrawIndexed calls)
+- Position.buf Based Dynamic Mod (replaces Position buffer content)
+- ShapeKey Real-time Based Dynamic Mod (shared, Naraka and WWMI exporters)
 
 ## Configuration
 
@@ -33,7 +33,7 @@ A one-frame draw/Position node or a single manually entered shape weight can als
 
 ## Shared clocks and shared keys
 
-Time Switch and Time Position Switch nodes with the same time alias share one exported clock and one toggle. They must use the same normalized key binding and Start Enabled setting, in addition to the existing matching-FPS requirement. Conflicts raise an export error instead of silently taking whichever node was visited first.
+The DrawIndex Based Dynamic Mod and the Position.buf Based Dynamic Mod nodes with the same time alias share one exported clock and one toggle. They must use the same normalized key binding and Start Enabled setting, in addition to the existing matching-FPS requirement. Conflicts raise an export error instead of silently taking whichever node was visited first.
 
 For example, two submeshes with alias `walk`, key `F6`, and Start Enabled checked are controlled by a single generated key section. Configure all nodes sharing that alias consistently; leaving the key empty on just one of them is a conflict.
 

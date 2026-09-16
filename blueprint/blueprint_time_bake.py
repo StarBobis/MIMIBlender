@@ -1,12 +1,14 @@
 '''
-Bake animation keyframes into per-frame mesh objects for the Time Switch node.
+Bake animation keyframes into per-frame mesh objects for the dynamic mod nodes.
 
-The Time Switch node swaps which object gets drawn based on wall-clock time,
-so an animation (shape keys, armature pose, object transforms, constraints)
-must first be flattened into a set of static objects: one per sampled frame.
-This module samples the evaluated mesh at each requested frame, stores it as
-a real mesh datablock, and wires the resulting objects into the frame sockets
-of a Time Switch node in frame order.
+The node shown in the UI as "DrawIndex Based Dynamic Mod" swaps which object
+gets drawn based on wall-clock time, so an animation (shape keys, armature
+pose, object transforms, constraints) must first be flattened into a set of
+static objects: one per sampled frame.  This module samples the evaluated mesh
+at each requested frame, stores it as a real mesh datablock, and wires the
+resulting objects into the frame sockets of such a node in frame order.  The
+node shown as "Position.buf Based Dynamic Mod" uses the exact same frames,
+because it also needs one object per timeline frame.
 
 Topology-changing modifiers may change vertex counts between sampled frames.
 DrawIndexed switching supports this because every object has its own index
@@ -19,12 +21,12 @@ from .blueprint_node_time_switch import renumber_time_switch_sockets
 
 
 class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
-    '''Sample an animated object at every chosen frame into static mesh objects, then wire them into the Time Switch node'''
+    '''Sample an animated object at every chosen frame into static mesh objects, then wire them into the timeline node'''
     bl_idname = "mimi.bake_animation_to_time_switch"
     bl_label = "Bake Animation to Frames"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # Target Time Switch node identity (filled in by the node's button).
+    # Target timeline node identity (filled in by the node's button).
     node_name: bpy.props.StringProperty() # type: ignore
     tree_name: bpy.props.StringProperty() # type: ignore
 
@@ -57,7 +59,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
 
     match_scene_fps: bpy.props.BoolProperty(
         name=tr("Sync Node FPS with Scene"),
-        description=tr("Set the Time Switch node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline"),
+        description=tr("Set this node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline"),
         default=True,
     ) # type: ignore
 
@@ -67,7 +69,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             return None, None
         node = tree.nodes.get(self.node_name) if self.node_name else None
         # The baker wires baked frames into "Frame N" sockets, which both the
-        # Time Switch node and the Time Position Switch node provide.
+        # DrawIndexed timeline and the Position.buf timeline provide.
         if node is None or getattr(node, "bl_idname", "") not in (
             'MIMINode_TimeSwitch',
             'MIMINode_TimePosSwitch',
@@ -78,7 +80,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
     def invoke(self, context, event):
         tree, node = self._get_tree_and_node()
         if node is None:
-            self.report({'WARNING'}, tr("Please run this from a Time Switch node"))
+            self.report({'WARNING'}, tr("Please run this from a DrawIndex Based or Position.buf Based Dynamic Mod node"))
             return {'CANCELLED'}
 
         scene = context.scene
@@ -123,7 +125,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
     def execute(self, context):
         tree, node = self._get_tree_and_node()
         if node is None:
-            self.report({'ERROR'}, tr("Target Time Switch node not found"))
+            self.report({'ERROR'}, tr("Target dynamic mod node not found"))
             return {'CANCELLED'}
 
         source_obj = bpy.data.objects.get(self.source_object)
@@ -138,7 +140,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
 
         frames = self._frame_numbers()
         if len(frames) < 2:
-            self.report({'ERROR'}, tr("At least 2 frames are required for a time switch animation"))
+            self.report({'ERROR'}, tr("At least 2 frames are required for a dynamic mod timeline"))
             return {'CANCELLED'}
         if len(frames) > 1000:
             # A hard sanity cap: baking is a full depsgraph evaluation per
@@ -164,7 +166,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             node.fps = round(scene_fps / self.frame_step, 4)
 
         tree.update_tag()
-        self.report({'INFO'}, tr("Baked {count} frames and wired them into the Time Switch node").format(count=len(baked_objects)))
+        self.report({'INFO'}, tr("Baked {count} frames and wired them into this node").format(count=len(baked_objects)))
         return {'FINISHED'}
 
     def _bake_frames(self, context, source_obj, frames):

@@ -95,7 +95,7 @@ class M_Key:
             raise ValueError("Invalid 3Dmigoto animation variable: " + self.key_name)
         if self.key_type == "time_shapekey":
             if len(self.weight_list) != count or not all(math.isfinite(w) and abs(w) <= 3.4e38 for w in self.weight_list):
-                raise ValueError("Time Shape Key needs one finite float32 weight per frame")
+                raise ValueError("ShapeKey Real-time Based Dynamic Mod needs one finite float32 weight per frame")
         step = repr(1.0 / self.fps)
         # clock is generated internally: either the legacy engine time or
         # elapsed time since the optional toggle was last enabled.

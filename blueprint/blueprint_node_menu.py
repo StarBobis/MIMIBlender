@@ -763,9 +763,11 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
     layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
-    layout.operator("node.add_node", text=tr("Time Switch"), icon='TIME').type = "MIMINode_TimeSwitch"
-    layout.operator("node.add_node", text=tr("Time Position Switch"), icon='TIME').type = "MIMINode_TimePosSwitch"
-    layout.operator("node.add_node", text=tr("Time Shape Key"), icon='SHAPEKEY_DATA').type = "MIMINode_TimeShapeKey"
+    # The three dynamic mod nodes are named after the data they switch, so a
+    # user can tell them apart without opening the documentation.
+    layout.operator("node.add_node", text=tr("DrawIndex Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimeSwitch"
+    layout.operator("node.add_node", text=tr("Position.buf Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimePosSwitch"
+    layout.operator("node.add_node", text=tr("ShapeKey Real-time Based Dynamic Mod"), icon='SHAPEKEY_DATA').type = "MIMINode_TimeShapeKey"
     # The cross-IB render node only produces INI for the Naraka preset,
     # so only offer it there to keep the other presets' menus clean.
     if GlobalConfig.logic_name == LogicName.Naraka:

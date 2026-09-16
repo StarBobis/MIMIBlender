@@ -27,20 +27,20 @@ def group_time_position_frames(frame_models):
         key_name = model.time_position_key_name
         timeline_keys = [key for key in model.work_key_list if key.key_name == key_name]
         if len(timeline_keys) != 1:
-            raise ValueError("Time Position Switch: each provider needs exactly one timeline state")
+            raise ValueError("Position.buf Based Dynamic Mod: each provider needs exactly one timeline state")
         gate = sorted((key.key_name, key.tmp_value) for key in model.work_key_list if key.key_name != key_name)
         if common_gate is not None and gate != common_gate:
-            raise ValueError("Time Position Switch: all frames of a DrawIB must share the same outer conditions")
+            raise ValueError("Position.buf Based Dynamic Mod: all frames of a DrawIB must share the same outer conditions")
         common_gate = gate
         frames = groups.setdefault(key_name, {})
         models = frames.setdefault(timeline_keys[0].tmp_value, [])
         if any(other.match_submesh_name == model.match_submesh_name for other in models):
-            raise ValueError("Time Position Switch: duplicate providers for submesh " + model.match_submesh_name)
+            raise ValueError("Position.buf Based Dynamic Mod: duplicate providers for submesh " + model.match_submesh_name)
         models.append(model)
     # A shared alias is the supported way to animate multiple slices together.
     # Reject independent clocks rather than emitting last-writer-wins output.
     if len(groups) > 1:
-        raise ValueError("Time Position Switch: use one shared timeline alias per DrawIB")
+        raise ValueError("Position.buf Based Dynamic Mod: use one shared timeline alias per DrawIB")
     return groups
 
 
@@ -50,8 +50,8 @@ def get_time_position_support_error(blueprint_model) -> str:
         return ""
     if GlobalConfig.logic_name in (LogicName.WWMI, LogicName.NTEMI, LogicName.EFMI):
         return (
-            "Time Position Switch is not supported for the " + str(GlobalConfig.logic_name)
-            + " game preset yet; use the Time Switch node (whole-mesh switching) instead"
+            "Position.buf Based Dynamic Mod is not supported for the " + str(GlobalConfig.logic_name)
+            + " game preset yet; use the DrawIndex Based Dynamic Mod node (whole-mesh switching) instead"
         )
     return ""
 
@@ -121,7 +121,7 @@ def append_time_position_sections(ini_builder: M_IniBuilder, blueprint_model, dr
 
         for key_name, frames in groups.items():
             if not frames or key_name not in blueprint_model.keyname_mkey_dict:
-                raise ValueError("Time Position Switch: missing timeline or frame resources")
+                raise ValueError("Position.buf Based Dynamic Mod: missing timeline or frame resources")
             safe_name = key_name.lstrip("$")
             # DrawIB and timeline identifiers are exporter-controlled tokens.
             # Prefix with a letter even when the hash starts with a digit.

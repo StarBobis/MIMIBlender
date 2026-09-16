@@ -1,5 +1,8 @@
 '''
-Time Position Switch blueprint node: wall-clock driven Position.buf switching.
+Time Position Switch blueprint node (shown in the UI as
+"Position.buf Based Dynamic Mod").
+
+Wall-clock driven Position.buf switching.
 
 Every input socket stands for one frame (time slice) of a looping timeline,
 exactly like the Time Switch node.  The difference is what gets switched:
@@ -55,11 +58,19 @@ from .blueprint_node_base import MIMINodeBase
 class MIMINode_TimePosSwitch(MIMINodeBase):
     '''Time Position Switch: the Position buffer content cycles through the connected frames on a wall-clock timeline'''
     bl_idname = 'MIMINode_TimePosSwitch'
-    bl_label = 'Time Position Switch'
+    # The title names the exact buffer this node rewrites every frame, which
+    # distinguishes it from the DrawIndexed and shape key timelines.
+    bl_label = 'Position.buf Based Dynamic Mod'
     bl_icon = 'TIME'
 
+    def width_texts(self):
+        """Return every text that decides how wide this node has to be."""
+        # The title is the longest text here, so an old default title must not
+        # shrink the node back to a width that truncates the new name.
+        return [self.label, self.time_alias, self.comment]
+
     def update_fps(self, context):
-        self.update_node_width([self.time_alias, self.comment])
+        self.update_node_width(self.width_texts())
 
     def update_time_alias(self, context):
         # Match the 3Dmigoto identifier alphabet; export separately checks
@@ -71,10 +82,10 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
         if self.time_alias != sanitized_alias:
             self.time_alias = sanitized_alias
             return
-        self.update_node_width([self.time_alias, self.comment])
+        self.update_node_width(self.width_texts())
 
     def update_comment(self, context):
-        self.update_node_width([self.time_alias, self.comment])
+        self.update_node_width(self.width_texts())
 
     fps: bpy.props.FloatProperty(
         name=tr("FPS"),
@@ -111,10 +122,11 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
 
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Time Position Switch")
+        self.label = self.default_title()
         self.inputs.new('MIMISocketObject', "Frame 0")
         self.outputs.new('MIMISocketObject', "Output")
-        self.width = 200
+        # Size the node from its texts, so the full title stays readable.
+        self.update_node_width(self.width_texts())
         self.use_custom_color = True
         self.color = (0.52, 0.40, 0.60)
 

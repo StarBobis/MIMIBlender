@@ -1,5 +1,8 @@
 '''
-Time Shape Key blueprint node: wall-clock driven shape key weight animation.
+Time Shape Key blueprint node (shown in the UI as
+"ShapeKey Real-time Based Dynamic Mod").
+
+Wall-clock driven shape key weight animation.
 
 The classic shape key workflow of this addon cycles a weight variable through
 a [Key] hotkey section.  This node instead animates the weight automatically
@@ -133,7 +136,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
     def invoke(self, context, event):
         tree, node = self._get_tree_and_node()
         if node is None:
-            self.report({'WARNING'}, tr("Please run this from a Time Shape Key node"))
+            self.report({'WARNING'}, tr("Please run this from a ShapeKey Real-time Based Dynamic Mod node"))
             return {'CANCELLED'}
 
         scene = context.scene
@@ -178,7 +181,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
     def execute(self, context):
         tree, node = self._get_tree_and_node()
         if node is None:
-            self.report({'ERROR'}, tr("Target Time Shape Key node not found"))
+            self.report({'ERROR'}, tr("Target ShapeKey Real-time Based Dynamic Mod node not found"))
             return {'CANCELLED'}
 
         shapekey_name = str(node.shapekey_name or "").strip()
@@ -202,7 +205,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
 
         frames = self._frame_numbers()
         if len(frames) < 2:
-            self.report({'ERROR'}, tr("At least 2 frames are required for a time shape key animation"))
+            self.report({'ERROR'}, tr("At least 2 frames are required for a shape key timeline"))
             return {'CANCELLED'}
         if len(frames) > 1000:
             self.report({'ERROR'}, tr("Too many frames ({count}); please increase the frame step").format(count=len(frames)))
@@ -239,7 +242,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
             node.fps = round(scene_fps / self.frame_step, 4)
 
         tree.update_tag()
-        self.report({'INFO'}, tr("Baked {count} weight frames into the Time Shape Key node").format(count=len(sampled_weights)))
+        self.report({'INFO'}, tr("Baked {count} weight frames into the ShapeKey Real-time Based Dynamic Mod node").format(count=len(sampled_weights)))
         return {'FINISHED'}
 
 
@@ -247,17 +250,25 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
 class MIMINode_TimeShapeKey(MIMINodeBase):
     '''Time Shape Key: animate a shape key weight on a wall-clock timeline instead of a hotkey'''
     bl_idname = 'MIMINode_TimeShapeKey'
-    bl_label = 'Time Shape Key'
+    # The title says what happens at runtime: the shape key deform is
+    # recalculated from the animated weight on the GPU, every single frame.
+    bl_label = 'ShapeKey Real-time Based Dynamic Mod'
     bl_icon = 'SHAPEKEY_DATA'
 
+    def width_texts(self):
+        """Return every text that decides how wide this node has to be."""
+        # The title is the longest text here, so an old default title must not
+        # shrink the node back to a width that truncates the new name.
+        return [self.label, self.shapekey_name, self.comment]
+
     def update_fps(self, context):
-        self.update_node_width([self.shapekey_name, self.comment])
+        self.update_node_width(self.width_texts())
 
     def update_shapekey_name(self, context):
-        self.update_node_width([self.shapekey_name, self.comment])
+        self.update_node_width(self.width_texts())
 
     def update_comment(self, context):
-        self.update_node_width([self.shapekey_name, self.comment])
+        self.update_node_width(self.width_texts())
 
     shapekey_name: bpy.props.StringProperty(
         name=tr("Shape Key Name"),
@@ -295,11 +306,12 @@ class MIMINode_TimeShapeKey(MIMINodeBase):
 
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Time Shape Key")
+        self.label = self.default_title()
         # The node carries no object data; the output socket only exists so
         # the node can be wired into groups for visual organization.
         self.outputs.new('MIMISocketObject', "Output")
-        self.width = 220
+        # Size the node from its texts, so the full title stays readable.
+        self.update_node_width(self.width_texts())
         self.use_custom_color = True
         self.color = (0.40, 0.56, 0.44)
 

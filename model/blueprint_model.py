@@ -128,7 +128,7 @@ class BluePrintModel:
         if alias == "":
             return ""
         if cls._KEY_ALIAS_PATTERN.fullmatch(alias) is None:
-            raise ValueError("The time variable alias of a Time Switch node must start with an ASCII letter or underscore and contain only ASCII letters, digits or underscores: " + alias)
+            raise ValueError("The time variable alias of a dynamic mod timeline node must start with an ASCII letter or underscore and contain only ASCII letters, digits or underscores: " + alias)
         # Internal animation/activation variables share the same INI namespace.
         # Reject collisions rather than emitting two declarations for one name.
         alias = alias.lower()
@@ -347,7 +347,7 @@ class BluePrintModel:
                     # Check both traversal orders: a hotkey visited after a
                     # time node must not silently inherit its clock driver.
                     if existing_key.key_type != "key":
-                        raise ValueError("Switch Key and Time Switch cannot share alias " + m_key.key_name)
+                        raise ValueError("A Switch Key node and a dynamic mod timeline node cannot share alias " + m_key.key_name)
                     m_key = existing_key
 
                 # Update the global key index
@@ -492,7 +492,7 @@ class BluePrintModel:
         fps = float(getattr(time_node, 'fps', 0.0) or 0.0)
         if not math.isfinite(fps) or fps <= 0.0:
             raise ValueError(
-                "Time Switch node '" + time_node.name + "' has an invalid FPS (must be greater than 0)"
+                "Dynamic mod timeline node '" + time_node.name + "' has an invalid FPS (must be greater than 0)"
             )
 
         m_key = M_Key()
@@ -519,18 +519,18 @@ class BluePrintModel:
         else:
             if existing_key.key_type != "time":
                 raise ValueError(
-                    "The alias '" + m_key.key_name + "' is shared by both a Switch Key node and a Time Switch node; please use different aliases"
+                    "The alias '" + m_key.key_name + "' is shared by both a Switch Key node and a dynamic mod timeline node; please use different aliases"
                 )
             if abs(existing_key.fps - fps) > 1e-6:
                 # Traversal order must not silently change playback speed.
                 raise ValueError(
-                    "Time Switch nodes sharing alias '" + m_key.key_name
+                    "Dynamic mod timeline nodes sharing alias '" + m_key.key_name
                     + "' must use the same FPS"
                 )
             # One alias owns one runtime switch. Conflicting node settings
             # must not make the chosen hotkey depend on traversal order.
             if (existing_key.toggle_key, existing_key.start_enabled) != (m_key.toggle_key, m_key.start_enabled):
-                raise ValueError("Time Switch nodes sharing alias '" + m_key.key_name + "' must use the same animation toggle key and start state")
+                raise ValueError("Dynamic mod timeline nodes sharing alias '" + m_key.key_name + "' must use the same animation toggle key and start state")
             m_key = existing_key
 
         # Tag only draw calls reached through this position node. A shared
@@ -542,7 +542,7 @@ class BluePrintModel:
             self.time_pos_key_names.add(m_key.key_name)
             for draw_call in self.ordered_draw_obj_data_model_list[first_draw:]:
                 if draw_call.time_position_key_name:
-                    raise ValueError("Nested Time Position Switch nodes are not supported")
+                    raise ValueError("Nested Position.buf Based Dynamic Mod nodes are not supported")
                 draw_call.time_position_key_name = m_key.key_name
 
     def _reclassify_time_pos_frames(self):
@@ -779,7 +779,7 @@ class BluePrintModel:
         # the loop below visits only normally connected base objects.
         for frame_model in self.time_pos_frame_models:
             if frame_model.match_draw_ib not in draw_ib_submesh_model_list_dict:
-                raise ValueError("Time Position Switch: connect a base object for DrawIB " + frame_model.match_draw_ib)
+                raise ValueError("Position.buf Based Dynamic Mod: connect a base object for DrawIB " + frame_model.match_draw_ib)
 
         for draw_ib, submesh_model_list in draw_ib_submesh_model_list_dict.items():
             drawib_model = DrawIBModel(submesh_model_list=submesh_model_list, combine_ib=combine_ib)

@@ -117,6 +117,11 @@ def _register_steps():
     # Texture combiner tool (texcomb)
     yield texcomb.register
 
+    # 4. Blueprint data migration: blueprints that were saved before a node was
+    # renamed still carry the old title, so refresh them once the node classes
+    # are registered. Files opened later are handled by the load_post handler.
+    yield blueprint_node_base.migrate_legacy_node_titles
+
 
 def unregister():
     # Unregister in the reverse order of register to avoid type dependency issues.

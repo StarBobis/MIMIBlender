@@ -420,7 +420,7 @@ class DrawIBModel:
         position_buffer = temp_submesh_model.category_buffer_dict.get("Position")
         if position_buffer is None or len(position_buffer) == 0:
             raise ValueError(
-                "Time Position Switch: frame object '" + str(frame_model.obj_name)
+                "Position.buf Based Dynamic Mod: frame object '" + str(frame_model.obj_name)
                 + "' produced no Position data; is it a valid mesh?"
             )
         # Equal byte counts do not prove compatible vertex ordering. Welding,
@@ -428,7 +428,7 @@ class DrawIBModel:
         # without changing the final count. Compare the actual exported mapping.
         if (not numpy.array_equal(temp_submesh_model.ib, base_submesh.ib)
                 or temp_submesh_model.index_vertex_id_dict != base_submesh.index_vertex_id_dict):
-            raise ValueError("Time Position Switch: exported topology/order differs for " + frame_model.obj_name)
+            raise ValueError("Position.buf Based Dynamic Mod: exported topology/order differs for " + frame_model.obj_name)
         # Only Position is replaced at runtime. Any other animated category
         # would silently retain base values (normals, UVs, weights, etc.).
         # Require DrawIndexed switching for those animations rather than export
@@ -438,8 +438,8 @@ class DrawIBModel:
                 continue
             if not numpy.array_equal(temp_submesh_model.category_buffer_dict.get(category), base_bytes):
                 raise ValueError(
-                    "Time Position Switch: frame '" + frame_model.obj_name + "' changes " + category
-                    + "; use Time Switch (DrawIndexed) for non-Position animation"
+                    "Position.buf Based Dynamic Mod: frame '" + frame_model.obj_name + "' changes " + category
+                    + "; use the DrawIndex Based Dynamic Mod node for non-Position animation"
                 )
         return position_buffer
 
@@ -460,7 +460,7 @@ class DrawIBModel:
             return
         if self.d3d11_game_type is None:
             raise ValueError(
-                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                "Position.buf Based Dynamic Mod: DrawIB " + str(self.draw_ib)
                 + " has no game type; cannot export position frames"
             )
         # GPU pre-skinning support depends on WHERE the skinning compute
@@ -478,21 +478,21 @@ class DrawIBModel:
             )
             if GlobalConfig.logic_name not in supported_preskinning_logics:
                 raise ValueError(
-                    "Time Position Switch is not supported for the GPU pre-skinning data type of DrawIB "
+                    "Position.buf Based Dynamic Mod is not supported for the GPU pre-skinning data type of DrawIB "
                     + str(self.draw_ib) + " under the current game preset"
-                    + "; use the Time Switch node (whole-mesh switching) instead"
+                    + "; use the DrawIndex Based Dynamic Mod node (whole-mesh switching) instead"
                 )
 
         position_stride = self.d3d11_game_type.CategoryStrideDict.get("Position", 0)
         if position_stride <= 0:
             raise ValueError(
-                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                "Position.buf Based Dynamic Mod: DrawIB " + str(self.draw_ib)
                 + " has no Position category; cannot export position frames"
             )
         base_position_buffer = self.category_buffer_dict.get("Position")
         if base_position_buffer is None:
             raise ValueError(
-                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                "Position.buf Based Dynamic Mod: DrawIB " + str(self.draw_ib)
                 + " has no base Position buffer; connect the base object normally"
             )
 
@@ -509,14 +509,14 @@ class DrawIBModel:
                     submesh_model = submesh_by_name.get(frame_model.match_submesh_name)
                     if submesh_model is None:
                         raise ValueError(
-                            "Time Position Switch: no base draw call found for submesh '"
+                            "Position.buf Based Dynamic Mod: no base draw call found for submesh '"
                             + str(frame_model.match_submesh_name)
                             + "' of frame object '" + str(frame_model.obj_name)
                             + "'; connect the base object of this submesh to the output node normally"
                         )
                     if len(submesh_model.drawcall_model_list) != 1:
                         raise ValueError(
-                            "Time Position Switch: submesh '" + str(submesh_model.submesh_name)
+                            "Position.buf Based Dynamic Mod: submesh '" + str(submesh_model.submesh_name)
                             + "' has " + str(len(submesh_model.drawcall_model_list))
                             + " base objects; a position frame replaces the whole submesh, "
                             + "so exactly one base object per animated submesh is required"
@@ -527,7 +527,7 @@ class DrawIBModel:
                     expected_len = self._get_exported_vertex_count(submesh_model) * position_stride
                     if len(frame_position_bytes) != expected_len:
                         raise ValueError(
-                            "Time Position Switch: frame object '" + str(frame_model.obj_name)
+                            "Position.buf Based Dynamic Mod: frame object '" + str(frame_model.obj_name)
                             + "' exported " + str(len(frame_position_bytes))
                             + " Position bytes but the base submesh '" + str(submesh_model.submesh_name)
                             + "' expects " + str(expected_len)

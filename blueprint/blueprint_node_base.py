@@ -8,6 +8,7 @@ from bpy.types import NodeTree, Node, NodeSocket, PropertyGroup
 
 from ..common.global_config import GlobalConfig
 from ..i18n.i18n import I18nOperator, tr, translatable
+from ..i18n.zh_cn import TRANSLATIONS_ZH_CN
 
 
 
@@ -40,11 +41,85 @@ class MIMIBlueprintTree(NodeTree):
 
 
 # 2. Define the base nodes
+
+def _historical_titles(title):
+    """Return every spelling an earlier version could have written as a title.
+
+    A node title is instance data, so an existing blueprint keeps the title
+    that was set when the node was created, written in the language that was
+    active at that moment. The English source text and every translation of it
+    therefore both have to be recognised.
+    """
+    # The argument already holds the spelling of the active language, because
+    # the caller passes the result of tr().
+    spellings = {title}
+    # The dictionary maps English source text to its translation; checking both
+    # directions also collects the spelling of the other language.
+    for source_text, translated_text in TRANSLATIONS_ZH_CN.items():
+        if source_text == title or translated_text == title:
+            spellings.add(source_text)
+            spellings.add(translated_text)
+    return tuple(sorted(spellings))
+
+
+# Default titles that earlier versions wrote into freshly created nodes. The
+# strings stay in the translation dictionary on purpose: a node created before
+# a rename must be recognised no matter which language was active back then.
+_LEGACY_TITLES_BY_IDNAME = {
+    'MIMINode_TimeSwitch': _historical_titles(tr("Time Switch")),
+    'MIMINode_TimePosSwitch': _historical_titles(tr("Time Position Switch")),
+    'MIMINode_TimeShapeKey': _historical_titles(tr("Time Shape Key")),
+}
+
+
+def migrate_legacy_node_titles(scene=None):
+    """Replace node titles that still hold the default name of an older version.
+
+    A node title is stored inside the blend file, so renaming a node type never
+    changes the nodes of a blueprint that was saved before the rename. Only an
+    exact match with a historical default title is replaced, which means a
+    title the user typed by hand is never overwritten.
+
+    The optional argument is the scene that Blender hands to a load_post
+    handler. The function returns the number of updated nodes, so the caller
+    and the tests can tell whether the migration did any work.
+    """
+    updated_count = 0
+    # Blender restricts bpy.data while an add-on is being registered, so this
+    # call has to give up quietly and let the load_post handler do the work.
+    if not hasattr(bpy.data, "node_groups"):
+        return updated_count
+    # Only the MMT blueprint tree can contain these nodes.
+    for tree in bpy.data.node_groups:
+        if getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+            continue
+        for node in tree.nodes:
+            legacy_titles = _LEGACY_TITLES_BY_IDNAME.get(getattr(node, "bl_idname", ""))
+            if not legacy_titles:
+                continue
+            current_title = str(getattr(node, "label", "") or "")
+            if current_title not in legacy_titles:
+                continue
+            # bl_label of the registered class already holds the active
+            # language, because @translatable keeps it up to date.
+            node.label = tr(type(node).bl_label)
+            updated_count += 1
+    return updated_count
+
+
 class MIMINodeBase(Node):
     @classmethod
     def poll(cls, ntree):
         return ntree.bl_idname == 'MIMIBlueprintTreeType'
-    
+
+    def default_title(self):
+        """Return the default title of this node in the active language.
+
+        bl_label is the single source of truth for the node name, and the
+        @translatable decorator keeps it in the language the user selected.
+        """
+        return tr(type(self).bl_label)
+
     def calculate_text_width(self, text, padding=40):
         """Estimate the width required to display the text."""
         if not text:
@@ -447,11 +522,21 @@ def register():
     MIMIBlueprintTree.ssmt_submesh_items = bpy.props.CollectionProperty(type=MIMISubmeshListItem) # type: ignore[attr-defined]
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.register_workspace_tree_sync_timer()
+    # Opening any blend file migrates the node titles of blueprints that were
+    # saved before a node was renamed.
+    if migrate_legacy_node_titles not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(migrate_legacy_node_titles)
 
 
 def unregister():
     from .blueprint_export_helper import BlueprintExportHelper
     BlueprintExportHelper.unregister_workspace_tree_sync_timer()
+    # Blender removes handlers of a reloaded add-on on its own, but a manual
+    # unregister must not leave a stale handler behind.
+    try:
+        bpy.app.handlers.load_post.remove(migrate_legacy_node_titles)
+    except ValueError:
+        pass
     del MIMIBlueprintTree.ssmt_submesh_items
     bpy.utils.unregister_class(MMT_OT_ApplyFramePropertiesToAll)
     bpy.utils.unregister_class(MIMIPT_FrameProperties)

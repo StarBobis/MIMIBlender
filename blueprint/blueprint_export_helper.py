@@ -370,7 +370,7 @@ class BlueprintExportHelper:
             if shapekey_name in shapekey_name_mkey_dict:
                 raise ValueError(
                     "The shape key '" + shapekey_name + "' is configured both in the output node "
-                    "and in a Time Shape Key node; please keep only one of them"
+                    "and in a ShapeKey Real-time Based Dynamic Mod node; please keep only one of them"
                 )
             m_key = M_Key()
             m_key.key_name = "$shapekey" + str(key_index)
@@ -390,7 +390,7 @@ class BlueprintExportHelper:
             # These exporters have no time-weight consumer. Reject rather than
             # accepting a node that can only produce a static mesh there.
             if GlobalConfig.logic_name in (LogicName.NTEMI, LogicName.EFMI):
-                raise ValueError("Time Shape Key is not supported by this preset; use DrawIndexed animation")
+                raise ValueError("ShapeKey Real-time Based Dynamic Mod is not supported by this preset; use DrawIndexed animation")
             m_key.comment = getattr(node, 'comment', '')
             shapekey_name_mkey_dict[shapekey_name] = m_key
             key_index += 1
