@@ -22,11 +22,18 @@ class M_Key:
     #   since injection: (GetTickCount() - ticks_at_launch) / 1000.0f, see
     #   CommandList.cpp ParamOverrideType::TIME, so playback speed never
     #   depends on the game's frame rate.
+    # - "time_shapekey": recomputed every frame like "time", but the variable
+    #   holds a shape key weight (0..1) taken from weight_list (Time Shape
+    #   Key node); value_list stays the frame indices.
     key_type: str = "key"
 
-    # Frames shown per second when key_type == "time". The INI writer turns
+    # Frames shown per second when key_type != "key". The INI writer turns
     # this into the per-frame step length step = 1.0 / fps (in seconds).
     fps: float = 12.0
+
+    # Per-frame weight values used when key_type == "time_shapekey":
+    # weight_list[i] is the weight written while value_list[i] is selected.
+    weight_list: list = field(default_factory=list)
 
     initialize_value: int = 0
     initialize_vk_str: str = ""  # Virtual-key combination following 3Dmigoto's parsing format
@@ -40,5 +47,6 @@ class M_Key:
     def __str__(self):
         return (f"M_Key(key_name='{self.key_name}', key_value='{self.key_value}', "
                 f"key_type='{self.key_type}', fps={self.fps}, "
-                f"value_list={self.value_list}, initialize_value={self.initialize_value}, "
+                f"value_list={self.value_list}, weight_list={self.weight_list}, "
+                f"initialize_value={self.initialize_value}, "
                 f"tmp_value={self.tmp_value}, comment='{self.comment}')")

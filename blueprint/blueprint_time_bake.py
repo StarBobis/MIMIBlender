@@ -66,7 +66,12 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
         if tree is None or getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
             return None, None
         node = tree.nodes.get(self.node_name) if self.node_name else None
-        if node is None or getattr(node, "bl_idname", "") != 'MIMINode_TimeSwitch':
+        # The baker wires baked frames into "Frame N" sockets, which both the
+        # Time Switch node and the Time Position Switch node provide.
+        if node is None or getattr(node, "bl_idname", "") not in (
+            'MIMINode_TimeSwitch',
+            'MIMINode_TimePosSwitch',
+        ):
             return tree, None
         return tree, node
 

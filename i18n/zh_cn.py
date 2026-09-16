@@ -889,4 +889,27 @@ TRANSLATIONS_ZH_CN = {
     "Target Time Switch node not found": "未找到目标时间切换节点",
     "Baking produced no objects": "烘焙未产出任何对象",
     "Baked {count} frames and wired them into the Time Switch node": "已烘焙 {count} 帧并连线到时间切换节点",
+
+    # ---- Time Position Switch node (Position.buf switching on a time line) ----
+    "Time Position Switch": "时间位置切换",
+    "Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple time switch nodes": "只允许英文字母和数字；相同别名会在多个时间切换类节点之间共享同一时间轴变量",
+    "The base object must also be connected normally": "基础对象也必须正常连接到输出",
+
+    # ---- Time Shape Key node (shape key weight animation on a time line) ----
+    "Time Shape Key": "时间形态键",
+    "Weight": "权重",
+    "Shape key weight while this frame is active (0 means Basis, 1 means full shape key)": "该帧生效时的形态键权重（0 为基础形态，1 为完整形态键）",
+    "Name of the shape key (on the exported objects) whose weight is animated by this timeline": "被此时间轴驱动权重的形态键名称（位于导出的对象上）",
+    "Add Weight Frame": "添加权重帧",
+    "Remove Weight Frame": "删除权重帧",
+    "Bake Shape Key Weights": "烘焙形态键权重",
+    "Mesh object whose animated shape key value is sampled": "要采样其动画形态键数值的网格对象",
+    "Set the node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline": "将节点的 FPS 设为 场景帧率 / 帧步长，使 Mod 播放速度与 Blender 时间线一致",
+    "Please run this from a Time Shape Key node": "请从时间形态键节点上运行此功能",
+    "Target Time Shape Key node not found": "未找到目标时间形态键节点",
+    "Please fill in the Shape Key Name first": "请先填写形态键名称",
+    "Object '{name}' has no shape key named '{shapekey}'": "对象“{name}”没有名为“{shapekey}”的形态键",
+    "At least 2 frames are required for a time shape key animation": "时间形态键动画至少需要 2 帧",
+    "Baked {count} weight frames into the Time Shape Key node": "已烘焙 {count} 个权重帧到时间形态键节点",
+    "Frame {count}": "帧 {count}",
 }

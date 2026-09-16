@@ -52,6 +52,18 @@ class DrawIBModel:
     obj_name_draw_offset:dict = field(init=False,repr=False,default_factory=dict)
     shapekey_name_bytelist_dict:dict = field(init=False,repr=False,default_factory=dict)
 
+    # Byte offset of every Submesh inside the concatenated category buffers
+    # (exported-vertex base).  Filled by _assemble_category_buffers; the
+    # Time Position Switch writer needs it to locate the animated slice.
+    submesh_vertex_base_dict:dict = field(init=False,repr=False,default_factory=dict)
+
+    # Time Position Switch frames of this DrawIB, attached by
+    # BluePrintModel.parse_drawib_model_list():
+    # {timeline variable name: {frame value: [DrawCallModel, ...]}}.
+    # Frame DrawCallModels never joined the submesh buffers; they only
+    # provide per-frame Position bytes.
+    time_pos_frame_groups:dict = field(default_factory=dict, repr=False)
+
 
     def __post_init__(self):
         # Every SubMeshModel in the list passed at init shares the same match_draw_ib, so take the first one
@@ -65,6 +77,7 @@ class DrawIBModel:
         self.vertex_count = vertex_count
         self.category_buffer_dict = category_buffer_dict
         self.index_vertex_id_dict = index_vertex_id_dict
+        self.submesh_vertex_base_dict = submesh_vertex_base_dict
         self.shapekey_name_bytelist_dict = self._assemble_shape_key_buffers()
 
         if self.combine_ib:
@@ -362,6 +375,149 @@ class DrawIBModel:
             filepath = os.path.join(output_folder, shapekey_buf_filename)
             with open(filepath, 'wb') as f:
                 shapekey_buf.tofile(f)
+
+        # Time Position Switch: one full-size Position buffer per frame.
+        self.write_time_position_files(output_folder)
+
+    def get_time_position_buffer_filename(self, var_name: str, frame_value: int) -> str:
+        """Return the side-buffer file name of one Time Position Switch frame.
+
+        Uses the same LOD prefix rule as the category buffers, so frames of
+        different LODs of the same DrawIB never overwrite each other.
+        """
+        lod_name = self.get_lod_name()
+        prefix = lod_name + "." if lod_name else ""
+        return f"{prefix}{self.draw_ib}-Position.{var_name}_{frame_value}.buf"
+
+    @staticmethod
+    def get_time_position_resource_name(draw_ib: str, var_name: str, frame_value: int) -> str:
+        """Return the 3Dmigoto resource name holding one frame's positions.
+
+        Resource names carry no LOD prefix, mirroring the existing
+        [Resource<draw_ib><Category>] declarations of the slot-style games.
+        """
+        return "Resource" + draw_ib + "Position." + var_name + "_" + str(frame_value)
+
+    def _compute_time_pos_frame_position_bytes(self, frame_model) -> numpy.ndarray:
+        """Run the standard single-object export pipeline for one frame
+        object and return its Position category bytes.
+
+        A throwaway SubMeshModel reuses the exact same conversion, weight
+        normalization, rotation and vertex ordering code as the base object,
+        so frame bytes land in the identical export order.  A fresh
+        DrawCallModel is used so the frame model itself is never mutated.
+        """
+        from .draw_call_model import DrawCallModel
+
+        temp_draw_call = DrawCallModel(
+            obj_name=frame_model.obj_name,
+            submesh_name=frame_model.submesh_name,
+        )
+        temp_submesh_model = SubMeshModel(drawcall_model_list=[temp_draw_call])
+        position_buffer = temp_submesh_model.category_buffer_dict.get("Position")
+        if position_buffer is None or len(position_buffer) == 0:
+            raise ValueError(
+                "Time Position Switch: frame object '" + str(frame_model.obj_name)
+                + "' produced no Position data; is it a valid mesh?"
+            )
+        return position_buffer
+
+    def write_time_position_files(self, output_folder: str):
+        """Write one full-DrawIB-size Position buffer per (timeline, frame).
+
+        Public because not every exporter routes buffer writing through
+        generate_buffer_files() (SRMI writes its buffers itself); those
+        exporters call this method directly after their own buffer writes.
+
+        D3D11's BaseVertexLocation applies to every bound vertex buffer, so a
+        frame cannot be a submesh-only buffer: the frame buffer is a copy of
+        the base Position buffer with the animated submesh slice replaced by
+        the frame object's positions.  Submeshes without a frame keep their
+        base positions byte for byte.
+        """
+        if not self.time_pos_frame_groups:
+            return
+        if self.d3d11_game_type is None:
+            raise ValueError(
+                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                + " has no game type; cannot export position frames"
+            )
+        # GPU pre-skinning support depends on WHERE the skinning compute
+        # reads its positions from:
+        # - Unity CS path (Naraka, NarakaM, AILIMIT) and ZZMIDX12 re-read
+        #   "cs-t0 = Resource<drawib>Position" at every dispatch, so a
+        #   per-frame copy into that resource flows through skinning fine.
+        # - SRMI/ZZMI route skinned draws through an extra PositionCS
+        #   indirection that this feature does not feed yet, so block them
+        #   loudly instead of silently exporting a static mod.
+        if getattr(self.d3d11_game_type, "GPU_PreSkinning", False):
+            from ..common.global_config import LogicName
+            supported_preskinning_logics = (
+                LogicName.Naraka, LogicName.NarakaM, LogicName.AILIMIT, LogicName.ZZMIDX12,
+            )
+            if GlobalConfig.logic_name not in supported_preskinning_logics:
+                raise ValueError(
+                    "Time Position Switch is not supported for the GPU pre-skinning data type of DrawIB "
+                    + str(self.draw_ib) + " under the current game preset"
+                    + "; use the Time Switch node (whole-mesh switching) instead"
+                )
+
+        position_stride = self.d3d11_game_type.CategoryStrideDict.get("Position", 0)
+        if position_stride <= 0:
+            raise ValueError(
+                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                + " has no Position category; cannot export position frames"
+            )
+        base_position_buffer = self.category_buffer_dict.get("Position")
+        if base_position_buffer is None:
+            raise ValueError(
+                "Time Position Switch: DrawIB " + str(self.draw_ib)
+                + " has no base Position buffer; connect the base object normally"
+            )
+
+        submesh_by_name = {
+            submesh_model.submesh_name: submesh_model
+            for submesh_model in self.submesh_model_list
+        }
+
+        for key_name, value_frame_dict in self.time_pos_frame_groups.items():
+            safe_var_name = key_name.lstrip("$")
+            for frame_value, frame_model_list in sorted(value_frame_dict.items()):
+                frame_buffer = base_position_buffer.copy()
+                for frame_model in frame_model_list:
+                    submesh_model = submesh_by_name.get(frame_model.match_submesh_name)
+                    if submesh_model is None:
+                        raise ValueError(
+                            "Time Position Switch: no base draw call found for submesh '"
+                            + str(frame_model.match_submesh_name)
+                            + "' of frame object '" + str(frame_model.obj_name)
+                            + "'; connect the base object of this submesh to the output node normally"
+                        )
+                    if len(submesh_model.drawcall_model_list) != 1:
+                        raise ValueError(
+                            "Time Position Switch: submesh '" + str(submesh_model.submesh_name)
+                            + "' has " + str(len(submesh_model.drawcall_model_list))
+                            + " base objects; a position frame replaces the whole submesh, "
+                            + "so exactly one base object per animated submesh is required"
+                        )
+                    frame_position_bytes = self._compute_time_pos_frame_position_bytes(frame_model)
+                    vertex_base = self.submesh_vertex_base_dict.get(submesh_model.submesh_name, 0)
+                    byte_start = vertex_base * position_stride
+                    expected_len = self._get_exported_vertex_count(submesh_model) * position_stride
+                    if len(frame_position_bytes) != expected_len:
+                        raise ValueError(
+                            "Time Position Switch: frame object '" + str(frame_model.obj_name)
+                            + "' exported " + str(len(frame_position_bytes))
+                            + " Position bytes but the base submesh '" + str(submesh_model.submesh_name)
+                            + "' expects " + str(expected_len)
+                            + "; every frame must keep the exact same topology as the base object"
+                        )
+                    frame_buffer[byte_start:byte_start + expected_len] = frame_position_bytes
+
+                buffer_filename = self.get_time_position_buffer_filename(safe_var_name, frame_value)
+                filepath = os.path.join(output_folder, buffer_filename)
+                with open(filepath, 'wb') as f:
+                    frame_buffer.tofile(f)
 
     @property
     def part_name_submesh_dict(self) -> dict:

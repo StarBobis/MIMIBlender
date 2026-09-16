@@ -349,6 +349,41 @@ class BlueprintExportHelper:
             shapekey_name_mkey_dict[item.shapekey_name.strip()] = m_key
             key_index += 1
 
+        # Time Shape Key nodes of the same tree: their weight timeline drives
+        # the variable from wall-clock time instead of a hotkey.  The buffer
+        # pipeline is unchanged because the variable keeps the $shapekeyN
+        # naming and the shape key name keys the dict as usual.
+        for node in tree.nodes:
+            if getattr(node, "bl_idname", "") != 'MIMINode_TimeShapeKey':
+                continue
+            if getattr(node, "mute", False):
+                continue
+            shapekey_name = str(getattr(node, "shapekey_name", "") or "").strip()
+            if not shapekey_name:
+                continue
+            weight_list = [float(item.weight) for item in getattr(node, "weights", [])]
+            if len(weight_list) < 2:
+                # A timeline with fewer than 2 frames never animates; skip it
+                # so a half-configured node does not break the export.
+                continue
+            if shapekey_name in shapekey_name_mkey_dict:
+                raise ValueError(
+                    "The shape key '" + shapekey_name + "' is configured both in the output node "
+                    "and in a Time Shape Key node; please keep only one of them"
+                )
+            m_key = M_Key()
+            m_key.key_name = "$shapekey" + str(key_index)
+            m_key.key_type = "time_shapekey"
+            m_key.fps = float(getattr(node, "fps", 12.0) or 12.0)
+            m_key.initialize_value = 0
+            # value_list stays the frame indices; weight_list holds the
+            # per-frame weights (same length, enforced by the node UI).
+            m_key.value_list = list(range(len(weight_list)))
+            m_key.weight_list = weight_list
+            m_key.comment = getattr(node, 'comment', '')
+            shapekey_name_mkey_dict[shapekey_name] = m_key
+            key_index += 1
+
         return shapekey_name_mkey_dict
 
 

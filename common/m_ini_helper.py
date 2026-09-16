@@ -556,6 +556,43 @@ class M_IniHelper:
         print("=" * 60)
     
     @staticmethod
+    def append_time_shapekey_weight_lines(section: M_IniSection, m_key: M_Key, indent: str = ""):
+        '''Append the wall-clock weight timeline of a Time Shape Key variable.
+
+        Emits a local frame counter recomputed from 3Dmigoto's built-in
+        "time" operand and an if/elif chain mapping the frame index to the
+        per-frame weight:
+
+            local $shapekey1_frame
+            $shapekey1_frame = (time % (step * count)) // step
+            if $shapekey1_frame == 0
+                $shapekey1 = 0.0
+            elif $shapekey1_frame == 1
+                $shapekey1 = 0.5
+            endif
+
+        The "//" floor division yields exact integer-valued floats
+        (CommandList.cpp operator definitions), so the "== N" conditions are
+        exact; the local variable name extends the weight variable name and
+        stays inside 3Dmigoto's ^[$][a-z_][a-z0-9_]*$ rule.
+        '''
+        frame_var_name = m_key.key_name + "_frame"
+        frame_count = len(m_key.value_list)
+        if frame_count < 1:
+            return
+        step_str = repr(1.0 / m_key.fps)
+        section.append(indent + "local " + frame_var_name)
+        section.append(
+            indent + frame_var_name + " = (time % (" + step_str + " * " + str(frame_count) + ")) // " + step_str
+        )
+        for index, frame_value in enumerate(m_key.value_list):
+            keyword = "if" if index == 0 else "elif"
+            weight = m_key.weight_list[index] if index < len(m_key.weight_list) else 0.0
+            section.append(indent + keyword + " " + frame_var_name + " == " + str(frame_value))
+            section.append(indent + "  " + m_key.key_name + " = " + repr(float(weight)))
+        section.append(indent + "endif")
+
+    @staticmethod
     def add_shapekey_ini_sections(ini_builder:M_IniBuilder,drawib_drawibmodel_dict:dict[str,DrawIBModel]):
         shapekeyname_mkey_dict = BlueprintExportHelper.get_current_shapekeyname_mkey_dict()
         if len(shapekeyname_mkey_dict.keys()) == 0:
@@ -576,7 +613,15 @@ class M_IniHelper:
 
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
             constants_section.append("; ShapeKey: " + shapekey_name)
-            constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
+            if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+                # Time-driven weights change every frame, so they must stay
+                # plain globals: a "persist" variable is written back to
+                # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
+                # VariableAssignment::run), which would mean a disk write
+                # every frame.
+                constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
+            else:
+                constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
             constants_section.new_line()
 
         ini_builder.append_section(constants_section)
@@ -604,6 +649,14 @@ class M_IniHelper:
         
         present_section.append("  $shapekey_first_run = 0")
         present_section.append("endif")
+
+        # Time Shape Key timelines: update the weight variables from
+        # wall-clock time BEFORE the compute dispatches below read them, so
+        # the same frame already renders with the new weights.
+        for shapekey_name, m_key in shapekeyname_mkey_dict.items():
+            if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+                present_section.append("; ShapeKey time timeline: " + shapekey_name)
+                M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
 
         ib_number = 1
         for drawib, drawib_model in drawib_drawibmodel_dict.items():
@@ -701,6 +754,9 @@ class M_IniHelper:
         # Keys for press testing; can also serve as hotkeys to toggle shape keys when no panel exists
         key_section = M_IniSection(M_SectionType.Key)
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
+            # Time-driven weights have no hotkey, so they never get a [Key].
+            if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+                continue
             if m_key.initialize_vk_str != "":
                 key_section.append("[Key_ShapeKey_" +shapekey_name + "]")
                 
@@ -719,11 +775,12 @@ class M_IniHelper:
 
 
     @staticmethod
-    def add_branch_key_sections(ini_builder:M_IniBuilder,key_name_mkey_dict:dict[str,M_Key]):
+    def add_branch_key_sections(ini_builder:M_IniBuilder, key_name_mkey_dict:dict[str,M_Key], blueprint_model=None, drawib_models=None):
         # Split the variables by their driver kind:
         # - "key"  : cycled by a hotkey [Key] section (classic Switch Key node).
         # - "time" : recomputed every frame from 3Dmigoto's built-in wall-clock
-        #            "time" operand in the [Present] command list (Time Switch).
+        #            "time" operand in the [Present] command list (Time Switch
+        #            and Time Position Switch nodes).
         time_mkey_list = [mkey for mkey in key_name_mkey_dict.values() if getattr(mkey, 'key_type', 'key') == "time"]
 
         if len(key_name_mkey_dict.keys()) != 0:
@@ -815,3 +872,15 @@ class M_IniHelper:
                 ini_builder.append_section(key_section)
 
                 key_number = key_number + 1
+
+        # Time Position Switch: per-frame Position resources + the [Present]
+        # copy lines that swap the real Position buffer content.  Appended
+        # after the Present section above, so the timeline variables are
+        # updated before the copies read them within the same frame.
+        if blueprint_model is not None:
+            from .m_time_position import append_time_position_sections
+            append_time_position_sections(
+                ini_builder=ini_builder,
+                blueprint_model=blueprint_model,
+                drawib_models=drawib_models,
+            )

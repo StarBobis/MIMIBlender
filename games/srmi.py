@@ -55,6 +55,10 @@ class ExportSRMI:
                 with open(shapekey_buf_filepath, 'wb') as f:
                     shapekey_buf.tofile(f)
 
+            # Time Position Switch frame buffers ride the same loop because
+            # SRMI writes buffers itself instead of DrawIBModel.generate_buffer_files().
+            drawib_model.write_time_position_files(buf_output_folder)
+
     def copy_texture_files(self):
         if MIMIGlobalProperties.forbid_auto_texture_ini():
             print("ExportSRMI: auto texture flow is disabled, skipping texture copying")
@@ -249,6 +253,10 @@ class ExportSRMI:
         M_IniHelper.add_branch_key_sections(
             ini_builder=ini_builder,
             key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict,
+            # Time Position Switch needs the model context to emit its
+            # per-frame Position resources and [Present] copy lines.
+            blueprint_model=self.blueprint_model,
+            drawib_models=list(drawib_drawibmodel_dict.values()),
         )
         M_IniHelper.add_shapekey_ini_sections(
             ini_builder=ini_builder,

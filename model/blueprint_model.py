@@ -17,6 +17,7 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
+from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
 from ..blueprint.blueprint_node_group import (
     GROUP_INPUT_IDNAME,
@@ -54,6 +55,14 @@ class BluePrintModel:
         # kept apart from the $swapkey namespace of hotkey-driven switches.
         self._time_key_index = 0
 
+        # Time Position Switch tracking: the variable names allocated by Time
+        # Position Switch nodes (a subset of the "time" key namespace) and the
+        # DrawCallModels of their frame branches.  Frame draw calls are moved
+        # out of ordered_draw_obj_data_model_list after parsing (they only
+        # provide per-frame Position bytes, never their own drawindexed call).
+        self.time_pos_key_names: set[str] = set()
+        self.time_pos_frame_models: list[DrawCallModel] = []
+
         print(tree)
         output_node = output_node or BlueprintExportHelper.get_node_from_bl_idname(
             tree, MIMINode_Result_Output.bl_idname
@@ -63,6 +72,17 @@ class BluePrintModel:
 
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])
+
+        # Move Time Position Switch frame draw calls out of the normal draw
+        # list before any game post-processor sees them.
+        self._reclassify_time_pos_frames()
+
+        # Fail loudly when the current game preset cannot drive position
+        # buffer switching at all (checked here so every exporter benefits).
+        from ..common.m_time_position import get_time_position_support_error
+        support_error = get_time_position_support_error(self)
+        if support_error:
+            raise ValueError(support_error)
 
         # Game-specific tree post-processors (e.g. Naraka cross-IB pairs) run
         # after the whole tree has been parsed into DrawCallModels.  The
@@ -140,7 +160,12 @@ class BluePrintModel:
                         counts.setdefault(alias, []).append(branch_count)
                 # Time Switch aliases live in the same variable namespace:
                 # one shared timeline variable per alias, LCM period included.
-                if getattr(node, "bl_idname", "") == MIMINode_TimeSwitch.bl_idname:
+                # Time Position Switch uses the same time_alias property, so
+                # the same scan covers both node types.
+                if getattr(node, "bl_idname", "") in (
+                    MIMINode_TimeSwitch.bl_idname,
+                    MIMINode_TimePosSwitch.bl_idname,
+                ):
                     alias = cls._normalize_time_alias(node)
                     branch_count = len(getattr(node, "inputs", []))
                     if alias and branch_count > 1:
@@ -241,6 +266,12 @@ class BluePrintModel:
             # from wall-clock time every frame instead of a hotkey.
             self._parse_time_switch_node(unknown_node, chain_key_list)
 
+        elif unknown_node.bl_idname == MIMINode_TimePosSwitch.bl_idname:
+            # Time Position Switch: same timeline parsing as Time Switch, but
+            # the branch draw calls become per-frame Position side buffers
+            # instead of conditional drawindexed calls.
+            self._parse_time_switch_node(unknown_node, chain_key_list, is_position_switch=True)
+
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
 
@@ -326,15 +357,19 @@ class BluePrintModel:
                         tmp_chain_key_list.append(chain_tmp_key)
                     self.parse_single_node(link.from_node, tmp_chain_key_list)
 
-    def _parse_time_switch_node(self, time_node: bpy.types.Node, chain_key_list: list[M_Key]):
+    def _parse_time_switch_node(self, time_node: bpy.types.Node, chain_key_list: list[M_Key], is_position_switch: bool = False):
         """
-        Parse a Time Switch node.
+        Parse a Time Switch / Time Position Switch node.
 
         The branch handling is identical to the Switch Key node: branch k maps
         to value k of the node's variable. The only difference is the driver:
         the variable is declared with key_type "time" so the INI writer
         recomputes it from wall-clock time in the [Present] command list
         instead of emitting a hotkey [Key] section.
+
+        is_position_switch marks the variable name as a position timeline:
+        after parsing, every DrawCallModel carrying it is reclassified as a
+        per-frame Position provider (see _reclassify_time_pos_frames).
         """
         valid_input_sockets = time_node.inputs[:]
 
@@ -349,6 +384,8 @@ class BluePrintModel:
 
         if len(valid_input_sockets) == 1:
             # A single frame never switches; treat the node as a pass-through.
+            # For a position switch this degenerates to "always use frame 0",
+            # which is exactly what the normal draw of that object already is.
             for link in valid_input_sockets[0].links:
                 self.parse_single_node(link.from_node, chain_key_list)
             return
@@ -390,7 +427,42 @@ class BluePrintModel:
                 )
             m_key = existing_key
 
+        # Position timelines are tracked by name, independently of how the
+        # shared M_Key object was created first, so an alias shared with a
+        # plain Time Switch node still reclassifies this node's branches.
+        if is_position_switch:
+            self.time_pos_key_names.add(m_key.key_name)
+
         self._parse_branch_sockets(valid_input_sockets, m_key, state_count, chain_key_list)
+
+    def _reclassify_time_pos_frames(self):
+        """
+        Move Time Position Switch frame draw calls out of the normal draw list.
+
+        A frame branch of a Time Position Switch node only contributes its
+        Position bytes to a per-frame side buffer; it must never reach the
+        merged submesh buffers (that would duplicate the vertices) nor emit
+        its own drawindexed call.  The matching rule is the timeline variable
+        name, so nested branches (groups, UniComponent splits) reclassify
+        together no matter how many draw calls one frame produced.
+        """
+        if not self.time_pos_key_names:
+            return
+        kept_draw_call_list = []
+        for draw_call_model in self.ordered_draw_obj_data_model_list:
+            is_time_pos_frame = any(
+                m_key.key_name in self.time_pos_key_names
+                for m_key in draw_call_model.work_key_list
+            )
+            if is_time_pos_frame:
+                self.time_pos_frame_models.append(draw_call_model)
+            else:
+                kept_draw_call_list.append(draw_call_model)
+        self.ordered_draw_obj_data_model_list = kept_draw_call_list
+        LOG.info(
+            "BluePrintModel: reclassified " + str(len(self.time_pos_frame_models))
+            + " draw call(s) as Time Position Switch frames"
+        )
 
     def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):
         """Expand an MMT group through its Group Output nodes."""
@@ -599,6 +671,13 @@ class BluePrintModel:
 
         for draw_ib, submesh_model_list in draw_ib_submesh_model_list_dict.items():
             drawib_model = DrawIBModel(submesh_model_list=submesh_model_list, combine_ib=combine_ib)
+            # Attach this DrawIB's Time Position Switch frame draw calls so
+            # generate_buffer_files() can write their per-frame Position side
+            # buffers without the exporters knowing about the feature.
+            drawib_model.time_pos_frame_models = [
+                frame_model for frame_model in self.time_pos_frame_models
+                if frame_model.match_draw_ib == draw_ib
+            ]
             drawib_model_list.append(drawib_model)
 
         return drawib_model_list

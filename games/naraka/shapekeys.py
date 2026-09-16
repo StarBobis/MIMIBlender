@@ -53,6 +53,7 @@ import shutil
 
 from ...common.global_config import GlobalConfig
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
+from ...common.m_ini_helper import M_IniHelper
 from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 
 
@@ -184,9 +185,33 @@ def add_naraka_shapekey_ini_sections(
     constants_section.append("[Constants]")
     for shapekey_name, m_key in shapekeyname_mkey_dict.items():
         constants_section.append("; ShapeKey: " + shapekey_name)
-        constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            # Time-driven weights change every frame, so they must stay
+            # plain globals: a "persist" variable is written back to
+            # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
+            # VariableAssignment::run), which would mean a disk write
+            # every frame.
+            constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
+        else:
+            constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
         constants_section.new_line()
     ini_builder.append_section(constants_section)
+
+    # [Present]: Time Shape Key timelines update the weight variables once
+    # per frame; the Naraka shape key compute reads them at draw time
+    # (x88 = $shapekeyN), right before the skinning re-dispatch.
+    present_section = M_IniSection(M_SectionType.Present)
+    present_section.SectionName = "Present"
+    present_has_lines = False
+    for shapekey_name, m_key in shapekeyname_mkey_dict.items():
+        if getattr(m_key, 'key_type', 'key') != "time_shapekey":
+            continue
+        present_section.append("; ShapeKey time timeline: " + shapekey_name)
+        M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+        present_section.new_line()
+        present_has_lines = True
+    if present_has_lines:
+        ini_builder.append_section(present_section)
 
     # [CustomShaderComputeShapesNarakaN]: one command list per DrawIB. It
     # is run from the top of the Position VB override, right before the
@@ -289,6 +314,9 @@ def add_naraka_shapekey_ini_sections(
     # also useful for quick testing when no toggle panel exists.
     key_section = M_IniSection(M_SectionType.Key)
     for shapekey_name, m_key in shapekeyname_mkey_dict.items():
+        # Time-driven weights have no hotkey, so they never get a [Key].
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            continue
         if m_key.initialize_vk_str == "":
             continue
 

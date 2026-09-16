@@ -16,6 +16,7 @@ import shutil
 from ...common.global_config import GlobalConfig
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
+from ...common.m_ini_helper import M_IniHelper
 from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 from .model import DrawIBModelWWMI
 
@@ -222,12 +223,39 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     constants_section.SectionName = "Constants"
     for shapekey_name, _safe_name, m_key in shapekey_entries:
         constants_section.append("; ShapeKey: " + shapekey_name)
-        constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            # Time-driven weights change every frame, so they must stay
+            # plain globals: a "persist" variable is written back to
+            # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
+            # VariableAssignment::run), which would mean a disk write
+            # every frame.
+            constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
+        else:
+            constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
         constants_section.new_line()
     ini_builder.append_section(constants_section)
 
+    # Time Shape Key timelines: the WWMI shape key compute reads the weight
+    # variables at draw time (x88 = $shapekeyN), so updating them in
+    # [Present] (once per frame, before any draw) is all that is needed.
+    present_section = M_IniSection(M_SectionType.Present)
+    present_section.SectionName = "Present"
+    present_has_lines = False
+    for shapekey_name, _safe_name, m_key in shapekey_entries:
+        if getattr(m_key, 'key_type', 'key') != "time_shapekey":
+            continue
+        present_section.append("; ShapeKey time timeline: " + shapekey_name)
+        M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
+        present_section.new_line()
+        present_has_lines = True
+    if present_has_lines:
+        ini_builder.append_section(present_section)
+
     key_section = M_IniSection(M_SectionType.Key)
     for shapekey_name, _safe_name, m_key in shapekey_entries:
+        # Time-driven weights have no hotkey, so they never get a [Key].
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            continue
         if m_key.initialize_vk_str == "":
             continue
 

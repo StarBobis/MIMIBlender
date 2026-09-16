@@ -54,6 +54,10 @@ class StandardExporter:
         M_IniHelper.add_branch_key_sections(
             ini_builder=ini_builder,
             key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict,
+            # Time Position Switch needs the model context to emit its
+            # per-frame Position resources and [Present] copy lines.
+            blueprint_model=self.blueprint_model,
+            drawib_models=list(drawib_drawibmodel_dict.values()),
         )
         M_IniHelper.add_shapekey_ini_sections(
             ini_builder=ini_builder,
