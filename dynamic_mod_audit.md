@@ -76,7 +76,7 @@ Source links below point to the exact revision inspected locally:
 - `python tools/test_naraka_shapekeys.py`: Naraka skinning hook order, raw conversion, input declarations and borrowed-slot restoration.
 - `python tools/test_naraka_shapekey_gpu.py`: real HLSL compilation and D3D11 WARP execution for 12-byte and 40-byte layouts; weights 0/0.3/1/reset/multiple additions; animated seeds; partial work groups; 65,537 vertices. Also reproduces three invalid legacy descriptor combinations.
 - `blender -b --factory-startup --python-exit-code 1 --python tools/test_dynamic_animation_blender.py`: real model traversal/grouping/assembly with mocked external workspace lookups, byte-slice preservation, topology/attribute rejection, actual Blender mesh evaluation, world transforms, fractional-frame restoration, failed-sampling cleanup, replacement wiring, lazy ranges and WWMI time-weight emission.
-- `blender -b --factory-startup --python-exit-code 1 --python tools/test_dynamic_mod_titles.py`: dynamic mod node titles in both languages, node width, the legacy title migration (English and Simplified Chinese spellings, user-chosen titles preserved, idempotent) and the renamed report translations.
+- `blender -b --factory-startup --python-exit-code 1 --python tools/test_dynamic_mod_titles.py`: dynamic mod node titles in both languages, node width, the legacy title migration (English and Simplified Chinese spellings, user-chosen titles preserved, idempotent), the real save/reopen `load_post` path and the renamed report translations.
 - Python compilation of `blueprint`, `common`, `model`, `games`, and `tools`; Git whitespace validation.
 
 ## Remaining limits and migration

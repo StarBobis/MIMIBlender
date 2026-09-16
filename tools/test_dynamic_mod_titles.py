@@ -53,6 +53,14 @@ def check(label, condition):
         _FAILURES.append(label)
 
 
+def find_node(tree, node_type):
+    """Return the first node of one type; a loaded file has fresh instances."""
+    for node in tree.nodes:
+        if node.bl_idname == node_type:
+            return node
+    return None
+
+
 def main():
     import MIMIBlender
     from MIMIBlender.i18n import i18n
@@ -63,6 +71,9 @@ def main():
     check("addon_enable completed", True)
 
     tree = bpy.data.node_groups.new(name="TitleTest", type="MIMIBlueprintTreeType")
+    # Without a fake user the node group has no owner and would be dropped when
+    # the test saves the file.
+    tree.use_fake_user = True
     nodes = {node_type: tree.nodes.new(node_type) for node_type, _, _ in _TITLES}
 
     # 2. English titles and layout. Identifiers must stay untouched so existing
@@ -86,13 +97,46 @@ def main():
 
     for node_type, legacy_title, _ in _LEGACY_TITLES:
         nodes[node_type].label = legacy_title
+        # Shrink the nodes first: a migrated node has to grow back, because the
+        # new title is longer than the one the old version wrote.
+        nodes[node_type].width = 200
     check("migration rewrites every legacy title", migrate_legacy_node_titles() == len(_LEGACY_TITLES))
     for node_type, english_title, _ in _TITLES:
-        check("migrated title (en): " + node_type, nodes[node_type].label == english_title)
+        node = nodes[node_type]
+        check("migrated title (en): " + node_type, node.label == english_title)
+        check(
+            "migrated node width fits the title: " + node_type,
+            node.width >= node.calculate_text_width(node.label),
+        )
     # A second run must find nothing left to do.
     check("migration is idempotent", migrate_legacy_node_titles() == 0)
 
-    # 4. Simplified Chinese. The translated spelling was written by a node that
+    # 4. The real load_post path: save a blueprint that still holds the old
+    # titles, then open it again and let Blender run the handler.
+    import tempfile
+
+    legacy_path = os.path.join(tempfile.mkdtemp(), "legacy_titles.blend")
+    for node_type, legacy_title, _ in _LEGACY_TITLES:
+        nodes[node_type].label = legacy_title
+        nodes[node_type].width = 200
+    bpy.ops.wm.save_as_mainfile(filepath=legacy_path)
+    check("legacy blueprint saved", os.path.exists(legacy_path))
+
+    bpy.ops.wm.open_mainfile(filepath=legacy_path)
+    loaded_tree = bpy.data.node_groups.get("TitleTest")
+    check("blueprint reopened", loaded_tree is not None)
+    for node_type, english_title, _ in _TITLES:
+        node = find_node(loaded_tree, node_type)
+        check("load_post migrated the title: " + node_type, node is not None and node.label == english_title)
+        check(
+            "load_post grew the node: " + node_type,
+            node is not None and node.width >= node.calculate_text_width(node.label),
+        )
+    # Continue with the reopened tree, because the old references are dead.
+    tree = loaded_tree
+    nodes = {node_type: find_node(tree, node_type) for node_type, _, _ in _TITLES}
+
+    # 5. Simplified Chinese. The translated spelling was written by a node that
     # was created while Chinese was active, so it must migrate as well.
     preferences = i18n.get_preferences()
     check("preferences object available", preferences is not None)
@@ -126,7 +170,7 @@ def main():
     ):
         check("translated report: " + english_text, i18n.tr(english_text) == chinese_text)
 
-    # 5. Back to English, then a clean unload.
+    # 6. Back to English, then a clean unload.
     preferences.ui_language = "en"
     check("language restored to English", i18n.tr("DrawIndex Based Dynamic Mod") == "DrawIndex Based Dynamic Mod")
     check("load_post handler registered", migrate_legacy_node_titles in bpy.app.handlers.load_post)

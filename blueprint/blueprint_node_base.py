@@ -72,6 +72,7 @@ _LEGACY_TITLES_BY_IDNAME = {
 }
 
 
+@bpy.app.handlers.persistent
 def migrate_legacy_node_titles(scene=None):
     """Replace node titles that still hold the default name of an older version.
 
@@ -83,6 +84,10 @@ def migrate_legacy_node_titles(scene=None):
     The optional argument is the scene that Blender hands to a load_post
     handler. The function returns the number of updated nodes, so the caller
     and the tests can tell whether the migration did any work.
+
+    The persistent marker is required: Blender throws away the handlers of a
+    running script when another blend file is loaded, and this handler has to
+    survive exactly that load to migrate the file that was just opened.
     """
     updated_count = 0
     # Blender restricts bpy.data while an add-on is being registered, so this
@@ -103,6 +108,9 @@ def migrate_legacy_node_titles(scene=None):
             # bl_label of the registered class already holds the active
             # language, because @translatable keeps it up to date.
             node.label = tr(type(node).bl_label)
+            # The new title is longer than the old one, so the node has to grow
+            # as well; every node type listed above provides these two methods.
+            node.update_node_width(node.width_texts())
             updated_count += 1
     return updated_count
 
