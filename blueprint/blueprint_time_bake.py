@@ -144,7 +144,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             self.report({'ERROR'}, tr("Baking produced no objects"))
             return {'CANCELLED'}
 
-        self._rebuild_node_wiring(tree, node, baked_objects, submesh_name)
+        self._rebuild_node_wiring(tree, node, baked_objects, submesh_name, source_obj)
 
         if self.match_scene_fps:
             scene_fps = context.scene.render.fps / context.scene.render.fps_base
@@ -211,7 +211,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
 
         return baked_objects
 
-    def _rebuild_node_wiring(self, tree, node, baked_objects, submesh_name):
+    def _rebuild_node_wiring(self, tree, node, baked_objects, submesh_name, source_obj):
         """Resize the node's frame sockets and wire one Object Info node per frame."""
         # Resize the frame sockets to exactly match the baked frame count.
         while len(node.inputs) < len(baked_objects):
@@ -220,12 +220,20 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             node.inputs.remove(node.inputs[-1])
         renumber_time_switch_sockets(node)
 
-        # Create one Object Info node per frame in a column left of the switch.
-        base_x = node.location.x - 450
-        base_y = node.location.y
+        # Wrap every created Object Info node in one Frame node, so the whole
+        # baked batch can be moved and organized as a single unit.
+        # The label matches the baked objects' collection name on purpose.
+        frame_node = tree.nodes.new('NodeFrame')
+        frame_node.label = "TB_" + source_obj.name
+        frame_node.shrink = True
+        frame_node.location = (node.location.x - 480, node.location.y + 60)
+
+        # Create one Object Info node per frame in a column inside the Frame
+        # (a child node's location is relative to its parent Frame).
         for index, (frame_number, baked_obj) in enumerate(baked_objects):
             object_node = tree.nodes.new('MIMINode_Object_Info')
-            object_node.location = (base_x, base_y - index * 260)
+            object_node.location = (30, -60 - index * 260)
+            object_node.parent = frame_node
             object_node.object_name = baked_obj.name
             object_node.submesh_name = submesh_name
             tree.links.new(object_node.outputs[0], node.inputs[index])
