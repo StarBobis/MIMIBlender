@@ -83,13 +83,17 @@ def succeeded(hr, label):
         raise RuntimeError(label + " failed: 0x" + format(hr & 0xffffffff, "08x"))
 
 
-def run(base, shape):
-    """Compute several weights, copy to raw, and compare all ten components."""
-    if len(base) != len(shape) or not base or len(base) % 40:
-        raise ValueError("Base and shape must have equal nonzero sizes divisible by 40")
-    count = len(base) // 40
-    if count > 65535:
-        raise ValueError("The shared one-thread shader requires at most 65535 vertices")
+def run(base, shape, stride=40, animated_seed=False):
+    """Compile real shaders and check base + deltas, including animated seeds.
+
+    The position-only and full-vertex shaders share the same slot contract.
+    Test partial work groups and meshes larger than the old Dispatch limit.
+    """
+    if len(base) != len(shape) or not base or len(base) % stride:
+        raise ValueError("Base and shape must have equal nonzero sizes aligned to stride")
+    count = len(base) // stride
+    if count > 65535 * 64:
+        raise ValueError("Vertex count exceeds the 64-thread Dispatch limit")
 
     # Load system DLLs, not the mod loader's injected replacement d3d11.dll.
     # Explicit System32 paths avoid accidentally using a local proxy DLL.
@@ -112,7 +116,7 @@ def run(base, shape):
         # STRUCTURED=0x40, ALLOW_RAW_VIEWS=0x20: never combine these flags.
         # The raw output retains the exported 40-byte vertex stride.
         desc = BufferDesc(len(base), 3 if staging else 0, bind,
-                          0x20000 if staging else 0, misc, 0 if staging else 40)
+                          0x20000 if staging else 0, misc, 0 if staging else stride)
         storage = ct.create_string_buffer(data) if data is not None else None
         initial = InitialData(ct.cast(storage, PTR), 0, 0) if storage is not None else None
         return create(3, [ct.POINTER(BufferDesc), ct.POINTER(InitialData)],
@@ -140,7 +144,8 @@ def run(base, shape):
         owned.extend([device, context])
 
         # Compile the actual shipped shader, not a simplified stand-in.
-        source = (Path(__file__).resolve().parents[1] / "resources" / "Shapes.hlsl").read_bytes()
+        shader_file = "Shapes.hlsl" if stride == 40 else "shapes_position.hlsl"
+        source = (Path(__file__).resolve().parents[1] / "resources" / shader_file).read_bytes()
         code, errors = PTR(), PTR()
         compiler.D3DCompile.argtypes = [PTR, ct.c_size_t, ct.c_char_p, PTR, PTR,
                                         ct.c_char_p, ct.c_char_p, UINT, UINT,
@@ -177,11 +182,22 @@ def run(base, shape):
             owned.append(invalid_buffer)
         if hr >= 0:
             raise AssertionError("D3D11 unexpectedly accepted RAW and STRUCTURED together")
-        print("OK: both legacy resource descriptor failures reproduced")
+        # Reproduce the shared pipeline's former structured-to-VB failure as
+        # well. A ref cannot turn a compute descriptor into a vertex buffer.
+        bad_desc = BufferDesc(len(base), 0, 128 | 1, 0, 64, stride)
+        invalid_vertex_buffer = PTR()
+        hr = call(device, 3, HRESULT, [ct.POINTER(BufferDesc), PTR, ct.POINTER(PTR)],
+                  ct.byref(bad_desc), None, ct.byref(invalid_vertex_buffer))
+        if invalid_vertex_buffer:
+            owned.append(invalid_vertex_buffer)
+        assert hr < 0, "Structured buffers must reject VERTEX_BUFFER bindings"
+        print("OK: all three legacy resource descriptor failures reproduced")
 
         # Inputs are explicitly structured; the accumulator has a UAV binding.
         # This mirrors type=StructuredBuffer plus cs-u5=copy base in the INI.
         base_buffer, shape_buffer = buffer(base), buffer(shape)
+        # Structured buffers cannot carry VERTEX_BUFFER bindings in D3D11.
+        # Keep the accumulator compute-only and copy into the raw result below.
         working = buffer(bind=128)
         base_view, shape_view = view(base_buffer), view(shape_buffer)
         working_view = view(working, unordered=True)
@@ -192,7 +208,9 @@ def run(base, shape):
 
         # The intermediate result has RAW only, not RAW|STRUCTURED.
         # Validate the exact R32_TYPELESS BUFFEREX SRV used by raw reads.
-        raw = buffer(bind=8, misc=32)
+        # Validate both consumers: raw SRV for skinning and VB for the shared
+        # CPU-skinned path. Neither may inherit the accumulator's STRUCTURED bit.
+        raw = buffer(bind=8 | 1, misc=32)
         raw_desc = (UINT * 6)(39, 11, 0, len(base) // 4, 1, 0)
         create(7, [PTR, PTR], raw, ct.byref(raw_desc))
         readback = buffer(bind=0, misc=0, staging=True)
@@ -201,8 +219,12 @@ def run(base, shape):
 
         # Include a reset after weight 1, then multiple keys/dispatches.
         # Re-copying the pristine base each run prevents frame accumulation.
+        # A nontrivial animated seed catches the old cancellation bug at
+        # weight=1: subtracting the seed instead of base would erase animation.
+        seed_values = [value + (2.0 if animated_seed else 0.0) for value in original]
+        seed_buffer = buffer(struct.pack("<" + "f" * len(seed_values), *seed_values))
         for weights in ((0.0,), (0.3,), (1.0,), (0.0,), (0.2, 0.5)):
-            call(context, 47, None, [PTR, PTR], working, base_buffer)
+            call(context, 47, None, [PTR, PTR], working, seed_buffer)
             for weight in weights:
                 # IniParams[88].x carries the weight exactly as x88 does.
                 params = (ct.c_float * (89 * 4))()
@@ -212,7 +234,7 @@ def run(base, shape):
                 texture = create(4, [ct.POINTER(TextureDesc), ct.POINTER(InitialData)],
                                  ct.byref(desc), ct.byref(initial))
                 srv(120, view(texture))
-                call(context, 41, None, [UINT, UINT, UINT], count, 1, 1)
+                call(context, 41, None, [UINT, UINT, UINT], (count + 63) // 64, 1, 1)
 
             # Copy structured bytes into raw, then into a CPU-readable buffer.
             # These are real D3D11 operations, not a CPU-only interpolation test.
@@ -224,7 +246,7 @@ def run(base, shape):
             result = ct.string_at(mapped.data, len(base))
             call(context, 15, None, [PTR, UINT], readback, 0)
             actual = struct.unpack("<" + "f" * len(original), result)
-            expected = [a + (b - a) * sum(weights) for a, b in zip(original, target)]
+            expected = [seed + (b - a) * sum(weights) for seed, a, b in zip(seed_values, original, target)]
             for index, (a, b) in enumerate(zip(actual, expected)):
                 if not math.isclose(a, b, rel_tol=2e-5, abs_tol=2e-6):
                     raise AssertionError("GPU mismatch at component " + str(index) + ": " + str((a, b)))
@@ -257,6 +279,13 @@ def main():
         base = struct.pack("<70f", *values)
         shape = struct.pack("<70f", *[value + 0.25 for value in values])
     run(base, shape)
+    if not args.buffers:
+        # Cover the new layout, partial final groups, animated-seed composition,
+        # and a 65537-vertex mesh that failed with one group per vertex.
+        for stride, count in ((12, 65), (40, 65), (12, 65537)):
+            values = [float(i % 13) / 13 for i in range(count * stride // 4)]
+            fmt = "<" + "f" * len(values)
+            run(struct.pack(fmt, *values), struct.pack(fmt, *[v + 0.25 for v in values]), stride, True)
     print("ALL NARAKA GPU CHECKS PASSED")
 
 

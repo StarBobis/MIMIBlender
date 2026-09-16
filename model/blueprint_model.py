@@ -29,7 +29,9 @@ from ..blueprint.blueprint_node_group import (
 
 class BluePrintModel:
 
-    _KEY_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
+    # 3Dmigoto lowercases INI tokens and rejects digit-leading variables.
+    # Underscores are legal in the parser even when older node UIs omit them.
+    _KEY_ALIAS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
     
     def __init__(self, tree=None, context=None, output_node=None):
         # Global key name and key attribute dict
@@ -54,6 +56,9 @@ class BluePrintModel:
         # Auto-allocated Time Switch variables use their own $dyntime counter,
         # kept apart from the $swapkey namespace of hotkey-driven switches.
         self._time_key_index = 0
+        # Re-visiting a linked node under several outer branches must reuse
+        # its clock instead of allocating a different timeline on each visit.
+        self._time_node_key_names = {}
 
         # Time Position Switch tracking: the variable names allocated by Time
         # Position Switch nodes (a subset of the "time" key namespace) and the
@@ -98,7 +103,12 @@ class BluePrintModel:
         if alias == "":
             return ""
         if cls._KEY_ALIAS_PATTERN.fullmatch(alias) is None:
-            raise ValueError("The variable alias of a key switch node may only contain English letters and digits: " + alias)
+            raise ValueError("The variable alias of a key switch node must start with an ASCII letter or underscore and contain only ASCII letters, digits or underscores: " + alias)
+        # Internal animation/activation variables share the same INI namespace.
+        # Reject collisions rather than emitting two declarations for one name.
+        alias = alias.lower()
+        if re.fullmatch(r"active\d+|shapekey\d+(_frame)?|shapekey_first_run", alias) or alias.startswith("mimi_"):
+            raise ValueError("This variable alias is reserved by the exporter: " + alias)
         return "$" + alias
 
     @classmethod
@@ -107,7 +117,12 @@ class BluePrintModel:
         if alias == "":
             return ""
         if cls._KEY_ALIAS_PATTERN.fullmatch(alias) is None:
-            raise ValueError("The time variable alias of a Time Switch node may only contain English letters and digits: " + alias)
+            raise ValueError("The time variable alias of a Time Switch node must start with an ASCII letter or underscore and contain only ASCII letters, digits or underscores: " + alias)
+        # Internal animation/activation variables share the same INI namespace.
+        # Reject collisions rather than emitting two declarations for one name.
+        alias = alias.lower()
+        if re.fullmatch(r"active\d+|shapekey\d+(_frame)?|shapekey_first_run", alias) or alias.startswith("mimi_"):
+            raise ValueError("This variable alias is reserved by the exporter: " + alias)
         return "$" + alias
 
     def _allocate_time_key_name(self, time_node: bpy.types.Node) -> str:
@@ -117,6 +132,9 @@ class BluePrintModel:
         if key_alias:
             return key_alias
 
+        identity = tuple(group.as_pointer() for group in self._group_instance_stack) + (time_node.as_pointer(),)
+        if identity in self._time_node_key_names:
+            return self._time_node_key_names[identity]
         key_name = "$dyntime" + str(self._time_key_index)
         while (
             key_name in self.keyname_mkey_dict
@@ -124,6 +142,7 @@ class BluePrintModel:
         ):
             self._time_key_index = self._time_key_index + 1
             key_name = "$dyntime" + str(self._time_key_index)
+        self._time_node_key_names[identity] = key_name
         return key_name
 
     def _allocate_switch_key_name(self, switch_node: bpy.types.Node) -> tuple[str, bool]:
@@ -174,10 +193,12 @@ class BluePrintModel:
                     visit(getattr(node, "node_tree", None))
 
         visit(root_tree)
-        return {
-            alias: math.lcm(*branch_counts)
-            for alias, branch_counts in counts.items()
-        }
+        # LCM expansion can explode for relatively prime branch counts.
+        # Bound it before building lists or traversing every generated state.
+        periods = {alias: math.lcm(*sizes) for alias, sizes in counts.items()}
+        if any(period > 10000 for period in periods.values()):
+            raise ValueError("Shared switch aliases may expand to at most 10000 states")
+        return periods
 
     def parse_current_node(self, current_node:bpy.types.Node, chain_key_list:list[M_Key]):
         for input_socket in current_node.inputs:
@@ -252,6 +273,10 @@ class BluePrintModel:
                 if existing_key is None:
                     self.keyname_mkey_dict[m_key.key_name] = m_key
                 else:
+                    # Check both traversal orders: a hotkey visited after a
+                    # time node must not silently inherit its clock driver.
+                    if existing_key.key_type != "key":
+                        raise ValueError("Switch Key and Time Switch cannot share alias " + m_key.key_name)
                     m_key = existing_key
 
                 # Update the global key index
@@ -382,16 +407,15 @@ class BluePrintModel:
         if not is_any_socket_linked:
             return
 
-        if len(valid_input_sockets) == 1:
-            # A single frame never switches; treat the node as a pass-through.
-            # For a position switch this degenerates to "always use frame 0",
-            # which is exactly what the normal draw of that object already is.
+        if len(valid_input_sockets) == 1 and not is_position_switch:
+            # A one-frame draw switch is a pass-through. A position provider
+            # must still replace the separate base object, never draw twice.
             for link in valid_input_sockets[0].links:
                 self.parse_single_node(link.from_node, chain_key_list)
             return
 
         fps = float(getattr(time_node, 'fps', 0.0) or 0.0)
-        if fps <= 0.0:
+        if not math.isfinite(fps) or fps <= 0.0:
             raise ValueError(
                 "Time Switch node '" + time_node.name + "' has an invalid FPS (must be greater than 0)"
             )
@@ -406,7 +430,8 @@ class BluePrintModel:
 
         m_key.key_type = "time"
         m_key.fps = fps
-        m_key.initialize_value = 0  # Always starts on the first frame
+        m_key.initialize_value = 0  # Used until the first Present update.
+        m_key.timeline_expression()
 
         # Set the comment field
         m_key.comment = getattr(time_node, 'comment', '')
@@ -421,19 +446,24 @@ class BluePrintModel:
                     "The alias '" + m_key.key_name + "' is shared by both a Switch Key node and a Time Switch node; please use different aliases"
                 )
             if abs(existing_key.fps - fps) > 1e-6:
-                LOG.warning(
-                    "BluePrintModel: Time Switch nodes sharing alias '" + m_key.key_name
-                    + "' have different FPS values; the first one (" + str(existing_key.fps) + ") wins"
+                # Traversal order must not silently change playback speed.
+                raise ValueError(
+                    "Time Switch nodes sharing alias '" + m_key.key_name
+                    + "' must use the same FPS"
                 )
             m_key = existing_key
 
-        # Position timelines are tracked by name, independently of how the
-        # shared M_Key object was created first, so an alias shared with a
-        # plain Time Switch node still reclassifies this node's branches.
+        # Tag only draw calls reached through this position node. A shared
+        # alias synchronizes clocks; it must not turn ordinary draws into
+        # position providers elsewhere in the graph.
+        first_draw = len(self.ordered_draw_obj_data_model_list)
+        self._parse_branch_sockets(valid_input_sockets, m_key, state_count, chain_key_list)
         if is_position_switch:
             self.time_pos_key_names.add(m_key.key_name)
-
-        self._parse_branch_sockets(valid_input_sockets, m_key, state_count, chain_key_list)
+            for draw_call in self.ordered_draw_obj_data_model_list[first_draw:]:
+                if draw_call.time_position_key_name:
+                    raise ValueError("Nested Time Position Switch nodes are not supported")
+                draw_call.time_position_key_name = m_key.key_name
 
     def _reclassify_time_pos_frames(self):
         """
@@ -442,18 +472,14 @@ class BluePrintModel:
         A frame branch of a Time Position Switch node only contributes its
         Position bytes to a per-frame side buffer; it must never reach the
         merged submesh buffers (that would duplicate the vertices) nor emit
-        its own drawindexed call.  The matching rule is the timeline variable
-        name, so nested branches (groups, UniComponent splits) reclassify
-        together no matter how many draw calls one frame produced.
+        its own drawindexed call. The marker records graph provenance rather
+        than variable identity, so sharing an alias with a draw switch is safe.
         """
         if not self.time_pos_key_names:
             return
         kept_draw_call_list = []
         for draw_call_model in self.ordered_draw_obj_data_model_list:
-            is_time_pos_frame = any(
-                m_key.key_name in self.time_pos_key_names
-                for m_key in draw_call_model.work_key_list
-            )
+            is_time_pos_frame = bool(draw_call_model.time_position_key_name)
             if is_time_pos_frame:
                 self.time_pos_frame_models.append(draw_call_model)
             else:
@@ -669,15 +695,24 @@ class BluePrintModel:
             tmp_submesh_model_list.append(submesh_model)
             draw_ib_submesh_model_list_dict[draw_ib] = tmp_submesh_model_list
 
+        # A provider without a base DrawIB used to disappear silently because
+        # the loop below visits only normally connected base objects.
+        for frame_model in self.time_pos_frame_models:
+            if frame_model.match_draw_ib not in draw_ib_submesh_model_list_dict:
+                raise ValueError("Time Position Switch: connect a base object for DrawIB " + frame_model.match_draw_ib)
+
         for draw_ib, submesh_model_list in draw_ib_submesh_model_list_dict.items():
             drawib_model = DrawIBModel(submesh_model_list=submesh_model_list, combine_ib=combine_ib)
             # Attach this DrawIB's Time Position Switch frame draw calls so
             # generate_buffer_files() can write their per-frame Position side
             # buffers without the exporters knowing about the feature.
-            drawib_model.time_pos_frame_models = [
+            # Populate the exact field consumed by both buffer and INI writers.
+            # Attaching an unrelated dynamic attribute left this dict empty.
+            from ..common.m_time_position import group_time_position_frames
+            drawib_model.time_pos_frame_groups = group_time_position_frames([
                 frame_model for frame_model in self.time_pos_frame_models
                 if frame_model.match_draw_ib == draw_ib
-            ]
+            ])
             drawib_model_list.append(drawib_model)
 
         return drawib_model_list

@@ -4,12 +4,10 @@ Naraka shape key support (GPU pre-skinning compatible).
 Why Naraka cannot reuse the generic shape key pipeline
 (common/m_ini_helper.py + resources/Shapes.hlsl) as-is:
 
-- The generic pipeline finishes its compute work with
-  "Resource<DrawIB>Position = ref cs-u5", re-pointing the position
-  resource at a *structured* buffer copy, and it runs at [Present] time.
-  CPU pre-skinning games bind that resource as a vertex buffer, where the
-  underlying view type does not matter, so the generic pipeline works
-  there.
+- The generic pipeline runs at Present and copies its structured result
+  into a raw vertex buffer. Direct structured-to-vertex references are not
+  valid in D3D11. Naraka instead needs a raw shader-resource binding and
+  must run the computation immediately before skinning.
 - Naraka skins its meshes on the GPU: Resource<DrawIB>Position is fed
   into the game's own skinning compute shader, which reads it as a raw
   ByteAddressBuffer. Re-pointing it at a structured copy is incompatible
@@ -123,6 +121,12 @@ def collect_usable_drawib_model_list(drawib_model_list: list) -> list:
             continue
 
         if not is_supported_position_layout(getattr(drawib_model, "d3d11_game_type", None)):
+            # Time-driven data must not silently export as a static mod.
+            keys = BlueprintExportHelper.get_current_shapekeyname_mkey_dict()
+            if getattr(drawib_model, "time_pos_frame_groups", None) or any(
+                getattr(key, "key_type", "key") == "time_shapekey" for key in keys.values()
+            ):
+                raise ValueError("Naraka animation requires the supported 40-byte shape Position layout")
             print("Naraka shape keys: DrawIB " + drawib
                   + " has an unsupported Position category layout, its shape keys are skipped")
             continue
@@ -186,11 +190,9 @@ def add_naraka_shapekey_ini_sections(
     for shapekey_name, m_key in shapekeyname_mkey_dict.items():
         constants_section.append("; ShapeKey: " + shapekey_name)
         if getattr(m_key, 'key_type', 'key') == "time_shapekey":
-            # Time-driven weights change every frame, so they must stay
-            # plain globals: a "persist" variable is written back to
-            # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
-            # VariableAssignment::run), which would mean a disk write
-            # every frame.
+            # Animation weights are transient runtime state. Persist only
+            # marks settings dirty here, but would restore stale weights on
+            # reload and unnecessarily include the clock in saved settings.
             constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
         else:
             constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
@@ -230,7 +232,12 @@ def add_naraka_shapekey_ini_sections(
             customshader_section.append("Resource" + drawib + "ShapeBackup_" + slot + " = ref " + slot)
         # u5 is a fresh structured copy of the pristine base buffer; every
         # shape key dispatch accumulates its weighted difference onto it.
-        customshader_section.append("cs-u5 = copy Resource" + drawib + "Position.1")
+        # PositionTimeBase is mutable; Position.1 stays the shape reference.
+        # With both features enabled the result is frame + weight*(shape-base).
+        seed = "Resource" + drawib + "Position.1"
+        if getattr(drawib_model, "time_pos_frame_groups", None):
+            seed = "Resource" + drawib + "PositionTimeBase"
+        customshader_section.append("cs-u5 = copy " + seed)
         customshader_section.new_line()
 
         # One dispatch per shape key that actually exists on this DrawIB.
@@ -244,7 +251,11 @@ def add_naraka_shapekey_ini_sections(
             customshader_section.append("x88 = " + m_key.key_name)
             customshader_section.append("cs-t50 = Resource" + drawib + "Position.1")
             customshader_section.append("cs-t51 = Resource" + drawib + "Position." + shapekey_name)
-            customshader_section.append("dispatch = " + str(draw_number) + ",1,1")
+            # The shared shader now uses 64 threads and guards its tail.
+            # Validate the D3D11 group-count limit instead of silently failing.
+            if draw_number < 1 or draw_number > 65535 * 64:
+                raise ValueError("Naraka shape key vertex count exceeds the supported Dispatch range")
+            customshader_section.append("dispatch = " + str((draw_number + 63) // 64) + ",1,1")
             customshader_section.new_line()
 
         # A 3Dmigoto copy recreates its destination from the source descriptor.

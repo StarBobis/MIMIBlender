@@ -387,7 +387,9 @@ class DrawIBModel:
         """
         lod_name = self.get_lod_name()
         prefix = lod_name + "." if lod_name else ""
-        return f"{prefix}{self.draw_ib}-Position.{var_name}_{frame_value}.buf"
+        # Keep animation files outside the Position.<shape-name> namespace.
+        # A user shape named dyntime0_0 must not overwrite an animation frame.
+        return f"{prefix}{self.draw_ib}-position_timeframe.{var_name}_{frame_value}.buf"
 
     @staticmethod
     def get_time_position_resource_name(draw_ib: str, var_name: str, frame_value: int) -> str:
@@ -396,9 +398,10 @@ class DrawIBModel:
         Resource names carry no LOD prefix, mirroring the existing
         [Resource<draw_ib><Category>] declarations of the slot-style games.
         """
-        return "Resource" + draw_ib + "Position." + var_name + "_" + str(frame_value)
+        # Resources also have a distinct prefix to avoid shape-name collisions.
+        return "Resource" + draw_ib + "PositionTimeFrame." + var_name + "_" + str(frame_value)
 
-    def _compute_time_pos_frame_position_bytes(self, frame_model) -> numpy.ndarray:
+    def _compute_time_pos_frame_position_bytes(self, frame_model, base_submesh) -> numpy.ndarray:
         """Run the standard single-object export pipeline for one frame
         object and return its Position category bytes.
 
@@ -420,6 +423,24 @@ class DrawIBModel:
                 "Time Position Switch: frame object '" + str(frame_model.obj_name)
                 + "' produced no Position data; is it a valid mesh?"
             )
+        # Equal byte counts do not prove compatible vertex ordering. Welding,
+        # triangulation and UV seams can reorder or split the exported vertices
+        # without changing the final count. Compare the actual exported mapping.
+        if (not numpy.array_equal(temp_submesh_model.ib, base_submesh.ib)
+                or temp_submesh_model.index_vertex_id_dict != base_submesh.index_vertex_id_dict):
+            raise ValueError("Time Position Switch: exported topology/order differs for " + frame_model.obj_name)
+        # Only Position is replaced at runtime. Any other animated category
+        # would silently retain base values (normals, UVs, weights, etc.).
+        # Require DrawIndexed switching for those animations rather than export
+        # a visually incorrect or incorrectly skinned position-only sequence.
+        for category, base_bytes in base_submesh.category_buffer_dict.items():
+            if category == "Position":
+                continue
+            if not numpy.array_equal(temp_submesh_model.category_buffer_dict.get(category), base_bytes):
+                raise ValueError(
+                    "Time Position Switch: frame '" + frame_model.obj_name + "' changes " + category
+                    + "; use Time Switch (DrawIndexed) for non-Position animation"
+                )
         return position_buffer
 
     def write_time_position_files(self, output_folder: str):
@@ -500,7 +521,7 @@ class DrawIBModel:
                             + " base objects; a position frame replaces the whole submesh, "
                             + "so exactly one base object per animated submesh is required"
                         )
-                    frame_position_bytes = self._compute_time_pos_frame_position_bytes(frame_model)
+                    frame_position_bytes = self._compute_time_pos_frame_position_bytes(frame_model, submesh_model)
                     vertex_base = self.submesh_vertex_base_dict.get(submesh_model.submesh_name, 0)
                     byte_start = vertex_base * position_stride
                     expected_len = self._get_exported_vertex_count(submesh_model) * position_stride

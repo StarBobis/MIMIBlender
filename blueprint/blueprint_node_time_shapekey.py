@@ -13,7 +13,7 @@ index to the weight variable every frame:
 
     [Present]
     local $shapekey1_frame
-    $shapekey1_frame = (time % (0.08333333333333333 * 24)) // 0.08333333333333333
+    $shapekey1_frame = ((time % (0.08333333333333333 * 24)) // 0.08333333333333333) % 24
     if $shapekey1_frame == 0
         $shapekey1 = 0.0
     elif $shapekey1_frame == 1
@@ -164,7 +164,9 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
     def _frame_numbers(self):
         if self.frame_step < 1 or self.frame_end < self.frame_start:
             return []
-        return list(range(self.frame_start, self.frame_end + 1, self.frame_step))
+        # Count samples lazily so an accidental huge range cannot allocate
+        # millions of entries before the 1000-frame validation runs.
+        return range(self.frame_start, self.frame_end + 1, self.frame_step)
 
     def _find_shape_key_block(self, source_obj, shapekey_name):
         """Return the shape key block of the source object, or None."""
@@ -211,6 +213,8 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
         # key_block.value already holds the animated value at that frame.
         scene = context.scene
         original_frame = scene.frame_current
+        # Restore subframes too; baking should not move the user's time cursor.
+        original_subframe = scene.frame_subframe
         sampled_weights = []
         window_manager = context.window_manager
         window_manager.progress_begin(0, len(frames))
@@ -222,7 +226,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
                 window_manager.progress_update(index + 1)
         finally:
             window_manager.progress_end()
-            scene.frame_set(original_frame)
+            scene.frame_set(original_frame, subframe=original_subframe)
 
         # Replace the whole timeline with the baked samples.
         node.weights.clear()

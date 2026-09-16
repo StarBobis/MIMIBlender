@@ -14,9 +14,9 @@ exactly like the Time Switch node.  The difference is what gets switched:
   Position resource:
 
       if $dyntime0 == 0
-          ResourceXXXXPosition = copy ResourceXXXXPosition.dyntime0_0
+          ResourceXXXXPosition = copy ResourceXXXXPositionTimeFrame.dyntime0_0
       elif $dyntime0 == 1
-          ResourceXXXXPosition = copy ResourceXXXXPosition.dyntime0_1
+          ResourceXXXXPosition = copy ResourceXXXXPositionTimeFrame.dyntime0_1
       endif
 
   3Dmigoto's "dst = copy src" reuses the cached destination buffer when it
@@ -28,14 +28,16 @@ Rules (enforced at export time with clear error messages):
 - The base object of the animated submesh must be connected to the output
   normally (an Object Info node outside this node); the frames replace its
   position data, everything else (IB, Texcoord, Blend, ...) stays shared.
-- Every frame object must have the exact same topology (vertex count and
-  order) as the base object; the "Bake Animation to Frames" button produces
-  such objects automatically.
+- Every frame must retain exported indices, vertex ordering and all shared
+  non-Position attributes. Baking topology-changing modifiers or separate
+  normal/UV animation requires DrawIndexed switching instead.
 - One draw call per animated submesh (the base object), because a frame
   replaces the whole submesh position range.
-- Game presets with GPU pre-skinning position pipelines (for example the
-  CS variants, WWMI, NTEMI) are not supported by this node yet; exporting
-  with them raises an explicit error instead of silently doing nothing.
+- One shared timeline and common outer gate per DrawIB are required.
+- WWMI, NTEMI, EFMI and unsupported GPU pre-skinning paths are rejected.
+  Naraka/NarakaM/AILIMIT/ZZMIDX12 shared Position skinning paths are allowed.
+- Shape keys use a separate animated seed; the shape reference stays fixed.
+  Empty frames and disabled gates restore the original Position buffer.
 
 The frame-rate independence relies on the same 3Dmigoto facts as the Time
 Switch node (wall-clock "time" operand, exact "//" floor division, plain
@@ -58,10 +60,11 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
         self.update_node_width([self.time_alias, self.comment])
 
     def update_time_alias(self, context):
-        # Same rule as the Switch Key alias: ASCII letters and digits only.
+        # Match the 3Dmigoto identifier alphabet; export separately checks
+        # the leading character and reserved internal variable names.
         sanitized_alias = "".join(
             char for char in str(self.time_alias or "")
-            if char.isascii() and char.isalnum()
+            if char.isascii() and (char.isalnum() or char == "_")
         )
         if self.time_alias != sanitized_alias:
             self.time_alias = sanitized_alias
@@ -81,7 +84,7 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
     ) # type: ignore
     time_alias: bpy.props.StringProperty(
         name=tr("Time Variable Alias"),
-        description=tr("Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple time switch nodes"),
+        description=tr("Start with an ASCII letter or underscore; use letters, digits or underscores. Aliases are case-insensitive and share one timeline."),
         default="",
         update=update_time_alias,
     ) # type: ignore

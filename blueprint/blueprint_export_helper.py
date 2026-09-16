@@ -1,7 +1,7 @@
 import os
 
 import bpy
-from ..common.global_config import GlobalConfig
+from ..common.global_config import GlobalConfig, LogicName
 from ..common.m_key import M_Key
 from ..workspace.mmt_workspace import MMTWorkSpace
 
@@ -374,16 +374,34 @@ class BlueprintExportHelper:
             m_key = M_Key()
             m_key.key_name = "$shapekey" + str(key_index)
             m_key.key_type = "time_shapekey"
-            m_key.fps = float(getattr(node, "fps", 12.0) or 12.0)
-            m_key.initialize_value = 0
+            # Do not replace zero/NaN with a default: invalid saved node data
+            # must fail validation instead of silently changing playback.
+            m_key.fps = float(getattr(node, "fps", 12.0))
+            m_key.initialize_value = weight_list[0]
             # value_list stays the frame indices; weight_list holds the
             # per-frame weights (same length, enforced by the node UI).
             m_key.value_list = list(range(len(weight_list)))
             m_key.weight_list = weight_list
+            m_key.timeline_expression()
+            # These exporters have no time-weight consumer. Reject rather than
+            # accepting a node that can only produce a static mesh there.
+            if GlobalConfig.logic_name in (LogicName.NTEMI, LogicName.EFMI):
+                raise ValueError("Time Shape Key is not supported by this preset; use DrawIndexed animation")
             m_key.comment = getattr(node, 'comment', '')
             shapekey_name_mkey_dict[shapekey_name] = m_key
             key_index += 1
 
+        # Windows filenames and 3Dmigoto resource identifiers are case
+        # insensitive even though Blender shape names are case sensitive.
+        # Reject collisions and path/section delimiters before writing files.
+        seen_names = set()
+        for name in shapekey_name_mkey_dict:
+            normalized = name.casefold()
+            if normalized in seen_names or normalized == "1":
+                raise ValueError("Shape key resource name collision: " + name)
+            if any(char in name for char in '\\/:*?"<>|[]\r\n') or name.endswith((".", " ")):
+                raise ValueError("Shape key name is not safe for buffer files and INI sections: " + name)
+            seen_names.add(normalized)
         return shapekey_name_mkey_dict
 
 

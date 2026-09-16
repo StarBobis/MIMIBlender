@@ -8,9 +8,9 @@ This module samples the evaluated mesh at each requested frame, stores it as
 a real mesh datablock, and wires the resulting objects into the frame sockets
 of a Time Switch node in frame order.
 
-Topology note: every baked frame comes from the same source mesh, so vertex
-count and triangle order are identical across frames.  That keeps the
-per-frame drawindexed offsets consistent inside the shared Submesh buffers.
+Topology-changing modifiers may change vertex counts between sampled frames.
+DrawIndexed switching supports this because every object has its own index
+range. Position switching validates exported topology and shared attributes.
 '''
 import bpy
 
@@ -116,7 +116,9 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
     def _frame_numbers(self):
         if self.frame_step < 1 or self.frame_end < self.frame_start:
             return []
-        return list(range(self.frame_start, self.frame_end + 1, self.frame_step))
+        # A lazy range lets the UI count huge inputs without allocating them
+        # before execute() can enforce the 1000-sample safety limit.
+        return range(self.frame_start, self.frame_end + 1, self.frame_step)
 
     def execute(self, context):
         tree, node = self._get_tree_and_node()
@@ -144,7 +146,13 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             self.report({'ERROR'}, tr("Too many frames ({count}); please increase the frame step").format(count=len(frames)))
             return {'CANCELLED'}
 
-        baked_objects = self._bake_frames(context, source_obj, frames)
+        # A failed sample must report an operator error, not leave a partial
+        # bake hidden in the scene. The sampling helper rolls back its data.
+        try:
+            baked_objects = self._bake_frames(context, source_obj, frames)
+        except Exception as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
         if not baked_objects:
             self.report({'ERROR'}, tr("Baking produced no objects"))
             return {'CANCELLED'}
@@ -169,6 +177,9 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
 
         baked_objects = []
         original_frame = scene.frame_current
+        original_subframe = scene.frame_subframe
+        created_meshes = []
+        created_objects = []
         window_manager = context.window_manager
         window_manager.progress_begin(0, len(frames))
         try:
@@ -188,9 +199,20 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
                     depsgraph=depsgraph,
                 )
 
+                created_meshes.append(mesh)
+                # Export normalizes object rotations for each game preset.
+                # Bake world transforms into the mesh itself so animated
+                # location/rotation/scale cannot be discarded at that step.
+                mesh.transform(evaluated_obj.matrix_world)
+                if evaluated_obj.matrix_world.determinant() < 0:
+                    mesh.flip_normals()
                 new_obj = bpy.data.objects.new(source_obj.name + "_f" + str(frame_number), mesh)
-                # Keep the world placement of this frame as a static transform.
-                new_obj.matrix_world = evaluated_obj.matrix_world.copy()
+                created_objects.append(new_obj)
+                # Preserve exporter metadata that lives on the object rather
+                # than the mesh. Vertex groups are copied separately below.
+                for property_name in source_obj.keys():
+                    if property_name != "_RNA_UI":
+                        new_obj[property_name] = source_obj[property_name]
 
                 # Vertex groups live on the object (not the mesh); without the
                 # names the exporter cannot address the baked blend weights.
@@ -209,15 +231,31 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
 
                 baked_objects.append((frame_number, new_obj))
                 window_manager.progress_update(index + 1)
+        except Exception:
+            # Remove only data created by this bake, never the source mesh.
+            # Tracking before linking also covers errors during hide_set().
+            for obj in created_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            for mesh in created_meshes:
+                if mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+            bpy.data.collections.remove(collection)
+            raise
         finally:
             window_manager.progress_end()
-            # Restore the frame the user was looking at before baking.
-            scene.frame_set(original_frame)
+            # Preserve fractional frames as well as integer timeline position.
+            scene.frame_set(original_frame, subframe=original_subframe)
 
         return baked_objects
 
     def _rebuild_node_wiring(self, tree, node, baked_objects, submesh_name, source_obj):
         """Resize the node's frame sockets and wire one Object Info node per frame."""
+        # Frame sockets allow multiple links. Re-baking must replace the old
+        # links explicitly, otherwise both old and new objects are drawn.
+        # Leave the old object nodes intact so user edits are not destroyed.
+        for socket in node.inputs:
+            for link in list(socket.links):
+                tree.links.remove(link)
         # Resize the frame sockets to exactly match the baked frame count.
         while len(node.inputs) < len(baked_objects):
             node.inputs.new('MIMISocketObject', "Frame {count}".format(count=len(node.inputs)))

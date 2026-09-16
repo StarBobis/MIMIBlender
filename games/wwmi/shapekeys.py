@@ -224,11 +224,9 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     for shapekey_name, _safe_name, m_key in shapekey_entries:
         constants_section.append("; ShapeKey: " + shapekey_name)
         if getattr(m_key, 'key_type', 'key') == "time_shapekey":
-            # Time-driven weights change every frame, so they must stay
-            # plain globals: a "persist" variable is written back to
-            # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
-            # VariableAssignment::run), which would mean a disk write
-            # every frame.
+            # Animation weights are transient runtime state. Persist only
+            # marks settings dirty here, but would restore stale weights on
+            # reload and unnecessarily include the clock in saved settings.
             constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
         else:
             constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
@@ -237,7 +235,7 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
 
     # Time Shape Key timelines: the WWMI shape key compute reads the weight
     # variables at draw time (x88 = $shapekeyN), so updating them in
-    # [Present] (once per frame, before any draw) is all that is needed.
+    # [Present] prepares their state for subsequent draws.
     present_section = M_IniSection(M_SectionType.Present)
     present_section.SectionName = "Present"
     present_has_lines = False
@@ -271,6 +269,10 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
 
     commandlist_section = M_IniSection(M_SectionType.CommandList)
     commandlist_section.append("[CommandListApplyShapeKeysPosition]")
+    # CustomShader restores shader objects, not the CS slots borrowed by this
+    # command list. Preserve the game's bindings instead of leaving them null.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append("ResourceShapeBackup_" + slot + " = ref " + slot)
     commandlist_section.append("ResourcePositionBufferRW = copy ResourcePositionBufferFloat")
     commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 3))
     commandlist_section.append("cs-t50 = ResourcePositionBufferFloat")
@@ -280,9 +282,8 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
         commandlist_section.append("x88 = " + m_key.key_name)
         commandlist_section.append("cs-t51 = ResourceShapeKeyPosition_" + safe_name)
         commandlist_section.append("run = CustomShaderComputeWWMIShapeKeyPosition")
-    commandlist_section.append("cs-t50 = null")
-    commandlist_section.append("cs-t51 = null")
-    commandlist_section.append("cs-u5 = null")
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(slot + " = ref ResourceShapeBackup_" + slot)
     commandlist_section.append("ResourcePositionBufferShapeKeyVB = copy ResourcePositionBufferRW")
     commandlist_section.new_line()
 
@@ -297,6 +298,10 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     commandlist_section.new_line()
 
     commandlist_section.append("[CommandListApplyShapeKeysVector]")
+    # Position and Vector lists run sequentially, so they may reuse backups.
+    # Restore after each list so unrelated game dispatches keep their state.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append("ResourceShapeBackup_" + slot + " = ref " + slot)
     commandlist_section.append("ResourceVectorBufferRW = copy ResourceVectorBufferInt")
     commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 2))
     commandlist_section.append("cs-t50 = ResourceVectorBufferInt")
@@ -306,9 +311,8 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
         commandlist_section.append("x88 = " + m_key.key_name)
         commandlist_section.append("cs-t51 = ResourceShapeKeyVector_" + safe_name)
         commandlist_section.append("run = CustomShaderComputeWWMIShapeKeyVector")
-    commandlist_section.append("cs-t50 = null")
-    commandlist_section.append("cs-t51 = null")
-    commandlist_section.append("cs-u5 = null")
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(slot + " = ref ResourceShapeBackup_" + slot)
     commandlist_section.append("ResourceVectorBufferShapeKeyVB = copy ResourceVectorBufferRW")
     commandlist_section.new_line()
 
@@ -324,6 +328,10 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     ini_builder.append_section(commandlist_section)
 
     resource_section = M_IniSection(M_SectionType.ResourceBuffer)
+    # Empty resources hold references only; no extra buffer files are needed.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        resource_section.append("[ResourceShapeBackup_" + slot + "]")
+        resource_section.new_line()
     resource_section.append("[ResourcePositionBufferRW]")
     resource_section.append("type = RWBuffer")
     resource_section.append("format = R32_FLOAT")

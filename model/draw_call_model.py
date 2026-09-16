@@ -25,6 +25,10 @@ class DrawCallModel:
     # Effective conditions, resolved when BlueprintModel is parsed
     work_key_list:list[M_Key] = field(init=False,repr=False,default_factory=list)
 
+    # Set by traversal through a Time Position Switch, not by alias matching.
+    # An ordinary DrawIndexed branch may legally share this clock variable.
+    time_position_key_name:str = field(init=False, default="")
+
     # These attributes are computed at the SubMeshModel level and used for ini output
     index_count:int = field(init=False,repr=False,default=0)
     vertex_count:int = field(init=False,repr=False,default=0)

@@ -564,7 +564,7 @@ class M_IniHelper:
         per-frame weight:
 
             local $shapekey1_frame
-            $shapekey1_frame = (time % (step * count)) // step
+            $shapekey1_frame = ((time % (step * count)) // step) % count
             if $shapekey1_frame == 0
                 $shapekey1 = 0.0
             elif $shapekey1_frame == 1
@@ -577,14 +577,11 @@ class M_IniHelper:
         stays inside 3Dmigoto's ^[$][a-z_][a-z0-9_]*$ rule.
         '''
         frame_var_name = m_key.key_name + "_frame"
-        frame_count = len(m_key.value_list)
-        if frame_count < 1:
-            return
-        step_str = repr(1.0 / m_key.fps)
+        # Validate before emitting any lines: malformed weights must not
+        # silently fall back to zero or leave a stale weight active.
+        expression = m_key.timeline_expression()
         section.append(indent + "local " + frame_var_name)
-        section.append(
-            indent + frame_var_name + " = (time % (" + step_str + " * " + str(frame_count) + ")) // " + step_str
-        )
+        section.append(indent + frame_var_name + " = " + expression)
         for index, frame_value in enumerate(m_key.value_list):
             keyword = "if" if index == 0 else "elif"
             weight = m_key.weight_list[index] if index < len(m_key.weight_list) else 0.0
@@ -598,27 +595,41 @@ class M_IniHelper:
         if len(shapekeyname_mkey_dict.keys()) == 0:
             return
 
+        from .m_shape_layout import shape_shader_for_layout
+        # Validate all layouts before writing resources or copying shaders.
+        # A 12-byte Position buffer must never be interpreted as a 40-byte
+        # position/normal/tangent struct merely because both have a stride.
+        shader_by_drawib = {}
+        for drawib, model in drawib_drawibmodel_dict.items():
+            if getattr(model, "shapekey_name_bytelist_dict", None):
+                # The shared result is a raw vertex buffer, not a skinning hook.
+                # Raw GPU skinning needs a game-specific conversion/hook (as
+                # Naraka provides), not a silent reference to this accumulator.
+                if getattr(model.d3d11_game_type, "GPU_PreSkinning", False):
+                    raise ValueError("Shared shape keys do not support this GPU pre-skinning path; use DrawIndexed animation")
+                shader_by_drawib[drawib] = shape_shader_for_layout(model.d3d11_game_type)
+                count = getattr(model, "draw_number", getattr(model, "vertex_count", 0))
+                if count < 1 or count > 65535 * 64:
+                    raise ValueError("Shape key vertex count exceeds the supported Dispatch range")
         import shutil
         addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        src = os.path.join(addon_root, "resources", "Shapes.hlsl")
-        # Flat layout: shaders are copied next to the generated INI, no res subfolder
         dst_dir = GlobalConfig.path_generate_mod_folder()
         os.makedirs(dst_dir, exist_ok=True)
-        shutil.copy2(src, os.path.join(dst_dir, "Shapes.hlsl"))
+        for shader in set(shader_by_drawib.values()):
+            shutil.copy2(os.path.join(addon_root, "resources", shader), os.path.join(dst_dir, shader))
 
         # [Constants]
         constants_section = M_IniSection(M_SectionType.Constants)
         constants_section.append("[Constants]")
-        constants_section.append("global persist $shapekey_first_run = 1")
+        # No persistent first-run flag: the accumulator is initialized from
+        # the seed on every compute run, including immediately after reload.
 
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
             constants_section.append("; ShapeKey: " + shapekey_name)
             if getattr(m_key, 'key_type', 'key') == "time_shapekey":
-                # Time-driven weights change every frame, so they must stay
-                # plain globals: a "persist" variable is written back to
-                # d3dx_user.ini on every change (3Dmigoto CommandList.cpp,
-                # VariableAssignment::run), which would mean a disk write
-                # every frame.
+                # Runtime animation state must not be restored on reload.
+                # Persist assignments mark user_config_dirty; they do not
+                # themselves write d3dx_user.ini on every rendered frame.
                 constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
             else:
                 constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
@@ -629,30 +640,13 @@ class M_IniHelper:
         # [Present]
         present_section = M_IniSection(M_SectionType.Present)
         present_section.append("[Present]")
-        present_section.append("if $shapekey_first_run")
-
-        ib_number = 1
-        for drawib, drawib_model in drawib_drawibmodel_dict.items():
-            shapekey_buffer_dict = getattr(drawib_model, "shapekey_name_bytelist_dict", {})
-
-            # If the current DrawIB has no shape key data, skip it
-            if not shapekey_buffer_dict:
-                continue
-
-            original_position_buffer_resource_name ="Resource" + drawib + "Position"     
-            duplicated_position_buffer_resource_name = "Resource" + drawib + "Position.1"
-
-            present_section.append("  " + original_position_buffer_resource_name + " = copy " + duplicated_position_buffer_resource_name)
-            present_section.append("  run = CustomShaderComputeShapes" + str(ib_number))
-
-            ib_number += 1
-        
-        present_section.append("  $shapekey_first_run = 0")
-        present_section.append("endif")
+        # The shader copies its seed once per run. A second first-run dispatch
+        # only duplicated work and a persisted initialization flag was unsafe
+        # after reload; neither is needed for a freshly allocated accumulator.
 
         # Time Shape Key timelines: update the weight variables from
         # wall-clock time BEFORE the compute dispatches below read them, so
-        # the same frame already renders with the new weights.
+        # subsequent draws use these weights and the matching position seed.
         for shapekey_name, m_key in shapekeyname_mkey_dict.items():
             if getattr(m_key, 'key_type', 'key') == "time_shapekey":
                 present_section.append("; ShapeKey time timeline: " + shapekey_name)
@@ -666,7 +660,9 @@ class M_IniHelper:
             if not shapekey_buffer_dict:
                 continue
 
-            present_section.append("  run = CustomShaderComputeShapes" + str(ib_number))
+            # Run after input events and the position-frame post hook. This
+            # keeps hotkey gates, animated seeds and shape weights coherent.
+            present_section.append("post run = CustomShaderComputeShapes" + str(ib_number))
             ib_number += 1
 
         ini_builder.append_section(present_section)
@@ -685,8 +681,15 @@ class M_IniHelper:
                 continue
 
             customshader_section.append("[CustomShaderComputeShapes" + str(ib_number) + "]")
-            customshader_section.append("cs = Shapes.hlsl")
-            customshader_section.append("cs-u5 = copy " + "Resource" + drawib + "Position.1")
+            customshader_section.append("cs = " + shader_by_drawib[drawib])
+            # CustomShader does not automatically restore borrowed CS slots.
+            # Save references before binding our resources, then restore below.
+            for slot in ("cs-u5", "cs-t50", "cs-t51"):
+                customshader_section.append("Resource" + drawib + "ShapeBackup_" + slot + " = ref " + slot)
+            seed = "Resource" + drawib + "Position.1"
+            if getattr(drawib_model, "time_pos_frame_groups", None):
+                seed = "Resource" + drawib + "PositionTimeBase"
+            customshader_section.append("cs-u5 = copy " + seed)
             customshader_section.new_line()
 
             # Compute for each shape key buffer
@@ -698,17 +701,23 @@ class M_IniHelper:
                     continue
 
                 customshader_section.append("x88 = " + m_key.key_name)
-                customshader_section.append("cs-t50 = copy " + "Resource" + drawib + "Position.1")
-                customshader_section.append("cs-t51 = copy " + "Resource" + drawib + "Position." + shapekey_name)
-                customshader_section.append("Resource" + drawib + "Position = ref cs-u5")
-                customshader_section.append("Dispatch = " + str(draw_number) + " ,1 ,1")
+                # Immutable structured SRVs can be referenced without a GPU copy.
+                # Keep the original reference even when the accumulation seed
+                # came from PositionTimeBase, so shape deltas remain invariant.
+                customshader_section.append("cs-t50 = ref Resource" + drawib + "Position.1")
+                customshader_section.append("cs-t51 = ref Resource" + drawib + "Position." + shapekey_name)
+                customshader_section.append("Dispatch = " + str((draw_number + 63) // 64) + ",1,1")
                 customshader_section.new_line()
 
             ib_number += 1
 
-            customshader_section.append("cs-u5 = null")
-            customshader_section.append("cs-t50 = null")
-            customshader_section.append("cs-t51 = null")
+            # D3D11 rejects STRUCTURED combined with VERTEX_BUFFER bindings.
+            # Copy bytes into an explicitly raw vertex buffer before exposing
+            # the result to normal draws; type alone does not clear old flags.
+            customshader_section.append("Resource" + drawib + "PositionComputed = copy cs-u5")
+            customshader_section.append("Resource" + drawib + "Position = ref Resource" + drawib + "PositionComputed")
+            for slot in ("cs-u5", "cs-t50", "cs-t51"):
+                customshader_section.append(slot + " = ref Resource" + drawib + "ShapeBackup_" + slot)
 
         ini_builder.append_section(customshader_section)
 
@@ -725,9 +734,20 @@ class M_IniHelper:
             if not shapekey_buffer_dict or d3d11_game_type is None:
                 continue
 
-            # The original buffer
+            # Explicit flags replace the structured descriptor inherited by
+            # CopyResource. RAW permits vertex binding; STRUCTURED does not.
+            resource_section.append("[Resource" + drawib + "PositionComputed]")
+            resource_section.append("type = ByteAddressBuffer")
+            resource_section.append("misc_flags = buffer_allow_raw_views")
+            resource_section.append("bind_flags = vertex_buffer")
+            resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
+            resource_section.new_line()
+            # Scratch resources hold the game's borrowed CS bindings.
+            for slot in ("cs-u5", "cs-t50", "cs-t51"):
+                resource_section.append("[Resource" + drawib + "ShapeBackup_" + slot + "]")
+                resource_section.new_line()
             resource_section.append("[Resource" + drawib + "Position.1]")
-            resource_section.append("type = buffer")
+            resource_section.append("type = StructuredBuffer")
             resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
             resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib_model.get_category_buffer_filename("Position")))
             resource_section.new_line()
@@ -741,7 +761,7 @@ class M_IniHelper:
                     continue
                 
                 resource_section.append("[Resource" + drawib + "Position." + shapekey_name + "]")
-                resource_section.append("type = buffer")
+                resource_section.append("type = StructuredBuffer")
                 resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
                 resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(drawib + "-" + "Position." + shapekey_name + ".buf"))
                 resource_section.new_line()
@@ -792,11 +812,9 @@ class M_IniHelper:
 
             for mkey in key_name_mkey_dict.values():
                 if getattr(mkey, 'key_type', 'key') == "time":
-                    # Time variables change every frame, so they must stay plain
-                    # globals: a "persist" variable is written back to
-                    # d3dx_user.ini whenever a command list alters it
-                    # (3Dmigoto CommandList.cpp, VariableAssignment::run), which
-                    # would mean a disk write every frame.
+                    # Timeline indices are runtime-only, not user settings.
+                    # Persist would mark settings dirty and restore an obsolete
+                    # phase on reload, even though assignments do not write disk.
                     constants_section.append("global " + mkey.key_name + " = " + str(mkey.initialize_value))
                 else:
                     key_str = "global persist " + mkey.key_name + " = " + str(mkey.initialize_value)
@@ -819,23 +837,17 @@ class M_IniHelper:
             # ParamOverrideType::TIME), so the animation speed never depends
             # on the game's frame rate.
             #
-            # Formula: (time % (step * count)) // step
-            # - "%" is fmod and "//" is floor division floor(lhs / rhs)
-            #   (CommandList.cpp operator definitions), so the result is an
-            #   exact integer-valued float in [0, count); doing fmod first
-            #   keeps the value bounded no matter how long the session runs.
-            # - The integer-valued result makes "== N" frame conditions exact,
-            #   so the regular condition writer can be reused unchanged.
+            # Float32 rounding near the period boundary can yield count.
+            # M_Key adds a final modulo after floor division to keep the
+            # selected index in range. Modulo cannot restore uptime precision
+            # already lost by the engine's float32 wall-clock operand.
             for mkey in time_mkey_list:
-                frame_count = len(mkey.value_list)
-                if frame_count < 1:
-                    continue
-                step_str = repr(1.0 / mkey.fps)
+                # Both mesh and weight timelines use the same float32-safe
+                # expression and reject malformed frame data consistently.
+                expression = mkey.timeline_expression()
                 if mkey.comment:
                     present_section.append("; " + mkey.comment)
-                present_section.append(
-                    mkey.key_name + " = (time % (" + step_str + " * " + str(frame_count) + ")) // " + step_str
-                )
+                present_section.append(mkey.key_name + " = " + expression)
             ini_builder.append_section(present_section)
         
         key_number = 0

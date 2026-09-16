@@ -4,21 +4,21 @@ Runs outside Blender: the bpy-dependent imports of common/m_ini_helper.py are
 replaced with light stubs, so the pure INI generation logic can be verified
 directly.  The test checks that:
 
-1. time-driven variables are declared as plain "global" (never "persist",
-   because persist variables are written back to d3dx_user.ini on every change
-   in 3Dmigoto, which would mean a disk write every frame),
+1. time-driven variables are plain globals, not persisted user settings,
+   avoiding dirty settings and stale clock values restored on reload,
 2. the [Present] section recomputes them with
-   "$name = (time % (step * count)) // step",
+   "$name = ((time % (step * count)) // step) % count",
 3. no [KeySwap] section is emitted for time-driven variables while regular
    hotkey variables still get theirs,
 4. DrawCallModel conditions for a time variable come out as "$name == N"
    (safe because "//" floor division yields exact integer-valued floats),
 5. the frame formula itself yields exact integers in [0, count) over a sweep
-   of wall-clock times (IEEE double simulation of the INI expression).
+   of wall-clock times (float32 rounding after every INI operator).
 """
 
 import importlib.util
 import math
+import struct
 import os
 import sys
 import tempfile
@@ -184,7 +184,7 @@ def test_time_key_sections(modules):
 
     # 2. [Present] recomputes the time variable from wall-clock time.
     expected_step = repr(1.0 / 12.0)
-    expected_line = "$dyntime0 = (time % (" + expected_step + " * 3)) // " + expected_step
+    expected_line = "$dyntime0 = ((time % (" + expected_step + " * 3)) // " + expected_step + ") % 3"
     assert expected_line in ini_text, "missing Present update line:\n" + ini_text
 
     # 3. No [KeySwap] section for the time variable, one for the hotkey one.
@@ -212,24 +212,28 @@ def test_time_condition_str(modules):
 
 
 def test_frame_formula_exactness():
-    """Simulate the INI expression with IEEE doubles and check exact integers."""
-    fps = 12.0
-    count = 24
-    step = 1.0 / fps
-    cycle = step * count
+    """Round after each operator, just like CommandList float evaluation.
 
-    # Sweep a 10 minute session in 1ms increments plus some nasty fractions.
-    sampled_times = [t * 0.001 for t in range(0, 600000)]
-    sampled_times += [cycle - 1e-12, cycle + 1e-12, 12345.6789]
+    Double-only sweeps missed out-of-range indices near a cycle boundary.
+    Probe adjacent representable float32 times as well as long-running clocks;
+    the final modulo must always leave a valid, exactly comparable frame.
+    """
+    def f32(value):
+        return struct.unpack("<f", struct.pack("<f", value))[0]
 
-    for time_value in sampled_times:
-        frame = math.floor((time_value % cycle) / step)
-        # The result must be an exact integer-valued float in [0, count).
-        assert frame == int(frame), (time_value, frame)
-        assert 0 <= frame < count, (time_value, frame)
-        # The INI condition compares against the integer literal directly.
-        assert (frame == 3) == (int(frame) == 3), (time_value, frame)
-
+    for fps in (0.01, 12.0, 23.976, 29.97, 60.0, 120.0):
+        for count in (1, 3, 24, 997):
+            step = f32(1.0 / fps)
+            cycle = f32(step * count)
+            times = [i * 0.031 for i in range(2000)] + [86400.0, 1234567.0]
+            # Enumerate float32 neighbours, not tiny double-only epsilons.
+            for boundary in (step, cycle, cycle * 10):
+                bits = struct.unpack("<I", struct.pack("<f", boundary))[0]
+                times += [struct.unpack("<f", struct.pack("<I", bits + delta))[0] for delta in (-1, 0, 1)]
+            for time_value in times:
+                remainder = f32(math.fmod(f32(time_value), cycle))
+                frame = f32(math.fmod(f32(math.floor(f32(remainder / step))), count))
+                assert frame == int(frame) and 0 <= frame < count, (fps, count, time_value, frame)
     print("test_frame_formula_exactness OK")
 
 

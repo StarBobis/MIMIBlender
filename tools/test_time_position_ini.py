@@ -6,8 +6,8 @@ generation logic can be verified directly.  The test checks that:
 
 1. append_time_position_sections() declares one buffer resource per frame and
    emits the conditional "dst = copy src" lines into [Present];
-2. the copy target becomes the pristine "Position.1" backup when the DrawIB
-   also carries shape key buffers (so the shape key compute layers on top);
+2. shape composition changes the accumulation seed (PositionTimeBase),
+   never the immutable delta reference (Position.1);
 3. get_time_position_support_error() blocks the WWMI/NTEMI presets;
 4. M_IniHelper.append_time_shapekey_weight_lines() emits the local frame
    counter plus the if/elif weight mapping, and add_shapekey_ini_sections()
@@ -146,6 +146,7 @@ def load_real_modules():
     modules = {}
     for dotted, relative in (
         (TEST_PKG + ".common.m_key", "common/m_key.py"),
+        (TEST_PKG + ".common.m_shape_layout", "common/m_shape_layout.py"),
         (TEST_PKG + ".common.m_ini_builder", "common/m_ini_builder.py"),
         (TEST_PKG + ".common.m_control_flow", "common/m_control_flow.py"),
         (TEST_PKG + ".common.texture_naming", "common/texture_naming.py"),
@@ -169,20 +170,26 @@ def build_ini_text(ini_builder, ini_path):
 def make_fake_drawib_model(shapekey_buffers=None):
     """A minimal stand-in exposing exactly what the INI emission reads."""
     draw_ib = "65b9cf5a"
-    game_type = types.SimpleNamespace(CategoryStrideDict={"Position": 12})
+    # Describe the actual layout, not just its stride, as the writer validates
+    # semantics and packed formats before selecting the matching shader.
+    game_type = types.SimpleNamespace(CategoryStrideDict={"Position": 12}, D3D11ElementList=[
+        types.SimpleNamespace(Category="Position", SemanticName="POSITION", Format="R32G32B32_FLOAT", ByteWidth=12)
+    ])
     fake = types.SimpleNamespace(
         draw_ib=draw_ib,
         d3d11_game_type=game_type,
         shapekey_name_bytelist_dict=shapekey_buffers or {},
         time_pos_frame_groups={"$dyntime0": {0: [object()], 1: [object()], 2: [object()]}},
     )
+    # Fallback resources use the original file, never a mutated target.
+    fake.get_category_buffer_filename = lambda category: draw_ib + "-" + category + ".buf"
     # Mirror DrawIBModel.get_time_position_buffer_filename (no LOD here).
     fake.get_time_position_buffer_filename = (
-        lambda var_name, frame_value: draw_ib + "-Position." + var_name + "_" + str(frame_value) + ".buf"
+        lambda var_name, frame_value: draw_ib + "-position_timeframe." + var_name + "_" + str(frame_value) + ".buf"
     )
     # Mirror DrawIBModel.get_time_position_resource_name.
     fake.get_time_position_resource_name = (
-        lambda ib, var_name, frame_value: "Resource" + ib + "Position." + var_name + "_" + str(frame_value)
+        lambda ib, var_name, frame_value: "Resource" + ib + "PositionTimeFrame." + var_name + "_" + str(frame_value)
     )
     return fake
 
@@ -219,13 +226,13 @@ def test_time_position_sections(modules):
         ini_text = build_ini_text(ini_builder, os.path.join(temp_dir, "pos.ini"))
 
     # 1. One resource per frame with the buffer file name.
-    assert "[Resource65b9cf5aPosition.dyntime0_0]" in ini_text, ini_text
-    assert "filename = Buffers\\65b9cf5a-Position.dyntime0_2.buf" in ini_text, ini_text
+    assert "[Resource65b9cf5aPositionTimeFrame.dyntime0_0]" in ini_text, ini_text
+    assert "filename = Buffers\\65b9cf5a-position_timeframe.dyntime0_2.buf" in ini_text, ini_text
     assert "stride = 12" in ini_text, ini_text
 
     # 2. The Present block copies the active frame into the bound resource.
     assert "if $dyntime0 == 0" in ini_text, ini_text
-    assert "  Resource65b9cf5aPosition = copy Resource65b9cf5aPosition.dyntime0_0" in ini_text, ini_text
+    assert "  Resource65b9cf5aPosition = copy Resource65b9cf5aPositionTimeFrame.dyntime0_0" in ini_text, ini_text
     assert "elif $dyntime0 == 1" in ini_text, ini_text
     assert "elif $dyntime0 == 2" in ini_text, ini_text
     assert "endif" in ini_text, ini_text
@@ -246,7 +253,7 @@ def test_time_position_shapekey_composition(modules):
     # weights on top of the frame positions.
     shapekey_model = make_fake_drawib_model(shapekey_buffers={"Smile": b"x"})
     shapekey_target = m_time_position.get_time_position_copy_target("65b9cf5a", shapekey_model)
-    assert shapekey_target == "Resource65b9cf5aPosition.1", shapekey_target
+    assert shapekey_target == "Resource65b9cf5aPositionTimeBase", shapekey_target
 
     print("test_time_position_shapekey_composition OK")
 
@@ -292,7 +299,7 @@ def test_time_shapekey_weight_lines(modules):
     # The local frame counter drives the weight through an if/elif chain.
     assert "local $shapekey1_frame" in text, text
     expected_step = repr(1.0 / 12.0)
-    assert "$shapekey1_frame = (time % (" + expected_step + " * 3)) // " + expected_step in text, text
+    assert "$shapekey1_frame = ((time % (" + expected_step + " * 3)) // " + expected_step + ") % 3" in text, text
     assert "if $shapekey1_frame == 0" in text, text
     assert "$shapekey1 = 0.0" in text, text
     assert "elif $shapekey1_frame == 1" in text, text
@@ -327,7 +334,11 @@ def test_time_shapekey_full_sections(modules):
     TEST_SHAPEKEY_DICT["Smile"] = hotkey_shapekey
 
     draw_ib = "65b9cf5a"
-    game_type = types.SimpleNamespace(CategoryStrideDict={"Position": 12})
+    # Describe the actual layout, not just its stride, as the writer validates
+    # semantics and packed formats before selecting the matching shader.
+    game_type = types.SimpleNamespace(CategoryStrideDict={"Position": 12}, D3D11ElementList=[
+        types.SimpleNamespace(Category="Position", SemanticName="POSITION", Format="R32G32B32_FLOAT", ByteWidth=12)
+    ])
     fake_drawib = types.SimpleNamespace(
         shapekey_name_bytelist_dict={"Blink": b"x", "Smile": b"y"},
         d3d11_game_type=game_type,
@@ -363,7 +374,61 @@ def test_time_shapekey_full_sections(modules):
     dispatch_index = ini_text.rindex("run = CustomShaderComputeShapes1")
     assert timeline_index < dispatch_index, "weight timeline must precede the per-frame compute dispatch:\n" + ini_text
 
+    # Multiple contributors must serialize one singleton section, and the
+    # old initialization pass must not dispatch a second time after reload.
+    assert ini_text.count("[Present]") == 1 and ini_text.count("[Constants]") == 1
+    assert "shapekey_first_run" not in ini_text
+    assert ini_text.count("run = CustomShaderComputeShapes1") == 1
+    assert "cs = shapes_position.hlsl" in ini_text
+    assert "Dispatch = 2,1,1" in ini_text
+    assert "type = StructuredBuffer" in ini_text
+    assert "cs-t50 = ref Resource65b9cf5aPosition.1" in ini_text
+    assert "cs-u5 = ref Resource65b9cf5aShapeBackup_cs-u5" in ini_text
+    # A structured accumulator is compute-only: copy into a raw VB before
+    # referencing it from the game's vertex slot (verified with D3D11 WARP).
+    assert "Resource65b9cf5aPosition = ref cs-u5" not in ini_text
+    assert "PositionComputed = copy cs-u5" in ini_text
+    assert "bind_flags = vertex_buffer" in ini_text
     print("test_time_shapekey_full_sections OK")
+
+
+def test_combined_animation_sections(modules):
+    """Combine all contributors, the path that formerly duplicated headers.
+
+    Shape deltas must use the immutable reference, while only the accumulator
+    reads the frame seed. Gated/off and empty-frame states restore the base.
+    """
+    builder = modules[TEST_PKG + ".common.m_ini_builder"].M_IniBuilder()
+    helper = modules[TEST_PKG + ".common.m_ini_helper"].M_IniHelper
+    blueprint = make_fake_blueprint_model(modules)
+    model = make_fake_drawib_model({"Blink": b"x", "Smile": b"y"})
+    model.vertex_count = 65
+    helper.add_branch_key_sections(builder, blueprint.keyname_mkey_dict, blueprint, [model])
+    helper.add_shapekey_ini_sections(builder, {model.draw_ib: model})
+    with tempfile.TemporaryDirectory() as folder:
+        text = build_ini_text(builder, os.path.join(folder, "combined.ini"))
+        # WWMI uses the append-order serializer; separated contributions must
+        # remain singleton sections there too, including repeated serialization.
+        unordered_path = os.path.join(folder, "append_order.ini")
+        builder.save_to_file_not_reorder(unordered_path)
+        with open(unordered_path, encoding="utf-8") as file:
+            unordered_text = file.read()
+        assert unordered_text.count("[Present]") == unordered_text.count("[Constants]") == 1
+        assert build_ini_text(builder, os.path.join(folder, "repeat.ini")) == text
+    assert text.count("[Present]") == text.count("[Constants]") == 1
+    assert "Resource65b9cf5aPosition.1 = copy" not in text
+    assert "cs-u5 = copy Resource65b9cf5aPositionTimeBase" in text
+    assert "cs-t50 = ref Resource65b9cf5aPosition.1" in text
+    assert "Resource65b9cf5aPositionTimeBase = copy Resource65b9cf5aPositionTimeOriginal" in text
+    # The cache compares the selected frame, including -1 for inactive gates,
+    # so identical rendered frames do not cause redundant full-buffer copies.
+    assert "if $mimi_pos_65b9cf5a_dyntime0_selected != $mimi_pos_65b9cf5a_dyntime0" in text
+    assert text.index("$dyntime0 = ((time") < text.index("local $mimi_pos_")
+    # Gate-sensitive copies and shape compute run after input handling, in
+    # this order, so a hotkey change cannot leave the next draw on an old seed.
+    assert text.index("post run = CommandListMimiTimePosition") < text.index("post run = CustomShaderComputeShapes1")
+    assert "[CommandListMimiTimePosition]" in text
+    print("test_combined_animation_sections OK")
 
 
 def main():
@@ -375,6 +440,7 @@ def main():
     test_time_position_support_error(modules)
     test_time_shapekey_weight_lines(modules)
     test_time_shapekey_full_sections(modules)
+    test_combined_animation_sections(modules)
     print("ALL TIME POSITION/SHAPEKEY TESTS PASSED")
 
 

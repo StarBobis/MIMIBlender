@@ -11,14 +11,14 @@ real time and never on the game's frame rate.
 - "time" keyword -> ParamOverrideType::TIME (CommandList.h), evaluated as
   (GetTickCount() - ticks_at_launch) / 1000.0f seconds (CommandList.cpp,
   CommandListOperand::evaluate).
-- "//" is floor division floor(lhs / rhs) and "%" is fmod; both return exact
-  integer-valued floats here, so "== N" frame conditions are safe
-  (CommandList.cpp operator definitions).
+- "//" is floor division and "%" is fmod. Operators evaluate float32;
+  M_Key.timeline_expression bounds the final floored result with modulo
+  so rounding at the cycle boundary never produces an unhandled frame.
 - [Present] is a command list run once per frame at DXGI::Present
   (HackerDXGI.cpp, RunFrameActions).
-- Variables tagged "persist" are written back to d3dx_user.ini whenever a
-  command list changes them (CommandList.cpp VariableAssignment::run), so
-  per-frame time variables must be plain "global", never "persist".
+- VariableAssignment::run marks persisted variables dirty on changes;
+  SavePersistentSettings writes them later, not on every assignment.
+  Animation clocks are transient state and should remain plain globals.
 '''
 import bpy
 
@@ -81,10 +81,11 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         self.update_node_width([self.time_alias, self.comment])
 
     def update_time_alias(self, context):
-        # Same rule as the Switch Key alias: ASCII letters and digits only.
+        # Match the 3Dmigoto identifier alphabet; export separately checks
+        # the leading character and reserved internal variable names.
         sanitized_alias = "".join(
             char for char in str(self.time_alias or "")
-            if char.isascii() and char.isalnum()
+            if char.isascii() and (char.isalnum() or char == "_")
         )
         if self.time_alias != sanitized_alias:
             self.time_alias = sanitized_alias
@@ -104,7 +105,7 @@ class MIMINode_TimeSwitch(MIMINodeBase):
     ) # type: ignore
     time_alias: bpy.props.StringProperty(
         name=tr("Time Variable Alias"),
-        description=tr("Only ASCII letters and digits are allowed; the same alias shares one timeline variable across multiple Time Switch nodes"),
+        description=tr("Start with an ASCII letter or underscore; use letters, digits or underscores. Aliases are case-insensitive and share one timeline."),
         default="",
         update=update_time_alias,
     ) # type: ignore

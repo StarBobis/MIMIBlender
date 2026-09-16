@@ -1,5 +1,7 @@
 
 from dataclasses import dataclass, field
+import math
+import re
 
 
 @dataclass
@@ -43,6 +45,31 @@ class M_Key:
 
     # Remarks
     comment: str = ""
+
+    def timeline_expression(self):
+        """Validate a timeline and return a bounded 3Dmigoto expression.
+
+        CommandList operators evaluate float32, not Python doubles. Rounding
+        immediately below a cycle boundary can produce count after division;
+        the final modulo prevents an unhandled frame and disappearing draws.
+        The source clock still has float32 uptime precision, which no modulo
+        can recover. This keeps the existing injection-relative phase.
+        """
+        count = len(self.value_list)
+        if count < 1 or count > 10000 or self.value_list != list(range(count)):
+            raise ValueError("Animation frames must be contiguous indices with a count from 1 to 10000")
+        if not math.isfinite(self.fps) or not 1e-6 <= self.fps <= 1e6:
+            raise ValueError("Animation FPS must be finite and between 0.000001 and 1000000")
+        # Match the engine's identifier grammar, including case normalization.
+        # Reject aliases of generated shape weights and internal state earlier
+        # in graph parsing; this check also protects standalone writer callers.
+        if re.fullmatch(r"\$[a-z_][a-z0-9_]*", self.key_name) is None:
+            raise ValueError("Invalid 3Dmigoto animation variable: " + self.key_name)
+        if self.key_type == "time_shapekey":
+            if len(self.weight_list) != count or not all(math.isfinite(w) and abs(w) <= 3.4e38 for w in self.weight_list):
+                raise ValueError("Time Shape Key needs one finite float32 weight per frame")
+        step = repr(1.0 / self.fps)
+        return "((time % (" + step + " * " + str(count) + ")) // " + step + ") % " + str(count)
 
     def __str__(self):
         return (f"M_Key(key_name='{self.key_name}', key_value='{self.key_value}', "
