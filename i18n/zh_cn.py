@@ -843,7 +843,6 @@ TRANSLATIONS_ZH_CN = {
     "texconv.exe not found; DDS output unavailable": "未找到 texconv.exe；DDS 输出不可用",
     "DDS output requires texconv.exe, but it could not be found. Set the texconv.exe path in the Output Format settings or the TEXCONV_PATH environment variable.": "DDS 输出需要 texconv.exe，但未找到。请在输出格式设置中指定 texconv.exe 路径，或设置 TEXCONV_PATH 环境变量。",
     "Naraka Cross-IB Render": "Naraka 跨IB渲染",
-    "Source Object": "源头物体",
     "Target Object": "目标物体",
     "Add Pair": "添加一对",
     "Remove Pair": "移除一对",

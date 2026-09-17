@@ -7,7 +7,6 @@ from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
 
 from ..common.buffer_export_helper import BufferExportHelper
-from ..common.global_config import GlobalConfig
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper

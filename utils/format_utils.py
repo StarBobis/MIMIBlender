@@ -2,7 +2,6 @@ import re
 import numpy
 import struct
 import math
-import numpy
 
 from .tbn_codec import TBNCodec
 
@@ -221,10 +220,6 @@ class FormatUtils:
     def convert_4x_float32_to_r16g16b16a16_unorm(input_array):
         return numpy.round(input_array * 65535).astype(numpy.uint16)
     
-    @staticmethod
-    def convert_4x_float32_to_r16g16b16a16_snorm(input_array):
-        return numpy.round(input_array * 32767).astype(numpy.int16)
-   
 
     @staticmethod    
     def convert_4x_float32_to_r8g8b8a8_unorm_blendweights(input_array):
