@@ -68,22 +68,19 @@ class MMT_OT_CreateGroupFromSelection(I18nOperator):
         group_node = node_tree.nodes.new(type='MIMINode_Object_Group')
         group_node.location = (base_x + 400, base_y)
         group_node.select = True
-        
-        # Create Object Info nodes and connect them
-        for i, obj in enumerate(selected_objects):
-            obj_node = node_tree.nodes.new(type='MIMINode_Object_Info')
-            obj_node.location = (base_x, base_y - i * 150)
-            obj_node.select = True
-            
-            obj_node.object_name = obj.name
-            
-            target_socket = None
-            if len(group_node.inputs) > 0:
-                 target_socket = group_node.inputs[-1]
-            
-            if target_socket:
-                node_tree.links.new(obj_node.outputs[0], target_socket)
-                group_node.update()
+
+        # Collect every selected object into one collapsible Object List node
+        # instead of a column of Object Info nodes, then feed the whole set
+        # into the Group through the aggregate All socket.
+        from .blueprint_node_object_list import _append_object_list_item
+        list_node = node_tree.nodes.new(type='MIMINode_Object_List')
+        list_node.location = (base_x, base_y)
+        list_node.select = True
+        for obj in selected_objects:
+            _append_object_list_item(list_node, obj.name)
+        if len(group_node.inputs) > 0:
+            node_tree.links.new(list_node.outputs[0], group_node.inputs[-1])
+            group_node.update()
 
         return {'FINISHED'}
 
@@ -173,27 +170,28 @@ class MMT_OT_CreateInternalSwitch(I18nOperator):
         
         switch_node = nodes.new(type='MIMINode_SwitchKey')
         switch_node.location = (base_x + 600, base_y)
-        
+
         while len(switch_node.inputs) > 1:
             switch_node.inputs.remove(switch_node.inputs[-1])
-        
+
         while len(switch_node.inputs) < len(objects_with_sequence):
             switch_node.inputs.new('MIMISocketObject', f"Status {len(switch_node.inputs)}")
-        
-        obj_nodes = []
+
+        # One collapsible Object List holds every sequenced object in order;
+        # each item socket feeds exactly one switch branch.
+        from .blueprint_node_object_list import _append_object_list_item
+        list_node = nodes.new(type='MIMINode_Object_List')
+        list_node.location = (base_x, base_y)
+        list_node.select = True
         for i, (seq_num, obj) in enumerate(objects_with_sequence):
-            obj_node = nodes.new(type='MIMINode_Object_Info')
-            obj_node.location = (base_x, base_y - i * 15)
-            obj_node.object_name = obj.name
-            obj_node.select = True
-            obj_nodes.append(obj_node)
-            
+            _append_object_list_item(list_node, obj.name)
             if i < len(switch_node.inputs):
-                links.new(obj_node.outputs[0], switch_node.inputs[i])
-        
+                # outputs[0] is the aggregate All socket, outputs[i + 1] item i.
+                links.new(list_node.outputs[i + 1], switch_node.inputs[i])
+
         switch_node.select = True
-        
-        self.report({'INFO'}, tr("Created {count} object nodes and connected them to the switch node").format(count=len(obj_nodes)))
+
+        self.report({'INFO'}, tr("Created one Object List with {count} objects and connected it to the switch node").format(count=len(objects_with_sequence)))
         return {'FINISHED'}
 
 

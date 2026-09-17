@@ -221,17 +221,17 @@ def _get_marked_diffuse_hash(json_path: str) -> str:
     return ""
 
 
-def _create_face_mod_export_node(tree, oldfoldername_node_dict, oldfoldername_jsonpath_dict, location):
+def _create_face_mod_export_node(tree, oldfoldername_item_dict, oldfoldername_jsonpath_dict, location):
     """Create and wire the face exporter when at least one imported SubMesh is marked Face."""
-    face_nodes = []
+    face_items = []
     diffuse_hash = ""
-    for old_folder_name, object_node in oldfoldername_node_dict.items():
+    for old_folder_name, (list_node_name, object_name) in oldfoldername_item_dict.items():
         json_path = oldfoldername_jsonpath_dict.get(old_folder_name, "")
         if json_path and _read_submesh_role(json_path) == "Face":
-            face_nodes.append(object_node)
+            face_items.append((list_node_name, object_name))
             if not diffuse_hash:
                 diffuse_hash = _get_marked_diffuse_hash(json_path)
-    if not face_nodes:
+    if not face_items:
         return None
 
     export_node = tree.nodes.new('MIMINode_Face_Mod_Export')
@@ -239,63 +239,69 @@ def _create_face_mod_export_node(tree, oldfoldername_node_dict, oldfoldername_js
     export_node.label = "Export Face Mod"
     export_node.diffuse_hash = diffuse_hash
     export_node.output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
-    for object_node in face_nodes:
+    for list_node_name, object_name in face_items:
+        list_node = tree.nodes.get(list_node_name)
+        if list_node is None:
+            continue
+        # Each list item mirrors an output socket named after its object.
+        source_socket = list_node.outputs.get(object_name)
+        if source_socket is None:
+            continue
         if export_node.inputs[-1].is_linked:
             export_node.inputs.new('MIMISocketObject', f"Face Group {len(export_node.inputs) + 1}")
-        tree.links.new(object_node.outputs[0], export_node.inputs[-1])
+        tree.links.new(source_socket, export_node.inputs[-1])
     return export_node
 
 
 def _exclude_marked_face_objects_from_regular_group(
-    tree, group_node, oldfoldername_node_dict, oldfoldername_jsonpath_dict,
+    tree, group_node, oldfoldername_item_dict, oldfoldername_jsonpath_dict,
 ):
     """Disconnect only JSON-marked Face objects from the normal mesh group."""
     if group_node is None:
         return
-    face_nodes = {
-        object_node.name
-        for old_folder_name, object_node in oldfoldername_node_dict.items()
+    face_items = {
+        (list_node_name, object_name)
+        for old_folder_name, (list_node_name, object_name) in oldfoldername_item_dict.items()
         if _read_submesh_role(oldfoldername_jsonpath_dict.get(old_folder_name, "")) == "Face"
     }
     for link in list(tree.links):
         # Blender may hand out distinct Python RNA wrappers for the same node;
-        # compare stable node names instead of object identity (``is``).
-        if link.from_node.name in face_nodes and link.to_node.name == group_node.name:
+        # compare stable node/socket names instead of object identity (``is``).
+        if (link.from_node.name, link.from_socket.name) in face_items and link.to_node.name == group_node.name:
             tree.links.remove(link)
 
 def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_dict, ws_model):
-    """Create Object Info nodes, connect them to the Group and lay them out.
+    """Create one Object List node holding every imported object and wire it to the Group.
 
-    All Object Info nodes are stacked in a single vertical column from top to
-    bottom. The column and the Group node are wrapped in one big NodeFrame
-    named after the workspace.
+    All imported objects live in a single collapsible Object List node, so a
+    big import no longer produces a screen-filling column of Object Info
+    nodes. Each item socket is wired to its own Group input, which keeps the
+    per-Submesh link granularity (e.g. disconnecting Face objects) intact.
+    The list and the Group node are wrapped in one big NodeFrame named after
+    the workspace.
 
-    Returns (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right).
+    Returns (oldfoldername_item_dict, oldfoldername_group_dict, max_node_right)
+    where oldfoldername_item_dict maps old folder name -> (list node name, object name).
     """
-    # old_folder_name -> Object Info node
-    oldfoldername_node_dict: dict[str, bpy.types.Node] = {}
+    from ..blueprint.blueprint_node_object_list import _append_object_list_item
+
+    # old_folder_name -> (Object List node name, object name)
+    oldfoldername_item_dict: dict[str, tuple[str, str]] = {}
     # old_folder_name -> group key (new-format submesh name)
     oldfoldername_group_dict: dict[str, str] = {}
-    # Every created Object Info node, in import order
-    object_nodes: list[bpy.types.Node] = []
 
+    list_node = tree.nodes.new('MIMINode_Object_List')
+
+    item_index = 0
     for new_submesh_name, (imported_obj, display_name) in foldername_imported_obj_dict.items():
         if imported_obj.type != 'MESH':
             continue
 
         # Resolve the new-format name via WorkSpaceModel to get the component number
         parsed = ws_model.parse_new_format_name(new_submesh_name)
-        component_str = str(parsed["component"]) if parsed else "0"
 
-        # Create the node
-        node = tree.nodes.new('MIMINode_Object_Info')
-
-        # Fill in the properties
-        node.object_name = imported_obj.name
-        node.original_object_name = imported_obj.name
-        node.component = component_str
-        node.submesh_name = display_name
-        node.label = imported_obj.name
+        _append_object_list_item(list_node, imported_obj.name)
+        list_node.object_items[item_index].submesh_name = display_name
 
         old_folder_name = ""
         if parsed:
@@ -305,51 +311,41 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
                 parsed.get("component", 0),
             )
         if old_folder_name:
-            oldfoldername_node_dict[old_folder_name] = node
+            oldfoldername_item_dict[old_folder_name] = (list_node.name, imported_obj.name)
             oldfoldername_group_dict[old_folder_name] = new_submesh_name
-
-        object_nodes.append(node)
 
         # Add a socket manually when the Group's last socket is already occupied
         if group_node.inputs[-1].is_linked:
             group_node.inputs.new('MIMISocketObject', f"Input {len(group_node.inputs) + 1}")
-        tree.links.new(node.outputs[0], group_node.inputs[-1])
+        # outputs[0] is the aggregate All socket, outputs[i + 1] is item i.
+        tree.links.new(list_node.outputs[item_index + 1], group_node.inputs[-1])
+        item_index += 1
 
-    # Stack all Object Info nodes into one vertical column, top to bottom.
+    # Place the Object List node and the Group node side by side; both are
+    # included in the Frame below, so the Frame wraps the whole import result
+    # and the imported content is easy to tell apart at a glance.
     NODE_X = 40.0
-    # Estimated height of a single Object Info node
-    NODE_Y_GAP = 260.0
-    y = 0.0
-    for node in object_nodes:
-        node.location = (NODE_X, y)
-        y -= NODE_Y_GAP
-
-    # Place the Group node to the right of the column; it is included in the
-    # Frame below, so the Frame wraps the whole import result and the imported
-    # content is easy to tell apart at a glance.
+    list_node.location = (NODE_X, 0.0)
     GROUP_X_GAP = 560.0
     group_node.location = (NODE_X + GROUP_X_GAP, -200.0)
     max_node_right = NODE_X + GROUP_X_GAP
 
-    # Wrap the whole column and the Group node in one big Frame named after
-    # the workspace. Blender fits the Frame size to its children; only a
-    # rough top-left position is given here.
+    # Wrap the whole import result in one big Frame named after the workspace.
+    # Blender fits the Frame size to its children; only a rough top-left
+    # position is given here.
     FRAME_PAD = 40.0
-    if object_nodes:
+    if item_index:
         workspace_name = GlobalConfig.get_workspace_name() or "Workspace"
         frame = tree.nodes.new('NodeFrame')
         frame.label = workspace_name
         frame.name = "Frame_" + workspace_name.replace(" ", "_")
         frame.location = (NODE_X - FRAME_PAD, FRAME_PAD)
-        for node in object_nodes:
+        for node in (list_node, group_node):
             abs_x, abs_y = node.location.x, node.location.y
             node.parent = frame
             node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
-        abs_x, abs_y = group_node.location.x, group_node.location.y
-        group_node.parent = frame
-        group_node.location = (abs_x - frame.location.x, abs_y - frame.location.y)
 
-    return (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right)
+    return (oldfoldername_item_dict, oldfoldername_group_dict, max_node_right)
 
 
 
@@ -524,8 +520,8 @@ def ImprotFromWorkSpaceFull(self, context):
         group_node = tree.nodes.new('MIMINode_Object_Group')
         group_node.label = "Default Group"
         
-        # 3. Create Object Info nodes stacked in one vertical column; the column and the Group node share one workspace-named Frame
-        (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
+        # 3. Collect every imported object into one collapsible Object List node; the list and the Group node share one workspace-named Frame
+        (oldfoldername_item_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
         # 4. Place the Output nodes (the Group node is already placed inside the Frame)
@@ -536,10 +532,10 @@ def ImprotFromWorkSpaceFull(self, context):
         output_node.label = "Generate Mod"
 
         face_export_node = _create_face_mod_export_node(
-            tree, oldfoldername_node_dict, oldfoldername_jsonpath_dict,
+            tree, oldfoldername_item_dict, oldfoldername_jsonpath_dict,
             (max_node_right + 480.0, -760.0),
         )
-        
+
         # Link the side-by-side group nodes directly to the Output
         _link_group_to_output(tree, face_export_node, output_node)
         _link_group_to_output(tree, group_node, output_node)
@@ -547,7 +543,7 @@ def ImprotFromWorkSpaceFull(self, context):
         if hasattr(group_node, "update"):
             group_node.update()
         _exclude_marked_face_objects_from_regular_group(
-            tree, group_node, oldfoldername_node_dict, oldfoldername_jsonpath_dict,
+            tree, group_node, oldfoldername_item_dict, oldfoldername_jsonpath_dict,
         )
 
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
@@ -824,7 +820,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
         ws_model = WorkSpaceModel()
 
-        (oldfoldername_node_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
+        (oldfoldername_item_dict, oldfoldername_group_dict, max_node_right) = _create_and_layout_obj_info_nodes(
             tree, group_node, foldername_imported_obj_dict, ws_model)
 
         output_node = tree.nodes.new('MIMINode_Result_Output')
@@ -832,7 +828,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         output_node.label = "Generate Mod"
 
         face_export_node = _create_face_mod_export_node(
-            tree, oldfoldername_node_dict, oldfoldername_jsonpath_dict or {},
+            tree, oldfoldername_item_dict, oldfoldername_jsonpath_dict or {},
             (max_node_right + 480.0, -760.0),
         )
 
@@ -842,7 +838,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         if hasattr(group_node, "update"):
             group_node.update()
         _exclude_marked_face_objects_from_regular_group(
-            tree, group_node, oldfoldername_node_dict, oldfoldername_jsonpath_dict or {},
+            tree, group_node, oldfoldername_item_dict, oldfoldername_jsonpath_dict or {},
         )
 
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)

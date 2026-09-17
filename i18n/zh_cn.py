@@ -487,6 +487,7 @@ TRANSLATIONS_ZH_CN = {
     "No objects with sequence numbers were found.": "没有找到带序号的物体。",
     "No valid blueprint tree found. Please open the blueprint editor first.": "未找到有效的蓝图树。请先打开蓝图编辑器。",
     "Created {count} object nodes and connected them to the switch node": "已创建 {count} 个物体节点并连接到开关节点",
+    "Created one Object List with {count} objects and connected it to the switch node": "已创建一个包含 {count} 个物体的物体列表并连接到开关节点",
     "Refresh Submesh List": "刷新子网格列表",
     "Refreshed the current blueprint submesh list with {count} entries": "已刷新当前蓝图的子网格列表，共 {count} 条",
     "Batch Set Selected Nodes to Submesh": "将选中节点批量设为子网格",

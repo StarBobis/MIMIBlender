@@ -279,10 +279,17 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
         return baked_objects
 
     def _rebuild_node_wiring(self, tree, node, baked_objects, submesh_name, source_obj):
-        """Resize the node's frame sockets and wire one Object Info node per frame."""
+        """Resize the node's frame sockets and wire one Object List of all frames.
+
+        One collapsible Object List node replaces the old column of Object
+        Info nodes; each item socket feeds exactly one frame input.
+        Re-baking clears and rebuilds the same list node (found by its
+        deterministic name) instead of stacking another one.
+        """
+        from .blueprint_node_object_list import _append_object_list_item
+
         # Frame sockets allow multiple links. Re-baking must replace the old
         # links explicitly, otherwise both old and new objects are drawn.
-        # Leave the old object nodes intact so user edits are not destroyed.
         for socket in node.inputs:
             for link in list(socket.links):
                 tree.links.remove(link)
@@ -293,23 +300,27 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             node.inputs.remove(node.inputs[-1])
         renumber_time_switch_sockets(node)
 
-        # Wrap every created Object Info node in one Frame node, so the whole
-        # baked batch can be moved and organized as a single unit.
-        # The label matches the baked objects' collection name on purpose.
-        frame_node = tree.nodes.new('NodeFrame')
-        frame_node.label = "TB_" + source_obj.name
-        frame_node.shrink = True
-        frame_node.location = (node.location.x - 480, node.location.y + 60)
+        # Re-bake: reuse the list node this operator created earlier. The
+        # deterministic name keeps the rebuild in place without touching
+        # user-made Object List nodes.
+        list_name = ("TB_" + source_obj.name + "_frames")[:60]
+        list_node = tree.nodes.get(list_name)
+        if list_node is not None:
+            while len(list_node.object_items) > 0:
+                list_node.object_items.remove(0)
+            while len(list_node.outputs) > 1:
+                list_node.outputs.remove(list_node.outputs[-1])
+        else:
+            list_node = tree.nodes.new('MIMINode_Object_List')
+            list_node.name = list_name
+            list_node.label = list_name
+            list_node.location = (node.location.x - 480, node.location.y + 60)
+        list_node.show_details = False
 
-        # Create one Object Info node per frame in a column inside the Frame
-        # (a child node's location is relative to its parent Frame).
         for index, (frame_number, baked_obj) in enumerate(baked_objects):
-            object_node = tree.nodes.new('MIMINode_Object_Info')
-            object_node.location = (30, -60 - index * 260)
-            object_node.parent = frame_node
-            object_node.object_name = baked_obj.name
-            object_node.submesh_name = submesh_name
-            tree.links.new(object_node.outputs[0], node.inputs[index])
+            _append_object_list_item(list_node, baked_obj.name)
+            list_node.object_items[index].submesh_name = submesh_name
+            tree.links.new(list_node.outputs[index + 1], node.inputs[index])
 
 
 classes = (
