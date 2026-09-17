@@ -61,11 +61,15 @@ def _sync_item_socket_label(node, item):
 
 
 def _object_list_item_changed(item):
-    '''Update callback: keep the list row and its socket label in sync.'''
+    '''Update callback: keep the list row, its socket label and the node width in sync.'''
     _object_list_item_refresh_display(item)
     node = _find_owner_object_list_node(item)
     if node is not None:
         _sync_item_socket_label(node, item)
+        # Width writes are forbidden while Blender draws the node (some draw
+        # contexts are read-only), so the width is maintained from property
+        # updates and operators instead of draw_buttons.
+        node._refresh_width()
 
 
 def _find_owner_object_list_node(item):
@@ -90,6 +94,7 @@ def _append_object_list_item(node, object_name):
     _object_list_item_refresh_display(item)
     node.outputs.new('MIMISocketObject', item.name)
     node.object_index = len(node.object_items) - 1
+    node._refresh_width()
     return item
 
 
@@ -102,6 +107,7 @@ def _remove_object_list_item(node, index):
     if index + 1 < len(node.outputs):
         node.outputs.remove(node.outputs[index + 1])
     node.object_index = max(0, min(index, len(node.object_items) - 1))
+    node._refresh_width()
 
 
 def _lookup_object_list_node(context, tree_name, node_name):
@@ -138,6 +144,7 @@ class MIMIObjectListItem(PropertyGroup):
         name=tr("Submesh"),
         description=tr("Optional Submesh override, same semantics as the Object Info node"),
         default="",
+        update=lambda self, context: _object_list_item_changed(self),
     ) # type: ignore
 
 
@@ -226,12 +233,13 @@ class MIMINode_Object_List(MIMINodeBase):
         return [self.label]
 
     def _refresh_width(self):
-        """Fit the node width to everything it currently displays.
+        """Fit the node width to everything the node displays.
 
         The socket labels mirror the item names, so the widest object name
         decides the width; the count line and the aggregate All socket are
-        included as well. Recomputed on every draw, so add/remove/rename
-        always end up with a fitting node.
+        included as well. Called from property update callbacks and the
+        add/remove operators, never from draw_buttons (ID writes are
+        forbidden in draw contexts).
         """
         texts = [
             str(self.label or ""),
@@ -257,9 +265,9 @@ class MIMINode_Object_List(MIMINodeBase):
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
 
-        # Keep the node wide enough for the title, the count line, the All
-        # socket and every mirrored item socket label.
-        self._refresh_width()
+        # NOTE: never write node data (e.g. the width) here; Blender forbids
+        # ID writes in several draw contexts. The width is maintained from
+        # property update callbacks and the add/remove operators instead.
 
         # Collapsed header: one toggle plus the object count. This is all a
         # reader sees for a 48-frame animation list until they expand it.
