@@ -124,8 +124,8 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
     ) # type: ignore
 
     match_scene_fps: bpy.props.BoolProperty(
-        name=tr("Sync Node FPS with Scene"),
-        description=tr("Set the node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline"),
+        name=tr("Set Node FPS to 60"),
+        description=tr("Set the node's FPS to 60 after baking"),
         default=True,
     ) # type: ignore
 
@@ -253,8 +253,9 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
             item.weight = weight
 
         if self.match_scene_fps:
-            scene_fps = context.scene.render.fps / context.scene.render.fps_base
-            node.fps = round(scene_fps / self.frame_step, 4)
+            # Bake to a fixed 60 FPS playback speed; the baked value no
+            # longer follows the Blender scene frame rate.
+            node.fps = 60.0
 
         # Sampling past the last keyed frame repeats the final weight in
         # every trailing entry, so the weight holds still before each loop
@@ -304,7 +305,7 @@ class MIMINode_TimeShapeKey(MIMINodeBase):
     fps: bpy.props.FloatProperty(
         name=tr("FPS"),
         description=tr("Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate"),
-        default=12.0,
+        default=60.0,
         min=0.01,
         soft_max=120.0,
         update=update_fps,

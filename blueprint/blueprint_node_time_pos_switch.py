@@ -90,7 +90,7 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
     fps: bpy.props.FloatProperty(
         name=tr("FPS"),
         description=tr("Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate"),
-        default=12.0,
+        default=60.0,
         min=0.01,
         soft_max=120.0,
         update=update_fps,

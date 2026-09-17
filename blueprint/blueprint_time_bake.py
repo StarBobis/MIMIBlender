@@ -64,8 +64,8 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
     ) # type: ignore
 
     match_scene_fps: bpy.props.BoolProperty(
-        name=tr("Sync Node FPS with Scene"),
-        description=tr("Set this node's FPS to scene_fps / frame_step so the mod plays back at the same speed as the Blender timeline"),
+        name=tr("Set Node FPS to 60"),
+        description=tr("Set the node's FPS to 60 after baking"),
         default=True,
     ) # type: ignore
 
@@ -178,8 +178,9 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
         self._rebuild_node_wiring(tree, node, baked_objects, submesh_name, source_obj)
 
         if self.match_scene_fps:
-            scene_fps = context.scene.render.fps / context.scene.render.fps_base
-            node.fps = round(scene_fps / self.frame_step, 4)
+            # Bake to a fixed 60 FPS playback speed; the baked value no
+            # longer follows the Blender scene frame rate.
+            node.fps = 60.0
 
         # A bake range past the last keyed pose repeats the final pose in
         # every trailing frame, so the timeline holds still before each

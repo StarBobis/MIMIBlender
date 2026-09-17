@@ -377,7 +377,7 @@ class BlueprintExportHelper:
             m_key.key_type = "time_shapekey"
             # Do not replace zero/NaN with a default: invalid saved node data
             # must fail validation instead of silently changing playback.
-            m_key.fps = float(getattr(node, "fps", 12.0))
+            m_key.fps = float(getattr(node, "fps", 60.0))
             m_key.initialize_value = weight_list[0]
             # value_list stays the frame indices; weight_list holds the
             # per-frame weights (same length, enforced by the node UI).
