@@ -483,6 +483,8 @@ TRANSLATIONS_ZH_CN = {
     "MMT Blueprint Graph": "MMT 蓝图",
     "Create Group from Selected Objects": "从选中物体创建分组",
     "Create Internal Switch": "创建内部开关",
+    "Texture Assign": "贴图指定",
+    "Dynamic Mod": "动态Mod",
     "These objects do not have sequence numbers: {names}": "以下物体没有序号：{names}",
     "No objects with sequence numbers were found.": "没有找到带序号的物体。",
     "No valid blueprint tree found. Please open the blueprint editor first.": "未找到有效的蓝图树。请先打开蓝图编辑器。",

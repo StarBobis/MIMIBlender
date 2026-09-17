@@ -749,6 +749,35 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
             print(f"  {info}")
 
         return {'FINISHED'}
+class MIMIMT_TextureAssignMenu(bpy.types.Menu):
+    '''Add-menu submenu grouping the texture assignment nodes'''
+    bl_idname = "MIMI_MT_texture_assign"
+    bl_label = "Texture Assign"
+
+    def draw(self, context):
+        layout = self.layout
+        # Slot Texture Bind replaces texture slots right before each passing
+        # object's drawindexed; it is a pass-through like the Group node.
+        layout.operator("node.add_node", text=tr("Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
+        # Hash Texture Bind turns each passing object into conditional this=
+        # blocks inside the global hash-style TextureOverride sections.
+        layout.operator("node.add_node", text=tr("Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
+
+
+class MIMIMT_DynamicModMenu(bpy.types.Menu):
+    '''Add-menu submenu grouping the dynamic mod (timeline) nodes'''
+    bl_idname = "MIMI_MT_dynamic_mod"
+    bl_label = "Dynamic Mod"
+
+    def draw(self, context):
+        layout = self.layout
+        # The three dynamic mod nodes are named after the data they switch, so a
+        # user can tell them apart without opening the documentation.
+        layout.operator("node.add_node", text=tr("DrawIndex Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimeSwitch"
+        layout.operator("node.add_node", text=tr("Position.buf Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimePosSwitch"
+        layout.operator("node.add_node", text=tr("ShapeKey Real-time Based Dynamic Mod"), icon='SHAPEKEY_DATA').type = "MIMINode_TimeShapeKey"
+
+
 def draw_node_add_menu(self, context):
     if not isinstance(context.space_data, bpy.types.SpaceNodeEditor):
         return
@@ -764,17 +793,10 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
     layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
-    # Slot Texture Bind replaces texture slots right before each passing
-    # object's drawindexed; it is a pass-through like the Group node.
-    layout.operator("node.add_node", text=tr("Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
-    # Hash Texture Bind turns each passing object into conditional this=
-    # blocks inside the global hash-style TextureOverride sections.
-    layout.operator("node.add_node", text=tr("Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
-    # The three dynamic mod nodes are named after the data they switch, so a
-    # user can tell them apart without opening the documentation.
-    layout.operator("node.add_node", text=tr("DrawIndex Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimeSwitch"
-    layout.operator("node.add_node", text=tr("Position.buf Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimePosSwitch"
-    layout.operator("node.add_node", text=tr("ShapeKey Real-time Based Dynamic Mod"), icon='SHAPEKEY_DATA').type = "MIMINode_TimeShapeKey"
+    # Texture assignment and dynamic mod entries live in their own submenus
+    # so the flat add menu stays short and readable.
+    layout.menu(MIMIMT_TextureAssignMenu.bl_idname, icon='TEXTURE')
+    layout.menu(MIMIMT_DynamicModMenu.bl_idname, icon='TIME')
     # The cross-IB render node only produces INI for the Naraka preset,
     # so only offer it there to keep the other presets' menus clean.
     if GlobalConfig.logic_name == LogicName.Naraka:
@@ -815,6 +837,8 @@ def register():
     bpy.utils.register_class(MMT_OT_AlignNodes)
     bpy.utils.register_class(MMT_OT_BatchConnectNodes)
     bpy.utils.register_class(MIMIMT_ObjectContextMenuSub)
+    bpy.utils.register_class(MIMIMT_TextureAssignMenu)
+    bpy.utils.register_class(MIMIMT_DynamicModMenu)
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
     # Add to the 3D viewport object context menu
     bpy.types.VIEW3D_MT_object_context_menu.append(draw_objects_context_menu_add)
@@ -849,6 +873,8 @@ def unregister():
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
 
     bpy.utils.unregister_class(MIMIMT_ObjectContextMenuSub)
+    bpy.utils.unregister_class(MIMIMT_TextureAssignMenu)
+    bpy.utils.unregister_class(MIMIMT_DynamicModMenu)
     bpy.utils.unregister_class(MMT_OT_BatchConnectNodes)
     bpy.utils.unregister_class(MMT_OT_AlignNodes)
     bpy.utils.unregister_class(MMT_OT_ApplySelectedObjectNodeSubmesh)

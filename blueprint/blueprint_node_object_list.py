@@ -225,6 +225,26 @@ class MIMINode_Object_List(MIMINodeBase):
         """Return every text that decides how wide this node has to be."""
         return [self.label]
 
+    def _refresh_width(self):
+        """Fit the node width to everything it currently displays.
+
+        The socket labels mirror the item names, so the widest object name
+        decides the width; the count line and the aggregate All socket are
+        included as well. Recomputed on every draw, so add/remove/rename
+        always end up with a fitting node.
+        """
+        texts = [
+            str(self.label or ""),
+            tr("{count} object(s)").format(count=len(self.object_items)),
+            ALL_SOCKET_NAME,
+        ]
+        for item in self.object_items:
+            texts.append(str(item.name or "?"))
+            submesh_name = str(getattr(item, "submesh_name", "") or "").strip()
+            if submesh_name:
+                texts.append(submesh_name)
+        self.update_node_width(texts)
+
     def init(self, context):
         # The default title is instance data, so bake in the active language.
         self.label = tr("Object List")
@@ -236,6 +256,10 @@ class MIMINode_Object_List(MIMINodeBase):
 
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
+
+        # Keep the node wide enough for the title, the count line, the All
+        # socket and every mirrored item socket label.
+        self._refresh_width()
 
         # Collapsed header: one toggle plus the object count. This is all a
         # reader sees for a 48-frame animation list until they expand it.
