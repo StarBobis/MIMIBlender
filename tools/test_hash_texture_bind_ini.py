@@ -31,8 +31,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # real addon package (which imports bpy) is never touched.
 TEST_PKG = "hash_texture_bind_ini_test_pkg"
 
-HASH_RED = "0123456789abcdef"
-HASH_BLUE = "fedcba9876543210"
+HASH_RED = "0123abcd"
+HASH_BLUE = "fedc9876"
 
 
 def load_module_by_path(module_name, file_path):
@@ -260,7 +260,7 @@ def test_resolve_hash_bindings(modules, source_dir):
     bound_call.hash_texture_binding_list = [
         make_binding("FILE", HASH_RED, file_path=red_file),
         make_binding("RESOURCE", HASH_BLUE, resource_name="ResourceSharedBlue"),
-        make_binding("MARK", "0123456789aaaaaa", mark_name="HairMark"),
+        make_binding("MARK", "0123aaaa", mark_name="HairMark"),
     ]
     plain_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_B", submesh_name="94517393-0")
     plain_call.hash_texture_binding_list = [
@@ -283,7 +283,7 @@ def test_resolve_hash_bindings(modules, source_dir):
     assert all(row["condition_str"] == "$swapkey0 == 0" for row in rows), rows
     # FILE rows get a generated resource name, recorded for copy + section.
     assert rows[0]["texture_hash"] == HASH_RED
-    assert rows[0]["resource_name"].startswith("ResourceTex_94517393_94517393_0_Hair_A_hash01234567"), rows[0]
+    assert rows[0]["resource_name"].startswith("ResourceTex_94517393_94517393_0_Hair_A_hash0123abcd"), rows[0]
     # RESOURCE rows pass the name through untouched.
     assert rows[1] == {
         "texture_hash": HASH_BLUE,
@@ -291,7 +291,7 @@ def test_resolve_hash_bindings(modules, source_dir):
         "resource_name": "ResourceSharedBlue",
     }, rows[1]
     # MARK rows resolve through the workspace helper and get their own copy.
-    assert rows[2]["texture_hash"] == "0123456789aaaaaa"
+    assert rows[2]["texture_hash"] == "0123aaaa"
     assert rows[2]["resource_name"].startswith("ResourceTex_"), rows[2]
 
     # The unconditioned row carries an empty condition string.
@@ -342,13 +342,13 @@ def test_resolve_hash_validation(modules, source_dir):
     )
     # Unknown mark name.
     expect_error(
-        [make_binding("MARK", "0123456789aaaaaa", mark_name="NoSuchMark")],
+        [make_binding("MARK", "0123aaaa", mark_name="NoSuchMark")],
         {"94517393-0": [FakeMarkup("HairMark", "Hash")]},
         "was not found",
     )
     # Slot-style marks belong to the Slot Texture Bind node, not this one.
     expect_error(
-        [make_binding("MARK", "0123456789aaaaaa", mark_name="BodyDiffuse")],
+        [make_binding("MARK", "0123aaaa", mark_name="BodyDiffuse")],
         {"94517393-0": [FakeMarkup("BodyDiffuse", "Slot")]},
         "only accepts Hash-style marks",
     )

@@ -21,8 +21,8 @@ from .submesh_model import SubMeshModel
 OBJECT_TEXTURE_SLOT_PATTERN = re.compile(r"^(ps|vs|gs|hs|ds|cs)-(t|s|b|u)\d+$")
 # 3Dmigoto resource section names are plain identifiers.
 OBJECT_TEXTURE_RESOURCE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-# A 3Dmigoto texture hash is 16 hexadecimal characters.
-OBJECT_TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{16}$")
+# A 3Dmigoto texture hash is 8 hexadecimal characters (a 32-bit hash).
+OBJECT_TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 # File formats 3Dmigoto can load directly from a [ResourceXXX] filename.
 OBJECT_TEXTURE_FILE_SUFFIXES = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga")
 
@@ -591,7 +591,7 @@ class DrawIBModel:
                 if OBJECT_TEXTURE_HASH_PATTERN.match(texture_hash) is None:
                     raise ValueError(
                         "Hash Texture Bind node '" + node_label + "': invalid texture hash '" + str(binding.get("texture_hash", ""))
-                        + "' for object '" + owner_name + "'; expected 16 hexadecimal characters."
+                        + "' for object '" + owner_name + "'; expected 8 hexadecimal characters (a 32-bit texture hash)."
                     )
                 if texture_hash in seen_hashes:
                     raise ValueError(

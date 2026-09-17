@@ -577,10 +577,10 @@ TRANSLATIONS_ZH_CN = {
     # ---- Hash Texture Bind node (conditional hash-style texture override) ----
     "Hash Texture Bind": "Hash贴图绑定",
     "Texture Hash": "贴图Hash",
-    "Hash of the original texture to replace (16 hexadecimal characters); the override applies wherever the game binds this hash": "要替换的原始贴图 Hash（16 位十六进制）；游戏在任何地方绑定该 Hash 时都会生效",
+    "Hash of the original texture to replace (8 hexadecimal characters, a 32-bit texture hash); the override applies wherever the game binds this hash": "要替换的原始贴图 Hash（8 位十六进制，32 位贴图 Hash）；游戏在任何地方绑定该 Hash 时都会生效",
     "Reuse the source file of a Hash-style mark from the SSMT5 texture mark page of this Submesh": "复用该 Submesh 在 SSMT5 贴图标记页标记的 Hash 风格贴图源文件",
     "Hash-style mark from the SSMT5 texture mark page; its texture file is copied into the generated mod": "SSMT5 贴图标记页的 Hash 风格标记；其贴图文件会被复制进生成的 Mod",
-    "Texture hash looks wrong; expected 16 hexadecimal characters": "贴图Hash看起来不对；应为 16 位十六进制字符",
+    "Texture hash looks wrong; expected 8 hexadecimal characters (a 32-bit texture hash)": "贴图Hash看起来不对；应为 8 位十六进制字符（32 位贴图Hash）",
     "{count} hash binding(s)": "{count} 条Hash绑定",
     "Add Hash Texture Binding": "添加Hash贴图绑定",
     "Remove Hash Texture Binding": "移除Hash贴图绑定",

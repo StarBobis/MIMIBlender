@@ -44,8 +44,8 @@ from .blueprint_node_texture import (
     normalize_mark_name_enum_value,
 )
 
-# A 3Dmigoto texture hash is 16 hexadecimal characters.
-_TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{16}$")
+# A 3Dmigoto texture hash is 8 hexadecimal characters (a 32-bit hash).
+_TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 
 
 def _texture_hash_item_refresh_display(item):
@@ -75,7 +75,7 @@ class MIMITextureHashItem(PropertyGroup):
 
     texture_hash: bpy.props.StringProperty(
         name=tr("Texture Hash"),
-        description=tr("Hash of the original texture to replace (16 hexadecimal characters); the override applies wherever the game binds this hash"),
+        description=tr("Hash of the original texture to replace (8 hexadecimal characters, a 32-bit texture hash); the override applies wherever the game binds this hash"),
         default="",
         update=lambda self, context: _texture_hash_item_refresh_display(self),
     ) # type: ignore
@@ -349,7 +349,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         # raises a hard error so a typo can never reach the generated INI.
         hash_text = str(item.texture_hash or "").strip().lower()
         if hash_text and _TEXTURE_HASH_PATTERN.match(hash_text) is None:
-            layout.label(text=tr("Texture hash looks wrong; expected 16 hexadecimal characters"), icon='ERROR')
+            layout.label(text=tr("Texture hash looks wrong; expected 8 hexadecimal characters (a 32-bit texture hash)"), icon='ERROR')
 
         active_count = len([row_item for row_item in self.texture_hash_items if row_item.enabled])
         layout.label(text=tr("{count} hash binding(s)").format(count=active_count), icon='TEXTURE_DATA')
