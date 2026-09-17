@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from .draw_call_model import DrawCallModel
 
 from ..utils.export_utils import ExportUtils
+from ..utils.mesh_mirror_utils import MeshMirrorUtils
 from ..utils.obj_utils import ObjUtils
 from ..utils.shapekey_utils import ShapeKeyUtils
 from ..utils.collection_utils import CollectionUtils
@@ -135,7 +136,12 @@ class SubMeshModel:
 
             self._normalize_temp_obj_for_export(temp_obj)
 
-            # Import flipped the object per LogicName, so flipping the temp object back at export restores the game's original coordinate system
+            # Restore the optional import mirror before the existing game-space
+            # rotation and scale are applied.  The source object stays untouched
+            # because this object is deleted after buffer generation.
+            if MeshMirrorUtils.restore_export_mirror(temp_obj):
+                print("SubMeshModel: restored the workflow mirror for " + temp_obj.name)
+
             self._apply_export_rotation_for_logic(temp_obj)
 
             # Triangulate the obj

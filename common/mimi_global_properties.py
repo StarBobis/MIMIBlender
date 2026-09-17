@@ -60,6 +60,32 @@ def _get_import_merged_vgmap_items(self, context):
     ]
 
 
+def _get_mirror_workflow_items(self, context):
+    # The first entry is intentionally the default to preserve the historical
+    # 3Dmigoto mirrored orientation for existing users and saved scenes.
+    return [
+        (
+            "MIRRORED",
+            tr("Mirrored Workflow"),
+            tr("Keep the historical 3Dmigoto mirrored model orientation"),
+        ),
+        (
+            "NON_MIRRORED",
+            tr("Non-Mirrored Workflow"),
+            tr("Bake a perfect left/right mirror on import and restore it on export"),
+        ),
+    ]
+
+
+def _update_mirror_workflow_mode(self, context):
+    # Mirror the new enum into the hidden legacy field so old callers and old
+    # saved scenes continue to receive a consistent boolean value.
+    try:
+        self.use_mirror_workflow = self.mirror_workflow_mode == "NON_MIRRORED"
+    except Exception:
+        pass
+
+
 class MIMIGlobalProperties(bpy.types.PropertyGroup):
     selected_blueprint_name: bpy.props.EnumProperty(
         name=tr("Current Blueprint"),
@@ -131,10 +157,22 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
         subtype='DIR_PATH',
     ) # type: ignore
 
+    mirror_workflow_mode: bpy.props.EnumProperty(
+        name=tr("Mirror Workflow"),
+        description=tr("Choose whether imported 3Dmigoto models keep their historical mirrored orientation"),
+        items=_get_mirror_workflow_items,
+        update=_update_mirror_workflow_mode,
+        # Dynamic enum callbacks use the first item as the default.  This keeps
+        # new scenes compatible with the historical mirrored workflow.
+    ) # type: ignore
+
+    # Keep the old RNA field so opening a file saved by earlier releases does
+    # not lose its stored value.  New code reads mirror_workflow_mode instead.
     use_mirror_workflow: bpy.props.BoolProperty(
-        name=tr("Use Non-Mirrored Workflow"),
-        description=tr("Default is False. When enabled, imported and exported models will no longer be mirrored. Currently, 3Dmigoto models being imported mirrored is purely due to a historical legacy issue, which is wrong. However, once the mistakes have piled up into a giant mess, people's habits and old projects are hard to change, so the non-mirrored workflow is only available when this option is enabled"),
+        name=tr("Legacy Non-Mirrored Workflow"),
+        description=tr("Compatibility field from the old mirror workflow"),
         default=False,
+        options={'HIDDEN'},
     ) # type: ignore
 
     gimi_high_fidelity_rendering: bpy.props.BoolProperty(
@@ -233,8 +271,26 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
         return cls._instance().generate_mod_folder_path
 
     @classmethod
+    def get_mirror_workflow_mode(cls):
+        # Return a stable value even while a newly registered scene is still
+        # receiving its dynamic enum defaults from Blender.
+        instance = cls._instance()
+        mode = str(getattr(instance, "mirror_workflow_mode", "MIRRORED"))
+        if mode not in {"MIRRORED", "NON_MIRRORED"}:
+            mode = "MIRRORED"
+        # Files saved before the dropdown existed may only contain the old
+        # boolean.  Treat that explicit legacy value as non-mirrored until the
+        # user picks a new dropdown entry, whose update callback synchronizes
+        # the compatibility field again.
+        if mode == "MIRRORED" and bool(getattr(instance, "use_mirror_workflow", False)):
+            return "NON_MIRRORED"
+        return mode
+
+    @classmethod
     def use_mirror_workflow(cls):
-        return cls._instance().use_mirror_workflow
+        # Keep the old method name for callers outside this module.  The new
+        # dropdown is the single source of truth for the workflow choice.
+        return cls.get_mirror_workflow_mode() == "NON_MIRRORED"
 
     @classmethod
     def workspace_source_mode(cls):

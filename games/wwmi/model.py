@@ -13,6 +13,7 @@ from ...common.global_config import GlobalConfig
 from ...common.global_config import LogicName
 from ...utils.export_utils import ExportUtils, ObjElementContext, WWMIBufferBuildResult
 from ...utils.log_utils import LOG
+from ...utils.mesh_mirror_utils import MeshMirrorUtils
 from ...utils.obj_utils import (
     MergedObject,
     MergedObjectComponent,
@@ -293,6 +294,12 @@ class DrawIBModelWWMI:
                     with OpenObject(bpy.context, temp_obj) as opened_obj:
                         selected_modifiers = [modifier.name for modifier in ObjUtils.get_modifiers(opened_obj)]
                         ShapeKeyUtils.apply_modifiers_for_object_with_shape_keys(bpy.context, selected_modifiers, None)
+
+                # WWMI has its own component merge and game-space transform.
+                # Restore the import mirror before either operation so every
+                # component follows the same paired coordinate contract.
+                if MeshMirrorUtils.restore_export_mirror(temp_obj):
+                    print("WWMI: restored the workflow mirror for " + temp_obj.name)
 
                 ObjUtils.triangulate_object(bpy.context, temp_obj)
 

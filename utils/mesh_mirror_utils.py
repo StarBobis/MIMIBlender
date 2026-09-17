@@ -14,12 +14,200 @@
 # The result is a "perfect mirror": editing, modifiers and exports all work
 # exactly like they do on a normally modeled mesh, with no hidden negative
 # scale left behind.
+import math
+
 import bpy
 import bmesh
 
 
 class MeshMirrorUtils:
-    """Mirror helpers for mesh objects, shared by the add-on operator."""
+    """Mirror helpers for mesh objects, shared by the add-on operator.
+
+    The same class also owns the import/export mirror contract.  Keeping the
+    contract beside the geometry operation prevents the importer and every
+    exporter from slowly growing different mirror implementations.
+    """
+
+    # Object properties identify meshes that were mirrored by the optional
+    # non-mirrored import workflow.  Export uses these properties instead of a
+    # scene-wide switch, so old objects are never mirrored by guesswork.
+    MIRROR_WORKFLOW_PROPERTY = "MIMI:MirrorWorkflow"
+    MIRROR_WORKFLOW_VERSION_PROPERTY = "MIMI:MirrorWorkflowVersion"
+    MIRROR_WORKFLOW_AXIS_PROPERTY = "MIMI:MirrorWorkflowAxis"
+    MIRROR_WORKFLOW_UV_PROPERTY = "MIMI:MirrorWorkflowUV"
+    MIRROR_WORKFLOW_GROUPS_PROPERTY = "MIMI:MirrorWorkflowSwapGroups"
+    MIRROR_WORKFLOW_ID = "PERFECT"
+    MIRROR_WORKFLOW_VERSION = 1
+
+    @classmethod
+    def apply_import_mirror(cls, obj, axis="X", mirror_uv="NONE", swap_side_groups=True):
+        """Bake the workflow mirror into a newly imported mesh object.
+
+        Import objects have already received the game's coordinate conversion
+        when this method is called.  The reflection is therefore local to the
+        same Blender space that the user edits and that export later restores.
+        """
+        cls.mirror_mesh_object(
+            obj=obj,
+            mode="FLIP",
+            axis=axis,
+            recalc_normals=False,
+            mirror_uv=mirror_uv,
+            swap_side_groups=swap_side_groups,
+            track_workflow_state=False,
+        )
+        cls._set_workflow_state(
+            obj=obj,
+            axis=axis,
+            mirror_uv=mirror_uv,
+            swap_side_groups=swap_side_groups,
+            applied=True,
+        )
+        return obj
+
+    @classmethod
+    def restore_export_mirror(cls, obj):
+        """Undo an import mirror on an exporter-owned temporary object.
+
+        The operation is intentionally limited to objects carrying the import
+        marker.  A model created before this workflow, or a normal user mesh,
+        must not receive an unexpected extra reflection during export.
+        """
+        if not cls.has_workflow_mirror(obj):
+            return False
+
+        axis = str(obj.get(cls.MIRROR_WORKFLOW_AXIS_PROPERTY, "X")).upper()
+        mirror_uv = str(obj.get(cls.MIRROR_WORKFLOW_UV_PROPERTY, "NONE")).upper()
+        swap_side_groups = bool(obj.get(cls.MIRROR_WORKFLOW_GROUPS_PROPERTY, True))
+        cls.mirror_mesh_object(
+            obj=obj,
+            mode="FLIP",
+            axis=axis,
+            recalc_normals=False,
+            mirror_uv=mirror_uv,
+            swap_side_groups=swap_side_groups,
+            track_workflow_state=False,
+        )
+        # The exporter owns this temporary object.  Marking the restored copy
+        # as clean makes an accidental second export pass a safe no-op.
+        cls._set_workflow_state(
+            obj=obj,
+            axis=axis,
+            mirror_uv=mirror_uv,
+            swap_side_groups=swap_side_groups,
+            applied=False,
+        )
+        return True
+
+    @classmethod
+    def has_workflow_mirror(cls, obj):
+        """Return whether an object needs the paired export reflection."""
+        if obj is None or getattr(obj, "type", "") != "MESH":
+            return False
+        try:
+            version = int(obj.get(cls.MIRROR_WORKFLOW_VERSION_PROPERTY, 0))
+        except (TypeError, ValueError):
+            version = 0
+        return (
+            obj.get(cls.MIRROR_WORKFLOW_PROPERTY, "") == cls.MIRROR_WORKFLOW_ID
+            and version == cls.MIRROR_WORKFLOW_VERSION
+            and bool(obj.get("MIMI:MirrorWorkflowApplied", False))
+        )
+
+    @classmethod
+    def _set_workflow_state(cls, obj, axis, mirror_uv, swap_side_groups, applied):
+        """Write the small, copyable state contract used by export."""
+        obj[cls.MIRROR_WORKFLOW_PROPERTY] = cls.MIRROR_WORKFLOW_ID
+        obj[cls.MIRROR_WORKFLOW_VERSION_PROPERTY] = cls.MIRROR_WORKFLOW_VERSION
+        obj[cls.MIRROR_WORKFLOW_AXIS_PROPERTY] = str(axis).upper()
+        obj[cls.MIRROR_WORKFLOW_UV_PROPERTY] = str(mirror_uv).upper()
+        obj[cls.MIRROR_WORKFLOW_GROUPS_PROPERTY] = bool(swap_side_groups)
+        obj["MIMI:MirrorWorkflowApplied"] = bool(applied)
+
+    @classmethod
+    def _toggle_workflow_state_after_flip(cls, source_obj, mirrored_obj, mode):
+        """Keep manual mirror operations consistent with automatic export."""
+        if source_obj.get(cls.MIRROR_WORKFLOW_PROPERTY, "") != cls.MIRROR_WORKFLOW_ID:
+            return
+        if mode == "FLIP":
+            current = bool(source_obj.get("MIMI:MirrorWorkflowApplied", False))
+            mirrored_obj["MIMI:MirrorWorkflowApplied"] = not current
+        elif mode == "COPY":
+            current = bool(source_obj.get("MIMI:MirrorWorkflowApplied", False))
+            mirrored_obj["MIMI:MirrorWorkflowApplied"] = not current
+
+    @staticmethod
+    def _capture_custom_loop_normals(mesh):
+        """Capture custom loop normals keyed by polygon and vertex identity."""
+        try:
+            if not mesh.has_custom_normals:
+                return None
+        except Exception:
+            return None
+
+        captured = {}
+        try:
+            for polygon in mesh.polygons:
+                for loop_index in range(polygon.loop_start, polygon.loop_start + polygon.loop_total):
+                    loop = mesh.loops[loop_index]
+                    normal = loop.normal
+                    captured[(polygon.index, loop.vertex_index)] = (
+                        float(normal.x),
+                        float(normal.y),
+                        float(normal.z),
+                    )
+        except Exception:
+            # Blender versions without readable loop normals should keep the
+            # regular face-winding result instead of failing the import.
+            return None
+        return captured
+
+    @staticmethod
+    def _transform_normal(normal, factor_x, factor_y, factor_z):
+        """Apply the inverse-transpose direction transform and normalize it."""
+        factors = (factor_x, factor_y, factor_z)
+        # Import/export uses a pure reflection.  A sign-only path avoids a
+        # needless normalize pass and keeps a double workflow mirror as close
+        # to the original Blender float values as possible.
+        if all(abs(abs(factor) - 1.0) < 1e-12 for factor in factors):
+            return tuple(
+                value * (-1.0 if factor < 0.0 else 1.0)
+                for value, factor in zip(normal, factors)
+            )
+
+        values = []
+        for value, factor in zip(normal, factors):
+            if abs(factor) < 1e-12:
+                values.append(0.0)
+            else:
+                values.append(value / factor)
+        length = math.sqrt(sum(value * value for value in values))
+        if length < 1e-12:
+            return tuple(values)
+        return tuple(value / length for value in values)
+
+    @classmethod
+    def _restore_custom_loop_normals(cls, mesh, captured, factor_x, factor_y, factor_z):
+        """Restore reflected custom normals after BMesh rewrites the faces."""
+        if not captured:
+            return
+
+        normals = []
+        for polygon in mesh.polygons:
+            for loop_index in range(polygon.loop_start, polygon.loop_start + polygon.loop_total):
+                loop = mesh.loops[loop_index]
+                original = captured.get((polygon.index, loop.vertex_index))
+                if original is None:
+                    return
+                normals.append(cls._transform_normal(original, factor_x, factor_y, factor_z))
+
+        try:
+            mesh.normals_split_custom_set(normals)
+            mesh.update()
+        except Exception:
+            # The geometry and winding are still valid when a Blender build
+            # refuses to restore a custom normal layer.
+            pass
 
     # Suffix pairs that mark the left / right side of a symmetric rig.
     # They are recognized at the END of vertex group names, for example
@@ -164,7 +352,7 @@ class MeshMirrorUtils:
     @staticmethod
     def mirror_mesh_object(obj, mode="COPY", axis="X", recalc_normals=True,
                            mirror_uv="NONE", swap_side_groups=True,
-                           copy_suffix="_mirror"):
+                           copy_suffix="_mirror", track_workflow_state=True):
         """Mirror one mesh object and return the object that holds the
         mirrored mesh.
 
@@ -235,6 +423,12 @@ class MeshMirrorUtils:
                 mirrored_obj.data = obj.data.copy()
 
         mesh = mirrored_obj.data
+        # Save custom normals before BMesh rewrites face loops.  The import
+        # workflow must reflect these normals, not discard them by recalculating
+        # every corner from the new face topology.
+        custom_loop_normals = None
+        if not recalc_normals:
+            custom_loop_normals = MeshMirrorUtils._capture_custom_loop_normals(mesh)
 
         # ------------------------------------------------------------------
         # Step 2: compute the baking factors for the mesh coordinates.
@@ -308,5 +502,24 @@ class MeshMirrorUtils:
         # ------------------------------------------------------------------
         mesh.validate()
         mesh.update()
+        if custom_loop_normals is not None and not recalc_normals:
+            MeshMirrorUtils._restore_custom_loop_normals(
+                mesh=mesh,
+                captured=custom_loop_normals,
+                factor_x=factor_x,
+                factor_y=factor_y,
+                factor_z=factor_z,
+            )
         mirrored_obj.scale = (1.0, 1.0, 1.0)
+
+        # Manual UI mirror operations must not leave a stale automatic export
+        # marker on a copied or flipped workflow object.  Import and export
+        # call this helper with tracking disabled because they set their state
+        # explicitly around the paired operation.
+        if track_workflow_state and mode in ("FLIP", "COPY"):
+            MeshMirrorUtils._toggle_workflow_state_after_flip(
+                source_obj=obj,
+                mirrored_obj=mirrored_obj,
+                mode=mode,
+            )
         return mirrored_obj

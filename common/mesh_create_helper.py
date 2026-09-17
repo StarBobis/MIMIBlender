@@ -8,6 +8,7 @@ from bpy_extras.io_utils import unpack_list, axis_conversion
 
 from ..utils.format_utils import Fatal, FormatUtils
 from ..utils.mesh_utils import MeshUtils
+from ..utils.mesh_mirror_utils import MeshMirrorUtils
 from ..utils.obj_utils import ObjUtils
 from ..workspace.texture_metadata_helper import TextureMetadataResolver
 from ..utils.timer_utils import TimerUtils
@@ -328,8 +329,16 @@ class MeshCreateHelper:
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
 
         if MIMIGlobalProperties.use_mirror_workflow():
-            print(f"Non-mirror workflow: applying mirror transform and face direction flip to {obj.name}")
-            ObjUtils.apply_mirror_workflow(obj)
+            # The non-mirrored view is a real X reflection, not a negative
+            # object scale.  The helper also stores a marker for export so the
+            # original game orientation can be restored on a temporary copy.
+            print(f"Non-mirror workflow: baking a perfect X mirror into {obj.name}")
+            MeshMirrorUtils.apply_import_mirror(
+                obj=obj,
+                axis="X",
+                mirror_uv="NONE",
+                swap_side_groups=True,
+            )
 
         bpy.context.view_layer.update()
         if not bpy.app.background:

@@ -448,50 +448,25 @@ class ObjUtils:
     @staticmethod
     def apply_mirror_transform(obj):
         '''
-        Apply the mirror transform: set Scale X to -1 and apply the scale transform,
-        using Blender's built-in apply-transform feature
+        Compatibility wrapper for callers that used the old scale operation.
+
+        The old method changed object scale and relied on a second normal-flip
+        call.  Route it to the shared geometry mirror so the object remains at
+        unit scale and the face winding is repaired in one operation.
         '''
-        if obj.type != 'MESH':
+        if obj is None or obj.type != 'MESH':
             return
-        
-        original_active = bpy.context.view_layer.objects.active
-        original_selected = list(bpy.context.selected_objects)
-        original_mode = obj.mode
-        
-        try:
-            if original_mode == 'EDIT':
-                bpy.ops.object.mode_set(mode='OBJECT')
-            
-            bpy.ops.object.select_all(action='DESELECT')
-            obj.select_set(True)
-            bpy.context.view_layer.objects.active = obj
-            
-            obj.scale[0] = -obj.scale[0]
-            
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-            
-        finally:
-            if original_mode == 'EDIT':
-                try:
-                    bpy.ops.object.select_all(action='DESELECT')
-                    obj.select_set(True)
-                    bpy.context.view_layer.objects.active = obj
-                    bpy.ops.object.mode_set(mode='EDIT')
-                except Exception:
-                    pass
-            
-            bpy.ops.object.select_all(action='DESELECT')
-            for sel_obj in original_selected:
-                if sel_obj:
-                    try:
-                        sel_obj.select_set(True)
-                    except Exception:
-                        pass
-            if original_active:
-                try:
-                    bpy.context.view_layer.objects.active = original_active
-                except Exception:
-                    pass
+
+        from .mesh_mirror_utils import MeshMirrorUtils
+
+        MeshMirrorUtils.mirror_mesh_object(
+            obj=obj,
+            mode="FLIP",
+            axis="X",
+            recalc_normals=False,
+            mirror_uv="NONE",
+            swap_side_groups=False,
+        )
 
     @staticmethod
     def flip_face_normals(obj):
@@ -628,19 +603,23 @@ class ObjUtils:
     @classmethod
     def apply_mirror_workflow(cls, obj):
         '''
-        Apply the non-mirror workflow: Scale X = -1 + flip face orientation
-        Note: if the object has an armature binding, the modifiers are applied first to bake the bone deformation into the mesh
+        Compatibility wrapper for the old non-mirrored workflow API.
+
+        The old implementation used a negative X scale followed by a normal
+        flip.  Keep the public method for external callers, but route it to the
+        shared mesh-data implementation so no new negative scale is created.
         '''
-        if obj.type != 'MESH':
+        if obj is None or obj.type != 'MESH':
             return
-        
-        has_armature = any(mod.type == 'ARMATURE' for mod in obj.modifiers)
-        
-        if has_armature:
-            cls._apply_all_modifiers(obj)
-        
-        cls.apply_mirror_transform(obj)
-        cls.flip_face_normals(obj)
+
+        from .mesh_mirror_utils import MeshMirrorUtils
+
+        MeshMirrorUtils.apply_import_mirror(
+            obj=obj,
+            axis="X",
+            mirror_uv="NONE",
+            swap_side_groups=True,
+        )
     
     @staticmethod
     def _apply_all_modifiers(obj):

@@ -389,6 +389,102 @@ def test_guard_errors():
     check("bad axis raises ValueError", raised)
 
 
+def polygon_vertex_lists(obj):
+    """Return polygon vertex order so winding can be compared exactly."""
+    return [tuple(polygon.vertices) for polygon in obj.data.polygons]
+
+
+def test_workflow_import_export_roundtrip():
+    """The optional workflow mirror must be its own exact inverse."""
+    obj = new_cube("WorkflowCube", poke=(2.0, 0.5, 0.25))
+    original_coords = vertex_coords(obj)
+    original_polygons = polygon_vertex_lists(obj)
+
+    # Point-domain attributes represent the raw bytes used by GIMI/SRMI.
+    # Their values must survive both halves of the workflow unchanged.
+    raw_attribute = obj.data.attributes.new(
+        name="MIMI:RawMirrorTest",
+        type="INT",
+        domain="POINT",
+    )
+    raw_values = [index * 17 + 3 for index in range(len(obj.data.vertices))]
+    for item, value in zip(raw_attribute.data, raw_values):
+        item.value = value
+
+    # Use a deliberately non-axis-aligned custom normal so the test catches a
+    # mirror helper that only reverses face winding without reflecting normals.
+    custom_normal = (0.6, 0.8, 0.0)
+    obj.data.normals_split_custom_set_from_vertices(
+        [custom_normal for _ in obj.data.vertices]
+    )
+    original_normals = [
+        tuple(loop.normal) for loop in obj.data.loops
+    ]
+
+    MeshMirrorUtils.apply_import_mirror(
+        obj,
+        axis="X",
+        mirror_uv="NONE",
+        swap_side_groups=False,
+    )
+    check(
+        "workflow import marker is set",
+        MeshMirrorUtils.has_workflow_mirror(obj),
+    )
+    check(
+        "workflow import scale is clean",
+        vec_close(obj.scale, (1.0, 1.0, 1.0)),
+        str(obj.scale),
+    )
+    check(
+        "workflow import coordinates are mirrored",
+        all(vec_close((-before.x, before.y, before.z), after)
+            for before, after in zip(original_coords, vertex_coords(obj))),
+    )
+
+    # Export always works on a copy.  This also verifies that restoring the
+    # mirror cannot mutate the user's Blender-facing object.
+    temp_obj = obj.copy()
+    temp_obj.data = obj.data.copy()
+    bpy.context.scene.collection.objects.link(temp_obj)
+    try:
+        restored = MeshMirrorUtils.restore_export_mirror(temp_obj)
+        check("workflow export marker is recognized", restored)
+        check(
+            "workflow restored copy is marked clean",
+            not MeshMirrorUtils.has_workflow_mirror(temp_obj),
+        )
+        check(
+            "workflow roundtrip coordinates restored",
+            all(vec_close(before, after)
+                for before, after in zip(original_coords, vertex_coords(temp_obj))),
+        )
+        check(
+            "workflow roundtrip winding restored",
+            polygon_vertex_lists(temp_obj) == original_polygons,
+        )
+        restored_normals = [tuple(loop.normal) for loop in temp_obj.data.loops]
+        check(
+            "workflow roundtrip custom normals restored",
+            all(vec_close(before, after, tol=2e-4)
+                for before, after in zip(original_normals, restored_normals)),
+        )
+        restored_raw = temp_obj.data.attributes.get("MIMI:RawMirrorTest")
+        restored_raw_values = [item.value for item in restored_raw.data] if restored_raw else []
+        check(
+            "workflow raw point attributes restored",
+            restored_raw_values == raw_values,
+            str(restored_raw_values),
+        )
+        check(
+            "workflow source remains mirrored",
+            all(vec_close((-before.x, before.y, before.z), after)
+                for before, after in zip(original_coords, vertex_coords(obj))),
+        )
+    finally:
+        bpy.data.objects.remove(temp_obj, do_unlink=True)
+
+
 def main():
     tests = [
         test_flip_coords_and_scale,
@@ -401,6 +497,7 @@ def main():
         test_shared_data_flip_keeps_sibling,
         test_copy_uses_same_collection,
         test_inplace_swap_groups,
+        test_workflow_import_export_roundtrip,
         test_operator_register_and_run,
         test_guard_errors,
     ]

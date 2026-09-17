@@ -74,7 +74,13 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         elif mimi_global_properties.workspace_source_mode == "CUSTOM":
             layout.prop(mimi_global_properties, "custom_workspace_folder_path", text=tr("Custom Folder"))
 
-        # layout.prop(mimi_global_properties,"use_mirror_workflow")
+        # 3Dmigoto models are historically mirrored.  The second dropdown
+        # entry enables the paired baked-mirror import/export workflow.
+        layout.prop(
+            mimi_global_properties,
+            "mirror_workflow_mode",
+            text=tr("Mirror Workflow"),
+        )
         
         if len(context.selected_objects) != 0:
             obj = context.selected_objects[0]
