@@ -150,7 +150,7 @@ def add_resource_texture_sections(ini_builder: M_IniBuilder, drawib_model):
     """Resource declarations for the Slot-style marked textures of this DrawIB."""
     # Texture Bind node FILE resources come first: they are explicit user
     # intent and must exist even when the automatic texture pipeline is off.
-    M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+    M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=ini_builder, draw_ib_model=drawib_model)
 
     if MIMIGlobalProperties.forbid_auto_texture_ini():
         return
