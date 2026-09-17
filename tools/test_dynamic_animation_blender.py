@@ -396,6 +396,81 @@ def test_bake_and_rollback():
     print("PASS: evaluated world transforms, subframes and transactional rollback")
 
 
+def test_bake_range_prefill_and_static_tail():
+    """Keyed-range prefill and trailing held-pose detection.
+
+    Scene ranges often extend past the last keyframe; baking that padding
+    freezes the animation at the end of every loop. The helpers must find
+    the union of the relevant actions and flag repeated trailing content.
+    """
+    from animation_test_addon.blueprint.blueprint_time_range import (
+        count_trailing_repeats,
+        detect_animated_frame_range,
+        mesh_content_hash,
+        trailing_static_frame_info,
+    )
+
+    # Pure repeat counter: only runs of identical trailing items count.
+    assert count_trailing_repeats([1, 2, 3]) == 0
+    assert count_trailing_repeats([1, 2, 2, 2]) == 2
+    assert count_trailing_repeats([5, 5, 5]) == 2
+    info = trailing_static_frame_info(["a", "b", "b"], [10, 11, 12], 12.0)
+    assert info == {"held_frames": 1, "held_seconds": 1 / 12.0, "last_unique_frame": 11}
+    assert trailing_static_frame_info(["a", "b"], [1, 2], 12.0) is None
+
+    # Plain objects without any action fall back to the scene range.
+    bpy.ops.mesh.primitive_cube_add()
+    obj = bpy.context.object
+    assert detect_animated_frame_range(obj) is None
+
+    # Object transform keys define the prefill range.
+    obj.location = (0, 0, 0)
+    obj.keyframe_insert(data_path="location", frame=3)
+    obj.location = (1, 0, 0)
+    obj.keyframe_insert(data_path="location", frame=5)
+    assert detect_animated_frame_range(obj) == (3, 5)
+
+    # Shape key value animation lives on the Key datablock and must widen
+    # the range to the union of both actions.
+    obj.shape_key_add()
+    key_block = obj.shape_key_add()
+    key_block.value = 0.0
+    key_block.keyframe_insert(data_path="value", frame=1)
+    key_block.value = 1.0
+    key_block.keyframe_insert(data_path="value", frame=40)
+    assert detect_animated_frame_range(obj) == (1, 40)
+    # Blender 5.x folds shape key keyframes into the object's action, so
+    # clearing the keys cannot restore the narrower range; drop them so the
+    # mesh bake below samples a plain deformed cube.
+    obj.shape_key_clear()
+
+    # Armature actions count too; fractional keyframes widen to whole frames.
+    fake = types.SimpleNamespace(
+        animation_data=None,
+        data=types.SimpleNamespace(shape_keys=None),
+        find_armature=lambda: types.SimpleNamespace(
+            animation_data=types.SimpleNamespace(
+                action=types.SimpleNamespace(frame_range=(2.5, 9.2)))),
+    )
+    assert detect_animated_frame_range(fake) == (2, 10)
+
+    # Baked meshes hash by content: a held pose repeats the same hash, so a
+    # bake range past the last keyframe (keys end at 7) produces a static
+    # tail that the warning helper measures in frames and seconds.
+    bake = MMT_OT_BakeAnimationToTimeSwitch._bake_frames
+    baked = bake(None, bpy.context, obj, [3, 4, 5, 6, 7])
+    tokens = [mesh_content_hash(baked_obj.data) for _, baked_obj in baked]
+    assert tokens[0] != tokens[1] != tokens[2]
+    static_tail = trailing_static_frame_info(tokens, [f for f, _ in baked], 12.0)
+    assert static_tail is not None
+    assert static_tail["held_frames"] == 2
+    assert static_tail["last_unique_frame"] == 5
+    assert abs(static_tail["held_seconds"] - 2 / 12.0) < 1e-9
+    for _, baked_obj in baked:
+        bpy.data.objects.remove(baked_obj, do_unlink=True)
+    print("PASS: keyed-range prefill, content hashing and static-tail detection")
+
+
 def test_rebake_wiring_and_large_ranges():
     """Re-baking replaces existing multi-links instead of drawing both sets.
 
@@ -536,6 +611,7 @@ test_switch_key_merging()
 test_position_pipeline()
 test_validation()
 test_bake_and_rollback()
+test_bake_range_prefill_and_static_tail()
 test_rebake_wiring_and_large_ranges()
 test_wwmi_time_weights()
 test_naraka_toggle_weights()

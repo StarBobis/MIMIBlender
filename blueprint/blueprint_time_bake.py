@@ -17,6 +17,11 @@ range. Position switching validates exported topology and shared attributes.
 import bpy
 
 from ..i18n.i18n import I18nOperator, tr
+from ..blueprint.blueprint_time_range import (
+    detect_animated_frame_range,
+    mesh_content_hash,
+    trailing_static_frame_info,
+)
 from .blueprint_node_time_switch import renumber_time_switch_sockets
 
 
@@ -48,6 +53,7 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
     ) # type: ignore
     frame_end: bpy.props.IntProperty(
         name=tr("End Frame"),
+        description=tr("Last sampled frame (inclusive). Frames past the last keyframe repeat its pose and look like a pause in each loop"),
         default=24,
     ) # type: ignore
     frame_step: bpy.props.IntProperty(
@@ -84,13 +90,23 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             return {'CANCELLED'}
 
         scene = context.scene
-        self.frame_start = scene.frame_start
-        self.frame_end = scene.frame_end
 
         # Prefill the source object with the currently active mesh object.
         active_obj = getattr(context, "active_object", None)
         if active_obj is not None and active_obj.type == 'MESH':
             self.source_object = active_obj.name
+
+        # Prefill the sampled range with the actual keyed range instead of
+        # the scene range. Scene ranges usually contain padding past the
+        # last keyframe, and baking that padding freezes the animation for
+        # a while at the end of every loop.
+        source_obj = bpy.data.objects.get(self.source_object)
+        keyed_range = detect_animated_frame_range(source_obj)
+        if keyed_range is not None:
+            self.frame_start, self.frame_end = keyed_range
+        else:
+            self.frame_start = scene.frame_start
+            self.frame_end = scene.frame_end
 
         return context.window_manager.invoke_props_dialog(self, width=420)
 
@@ -164,6 +180,18 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
         if self.match_scene_fps:
             scene_fps = context.scene.render.fps / context.scene.render.fps_base
             node.fps = round(scene_fps / self.frame_step, 4)
+
+        # A bake range past the last keyed pose repeats the final pose in
+        # every trailing frame, so the timeline holds still before each
+        # loop and users read that as a playback pause. Warn instead of
+        # trimming: a deliberate rest before the loop is valid content.
+        frame_tokens = [mesh_content_hash(obj.data) for _, obj in baked_objects]
+        frame_numbers = [frame_number for frame_number, _ in baked_objects]
+        static_tail = trailing_static_frame_info(frame_tokens, frame_numbers, node.fps)
+        if static_tail is not None:
+            self.report({'WARNING'}, tr(
+                "The last {held} baked frame(s) repeat the pose of frame {frame}; playback will freeze for about {seconds:.2f} s before each loop. If this is not intended, bake up to frame {frame} instead."
+            ).format(held=static_tail["held_frames"], frame=static_tail["last_unique_frame"], seconds=static_tail["held_seconds"]))
 
         tree.update_tag()
         self.report({'INFO'}, tr("Baked {count} frames and wired them into this node").format(count=len(baked_objects)))

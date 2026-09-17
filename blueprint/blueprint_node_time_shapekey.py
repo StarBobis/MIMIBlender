@@ -37,6 +37,10 @@ only replaces the hotkey driver with the time driver.
 import bpy
 
 from ..i18n.i18n import I18nOperator, tr, translatable
+from ..blueprint.blueprint_time_range import (
+    detect_animated_frame_range,
+    trailing_static_frame_info,
+)
 from .blueprint_node_base import MIMINodeBase
 
 
@@ -109,6 +113,7 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
     ) # type: ignore
     frame_end: bpy.props.IntProperty(
         name=tr("End Frame"),
+        description=tr("Last sampled frame (inclusive). Frames past the last keyframe repeat its weight and look like a pause in each loop"),
         default=24,
     ) # type: ignore
     frame_step: bpy.props.IntProperty(
@@ -140,13 +145,23 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
             return {'CANCELLED'}
 
         scene = context.scene
-        self.frame_start = scene.frame_start
-        self.frame_end = scene.frame_end
 
         # Prefill the source object with the currently active mesh object.
         active_obj = getattr(context, "active_object", None)
         if active_obj is not None and active_obj.type == 'MESH':
             self.source_object = active_obj.name
+
+        # Prefill the sampled range with the keyed range of the shape key
+        # action instead of the scene range. Scene ranges usually contain
+        # padding past the last keyframe, and sampling that padding makes
+        # the weight freeze for a while at the end of every loop.
+        source_obj = bpy.data.objects.get(self.source_object)
+        keyed_range = detect_animated_frame_range(source_obj)
+        if keyed_range is not None:
+            self.frame_start, self.frame_end = keyed_range
+        else:
+            self.frame_start = scene.frame_start
+            self.frame_end = scene.frame_end
 
         return context.window_manager.invoke_props_dialog(self, width=420)
 
@@ -240,6 +255,16 @@ class MMT_OT_TimeShapeKey_BakeWeights(I18nOperator):
         if self.match_scene_fps:
             scene_fps = context.scene.render.fps / context.scene.render.fps_base
             node.fps = round(scene_fps / self.frame_step, 4)
+
+        # Sampling past the last keyed frame repeats the final weight in
+        # every trailing entry, so the weight holds still before each loop
+        # and users read that as a playback pause. Warn instead of trimming:
+        # a deliberate rest before the loop is valid content.
+        static_tail = trailing_static_frame_info(sampled_weights, list(frames), node.fps)
+        if static_tail is not None:
+            self.report({'WARNING'}, tr(
+                "The last {held} baked weight(s) repeat the value of frame {frame}; playback will freeze for about {seconds:.2f} s before each loop. If this is not intended, bake up to frame {frame} instead."
+            ).format(held=static_tail["held_frames"], frame=static_tail["last_unique_frame"], seconds=static_tail["held_seconds"]))
 
         tree.update_tag()
         self.report({'INFO'}, tr("Baked {count} weight frames into the ShapeKey Real-time Based Dynamic Mod node").format(count=len(sampled_weights)))
