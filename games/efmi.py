@@ -133,6 +133,11 @@ class ExportEFMI:
                 resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(submesh_model.display_str + "-" + category + ".buf"))
                 resource_buffer_section.new_line()
 
+        # Texture Bind node FILE resources are explicit user intent and must
+        # exist even when the automatic texture pipeline is disabled.
+        for drawib_model in self.drawib_model_list:
+            M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+
         if not MIMIGlobalProperties.forbid_auto_texture_ini():
             resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
             appended_resource_names = set()
@@ -155,6 +160,7 @@ class ExportEFMI:
 
         for drawib_model in self.drawib_model_list:
             M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
 
         GlobalConfig.generated_mod_number = len(self.drawib_model_list)
         M_IniHelper.add_branch_key_sections(

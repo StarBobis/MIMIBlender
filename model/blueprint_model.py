@@ -16,6 +16,7 @@ from ..common.global_config import GlobalConfig
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
+from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -368,6 +369,22 @@ class BluePrintModel:
             # instead of conditional drawindexed calls.
             self._parse_time_switch_node(unknown_node, chain_key_list, is_position_switch=True)
 
+        elif unknown_node.bl_idname == MIMINode_Texture_Bind.bl_idname:
+            # Texture Bind is a transparent pass-through: parse the upstream
+            # object chain first, then tag every DrawCallModel that this
+            # visit produced with the node's slot bindings. Each visit news
+            # its own DrawCallModels, so the same Object Info passing
+            # through different branches/bind nodes stays independent.
+            draw_model_count_before = len(self.ordered_draw_obj_data_model_list)
+            self.parse_current_node(unknown_node, chain_key_list)
+            bindings = self._collect_texture_bindings(unknown_node)
+            if bindings:
+                for obj_model in self.ordered_draw_obj_data_model_list[draw_model_count_before:]:
+                    obj_model.texture_slot_binding_list = self._merge_texture_slot_bindings(
+                        getattr(obj_model, "texture_slot_binding_list", []),
+                        bindings,
+                    )
+
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
 
@@ -418,6 +435,49 @@ class BluePrintModel:
             # Result Output.  Parsing its mesh inputs here would duplicate
             # them in the regular output layer.
             return
+
+    @staticmethod
+    def _collect_texture_bindings(bind_node):
+        '''Read the Texture Bind node rows into plain dicts for the export pass.
+
+        FILE paths are resolved to absolute paths here (bpy lives in this
+        layer, not in the model layer) so DrawIBModel only sees real paths.
+        '''
+        bindings = []
+        for item in getattr(bind_node, "texture_slot_items", []):
+            file_path = str(getattr(item, "file_path", "") or "").strip()
+            if file_path:
+                try:
+                    file_path = bpy.path.abspath(file_path)
+                except Exception:
+                    pass
+            bindings.append({
+                "enabled": bool(getattr(item, "enabled", True)),
+                "slot": str(getattr(item, "slot", "") or ""),
+                "source_type": str(getattr(item, "source_type", "") or ""),
+                "mark_name": str(getattr(item, "mark_name", "") or ""),
+                "file_path": file_path,
+                "resource_name": str(getattr(item, "resource_name", "") or ""),
+                "restore_after_draw": bool(getattr(item, "restore_after_draw", False)),
+                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Texture Bind"),
+            })
+        return bindings
+
+    @staticmethod
+    def _merge_texture_slot_bindings(inner_list, outer_list):
+        '''Merge bindings of nested Texture Bind nodes, keyed by slot.
+
+        The node closest to the Object Info node wins for the same slot
+        (it is the most specific one); bindings for different slots add up.
+        '''
+        merged = {}
+        order = []
+        for binding in outer_list + inner_list:
+            key = str(binding.get("slot", "")).strip().lower()
+            if key not in merged:
+                order.append(key)
+            merged[key] = binding
+        return [merged[key] for key in order]
 
     def _parse_branch_sockets(self, branch_sockets, m_key: M_Key, state_count: int, chain_key_list: list[M_Key]):
         """

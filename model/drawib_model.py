@@ -1,9 +1,11 @@
 
 from dataclasses import field, dataclass
 import os
+import re
 
 from ..common.d3d11_gametype import D3D11GameType
 from ..common.global_config import GlobalConfig
+from ..common.mimi_global_properties import MIMIGlobalProperties
 
 from ..utils.json_utils import JsonUtils
 from ..workspace.texture_metadata_helper import TextureMetadataResolver
@@ -14,6 +16,13 @@ from ..common.buffer_export_helper import BufferExportHelper
 import numpy
 
 from .submesh_model import SubMeshModel
+
+# 3Dmigoto texture slot syntax, e.g. ps-t0 / vs-s1 / cs-u2.
+OBJECT_TEXTURE_SLOT_PATTERN = re.compile(r"^(ps|vs|gs|hs|ds|cs)-(t|s|b|u)\d+$")
+# 3Dmigoto resource section names are plain identifiers.
+OBJECT_TEXTURE_RESOURCE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# File formats 3Dmigoto can load directly from a [ResourceXXX] filename.
+OBJECT_TEXTURE_FILE_SUFFIXES = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga")
 
 @dataclass
 class DrawIBModel:
@@ -64,6 +73,14 @@ class DrawIBModel:
     # provide per-frame Position bytes.
     time_pos_frame_groups:dict = field(default_factory=dict, repr=False)
 
+    # Per-object texture slot bindings (Texture Bind blueprint nodes):
+    # resource sections that still need to be emitted, as
+    # (resource_name, target_filename) pairs, and file copy jobs as
+    # (resource_name, source_path, target_filename) triples. Both are
+    # filled by resolve_texture_slot_bindings() during __post_init__.
+    object_texture_binding_resource_list:list = field(init=False,repr=False,default_factory=list)
+    object_texture_binding_file_list:list = field(init=False,repr=False,default_factory=list)
+
 
     def __post_init__(self):
         # Every SubMeshModel in the list passed at init shares the same match_draw_ib, so take the first one
@@ -92,6 +109,11 @@ class DrawIBModel:
             self.submesh_ib_dict = submesh_ib_dict
             self.obj_name_draw_offset = obj_name_draw_offset
             self.index_count = total_index_count
+
+        # Resolve per-object texture slot bindings (Texture Bind nodes) now
+        # that the texture markup dict is loaded, so every game exporter
+        # sees ready-made INI lines on the DrawCallModels.
+        self.resolve_texture_slot_bindings()
 
     def _load_import_metadata_from_first_submesh(self):
         if not self.submesh_model_list:
@@ -329,6 +351,187 @@ class DrawIBModel:
 
     def get_submesh_texture_markup_info_list(self, submesh_model: SubMeshModel) -> list:
         return self.submesh_texturemarkinfolist_dict.get(submesh_model.submesh_name, [])
+
+    @staticmethod
+    def _object_texture_resource_slug(text: str, limit: int = 24) -> str:
+        '''Turn an arbitrary name into a safe ASCII resource name fragment.'''
+        slug = re.sub(r"[^A-Za-z0-9_]", "_", str(text or ""))
+        slug = re.sub(r"_+", "_", slug).strip("_")
+        return (slug or "obj")[:limit]
+
+    def resolve_texture_slot_bindings(self):
+        '''Resolve Texture Bind node rows into ready-made INI lines.
+
+        For every DrawCallModel carrying texture_slot_binding_list (collected
+        by BluePrintModel when an object passes through a Texture Bind node)
+        this builds:
+        - resolved_texture_slot_lines: written right before the object's
+          drawindexed line, so the replacement only affects that draw;
+        - resolved_texture_slot_restore_lines: written right after the draw
+          when "Restore After Draw" is on (ref capture + rebind);
+
+        MARK sources reuse the Submesh's existing Slot / SharedSlot resource
+        (no new section or file copy). FILE sources get a dedicated resource
+        name; the actual copy and the [ResourceXXX] section happen later in
+        the export pipeline (M_IniHelper), driven by the two job lists this
+        method fills on self.
+
+        Raises ValueError on any invalid row so a typo fails the export
+        loudly instead of silently reaching the generated INI.
+        '''
+        self.object_texture_binding_resource_list = []
+        self.object_texture_binding_file_list = []
+
+        binding_owner_list = [
+            (submesh_model, draw_model)
+            for submesh_model in self.submesh_model_list
+            for draw_model in submesh_model.drawcall_model_list
+            if getattr(draw_model, "texture_slot_binding_list", None)
+        ]
+        if not binding_owner_list:
+            return
+
+        print("DrawIBModel: resolving per-object texture slot bindings, DrawIB: " + self.draw_ib)
+        if MIMIGlobalProperties.forbid_auto_texture_ini():
+            # The global switch only disables the automatic texture pipeline;
+            # a Texture Bind node is explicit user intent and still applies.
+            print("DrawIBModel: forbid_auto_texture_ini is on, but Texture Bind nodes are explicit user intent; bindings still apply.")
+
+        used_resource_names = set()
+        # One FILE resource per unique source path, shared by all objects
+        # that picked the same file (same dedupe idea as the hash style).
+        file_resource_by_source = {}
+
+        for submesh_model, draw_model in binding_owner_list:
+            markup_list = self.get_submesh_texture_markup_info_list(submesh_model)
+            before_lines = []
+            after_lines = []
+            seen_slots = set()
+
+            for binding in draw_model.texture_slot_binding_list:
+                if not binding.get("enabled", True):
+                    continue
+                node_label = str(binding.get("node_label", "") or "Texture Bind")
+                owner_name = str(getattr(draw_model, "obj_name", "") or draw_model)
+                slot = str(binding.get("slot", "") or "").strip().lower()
+                if OBJECT_TEXTURE_SLOT_PATTERN.match(slot) is None:
+                    raise ValueError(
+                        "Texture Bind node '" + node_label + "': invalid texture slot '" + str(binding.get("slot", ""))
+                        + "' for object '" + owner_name + "'; expected the form ps-t0."
+                    )
+                if slot in seen_slots:
+                    raise ValueError(
+                        "Texture Bind node '" + node_label + "': slot '" + slot + "' is bound twice for object '"
+                        + owner_name + "'."
+                    )
+                seen_slots.add(slot)
+
+                source_type = str(binding.get("source_type", "") or "")
+                if source_type == "MARK":
+                    resource_name = self._resolve_mark_texture_resource(binding, markup_list, node_label, owner_name, submesh_model)
+                elif source_type == "FILE":
+                    resource_name = self._resolve_file_texture_resource(
+                        binding, node_label, owner_name, slot,
+                        used_resource_names, file_resource_by_source,
+                    )
+                elif source_type == "RESOURCE":
+                    resource_name = str(binding.get("resource_name", "") or "").strip()
+                    if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
+                        raise ValueError(
+                            "Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
+                            + "' for object '" + owner_name + "'."
+                        )
+                    used_resource_names.add(resource_name)
+                else:
+                    raise ValueError(
+                        "Texture Bind node '" + node_label + "': unknown source type '" + source_type
+                        + "' for object '" + owner_name + "'."
+                    )
+
+                if binding.get("restore_after_draw", False):
+                    # Capture the currently bound texture before replacing
+                    # it, then rebind the original after the draw. The ref
+                    # keyword is the same backup trick used for the SnowBreak
+                    # index buffer; verify on the target game before shipping.
+                    backup_name = resource_name + "_Bak_" + str(len(before_lines))
+                    before_lines.append(backup_name + " = ref " + slot)
+                    before_lines.append(slot + " = " + resource_name)
+                    after_lines.append(slot + " = " + backup_name)
+                else:
+                    before_lines.append(slot + " = " + resource_name)
+
+            draw_model.resolved_texture_slot_lines = before_lines
+            draw_model.resolved_texture_slot_restore_lines = after_lines
+
+    def _resolve_mark_texture_resource(self, binding, markup_list, node_label, owner_name, submesh_model) -> str:
+        '''MARK source: reuse the Submesh mark's existing resource name.'''
+        mark_name = str(binding.get("mark_name", "") or "").strip()
+        if not mark_name:
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
+            )
+        matched_markup = None
+        for markup_info in markup_list:
+            if str(getattr(markup_info, "mark_name", "") or "").strip().lower() == mark_name.lower():
+                matched_markup = markup_info
+                break
+        if matched_markup is None:
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
+                + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
+            )
+        if str(getattr(matched_markup, "mark_type", "") or "") not in ("Slot", "SharedSlot"):
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
+            )
+        return matched_markup.get_resource_name()
+
+    def _resolve_file_texture_resource(self, binding, node_label, owner_name, slot, used_resource_names, file_resource_by_source) -> str:
+        '''FILE source: build a unique resource name and record the copy job.'''
+        source_path = str(binding.get("file_path", "") or "").strip()
+        if not source_path:
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': texture file path is empty for object '" + owner_name + "'."
+            )
+        file_suffix = os.path.splitext(source_path)[1].lower()
+        if file_suffix not in OBJECT_TEXTURE_FILE_SUFFIXES:
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
+                + "' for object '" + owner_name + "'; use one of " + ", ".join(OBJECT_TEXTURE_FILE_SUFFIXES) + "."
+            )
+        if not os.path.exists(source_path):
+            raise ValueError(
+                "Texture Bind node '" + node_label + "': texture file does not exist: " + source_path
+                + " (object '" + owner_name + "')."
+            )
+
+        source_key = source_path.casefold()
+        existing = file_resource_by_source.get(source_key)
+        if existing is not None:
+            # Same file picked by another object: reuse the same resource.
+            return existing
+
+        base_name = (
+            "ResourceTex_"
+            + self._object_texture_resource_slug(self.draw_ib, 16)
+            + "_"
+            + self._object_texture_resource_slug(owner_name, 24)
+            + "_"
+            + slot.replace("-", "_")
+        )
+        resource_name = base_name
+        counter = 2
+        while resource_name in used_resource_names:
+            resource_name = base_name + "_" + str(counter)
+            counter += 1
+        used_resource_names.add(resource_name)
+
+        target_filename = resource_name + file_suffix
+        file_resource_by_source[source_key] = resource_name
+        self.object_texture_binding_file_list.append((resource_name, source_path, target_filename))
+        self.object_texture_binding_resource_list.append((resource_name, target_filename))
+        return resource_name
+
 
     def get_lod_name(self) -> str:
         """Return the LOD name shared by the Submeshes of this DrawIB ('' when none).

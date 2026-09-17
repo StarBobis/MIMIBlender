@@ -61,6 +61,12 @@ class Exporter:
             self.blueprint_model.keyname_mkey_dict,
         )
 
+        # Texture Bind node resources are explicit user intent: they apply
+        # even when the automatic texture pipeline is disabled.
+        sections.append_object_texture_binding_resources(lines, self.drawib_model_list)
+        for drawib_model in self.drawib_model_list:
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
+
         # Texture handling
         if not MIMIGlobalProperties.forbid_auto_texture_ini():
             sections.append_texture_resources(lines, self.drawib_model_list)

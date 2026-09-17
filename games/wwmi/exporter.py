@@ -406,6 +406,7 @@ class Exporter:
             print("=" * 60)
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start copying Slot textures...")
             M_IniHelper.move_slot_style_textures(draw_ib_model=draw_ib_model)
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=draw_ib_model)
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Slot texture copy done")
 
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
@@ -414,6 +415,9 @@ class Exporter:
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start generating Hash texture INI...")
             M_IniHelper.generate_hash_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
             M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
+            # Texture Bind node FILE resources are explicit user intent and
+            # must exist even when the automatic texture pipeline is off.
+            M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Hash/SharedSlot texture INI generation done")
             print("=" * 60)
 

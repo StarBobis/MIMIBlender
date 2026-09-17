@@ -763,6 +763,9 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
     layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
+    # Texture Bind replaces texture slots right before each passing object's
+    # drawindexed; it is a pass-through like the Group node.
+    layout.operator("node.add_node", text=tr("Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
     # The three dynamic mod nodes are named after the data they switch, so a
     # user can tell them apart without opening the documentation.
     layout.operator("node.add_node", text=tr("DrawIndex Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimeSwitch"

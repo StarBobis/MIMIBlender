@@ -26,6 +26,7 @@ from .ui import ui_panel_fast_texture
 from .ui import ui_panel_updater
 
 from .blueprint import blueprint_node_obj
+from .blueprint import blueprint_node_texture
 from .blueprint import blueprint_node_base
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
@@ -99,6 +100,8 @@ def _register_steps():
     # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
     yield blueprint_node_shapekey.register
     yield blueprint_node_obj.register
+    # Texture Bind node and its PropertyGroup register right after the base object nodes.
+    yield blueprint_node_texture.register
     # Time Switch node and its animation baker register right after the base object nodes.
     yield blueprint_node_time_switch.register
     # Time Position Switch and Time Shape Key build on the same timeline machinery.
@@ -149,6 +152,7 @@ def unregister():
         blueprint_node_time_pos_switch.unregister,
         blueprint_node_time_switch.unregister,
         blueprint_node_obj.unregister,
+        blueprint_node_texture.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
         ui_func_import_mmt.unregister,

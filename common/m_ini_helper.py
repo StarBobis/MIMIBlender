@@ -157,15 +157,25 @@ class M_IniHelper:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("  ; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
+                    # Per-object Texture Bind lines go right before this
+                    # object's drawindexed (after the submesh level ones).
+                    for slot_line in M_ControlFlow.get_object_texture_slot_lines(obj_model):
+                        drawindexed_str_list.append("  " + slot_line)
                     draw_line = obj_model.get_drawindexed_str(obj_name_draw_offset_dict)
                     drawindexed_str_list.append("  " + draw_line)
+                    for slot_line in M_ControlFlow.get_object_texture_slot_restore_lines(obj_model):
+                        drawindexed_str_list.append("  " + slot_line)
                 drawindexed_str_list.append("endif")
             else:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
+                    for slot_line in M_ControlFlow.get_object_texture_slot_lines(obj_model):
+                        drawindexed_str_list.append(slot_line)
                     draw_line = obj_model.get_drawindexed_str(obj_name_draw_offset_dict)
                     drawindexed_str_list.append(draw_line)
+                    for slot_line in M_ControlFlow.get_object_texture_slot_restore_lines(obj_model):
+                        drawindexed_str_list.append(slot_line)
             drawindexed_str_list.append("")
 
         return drawindexed_str_list
@@ -208,15 +218,23 @@ class M_IniHelper:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("  ; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
+                    for slot_line in M_ControlFlow.get_object_texture_slot_lines(obj_model):
+                        drawindexed_str_list.append("  " + slot_line)
                     draw_line = obj_model.get_drawindexed_instanced_str(obj_name_draw_offset_dict)
                     drawindexed_str_list.append("  " + draw_line)
+                    for slot_line in M_ControlFlow.get_object_texture_slot_restore_lines(obj_model):
+                        drawindexed_str_list.append("  " + slot_line)
                 drawindexed_str_list.append("endif")
             else:
                 for obj_model in obj_model_list:
                     display_name = str(getattr(obj_model, 'obj_name', '') or getattr(obj_model, 'display_name', '') or '')
                     drawindexed_str_list.append("; [mesh:" + display_name + "] [vertex_count:" + str(obj_model.vertex_count) + "]" )
+                    for slot_line in M_ControlFlow.get_object_texture_slot_lines(obj_model):
+                        drawindexed_str_list.append(slot_line)
                     draw_line = obj_model.get_drawindexed_instanced_str(obj_name_draw_offset_dict)
                     drawindexed_str_list.append(draw_line)
+                    for slot_line in M_ControlFlow.get_object_texture_slot_restore_lines(obj_model):
+                        drawindexed_str_list.append(slot_line)
             drawindexed_str_list.append("")
 
         return drawindexed_str_list
@@ -555,6 +573,62 @@ class M_IniHelper:
         print("[TRACE]   Slot skipped (non-Slot type): " + str(slot_skipped_non_slot))
         print("=" * 60)
     
+    @classmethod
+    def add_object_texture_binding_resource_sections(cls, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModel):
+        '''Resource declarations for the Texture Bind node FILE textures.
+
+        Unlike the automatic Slot pipeline this runs even when
+        forbid_auto_texture_ini is on: a Texture Bind node is explicit user
+        intent, not an automatic texture replacement.
+        '''
+        resource_entries = list(getattr(draw_ib_model, "object_texture_binding_resource_list", None) or [])
+        if not resource_entries:
+            return
+
+        resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
+        appended_resource_names = set()
+        for resource_name, target_filename in resource_entries:
+            if resource_name in appended_resource_names:
+                continue
+            appended_resource_names.add(resource_name)
+            resource_texture_section.append("[" + resource_name + "]")
+            resource_texture_section.append("filename = " + GlobalConfig.ini_texture_filename(target_filename))
+            resource_texture_section.new_line()
+
+        ini_builder.append_section(resource_texture_section)
+
+    @classmethod
+    def move_object_texture_binding_files(cls, draw_ib_model: DrawIBModel):
+        '''Copy the Texture Bind FILE source textures into the mod Texture folder.
+
+        Skips targets that already exist (same dedupe behaviour as
+        move_slot_style_textures), so calling this more than once is safe.
+        '''
+        file_list = list(getattr(draw_ib_model, "object_texture_binding_file_list", None) or [])
+        if not file_list:
+            return
+
+        texture_output_folder = GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib_model.draw_ib)
+        os.makedirs(texture_output_folder, exist_ok=True)
+
+        copied_count = 0
+        skipped_count = 0
+        for resource_name, source_path, target_filename in file_list:
+            target_path = os.path.join(texture_output_folder, target_filename)
+            if os.path.exists(target_path):
+                skipped_count += 1
+                continue
+            if not os.path.exists(source_path):
+                print("M_IniHelper: Texture Bind source file missing, skip copy: " + source_path)
+                continue
+            shutil.copy2(source_path, target_path)
+            copied_count += 1
+
+        print(
+            "M_IniHelper: Texture Bind texture copy done, DrawIB: " + draw_ib_model.draw_ib
+            + ", copied: " + str(copied_count) + ", skipped (target exists): " + str(skipped_count)
+        )
+
     @staticmethod
     def add_time_animation_sections(ini_builder, present_section, m_key):
         """Emit one timeline, optionally controlled by a keyboard switch.

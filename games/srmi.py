@@ -68,6 +68,7 @@ class ExportSRMI:
         for drawib_model in self.drawib_model_list:
             print("ExportSRMI: copying texture files of DrawIB " + drawib_model.draw_ib + " ...")
             M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
             
     def generate_ini_file(self):
         ini_builder = M_IniBuilder()
@@ -115,6 +116,10 @@ class ExportSRMI:
                         vertexlimit_section.append("uav_byte_stride = 4")
                         vertexlimit_section.new_line()
                 ini_builder.append_section(vertexlimit_section)
+
+            # Texture Bind node FILE resources are explicit user intent and
+            # must exist even when the automatic texture pipeline is off.
+            M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=ini_builder, drawib_model=drawib_model)
 
             if not MIMIGlobalProperties.forbid_auto_texture_ini() and drawib_model.submesh_texturemarkinfolist_dict:
                 resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)

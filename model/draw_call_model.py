@@ -25,6 +25,17 @@ class DrawCallModel:
     # Effective conditions, resolved when BlueprintModel is parsed
     work_key_list:list[M_Key] = field(init=False,repr=False,default_factory=list)
 
+    # Per-object texture slot bindings collected from Texture Bind blueprint
+    # nodes this object passed through (list of plain dicts; see
+    # BluePrintModel._collect_texture_bindings). Empty for unbound objects.
+    texture_slot_binding_list:list = field(init=False,repr=False,default_factory=list)
+
+    # INI lines resolved by DrawIBModel.resolve_texture_slot_bindings():
+    # binding lines go right before this object's drawindexed, restore lines
+    # right after it (only when the user enabled "Restore After Draw").
+    resolved_texture_slot_lines:list[str] = field(init=False,repr=False,default_factory=list)
+    resolved_texture_slot_restore_lines:list[str] = field(init=False,repr=False,default_factory=list)
+
     # Set by traversal through a Time Position Switch, not by alias matching.
     # An ordinary DrawIndexed branch may legally share this clock variable.
     time_position_key_name:str = field(init=False, default="")

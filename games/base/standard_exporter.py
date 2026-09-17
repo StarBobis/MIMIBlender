@@ -104,6 +104,7 @@ class StandardExporter:
         for drawib_model in self.drawib_model_list:
             self.add_drawib_sections(ini_builder=ini_builder, drawib_model=drawib_model)
             M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
             GlobalConfig.generated_mod_number = GlobalConfig.generated_mod_number + 1
 
         self.add_final_sections(

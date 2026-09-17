@@ -373,7 +373,13 @@ def append_draw_overrides(lines: list[str], drawib_model_list,
                 index_count = draw_model.index_count
                 first_idx = draw_model.index_offset
                 lines.append(f"; [mesh:{draw_model.obj_name}] [vertex_count:{draw_model.vertex_count}]")
+                # Per-object Texture Bind lines: right before this draw, so
+                # the replacement only affects this drawindexed call.
+                for slot_line in getattr(draw_model, "resolved_texture_slot_lines", None) or []:
+                    lines.append(slot_line)
                 lines.append(f"drawindexed = {index_count},{first_idx},0")
+                for slot_line in getattr(draw_model, "resolved_texture_slot_restore_lines", None) or []:
+                    lines.append(slot_line)
 
             if len(keyname_mkey_dict.keys()) != 0:
                 lines.append(f"$active{active_index} = 1")
@@ -407,6 +413,29 @@ def append_texture_resources(lines: list[str], drawib_model_list):
 
     if tex_lines:
         lines.append("; MARK: Texture resources")
+        lines.append("")
+        lines.extend(tex_lines)
+
+
+def append_object_texture_binding_resources(lines: list[str], drawib_model_list):
+    """Resource sections of Texture Bind node FILE textures (explicit user
+    intent, so this runs even when the automatic texture pipeline is off)."""
+    appended: set[str] = set()
+    tex_lines: list[str] = []
+
+    for drawib_model in drawib_model_list:
+        for resource_name, target_filename in getattr(drawib_model, "object_texture_binding_resource_list", []) or []:
+            if resource_name in appended:
+                continue
+            appended.add(resource_name)
+            tex_lines.extend([
+                f"[{resource_name}]",
+                f"filename = {GlobalConfig.ini_texture_filename(target_filename)}",
+                "",
+            ])
+
+    if tex_lines:
+        lines.append("; MARK: Texture Bind resources")
         lines.append("")
         lines.extend(tex_lines)
 

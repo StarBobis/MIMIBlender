@@ -3,6 +3,16 @@
 
 class M_ControlFlow:
     @staticmethod
+    def get_object_texture_slot_lines(obj_model):
+        '''Binding lines written right before this object's drawindexed.'''
+        return list(getattr(obj_model, "resolved_texture_slot_lines", None) or [])
+
+    @staticmethod
+    def get_object_texture_slot_restore_lines(obj_model):
+        '''Restore lines written right after this object's drawindexed.'''
+        return list(getattr(obj_model, "resolved_texture_slot_restore_lines", None) or [])
+
+    @staticmethod
     def append_drawindexed_with_slot_lines(
         section,
         ordered_draw_obj_model_list,
@@ -39,8 +49,15 @@ class M_ControlFlow:
                 )
                 for line in slot_line_provider(obj_model):
                     section.append(indent + line)
+                # Per-object Texture Bind lines: emitted after the submesh
+                # level slot lines and right before this object's draw, so a
+                # per-object binding overrides the submesh one for this draw.
+                for line in M_ControlFlow.get_object_texture_slot_lines(obj_model):
+                    section.append(indent + line)
                 draw_line = obj_model.get_drawindexed_str(obj_name_draw_offset_dict)
                 section.append(indent + draw_line)
+                for line in M_ControlFlow.get_object_texture_slot_restore_lines(obj_model):
+                    section.append(indent + line)
 
             if condition_str:
                 section.append("endif")
