@@ -36,6 +36,13 @@ from bpy.types import PropertyGroup
 
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
+from .blueprint_node_texture import (
+    _MARK_NAME_NONE,
+    _find_submesh_mark_by_name,
+    _load_submesh_mark_dicts,
+    _resolve_upstream_submesh_name,
+    normalize_mark_name_enum_value,
+)
 
 # A 3Dmigoto texture hash is 16 hexadecimal characters.
 _TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{16}$")
@@ -87,8 +94,9 @@ class MIMITextureHashItem(PropertyGroup):
 
     mark_name: bpy.props.EnumProperty(
         name=tr("Mark Name"),
-        description=tr("Hash-style mark from the SSMT5 texture mark page; its texture file is copied into the generated mod"),
+        description=tr("Hash-style mark from the SSMT5 texture mark page; its texture file is copied into the generated mod. Picking one fills the texture hash automatically"),
         items=lambda self, context: _texture_hash_bind_mark_name_items(self),
+        update=lambda self, context: _texture_hash_item_mark_changed(self),
     ) # type: ignore
 
     file_path: bpy.props.StringProperty(
@@ -121,56 +129,28 @@ def _find_owner_hash_bind_node(item):
     return None
 
 
-def _resolve_upstream_submesh_name(node, depth=0):
-    '''Walk upstream through pass-through nodes to find an Object Info node.'''
-    if node is None or depth > 16:
-        return ""
-    if getattr(node, "bl_idname", "") == 'MIMINode_Object_Info':
-        submesh_name = str(getattr(node, "submesh_name", "") or "").strip()
-        if submesh_name:
-            return submesh_name
-        return str(getattr(node, "object_name", "") or "").strip()
-    for socket in getattr(node, "inputs", []):
-        for link in getattr(socket, "links", []):
-            found = _resolve_upstream_submesh_name(link.from_node, depth + 1)
-            if found:
-                return found
-    return ""
+def _texture_hash_item_mark_changed(item):
+    '''Picking a mark fills the texture hash from the mark's MarkHash value.'''
+    mark_dict = _find_submesh_mark_by_name(item, _find_owner_hash_bind_node)
+    if mark_dict and mark_dict["hash"]:
+        item.texture_hash = mark_dict["hash"]
+    _texture_hash_item_refresh_display(item)
 
 
-# The slot node keeps its own resolver with the same logic; both stay
-# small on purpose so each node file stays readable on its own.
 def _texture_hash_bind_mark_name_items(item):
     '''Enum items for the mark name dropdown: Hash-style marks of the upstream Submesh.'''
-    from .blueprint_node_texture import _MARK_NAME_NONE
     empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
     try:
         node = _find_owner_hash_bind_node(item)
         submesh_name = _resolve_upstream_submesh_name(node)
         if not submesh_name:
             return empty_items
-        from ..workspace.submesh_json import SubmeshJson
-        from ..workspace.mmt_workspace import MMTWorkSpace
-        submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
         items = list(empty_items)
-        seen_names = set()
-        for raw_mark in submesh_json.TextureMarkUpInfoList:
-            mark_name = ""
-            mark_type = ""
-            if isinstance(raw_mark, dict):
-                mark_name = str(raw_mark.get("MarkName", "") or "").strip()
-                mark_type = str(raw_mark.get("MarkType", "") or "").strip()
-            else:
-                mark_name = str(getattr(raw_mark, "MarkName", "") or "").strip()
-                mark_type = str(getattr(raw_mark, "MarkType", "") or "").strip()
+        for mark_dict in _load_submesh_mark_dicts(submesh_name):
             # Only Hash-style marks make sense for this node.
-            if mark_type != "Hash":
+            if mark_dict["type"] != "Hash":
                 continue
-            normalized = mark_name.lower()
-            if not mark_name or normalized in seen_names:
-                continue
-            seen_names.add(normalized)
-            items.append((mark_name, mark_name, ""))
+            items.append((mark_dict["name"], mark_dict["name"], ""))
         return items if len(items) > 1 else empty_items
     except Exception:
         # Never let a dropdown lookup break the node editor drawing.
@@ -226,6 +206,69 @@ class MMT_OT_TexHashBindRemoveItem(I18nOperator):
         return {'FINISHED'}
 
 
+class MMT_OT_TexHashBindAutoFill(I18nOperator):
+    '''Add one binding row for every Hash-style mark of the upstream Submesh'''
+    bl_idname = "mimi.texhashbind_autofill"
+    bl_label = "Auto Fill From Marks"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
+        if tree is None:
+            tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if tree is None:
+            return {'CANCELLED'}
+        node = tree.nodes.get(self.node_name)
+        if node is None or getattr(node, "bl_idname", "") != 'MIMINode_Hash_Texture_Bind':
+            return {'CANCELLED'}
+
+        submesh_name = _resolve_upstream_submesh_name(node)
+        if not submesh_name:
+            self.report({'ERROR'}, tr("Upstream Submesh not resolved; set the Submesh on the upstream Object Info node first"))
+            return {'CANCELLED'}
+
+        # Rows already referencing a mark are kept untouched; the operator
+        # only appends what is missing, so it is safe to press repeatedly.
+        existing_names = set()
+        for row_item in node.texture_hash_items:
+            if str(row_item.source_type or "") == 'MARK':
+                existing_names.add(normalize_mark_name_enum_value(row_item.mark_name).lower())
+
+        added_count = 0
+        skipped_count = 0
+        try:
+            mark_dict_list = _load_submesh_mark_dicts(submesh_name)
+        except Exception as error:
+            self.report({'ERROR'}, tr("Failed to read the texture marks of Submesh") + " '" + submesh_name + "': " + str(error))
+            return {'CANCELLED'}
+
+        for mark_dict in mark_dict_list:
+            if mark_dict["type"] != "Hash":
+                continue
+            if not mark_dict["name"] or mark_dict["name"].lower() in existing_names:
+                skipped_count += 1
+                continue
+            if not mark_dict["hash"]:
+                print("Hash Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkHash, skipped")
+                skipped_count += 1
+                continue
+            row_item = node.texture_hash_items.add()
+            row_item.enabled = True
+            row_item.texture_hash = mark_dict["hash"]
+            row_item.source_type = 'MARK'
+            row_item.mark_name = mark_dict["name"]
+            _texture_hash_item_refresh_display(row_item)
+            added_count += 1
+            existing_names.add(mark_dict["name"].lower())
+
+        node.texture_hash_index = len(node.texture_hash_items) - 1
+        self.report({'INFO'}, tr("Auto fill done: {added} row(s) added, {skipped} skipped").format(added=added_count, skipped=skipped_count))
+        return {'FINISHED'}
+
+
 @translatable
 class MIMINode_Hash_Texture_Bind(MIMINodeBase):
     '''Hash Texture Bind replaces a texture hash with conditional this= blocks while the upstream switch conditions hold'''
@@ -267,6 +310,11 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         remove_operator = column.operator("mimi.texhashbind_remove_item", text="", icon='REMOVE')
         remove_operator.node_name = self.name
         remove_operator.tree_name = tree.name if tree else ""
+        # One click turns every Hash-style mark of the upstream Submesh
+        # into a ready-made MARK binding row.
+        autofill_operator = column.operator("mimi.texhashbind_autofill", text="", icon='FILE_REFRESH')
+        autofill_operator.node_name = self.name
+        autofill_operator.tree_name = tree.name if tree else ""
 
         if not self.texture_hash_items:
             layout.label(text=tr("No bindings; objects pass through unchanged"), icon='INFO')
@@ -290,6 +338,10 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
                 box.label(text=tr("Upstream Submesh not resolved; mark names unavailable"), icon='ERROR')
         elif source_type == 'FILE':
             box.prop(item, "file_path")
+            # With a FILE source the mark dropdown only borrows the hash:
+            # pick the original texture here, then point file_path at the
+            # replacement image.
+            box.prop(item, "mark_name")
         else:
             box.prop(item, "resource_name")
 
@@ -306,6 +358,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
 classes = (
     MMT_OT_TexHashBindAddItem,
     MMT_OT_TexHashBindRemoveItem,
+    MMT_OT_TexHashBindAutoFill,
     MIMINode_Hash_Texture_Bind,
 )
 

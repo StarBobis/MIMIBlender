@@ -95,8 +95,9 @@ class MIMITextureSlotItem(PropertyGroup):
 
     mark_name: bpy.props.EnumProperty(
         name=tr("Mark Name"),
-        description=tr("Semantic mark name from the SSMT5 texture mark page; resolved against the Submesh of the upstream object"),
+        description=tr("Semantic mark name from the SSMT5 texture mark page; resolved against the Submesh of the upstream object. Picking one fills the slot automatically"),
         items=lambda self, context: _texture_bind_mark_name_items(self),
+        update=lambda self, context: _texture_slot_item_mark_changed(self),
     ) # type: ignore
 
     file_path: bpy.props.StringProperty(
@@ -153,6 +154,75 @@ def _resolve_upstream_submesh_name(node, depth=0):
     return ""
 
 
+def _load_submesh_mark_dicts(submesh_name):
+    '''Texture marks of one Submesh as normalized plain dicts.
+
+    Shared by the mark dropdowns, the auto-fill operators and the
+    pick-a-mark update callbacks, so all of them agree on the workspace
+    format. Returns [] when the Submesh JSON is missing or has no marks.
+    '''
+    if not submesh_name:
+        return []
+    # Imported here so a missing workspace never breaks the node UI.
+    from ..workspace.submesh_json import SubmeshJson
+    from ..workspace.mmt_workspace import MMTWorkSpace
+    submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
+    mark_dict_list = []
+    seen_names = set()
+    for raw_mark in submesh_json.TextureMarkUpInfoList:
+        if isinstance(raw_mark, dict):
+            mark_name = str(raw_mark.get("MarkName", "") or "").strip()
+            mark_dict = {
+                "name": mark_name,
+                "type": str(raw_mark.get("MarkType", "") or "").strip(),
+                "slot": str(raw_mark.get("MarkSlot", "") or "").strip().lower(),
+                "hash": str(raw_mark.get("MarkHash", "") or "").strip().lower(),
+                "filename": str(raw_mark.get("MarkFileName", "") or "").strip(),
+            }
+        else:
+            mark_name = str(getattr(raw_mark, "MarkName", "") or "").strip()
+            mark_dict = {
+                "name": mark_name,
+                "type": str(getattr(raw_mark, "MarkType", "") or "").strip(),
+                "slot": str(getattr(raw_mark, "MarkSlot", "") or "").strip().lower(),
+                "hash": str(getattr(raw_mark, "MarkHash", "") or "").strip().lower(),
+                "filename": str(getattr(raw_mark, "MarkFileName", "") or "").strip(),
+            }
+        normalized = mark_name.lower()
+        if not mark_name or normalized in seen_names:
+            continue
+        seen_names.add(normalized)
+        mark_dict_list.append(mark_dict)
+    return mark_dict_list
+
+
+def _find_submesh_mark_by_name(item, find_owner_node):
+    '''Locate the mark dict matching the row's mark name ("" when missing).'''
+    try:
+        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+        if not mark_name:
+            return None
+        node = find_owner_node(item)
+        submesh_name = _resolve_upstream_submesh_name(node)
+        if not submesh_name:
+            return None
+        for mark_dict in _load_submesh_mark_dicts(submesh_name):
+            if mark_dict["name"].lower() == mark_name.lower():
+                return mark_dict
+    except Exception:
+        # Dropdown and callback lookups must never break the node editor.
+        pass
+    return None
+
+
+def _texture_slot_item_mark_changed(item):
+    '''Picking a mark fills the slot from the mark's own MarkSlot value.'''
+    mark_dict = _find_submesh_mark_by_name(item, _find_owner_bind_node)
+    if mark_dict and mark_dict["slot"]:
+        item.slot = mark_dict["slot"]
+    _texture_slot_item_refresh_display(item)
+
+
 def _texture_bind_mark_name_items(item):
     '''Enum items for the mark name dropdown: marks of the upstream Submesh.'''
     empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
@@ -161,23 +231,9 @@ def _texture_bind_mark_name_items(item):
         submesh_name = _resolve_upstream_submesh_name(node)
         if not submesh_name:
             return empty_items
-        # Imported here so a missing workspace never breaks the node UI.
-        from ..workspace.submesh_json import SubmeshJson
-        from ..workspace.mmt_workspace import MMTWorkSpace
-        submesh_json = SubmeshJson(MMTWorkSpace.check_and_get_submesh_json_path(submesh_name))
         items = list(empty_items)
-        seen_names = set()
-        for raw_mark in submesh_json.TextureMarkUpInfoList:
-            mark_name = ""
-            if isinstance(raw_mark, dict):
-                mark_name = str(raw_mark.get("MarkName", "") or "").strip()
-            else:
-                mark_name = str(getattr(raw_mark, "MarkName", "") or "").strip()
-            normalized = mark_name.lower()
-            if not mark_name or normalized in seen_names:
-                continue
-            seen_names.add(normalized)
-            items.append((mark_name, mark_name, ""))
+        for mark_dict in _load_submesh_mark_dicts(submesh_name):
+            items.append((mark_dict["name"], mark_dict["name"], ""))
         return items if len(items) > 1 else empty_items
     except Exception:
         # Never let a dropdown lookup break the node editor drawing.
@@ -240,6 +296,69 @@ class MMT_OT_TexBindRemoveItem(I18nOperator):
         return {'FINISHED'}
 
 
+class MMT_OT_TexBindAutoFill(I18nOperator):
+    '''Add one binding row for every Slot / SharedSlot mark of the upstream Submesh'''
+    bl_idname = "mimi.texbind_autofill"
+    bl_label = "Auto Fill From Marks"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
+        if tree is None:
+            tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if tree is None:
+            return {'CANCELLED'}
+        node = tree.nodes.get(self.node_name)
+        if node is None or getattr(node, "bl_idname", "") != 'MIMINode_Texture_Bind':
+            return {'CANCELLED'}
+
+        submesh_name = _resolve_upstream_submesh_name(node)
+        if not submesh_name:
+            self.report({'ERROR'}, tr("Upstream Submesh not resolved; set the Submesh on the upstream Object Info node first"))
+            return {'CANCELLED'}
+
+        # Rows already referencing a mark are kept untouched; the operator
+        # only appends what is missing, so it is safe to press repeatedly.
+        existing_names = set()
+        for row_item in node.texture_slot_items:
+            if str(row_item.source_type or "") == 'MARK':
+                existing_names.add(normalize_mark_name_enum_value(row_item.mark_name).lower())
+
+        added_count = 0
+        skipped_count = 0
+        try:
+            mark_dict_list = _load_submesh_mark_dicts(submesh_name)
+        except Exception as error:
+            self.report({'ERROR'}, tr("Failed to read the texture marks of Submesh") + " '" + submesh_name + "': " + str(error))
+            return {'CANCELLED'}
+
+        for mark_dict in mark_dict_list:
+            if mark_dict["type"] not in ("Slot", "SharedSlot"):
+                continue
+            if not mark_dict["name"] or mark_dict["name"].lower() in existing_names:
+                skipped_count += 1
+                continue
+            if not mark_dict["slot"]:
+                print("Slot Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkSlot, skipped")
+                skipped_count += 1
+                continue
+            row_item = node.texture_slot_items.add()
+            row_item.enabled = True
+            row_item.slot = mark_dict["slot"]
+            row_item.source_type = 'MARK'
+            row_item.mark_name = mark_dict["name"]
+            _texture_slot_item_refresh_display(row_item)
+            added_count += 1
+            existing_names.add(mark_dict["name"].lower())
+
+        node.texture_slot_index = len(node.texture_slot_items) - 1
+        self.report({'INFO'}, tr("Auto fill done: {added} row(s) added, {skipped} skipped").format(added=added_count, skipped=skipped_count))
+        return {'FINISHED'}
+
+
 @translatable
 class MIMINode_Texture_Bind(MIMINodeBase):
     '''Slot Texture Bind assigns replacement textures to slots right before each passing object's drawindexed'''
@@ -282,6 +401,11 @@ class MIMINode_Texture_Bind(MIMINodeBase):
         remove_operator = column.operator("mimi.texbind_remove_item", text="", icon='REMOVE')
         remove_operator.node_name = self.name
         remove_operator.tree_name = tree.name if tree else ""
+        # One click turns every Slot / SharedSlot mark of the upstream
+        # Submesh into a ready-made MARK binding row.
+        autofill_operator = column.operator("mimi.texbind_autofill", text="", icon='FILE_REFRESH')
+        autofill_operator.node_name = self.name
+        autofill_operator.tree_name = tree.name if tree else ""
 
         if not self.texture_slot_items:
             layout.label(text=tr("No bindings; objects pass through unchanged"), icon='INFO')
@@ -325,6 +449,7 @@ class MIMINode_Texture_Bind(MIMINodeBase):
 classes = (
     MMT_OT_TexBindAddItem,
     MMT_OT_TexBindRemoveItem,
+    MMT_OT_TexBindAutoFill,
     MIMINode_Texture_Bind,
 )
 

@@ -584,6 +584,13 @@ TRANSLATIONS_ZH_CN = {
     "{count} hash binding(s)": "{count} 条Hash绑定",
     "Add Hash Texture Binding": "添加Hash贴图绑定",
     "Remove Hash Texture Binding": "移除Hash贴图绑定",
+    # Auto fill from the SSMT5 texture marks of the upstream Submesh.
+    "Auto Fill From Marks": "从标记自动填充",
+    "Auto fill done: {added} row(s) added, {skipped} skipped": "自动填充完成：新增 {added} 行，跳过 {skipped} 行",
+    "Upstream Submesh not resolved; set the Submesh on the upstream Object Info node first": "未解析到上游Submesh；请先在上游物体信息节点上设置Submesh",
+    "Failed to read the texture marks of Submesh": "读取Submesh的贴图标记失败",
+    "Semantic mark name from the SSMT5 texture mark page; resolved against the Submesh of the upstream object. Picking one fills the slot automatically": "SSMT5贴图标记页中的语义标记名；按上游物体的Submesh解析。选择后自动填入槽位",
+    "Hash-style mark from the SSMT5 texture mark page; its texture file is copied into the generated mod. Picking one fills the texture hash automatically": "SSMT5贴图标记页中的Hash风格标记；其贴图文件会复制进生成的Mod。选择后自动填入贴图Hash",
     "Use Shape Key Options": "使用形态键选项",
     "Export the checked shape key buffers and runtime control config": "导出勾选的形态键缓冲区和运行时控制配置",
     "Auto Add Missing Vertex Groups": "自动补充缺失的顶点组",
