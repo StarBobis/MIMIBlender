@@ -36,6 +36,17 @@ class DrawCallModel:
     resolved_texture_slot_lines:list[str] = field(init=False,repr=False,default_factory=list)
     resolved_texture_slot_restore_lines:list[str] = field(init=False,repr=False,default_factory=list)
 
+    # Per-object hash texture bindings collected from Hash Texture Bind
+    # blueprint nodes this object passed through (list of plain dicts).
+    # Unlike slot bindings these become blueprint-global conditional
+    # "this = ..." blocks inside [TextureOverride_Texture_<hash>] sections.
+    hash_texture_binding_list:list = field(init=False,repr=False,default_factory=list)
+
+    # Rows resolved by DrawIBModel.resolve_hash_texture_bindings(): each row
+    # is {"texture_hash", "condition_str", "resource_name"} and carries the
+    # object condition captured at resolution time.
+    resolved_hash_texture_binding_list:list = field(init=False,repr=False,default_factory=list)
+
     # Set by traversal through a Time Position Switch, not by alias matching.
     # An ordinary DrawIndexed branch may legally share this clock variable.
     time_position_key_name:str = field(init=False, default="")

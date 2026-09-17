@@ -239,6 +239,93 @@ class M_IniHelper:
 
         return drawindexed_str_list
 
+    @staticmethod
+    def _collect_hash_binding_managed_hashes(drawib_drawibmodel_dict: dict) -> set:
+        '''Every texture hash explicitly bound by a Hash Texture Bind node.'''
+        managed_hash_set = set()
+        for draw_ib_model in drawib_drawibmodel_dict.values():
+            for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
+                for draw_model in getattr(submesh_model, "drawcall_model_list", []):
+                    for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
+                        managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
+        managed_hash_set.discard("")
+        return managed_hash_set
+
+    @classmethod
+    def generate_hash_style_object_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
+        '''Conditional hash-style overrides driven by Hash Texture Bind nodes.
+
+        One [TextureOverride_Texture_<hash>_Switch] section per managed hash,
+        shared by the whole blueprint: every resolved binding row becomes an
+        if/endif block around "this = ResourceXXX", so the switch conditions
+        collected upstream decide which texture is bound. Rows without a
+        condition become a plain unconditional this= line.
+
+        Emitted even when forbid_auto_texture_ini is on, for the same reason
+        as the slot bindings: a Hash Texture Bind node is explicit user
+        intent, not part of the automatic texture pipeline.
+        '''
+        # hash -> ordered list of (condition_str, resource_name)
+        binding_entry_dict: dict[str, list] = {}
+        for draw_ib_model in drawib_drawibmodel_dict.values():
+            for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
+                for draw_model in getattr(submesh_model, "drawcall_model_list", []):
+                    for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
+                        texture_hash = str(row.get("texture_hash", "") or "").strip().lower()
+                        if not texture_hash:
+                            continue
+                        condition_str = str(row.get("condition_str", "") or "").strip()
+                        resource_name = str(row.get("resource_name", "") or "").strip()
+                        binding_entry_dict.setdefault(texture_hash, []).append((condition_str, resource_name))
+
+        if not binding_entry_dict:
+            return
+
+        for texture_hash, entry_list in binding_entry_dict.items():
+            # Normalize: identical (condition, resource) pairs dedupe, the
+            # same condition with two different resources is a contradiction
+            # and mixing an unconditional row with conditional ones makes the
+            # result depend on line order, so both fail loudly.
+            resource_by_condition: dict[str, str] = {}
+            condition_order: list[str] = []
+            has_unconditional = False
+            for condition_str, resource_name in entry_list:
+                if not condition_str:
+                    has_unconditional = True
+                if condition_str in resource_by_condition:
+                    if resource_by_condition[condition_str] != resource_name:
+                        raise ValueError(
+                            "Hash Texture Bind: texture hash " + texture_hash + " is bound with condition '"
+                            + (condition_str or "<always>") + "' to both " + resource_by_condition[condition_str]
+                            + " and " + resource_name + "; give each switch state one texture."
+                        )
+                    continue
+                resource_by_condition[condition_str] = resource_name
+                condition_order.append(condition_str)
+
+            if has_unconditional and len(condition_order) > 1:
+                raise ValueError(
+                    "Hash Texture Bind: texture hash " + texture_hash + " mixes an unconditional binding with "
+                    + str(len(condition_order) - 1) + " conditional one(s); connect every branch through an explicit switch so the replacement states stay unambiguous."
+                )
+
+            switch_section = M_IniSection(M_SectionType.TextureOverrideTexture)
+            switch_section.append("[TextureOverride_Texture_" + texture_hash + "_Switch]")
+            switch_section.append("hash = " + texture_hash)
+            # Same priority as the automatic hash overrides, so the managed
+            # section behaves like a drop-in replacement for them.
+            switch_section.append("match_priority = 0")
+            for condition_str in condition_order:
+                if condition_str:
+                    switch_section.append("if " + condition_str)
+                    switch_section.append("  this = " + resource_by_condition[condition_str])
+                    switch_section.append("endif")
+                else:
+                    switch_section.append("this = " + resource_by_condition[condition_str])
+            switch_section.new_line()
+
+            ini_builder.append_section(switch_section)
+
     @classmethod
     def generate_hash_style_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict[str, DrawIBModel]):
         """
@@ -257,6 +344,11 @@ class M_IniHelper:
         # Step 2: initialize the dedupe list, then process Hash textures for each DrawIB
         # ═══════════════════════════════════════════════════
         repeat_hash_list: list[str] = []
+
+        # Hashes managed by Hash Texture Bind nodes are explicit user intent:
+        # the automatic unconditional override hands over to the conditional
+        # sections from generate_hash_style_object_texture_ini.
+        managed_hash_set = cls._collect_hash_binding_managed_hashes(drawib_drawibmodel_dict)
 
         for draw_ib, draw_ib_model in drawib_drawibmodel_dict.items():
             submesh_list = getattr(draw_ib_model, "submesh_model_list", [])
@@ -289,6 +381,13 @@ class M_IniHelper:
                     if texture_markup_info.mark_hash in repeat_hash_list:
                         continue
                     repeat_hash_list.append(texture_markup_info.mark_hash)
+
+                    # Hashes bound by Hash Texture Bind nodes keep their
+                    # resource management but skip the automatic override;
+                    # the conditional this= sections take over.
+                    if texture_markup_info.mark_hash in managed_hash_set:
+                        print("M_IniHelper: hash " + texture_markup_info.mark_hash + " is managed by Hash Texture Bind nodes; skipping the automatic Hash override.")
+                        continue
 
                     # Find the source texture file path
                     original_texture_file_path = cls._get_slot_texture_source_path(

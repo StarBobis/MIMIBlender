@@ -17,6 +17,7 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
 from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind, normalize_mark_name_enum_value
+from ..blueprint.blueprint_node_hash_texture import MIMINode_Hash_Texture_Bind
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -385,6 +386,21 @@ class BluePrintModel:
                         bindings,
                     )
 
+        elif unknown_node.bl_idname == MIMINode_Hash_Texture_Bind.bl_idname:
+            # Hash Texture Bind is a transparent pass-through like the Slot
+            # variant; the resolved rows later merge into one global
+            # [TextureOverride_Texture_<hash>] section per hash, so the same
+            # "parse first, then tag the new models" pattern applies here.
+            draw_model_count_before = len(self.ordered_draw_obj_data_model_list)
+            self.parse_current_node(unknown_node, chain_key_list)
+            bindings = self._collect_hash_texture_bindings(unknown_node)
+            if bindings:
+                for obj_model in self.ordered_draw_obj_data_model_list[draw_model_count_before:]:
+                    obj_model.hash_texture_binding_list = self._merge_hash_texture_bindings(
+                        getattr(obj_model, "hash_texture_binding_list", []),
+                        bindings,
+                    )
+
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
             obj = bpy.data.objects.get(unknown_node.object_name)
 
@@ -474,6 +490,44 @@ class BluePrintModel:
         order = []
         for binding in outer_list + inner_list:
             key = str(binding.get("slot", "")).strip().lower()
+            if key not in merged:
+                order.append(key)
+            merged[key] = binding
+        return [merged[key] for key in order]
+
+    @staticmethod
+    def _collect_hash_texture_bindings(bind_node):
+        '''Read the Hash Texture Bind node rows into plain dicts for export.'''
+        bindings = []
+        for item in getattr(bind_node, "texture_hash_items", []):
+            file_path = str(getattr(item, "file_path", "") or "").strip()
+            if file_path:
+                try:
+                    file_path = bpy.path.abspath(file_path)
+                except Exception:
+                    pass
+            bindings.append({
+                "enabled": bool(getattr(item, "enabled", True)),
+                "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
+                "source_type": str(getattr(item, "source_type", "") or ""),
+                "mark_name": normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "file_path": file_path,
+                "resource_name": str(getattr(item, "resource_name", "") or ""),
+                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Hash Texture Bind"),
+            })
+        return bindings
+
+    @staticmethod
+    def _merge_hash_texture_bindings(inner_list, outer_list):
+        '''Merge bindings of nested Hash Texture Bind nodes, keyed by hash.
+
+        Same rule as the slot variant: the node closest to the Object Info
+        node wins for the same texture hash.
+        '''
+        merged = {}
+        order = []
+        for binding in outer_list + inner_list:
+            key = str(binding.get("texture_hash", "")).strip().lower()
             if key not in merged:
                 order.append(key)
             merged[key] = binding

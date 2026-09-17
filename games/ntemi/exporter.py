@@ -68,10 +68,10 @@ class Exporter:
             M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
 
         # Texture handling
+        tex_ini_builder = M_IniBuilder()
         if not MIMIGlobalProperties.forbid_auto_texture_ini():
             sections.append_texture_resources(lines, self.drawib_model_list)
             # Also generate hash-style texture overrides (standard for all game types)
-            tex_ini_builder = M_IniBuilder()
             M_IniHelper.generate_hash_style_texture_ini(
                 ini_builder=tex_ini_builder,
                 drawib_drawibmodel_dict=drawib_drawibmodel_dict,
@@ -80,12 +80,19 @@ class Exporter:
                 ini_builder=tex_ini_builder,
                 drawib_drawibmodel_dict=drawib_drawibmodel_dict,
             )
-            for section in tex_ini_builder.ini_section_list:
-                for sl in section.SectionLineList:
-                    if sl:
-                        lines.append(sl)
             for drawib_model in self.drawib_model_list:
                 M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
+
+        # Hash Texture Bind conditional overrides are explicit user intent
+        # and are emitted even when the automatic texture pipeline is off.
+        M_IniHelper.generate_hash_style_object_texture_ini(
+            ini_builder=tex_ini_builder,
+            drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+        )
+        for section in tex_ini_builder.ini_section_list:
+            for sl in section.SectionLineList:
+                if sl:
+                    lines.append(sl)
 
         GlobalConfig.generated_mod_number = len(self.drawib_model_list)
 

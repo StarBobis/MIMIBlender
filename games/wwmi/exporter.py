@@ -418,6 +418,12 @@ class Exporter:
             # Texture Bind node FILE resources are explicit user intent and
             # must exist even when the automatic texture pipeline is off.
             M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
+            # Conditional hash overrides from Hash Texture Bind nodes follow
+            # the same explicit-intent rule (full dict, like the generators above).
+            M_IniHelper.generate_hash_style_object_texture_ini(
+                ini_builder=config_ini_builder,
+                drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
+            )
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - Hash/SharedSlot texture INI generation done")
             print("=" * 60)
 

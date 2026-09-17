@@ -766,6 +766,9 @@ def draw_node_add_menu(self, context):
     # Slot Texture Bind replaces texture slots right before each passing
     # object's drawindexed; it is a pass-through like the Group node.
     layout.operator("node.add_node", text=tr("Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
+    # Hash Texture Bind turns each passing object into conditional this=
+    # blocks inside the global hash-style TextureOverride sections.
+    layout.operator("node.add_node", text=tr("Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
     # The three dynamic mod nodes are named after the data they switch, so a
     # user can tell them apart without opening the documentation.
     layout.operator("node.add_node", text=tr("DrawIndex Based Dynamic Mod"), icon='TIME').type = "MIMINode_TimeSwitch"
