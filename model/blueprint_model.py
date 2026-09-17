@@ -16,7 +16,7 @@ from ..common.global_config import GlobalConfig
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
-from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind
+from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind, normalize_mark_name_enum_value
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -455,7 +455,7 @@ class BluePrintModel:
                 "enabled": bool(getattr(item, "enabled", True)),
                 "slot": str(getattr(item, "slot", "") or ""),
                 "source_type": str(getattr(item, "source_type", "") or ""),
-                "mark_name": str(getattr(item, "mark_name", "") or ""),
+                "mark_name": normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "restore_after_draw": bool(getattr(item, "restore_after_draw", False)),

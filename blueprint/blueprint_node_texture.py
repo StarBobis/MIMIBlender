@@ -39,6 +39,12 @@ from .blueprint_node_base import MIMINodeBase
 # type (t/s/b/u) + register number, written lowercase by convention.
 _SLOT_PATTERN = re.compile(r"^(ps|vs|gs|hs|ds|cs)-(t|s|b|u)\d+$")
 
+# Placeholder identifier of the mark name dropdown. Blender enum identifiers
+# must not be empty strings, otherwise RNA falls back to the numeric index
+# and the stored value stops round-tripping ("current value '0' matches no
+# enum" warning).
+_MARK_NAME_NONE = "(none)"
+
 
 def _texture_slot_item_refresh_display(item):
     '''Rebuild the one-line display name shown inside the list widget.'''
@@ -149,7 +155,7 @@ def _resolve_upstream_submesh_name(node, depth=0):
 
 def _texture_bind_mark_name_items(item):
     '''Enum items for the mark name dropdown: marks of the upstream Submesh.'''
-    empty_items = [("", "(" + tr("none") + ")", "")]
+    empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
     try:
         node = _find_owner_bind_node(item)
         submesh_name = _resolve_upstream_submesh_name(node)
@@ -176,6 +182,12 @@ def _texture_bind_mark_name_items(item):
     except Exception:
         # Never let a dropdown lookup break the node editor drawing.
         return empty_items
+
+
+def normalize_mark_name_enum_value(value):
+    '''Map the dropdown placeholder back to an empty mark name at export.'''
+    text = str(value or "").strip()
+    return "" if text == _MARK_NAME_NONE else text
 
 
 class MMT_OT_TexBindAddItem(I18nOperator):
