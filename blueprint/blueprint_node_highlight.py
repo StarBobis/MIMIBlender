@@ -1,10 +1,11 @@
-"""Synchronize MMT blueprint Object Info node colors with Blender selection state."""
+"""Synchronize MMT blueprint Object Info and Object List node colors with Blender selection state."""
 
 import bpy
 
 
 TREE_IDNAME = "MIMIBlueprintTreeType"
 OBJECT_INFO_IDNAME = "MIMINode_Object_Info"
+OBJECT_LIST_IDNAME = "MIMINode_Object_List"
 OBJECT_PERSISTENT_ID_KEY = "_ssmt_object_uuid"
 
 _COLORS = {
@@ -88,6 +89,19 @@ def _matches_selected_object(node, selected_objects) -> bool:
     return False
 
 
+def _matches_object_list_item(node, selected_objects) -> bool:
+    """An Object List node highlights when any of its items references a selected mesh."""
+    items = getattr(node, "object_items", None)
+    if not items:
+        return False
+    selected_names = {obj.name for obj in selected_objects}
+    for item in items:
+        object_name = str(getattr(item, "object_name", "") or "").strip()
+        if object_name and object_name in selected_names:
+            return True
+    return False
+
+
 def _sync_highlights():
     """Apply only changed colors, keeping this safe to run as a short timer."""
     selected_meshes = ()
@@ -108,7 +122,10 @@ def _sync_highlights():
             continue
         for node in tree.nodes:
             color = None
-            if getattr(node, "bl_idname", "") == OBJECT_INFO_IDNAME and _matches_selected_object(node, selected_meshes):
+            node_idname = getattr(node, "bl_idname", "")
+            if node_idname == OBJECT_INFO_IDNAME and _matches_selected_object(node, selected_meshes):
+                color = _COLORS["OBJECT"]
+            elif node_idname == OBJECT_LIST_IDNAME and _matches_object_list_item(node, selected_meshes):
                 color = _COLORS["OBJECT"]
 
             if color is None:

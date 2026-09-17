@@ -323,14 +323,68 @@ classes = (
 )
 
 
+def _sync_item_socket_integrity(node):
+    '''Recreate missing per-item output sockets and relabel mismatches.
+
+    A blueprint saved by an older version, or an edit that was interrupted,
+    can leave the node without the mirrored output socket of an item. The
+    item still shows up inside the list, yet there is nothing to wire from.
+    This check restores the invariant outputs[i + 1] <-> items[i] that the
+    parser and the wiring both rely on. It only ever ADDS sockets or fixes
+    labels; foreign or extra sockets are never deleted here.
+    '''
+    changed = False
+    # outputs[0] is the aggregate "All" socket; recreate it only when the
+    # node has no outputs at all.
+    if len(node.outputs) == 0:
+        node.outputs.new('MIMISocketObject', ALL_SOCKET_NAME)
+        changed = True
+    for index, item in enumerate(node.object_items):
+        socket_index = index + 1
+        if socket_index >= len(node.outputs):
+            node.outputs.new('MIMISocketObject', item.name or "?")
+            changed = True
+            continue
+        socket = node.outputs[socket_index]
+        if getattr(socket, "bl_idname", "") != 'MIMISocketObject':
+            # A socket we do not own occupies the mirrored slot; skip it
+            # instead of deleting data we do not understand.
+            continue
+        if socket.name != (item.name or "?"):
+            socket.name = item.name or "?"
+            changed = True
+    if changed:
+        node._refresh_width()
+
+
+def _object_list_socket_sync_timer():
+    '''Timer entry: keep every Object List node's sockets in sync with its items.'''
+    try:
+        for tree in bpy.data.node_groups:
+            if getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+                continue
+            for node in tree.nodes:
+                if getattr(node, "bl_idname", "") == 'MIMINode_Object_List':
+                    _sync_item_socket_integrity(node)
+    except Exception as error:
+        # The timer must never disrupt Blender interaction; a later tick
+        # retries once the data is editable again.
+        print(f"[MMT Object List] socket sync failed: {error}")
+    return 0.5
+
+
 def register():
     # The PropertyGroup must exist before the node class that references it.
     bpy.utils.register_class(MIMIObjectListItem)
     for cls in classes:
         bpy.utils.register_class(cls)
+    if not bpy.app.timers.is_registered(_object_list_socket_sync_timer):
+        bpy.app.timers.register(_object_list_socket_sync_timer, first_interval=0.5, persistent=True)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_object_list_socket_sync_timer):
+        bpy.app.timers.unregister(_object_list_socket_sync_timer)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     bpy.utils.unregister_class(MIMIObjectListItem)

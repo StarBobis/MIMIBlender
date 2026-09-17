@@ -27,7 +27,12 @@ class MIMISocketObject(NodeSocket):
         return (0.0, 0.8, 0.8, 1.0) # Cyan/Teal
 
     def draw(self, context, layout, node, text):
-        layout.label(text=text)
+        # Blender requires NodeSocket subclasses to define draw(); delegate
+        # to the C++ default so the clickable circle (dot) renders next to
+        # the label. Drawing the label alone (the old override) made every
+        # MMT socket invisible, so users had to guess the exact edge
+        # position to start or receive a wire.
+        super().draw(context, layout, node, text)
 
 # 1. Define the custom node tree type
 
