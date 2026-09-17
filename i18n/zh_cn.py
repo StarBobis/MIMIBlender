@@ -546,6 +546,7 @@ TRANSLATIONS_ZH_CN = {
     "Add Socket": "添加接口",
     "Remove Socket": "移除接口",
     # ---- Texture Bind node (per-object texture slot binding) ----
+    "Slot Texture Bind": "贴图槽位绑定",
     "Texture Bind": "贴图槽位绑定",
     "Texture slot to replace right before this object's drawindexed, e.g. ps-t0": "在此物体的 drawindexed 之前替换的贴图槽位，例如 ps-t0",
     "Where the replacement texture comes from": "替换贴图的来源",

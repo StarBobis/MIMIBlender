@@ -459,7 +459,7 @@ class BluePrintModel:
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "restore_after_draw": bool(getattr(item, "restore_after_draw", False)),
-                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Texture Bind"),
+                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Slot Texture Bind"),
             })
         return bindings
 

@@ -395,7 +395,7 @@ class DrawIBModel:
         if MIMIGlobalProperties.forbid_auto_texture_ini():
             # The global switch only disables the automatic texture pipeline;
             # a Texture Bind node is explicit user intent and still applies.
-            print("DrawIBModel: forbid_auto_texture_ini is on, but Texture Bind nodes are explicit user intent; bindings still apply.")
+            print("DrawIBModel: forbid_auto_texture_ini is on, but Slot Texture Bind nodes are explicit user intent; bindings still apply.")
 
         used_resource_names = set()
         # One FILE resource per unique source path, shared by all objects
@@ -416,12 +416,12 @@ class DrawIBModel:
                 slot = str(binding.get("slot", "") or "").strip().lower()
                 if OBJECT_TEXTURE_SLOT_PATTERN.match(slot) is None:
                     raise ValueError(
-                        "Texture Bind node '" + node_label + "': invalid texture slot '" + str(binding.get("slot", ""))
+                        "Slot Texture Bind node '" + node_label + "': invalid texture slot '" + str(binding.get("slot", ""))
                         + "' for object '" + owner_name + "'; expected the form ps-t0."
                     )
                 if slot in seen_slots:
                     raise ValueError(
-                        "Texture Bind node '" + node_label + "': slot '" + slot + "' is bound twice for object '"
+                        "Slot Texture Bind node '" + node_label + "': slot '" + slot + "' is bound twice for object '"
                         + owner_name + "'."
                     )
                 seen_slots.add(slot)
@@ -438,13 +438,13 @@ class DrawIBModel:
                     resource_name = str(binding.get("resource_name", "") or "").strip()
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
-                            "Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
+                            "Slot Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
                             + "' for object '" + owner_name + "'."
                         )
                     used_resource_names.add(resource_name)
                 else:
                     raise ValueError(
-                        "Texture Bind node '" + node_label + "': unknown source type '" + source_type
+                        "Slot Texture Bind node '" + node_label + "': unknown source type '" + source_type
                         + "' for object '" + owner_name + "'."
                     )
 
@@ -468,7 +468,7 @@ class DrawIBModel:
         mark_name = str(binding.get("mark_name", "") or "").strip()
         if not mark_name:
             raise ValueError(
-                "Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
+                "Slot Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
             )
         matched_markup = None
         for markup_info in markup_list:
@@ -477,12 +477,12 @@ class DrawIBModel:
                 break
         if matched_markup is None:
             raise ValueError(
-                "Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
+                "Slot Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
                 + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
             )
         if str(getattr(matched_markup, "mark_type", "") or "") not in ("Slot", "SharedSlot"):
             raise ValueError(
-                "Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
+                "Slot Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
             )
         return matched_markup.get_resource_name()
 
@@ -491,17 +491,17 @@ class DrawIBModel:
         source_path = str(binding.get("file_path", "") or "").strip()
         if not source_path:
             raise ValueError(
-                "Texture Bind node '" + node_label + "': texture file path is empty for object '" + owner_name + "'."
+                "Slot Texture Bind node '" + node_label + "': texture file path is empty for object '" + owner_name + "'."
             )
         file_suffix = os.path.splitext(source_path)[1].lower()
         if file_suffix not in OBJECT_TEXTURE_FILE_SUFFIXES:
             raise ValueError(
-                "Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
+                "Slot Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
                 + "' for object '" + owner_name + "'; use one of " + ", ".join(OBJECT_TEXTURE_FILE_SUFFIXES) + "."
             )
         if not os.path.exists(source_path):
             raise ValueError(
-                "Texture Bind node '" + node_label + "': texture file does not exist: " + source_path
+                "Slot Texture Bind node '" + node_label + "': texture file does not exist: " + source_path
                 + " (object '" + owner_name + "')."
             )
 

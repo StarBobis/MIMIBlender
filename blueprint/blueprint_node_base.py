@@ -69,6 +69,10 @@ _LEGACY_TITLES_BY_IDNAME = {
     'MIMINode_TimeSwitch': _historical_titles(tr("Time Switch")),
     'MIMINode_TimePosSwitch': _historical_titles(tr("Time Position Switch")),
     'MIMINode_TimeShapeKey': _historical_titles(tr("Time Shape Key")),
+    # Renamed to "Slot Texture Bind"; the plain English "Texture Bind" was
+    # the default title for a few days and is added explicitly because the
+    # dictionary pairing below only knows the current label.
+    'MIMINode_Texture_Bind': _historical_titles(tr("Slot Texture Bind")) + ("Texture Bind",),
 }
 
 

@@ -1,5 +1,5 @@
 '''
-Texture Bind blueprint node (per-object texture slot binding).
+Slot Texture Bind blueprint node (per-object texture slot binding).
 
 A transparent pass-through node: Object in, Object out. Every object that
 passes through it gets its texture slots replaced right before its own
@@ -242,18 +242,22 @@ class MMT_OT_TexBindRemoveItem(I18nOperator):
 
 @translatable
 class MIMINode_Texture_Bind(MIMINodeBase):
-    '''Texture Bind assigns replacement textures to slots right before each passing object's drawindexed'''
+    '''Slot Texture Bind assigns replacement textures to slots right before each passing object's drawindexed'''
     bl_idname = 'MIMINode_Texture_Bind'
-    bl_label = 'Texture Bind'
+    bl_label = 'Slot Texture Bind'
     bl_icon = 'TEXTURE'
     bl_width_min = 320
 
     texture_slot_items: bpy.props.CollectionProperty(type=MIMITextureSlotItem) # type: ignore
     texture_slot_index: bpy.props.IntProperty(default=0) # type: ignore
 
+    def width_texts(self):
+        """Return every text that decides how wide this node has to be."""
+        return [self.label]
+
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Texture Bind")
+        self.label = tr("Slot Texture Bind")
         self.inputs.new('MIMISocketObject', "Object")
         self.outputs.new('MIMISocketObject', "Output")
         self.width = 340
