@@ -59,7 +59,7 @@ def new_blueprint():
 
     # Leaf conversion is unrelated to clock provenance; build real DrawCalls.
     # Copy the condition chain exactly as normal object-node parsing does.
-    def parse_leaf(node, chain):
+    def parse_leaf(node, chain, from_socket=None):
         draw = DrawCallModel(node.obj_name, node.submesh_name)
         draw.work_key_list = copy.deepcopy(chain)
         model.ordered_draw_obj_data_model_list.append(draw)
@@ -73,7 +73,7 @@ def time_node(alias="shared", count=2, prefix="frame"):
     sockets = []
     for index in range(count):
         leaf = types.SimpleNamespace(obj_name="abcd1234-0." + prefix + str(index), submesh_name="abcd1234-0")
-        sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf)]))
+        sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf, from_socket=None)]))
     node = types.SimpleNamespace(inputs=sockets, time_alias=alias, fps=12.0, name=prefix, comment="")
     node.as_pointer = lambda: id(node)
     return node
@@ -196,7 +196,7 @@ def switch_node(key="VK_F1", alias="", count=2, prefix="branch"):
     sockets = []
     for index in range(count):
         leaf = types.SimpleNamespace(obj_name="abcd1234-0." + prefix + str(index), submesh_name="abcd1234-0")
-        sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf)]))
+        sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf, from_socket=None)]))
     return types.SimpleNamespace(
         inputs=sockets, key_name=key, key_alias=alias, name=prefix, comment="", mute=False,
         bl_idname=sys.modules[BluePrintModel.__module__].MIMINode_SwitchKey.bl_idname,

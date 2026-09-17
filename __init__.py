@@ -26,6 +26,7 @@ from .ui import ui_panel_fast_texture
 from .ui import ui_panel_updater
 
 from .blueprint import blueprint_node_obj
+from .blueprint import blueprint_node_object_list
 from .blueprint import blueprint_node_texture
 from .blueprint import blueprint_node_hash_texture
 from .blueprint import blueprint_node_base
@@ -101,6 +102,8 @@ def _register_steps():
     # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
     yield blueprint_node_shapekey.register
     yield blueprint_node_obj.register
+    # Object List keeps many objects in one collapsible fan-out node.
+    yield blueprint_node_object_list.register
     # Texture Bind node and its PropertyGroup register right after the base object nodes.
     yield blueprint_node_texture.register
     yield blueprint_node_hash_texture.register
@@ -154,6 +157,7 @@ def unregister():
         blueprint_node_time_pos_switch.unregister,
         blueprint_node_time_switch.unregister,
         blueprint_node_obj.unregister,
+        blueprint_node_object_list.unregister,
         blueprint_node_texture.unregister,
         blueprint_node_hash_texture.unregister,
         blueprint_node_shapekey.unregister,

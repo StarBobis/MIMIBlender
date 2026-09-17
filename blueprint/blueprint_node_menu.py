@@ -759,6 +759,9 @@ def draw_node_add_menu(self, context):
     
     layout = self.layout
     layout.operator("node.add_node", text=tr("Object Info"), icon='OBJECT_DATAMODE').type = "MIMINode_Object_Info"
+    # Object List packs many objects (e.g. baked animation frames) into one
+    # collapsible node with per-item sockets plus one aggregate All socket.
+    layout.operator("node.add_node", text=tr("Object List"), icon='OUTLINER_OB_GROUP_INSTANCE').type = "MIMINode_Object_List"
     layout.operator("node.add_node", text=tr("Group"), icon='GROUP').type = "MIMINode_Object_Group"
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"

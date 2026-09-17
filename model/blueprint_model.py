@@ -16,6 +16,7 @@ from ..common.global_config import GlobalConfig
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
+from ..blueprint.blueprint_node_object_list import MIMINode_Object_List
 from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind, normalize_mark_name_enum_value
 from ..blueprint.blueprint_node_hash_texture import MIMINode_Hash_Texture_Bind
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
@@ -279,9 +280,12 @@ class BluePrintModel:
                 if link.from_node.bl_idname == GROUP_INPUT_IDNAME:
                     self._parse_group_input(link.from_node, link.from_socket, chain_key_list)
                 else:
-                    self.parse_single_node(link.from_node, chain_key_list)
+                    # The from_socket matters for fan-out source nodes such as
+                    # Object List, where each output socket carries a
+                    # different subset of the contained objects.
+                    self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
 
-    def parse_single_node(self, unknown_node:bpy.types.Node, chain_key_list:list[M_Key]):
+    def parse_single_node(self, unknown_node:bpy.types.Node, chain_key_list:list[M_Key], from_socket:bpy.types.NodeSocket=None):
         '''
         Recursive method.
         Parse the current node, gathering info about all nodes connected to it and parsing them by type.
@@ -323,7 +327,7 @@ class BluePrintModel:
                 # 2. If it is disconnected -> ignore it (already filtered by all_socket_linked above)
                 if valid_input_sockets[0].is_linked:
                         for link in valid_input_sockets[0].links:
-                            self.parse_single_node(link.from_node, chain_key_list)
+                            self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
             else:
                 # With more than 1 effective branch socket, a Key must be created even when some sockets are empty (they stand for empty branches)
                 m_key = M_Key()
@@ -401,44 +405,54 @@ class BluePrintModel:
                         bindings,
                     )
 
+        elif unknown_node.bl_idname == MIMINode_Object_List.bl_idname:
+            # Fan-out source: the link's from_socket decides what is emitted.
+            # A per-item socket carries exactly that object; the leading
+            # "All" socket (or a visit without socket info) emits every
+            # enabled item in list order.
+            node_label = str(getattr(unknown_node, "label", "") or getattr(unknown_node, "name", "") or "Object List")
+            output_sockets = list(unknown_node.outputs)
+            selected_items = []
+            if from_socket is not None and from_socket in output_sockets:
+                output_index = output_sockets.index(from_socket)
+                if output_index > 0 and output_index - 1 < len(unknown_node.object_items):
+                    selected_items = [unknown_node.object_items[output_index - 1]]
+            if not selected_items:
+                selected_items = list(unknown_node.object_items)
+
+            emitted_names = []
+            for item in selected_items:
+                if not item.enabled:
+                    continue
+                object_name = str(getattr(item, "object_name", "") or "").strip()
+                if not object_name:
+                    LOG.warning("BluePrintModel: Object List node '" + node_label + "' has an empty object entry; skipped")
+                    continue
+                emitted_names.append(object_name)
+                self._emit_object_source(
+                    object_name=object_name,
+                    submesh_name=str(getattr(item, "submesh_name", "") or ""),
+                    original_object_name="",
+                    chain_key_list=chain_key_list,
+                )
+
+            # Duplicate objects within one expansion would silently emit
+            # duplicate drawindexed calls; fail loudly instead.
+            normalized_names = [name.lower() for name in emitted_names]
+            if len(set(normalized_names)) != len(normalized_names):
+                duplicated = sorted({name for name in normalized_names if normalized_names.count(name) > 1})
+                raise ValueError(
+                    "Object List node '" + node_label + "' contains the same object more than once: "
+                    + ", ".join(duplicated) + "; remove the duplicates or disable the extra entries."
+                )
+
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
-            obj = bpy.data.objects.get(unknown_node.object_name)
-
-            # Filter empty meshes early while parsing the blueprint, so the later export step never hits the "all vertex groups locked" error.
-            if obj is None or obj.type != 'MESH' or obj.data is None or len(obj.data.vertices) == 0:
-                LOG.info("BluePrintModel: skipping empty mesh or invalid object: " + str(unknown_node.object_name))
-                return
-
-            # UniComponent mode: automatically detect and split the object
-            if MIMIGlobalProperties.is_unico_component():
-                split_results = self._unico_split_object(
-                    obj=obj,
-                    node_submesh_name=getattr(unknown_node, 'submesh_name', ''),
-                )
-                for submesh_name, temp_obj in split_results:
-                    obj_model = DrawCallModel(
-                        obj_name=temp_obj.name,
-                        submesh_name=submesh_name,
-                    )
-                    obj_model.work_key_list = copy.deepcopy(chain_key_list)
-                    self.ordered_draw_obj_data_model_list.append(obj_model)
-                    self._unico_temp_objects.append(temp_obj)
-                    LOG.info(f"BluePrintModel: UniComponent split '{unknown_node.object_name}' -> "
-                             f"submesh='{submesh_name}' parsed='{obj_model.match_submesh_name}' "
-                             f"draw_ib='{obj_model.match_draw_ib}' (temporary object: '{temp_obj.name}')")
-            else:
-                # Legacy mode: use the original object directly
-                obj_model = DrawCallModel(
-                    obj_name=unknown_node.object_name,
-                    submesh_name=getattr(unknown_node, 'submesh_name', ''),
-                )
-                
-                if hasattr(unknown_node, 'original_object_name') and unknown_node.original_object_name:
-                    obj_model.display_name = unknown_node.original_object_name
-
-                obj_model.work_key_list = copy.deepcopy(chain_key_list)
-                
-                self.ordered_draw_obj_data_model_list.append(obj_model)
+            self._emit_object_source(
+                object_name=str(unknown_node.object_name),
+                submesh_name=str(getattr(unknown_node, 'submesh_name', '') or ""),
+                original_object_name=str(getattr(unknown_node, 'original_object_name', '') or ""),
+                chain_key_list=chain_key_list,
+            )
 
         elif unknown_node.bl_idname == MIMINode_Result_Output.bl_idname:
             # Result Output nodes are composition boundaries.  The selected
@@ -451,6 +465,51 @@ class BluePrintModel:
             # Result Output.  Parsing its mesh inputs here would duplicate
             # them in the regular output layer.
             return
+
+    def _emit_object_source(self, object_name: str, submesh_name: str, original_object_name: str, chain_key_list: list[M_Key]):
+        '''Emit one DrawCallModel (or its UniComponent splits) for an object.
+
+        Shared by the Object Info branch and the Object List branch so both
+        nodes behave identically: empty meshes are filtered early, and
+        UniComponent mode splits the object per Submesh VG range.
+        '''
+        obj = bpy.data.objects.get(object_name)
+
+        # Filter empty meshes early while parsing the blueprint, so the later export step never hits the "all vertex groups locked" error.
+        if obj is None or obj.type != 'MESH' or obj.data is None or len(obj.data.vertices) == 0:
+            LOG.info("BluePrintModel: skipping empty mesh or invalid object: " + str(object_name))
+            return
+
+        # UniComponent mode: automatically detect and split the object
+        if MIMIGlobalProperties.is_unico_component():
+            split_results = self._unico_split_object(
+                obj=obj,
+                node_submesh_name=submesh_name,
+            )
+            for split_submesh_name, temp_obj in split_results:
+                obj_model = DrawCallModel(
+                    obj_name=temp_obj.name,
+                    submesh_name=split_submesh_name,
+                )
+                obj_model.work_key_list = copy.deepcopy(chain_key_list)
+                self.ordered_draw_obj_data_model_list.append(obj_model)
+                self._unico_temp_objects.append(temp_obj)
+                LOG.info(f"BluePrintModel: UniComponent split '{object_name}' -> "
+                         f"submesh='{split_submesh_name}' parsed='{obj_model.match_submesh_name}' "
+                         f"draw_ib='{obj_model.match_draw_ib}' (temporary object: '{temp_obj.name}')")
+        else:
+            # Legacy mode: use the original object directly
+            obj_model = DrawCallModel(
+                obj_name=object_name,
+                submesh_name=submesh_name,
+            )
+
+            if original_object_name:
+                obj_model.display_name = original_object_name
+
+            obj_model.work_key_list = copy.deepcopy(chain_key_list)
+
+            self.ordered_draw_obj_data_model_list.append(obj_model)
 
     @staticmethod
     def _collect_texture_bindings(bind_node):
@@ -565,7 +624,7 @@ class BluePrintModel:
                         chain_tmp_key = copy.deepcopy(m_key)
                         chain_tmp_key.tmp_value = state
                         tmp_chain_key_list.append(chain_tmp_key)
-                    self.parse_single_node(link.from_node, tmp_chain_key_list)
+                    self.parse_single_node(link.from_node, tmp_chain_key_list, link.from_socket)
 
     def _parse_time_switch_node(self, time_node: bpy.types.Node, chain_key_list: list[M_Key], is_position_switch: bool = False):
         """
@@ -600,7 +659,7 @@ class BluePrintModel:
             # A one-frame draw switch is a pass-through. A position provider
             # must still replace the separate base object, never draw twice.
             for link in valid_input_sockets[0].links:
-                self.parse_single_node(link.from_node, chain_key_list)
+                self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
             return
 
         fps = float(getattr(time_node, 'fps', 0.0) or 0.0)
@@ -722,7 +781,7 @@ class BluePrintModel:
         if parent_socket is None:
             return
         for link in parent_socket.links:
-            self.parse_single_node(link.from_node, chain_key_list)
+            self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
 
     def _unico_split_object(
         self,
