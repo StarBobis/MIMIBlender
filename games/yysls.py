@@ -1,9 +1,10 @@
 """
 YYSLS (Where Winds Meet) mod exporter.
 
-Only the IB override sections and the IB resource naming are
-YYSLS-specific (resource names use the raw submesh name with dashes
-replaced); everything else comes from the shared base.
+IB overrides, resource naming and draw-scoped cloth bypass are YYSLS-specific.
+The custom VS is used only for mod draws matching its verified original hash.
+Other shader passes keep their original VS; the shared export pipeline remains
+responsible for buffers, texture automation, branch keys and shape keys.
 """
 
 from ..common.global_config import GlobalConfig
@@ -12,10 +13,25 @@ from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
 from .base.standard_exporter import StandardExporter
 from .base import sections
+from . import yysls_cloth
 
 
 class ExportYYSLS(StandardExporter):
-    """YYSLS exporter: shared pipeline, custom IB override + IB resources."""
+    """YYSLS exporter with a hash-checked, draw-local no-cloth VS."""
+
+    def generate_buffer_files(self):
+        # Package the shader with each mod instead of installing a global fix.
+        # This also keeps exported mods portable to another game installation.
+        super().generate_buffer_files()
+        yysls_cloth.copy_shader_asset()
+
+    def add_final_sections(self, ini_builder, drawib_drawibmodel_dict):
+        # Keep shared branch/shape-key behavior, then identify the target VS.
+        # This hook runs once, even when the mod contains several DrawIBs.
+        # The marker carries no render commands and cannot affect other meshes.
+        # Actual shader selection is deferred until each enabled object draw.
+        super().add_final_sections(ini_builder, drawib_drawibmodel_dict)
+        yysls_cloth.add_shader_check(ini_builder)
 
     def add_drawib_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # YYSLS emits no VB overrides, only per-Submesh IB overrides.
@@ -31,6 +47,11 @@ class ExportYYSLS(StandardExporter):
 
     def add_unity_vs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):
         texture_override_ib_section = M_IniSection(M_SectionType.TextureOverrideIB)
+        # Each wrapped draw has its own CustomShader with the original draw args.
+        # Shader selection belongs here, not in a frame-wide active flag.
+        # The same index buffer can appear in multiple passes with different VSs.
+        # An unknown VS must keep the old draw path instead of guessing its ABI.
+        custom_section = M_IniSection(M_SectionType.CommandList)
         draw_ib = drawib_model.draw_ib
         d3d11_game_type = drawib_model.d3d11_game_type
         for submesh_model in drawib_model.submesh_model_list:
@@ -42,12 +63,19 @@ class ExportYYSLS(StandardExporter):
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + match_first_index)
             texture_override_ib_section.append("match_index_count = " + str(submesh_model.match_index_count))
+            # The game package declares this switch in d3dx.ini (F6 in Core).
+            # A disabled mod must not skip the game draw or bind mod resources.
+            # Object branch conditions below still control their actual draws.
+            texture_override_ib_section.append("; Disabled mods leave the game draw untouched.")
+            texture_override_ib_section.append("if $costume_mods")
             texture_override_ib_section.append("handling = skip")
 
             # An empty index buffer means the submesh is hidden: null the IB out.
             ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)
             if ib_buf is None or len(ib_buf) == 0:
                 texture_override_ib_section.append("ib = null")
+                # Hidden meshes issue no draw and therefore need no custom VS.
+                texture_override_ib_section.append("endif")
                 texture_override_ib_section.new_line()
                 continue
 
@@ -77,16 +105,25 @@ class ExportYYSLS(StandardExporter):
             # However, the character appearance UI uses DrawIndexed.
             # So a compatible approach still needs to be explored; maybe it can be filtered by some DRAW_TYPE?
             # emmmm, will think about it during later testing; recorded here for now.
-            for drawindexed_str in M_IniHelper.get_drawindexed_str_list(
+            draw_lines = M_IniHelper.get_drawindexed_str_list(
                 submesh_model.drawcall_model_list,
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,
-            ):
-                texture_override_ib_section.append(drawindexed_str)
+            )
+            # Only actual draw commands are wrapped; texture restores and
+            # switch conditions keep their original ordering and scope.
+            yysls_cloth.append_scoped_draws(
+                texture_override_ib_section, custom_section, draw_lines,
+                texture_override_name_suffix,
+            )
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
 
+            texture_override_ib_section.append("endif")
+            texture_override_ib_section.new_line()
+
         ini_builder.append_section(texture_override_ib_section)
+        ini_builder.append_section(custom_section)
 
     def add_unity_vs_resource_vb_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # Resource declarations; the IB resources use the YYSLS raw-name style
