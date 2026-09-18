@@ -87,6 +87,13 @@ Global `ShaderFixes/ab148fe238420411-vs_replace.txt` and
 `ShaderFixes/49bf02a13c364cd9-vs_replace.txt` files, or their compiled `.bin`
 counterparts, would still affect unrelated meshes. Back them up outside the
 loader's active ShaderFixes directory before enabling this local approach.
+
+Every duplicate `[ShaderOverride]` for a supported hash must repeat its
+matching `filter_index` (`823114` or `823115`). 3Dmigoto keeps one override
+record per hash and the last duplicate's filter wins; a later hash-only
+`VSCheck.ini` section without `filter_index` collapses `vs` to `1.0`, so the
+nested routes cannot distinguish the two shaders. The existing generated
+`VSCheck.ini` must therefore use the same filter values as the local markers.
 Do not automatically delete arbitrary files from a user's game installation
 when exporting a new mod; the exporter only packages its own local asset.
 
