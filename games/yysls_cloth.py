@@ -1,10 +1,9 @@
-"""Draw-scoped no-cloth support for one verified YYSLS vertex shader.
+"""Draw-scoped no-cloth support for verified YYSLS vertex shaders.
 
-The hash marker never replaces or draws a shader by itself. Each submesh
-checks the original VS before modifying any vertex, index, or texture slot.
-A matching CustomShader binds VS first, then invokes the shared resource and
-draw command list. Other VS hashes invoke that list without a shader change.
-No global frame flag, IniParams slot, or deformation resource is modified.
+Each supported shader hash has its own replacement asset because input
+signatures and UV layouts are part of the vertex-shader ABI. The hash marker
+never replaces or draws a shader by itself. Each submesh checks the original VS
+before modifying any vertex, index, or texture slot.
 """
 
 import os
@@ -14,78 +13,124 @@ from ..common.global_config import GlobalConfig
 from ..common.m_ini_builder import M_IniSection, M_SectionType
 
 
-# A shared marker lets independently generated mods recognize the same VS.
-# Keep it exactly representable as float32, which is how INI filters are stored.
-# Do not reuse this value for another hash or an unrelated shader family.
+# The first marker and constants remain stable for existing generated mods.
+# Keep filter values exactly representable as float32, as required by 3Dmigoto.
+# Never reuse a value for another hash or an unrelated shader family.
 CLOTH_VS_HASH = "ab148fe238420411"
 CLOTH_VS_FILTER = 823114
 CLOTH_SHADER_FILENAME = "yysls_no_cloth.hlsl"
 
+# The supplied second replacement has a TEXCOORD1 input and therefore needs a
+# separate asset. Its constant-buffer and resource ABI otherwise follows the
+# same YYSLS cloth-result path as the first supported shader.
+CLOTH_VS_HASH_49BF = "49bf02a13c364cd9"
+CLOTH_VS_FILTER_49BF = 823115
+CLOTH_SHADER_FILENAME_49BF = "yysls_no_cloth_49bf02a13c364cd9.hlsl"
+
+# Tuple fields are original hash, filter value, packaged filename, and a stable
+# name suffix used only for sections belonging to variants after the first.
+CLOTH_SHADER_VARIANTS = (
+    (CLOTH_VS_HASH, CLOTH_VS_FILTER, CLOTH_SHADER_FILENAME, "default"),
+    (CLOTH_VS_HASH_49BF, CLOTH_VS_FILTER_49BF, CLOTH_SHADER_FILENAME_49BF, "49bf02a13c364cd9"),
+)
+
 
 def copy_shader_asset():
-    """Package the shader beside the mod INI, never inside ShaderFixes."""
-    # The addon owns the template; exported mods must not depend on the
-    # author's local game installation or an absolute ShaderFixes path.
+    """Package every supported shader beside the mod INI.
+
+    The addon owns the templates; exported mods must not depend on an author's
+    local game installation or an absolute ShaderFixes path. Copying all
+    variants keeps the generated INI self-contained.
+    """
     addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    source = os.path.join(addon_root, "resources", CLOTH_SHADER_FILENAME)
     destination = GlobalConfig.path_generate_mod_folder()
     os.makedirs(destination, exist_ok=True)
-    shutil.copyfile(source, os.path.join(destination, CLOTH_SHADER_FILENAME))
+    for _, _, filename, _ in CLOTH_SHADER_VARIANTS:
+        source = os.path.join(addon_root, "resources", filename)
+        shutil.copyfile(source, os.path.join(destination, filename))
+
+
+def _marker_section_name(variant_index, variant):
+    """Return a unique identification section name for one shader variant."""
+    if variant_index == 0:
+        return "ShaderOverride_YYSLS_ClothVS"
+    return "ShaderOverride_YYSLS_ClothVS_" + variant[3]
 
 
 def add_shader_check(ini_builder):
     """Declare identification metadata once per exported INI."""
-    # This section has no run, skip, or resource commands: merely seeing
-    # this VS on an unmodified game mesh cannot activate the custom shader.
+    # These sections contain no run, skip, or resource commands. Encountering a
+    # supported VS on an unmodified game mesh therefore cannot activate a
+    # custom shader. Each marker cooperates with independently generated mods.
     section = M_IniSection(M_SectionType.VertexShaderCheck)
-    section.append("; Identify the original VS without replacing it globally.")
-    section.append("; All YYSLS mods use the same marker for this exact hash.")
-    section.append("[ShaderOverride_YYSLS_ClothVS]")
-    section.append("hash = " + CLOTH_VS_HASH)
-    section.append("allow_duplicate_hash = true")
-    section.append("filter_index = " + str(CLOTH_VS_FILTER))
-    section.new_line()
+    section.append("; Identify original VS hashes without replacing them globally.")
+    section.append("; Each supported hash uses a separate float32-safe filter value.")
+    for variant_index, variant in enumerate(CLOTH_SHADER_VARIANTS):
+        shader_hash, shader_filter, _, _ = variant
+        section.append("[" + _marker_section_name(variant_index, variant) + "]")
+        section.append("hash = " + shader_hash)
+        section.append("allow_duplicate_hash = true")
+        section.append("filter_index = " + str(shader_filter))
+        section.new_line()
     ini_builder.append_section(section)
 
 
-def append_scoped_submesh(section, command_section, mod_lines, name_suffix):
-    """Select VS before running any submesh resource bindings or draws.
+def _custom_shader_name(name_suffix, variant_index, variant):
+    """Keep the original section name and suffix later variants."""
+    base = "CustomShader_YYSLS_NoCloth_" + name_suffix
+    if variant_index == 0:
+        return base
+    return base + "_" + variant[3]
 
-    The caller has already matched the submesh and checked the mod switch.
-    Keep one shared command list for both shader paths so buffer bindings,
-    texture bindings, object conditions and draw offsets cannot drift apart.
-    CustomShader installs VS before running its command list, then restores
-    the original shader after the entire submesh list returns.
+
+def append_scoped_submesh(section, command_section, mod_lines, name_suffix):
+    """Select a matching VS before running any submesh binding or draw.
+
+    The caller has already matched the submesh and checked the mod switch. One
+    shared command list is used by every shader route so buffer bindings,
+    texture bindings, object conditions, and draw offsets cannot drift apart.
+    A CustomShader installs its variant before executing that shared list and
+    restores the original shader after the complete list returns.
     """
-    custom_name = "CustomShader_YYSLS_NoCloth_" + name_suffix
     draw_name = "CommandList_YYSLS_Draw_" + name_suffix
 
-    # Do not bind VB/IB/textures in the parent TextureOverride. That would
-    # recreate the late shader switch which this scope is intended to avoid.
-    # Evaluate the marker while all game bindings are still the originals.
-    section.append("; Check the original VS before changing any mod resource slots.")
-    section.append("if vs == " + str(CLOTH_VS_FILTER))
-    section.append("  run = " + custom_name)
-    section.append("else")
-    section.append("  run = " + draw_name)
-    section.append("endif")
+    # Recursively emit nested conditions instead of relying on loader-specific
+    # support for an "else if" spelling. The final branch keeps the original VS.
+    def append_route(variant_index, indent):
+        if variant_index == len(CLOTH_SHADER_VARIANTS):
+            section.append(indent + "run = " + draw_name)
+            return
+        variant = CLOTH_SHADER_VARIANTS[variant_index]
+        _, shader_filter, _, _ = variant
+        custom_name = _custom_shader_name(name_suffix, variant_index, variant)
+        section.append(indent + "if vs == " + str(shader_filter))
+        section.append(indent + "  run = " + custom_name)
+        section.append(indent + "else")
+        append_route(variant_index + 1, indent + "  ")
+        section.append(indent + "endif")
 
-    # Only the matched path replaces VS. CustomShader binds the shader before
-    # executing run; a plain CommandList call does not establish shader scope.
-    # Leave other shader stages and the game's ranged constant buffers alone.
-    command_section.append("[" + custom_name + "]")
-    command_section.append("; Install VS first, then bind resources and draw the submesh.")
-    command_section.append("; Restore the original VS only after the shared list returns.")
-    command_section.append("vs = " + CLOTH_SHADER_FILENAME)
-    command_section.append("run = " + draw_name)
-    command_section.new_line()
+    # Do not bind VB, IB, or textures in the parent TextureOverride. Evaluating
+    # every marker while the game's bindings are original avoids a late shader
+    # switch after mod resources have already been installed.
+    section.append("; Check the original VS before changing mod resource slots.")
+    append_route(0, "")
 
-    # Include the complete original binding/drawing sequence exactly once.
-    # Object texture save/restore commands stay beside their conditional draw.
-    # All draws in this submesh execute under the selected shader scope.
-    # No global shader flag or additional resource slot is introduced here.
+    # Only the matching CustomShader replaces VS. A plain CommandList call does
+    # not establish a shader scope and is therefore used for all other hashes.
+    for variant_index, variant in enumerate(CLOTH_SHADER_VARIANTS):
+        _, _, filename, _ = variant
+        custom_name = _custom_shader_name(name_suffix, variant_index, variant)
+        command_section.append("[" + custom_name + "]")
+        command_section.append("; Install this VS before the shared binding and draw list.")
+        command_section.append("; Restore the original VS only after that list returns.")
+        command_section.append("vs = " + filename)
+        command_section.append("run = " + draw_name)
+        command_section.new_line()
+
+    # Include the complete original binding and drawing sequence exactly once.
+    # Per-object texture restoration remains inside the selected shader scope.
     command_section.append("[" + draw_name + "]")
-    command_section.append("; Reached with either the scoped no-cloth VS or the original VS.")
+    command_section.append("; Reached with a selected replacement VS or the original VS.")
     command_section.append("; Keep resource bindings before the original conditional draws.")
     for line in mod_lines:
         command_section.append(line)

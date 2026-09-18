@@ -2,8 +2,22 @@
 
 ## Behavior
 
-The exporter packages `resources/yysls_no_cloth.hlsl` beside each generated
-mod INI. It never installs a global ShaderFixes replacement.
+The exporter packages one local replacement asset for every verified shader
+variant beside each generated mod INI. It never installs a global ShaderFixes
+replacement.
+
+The currently supported variants are:
+
+| Original VS hash | Filter | Local asset | ABI note |
+| --- | ---: | --- | --- |
+| `ab148fe238420411` | `823114` | `yysls_no_cloth.hlsl` | TEXCOORD0, then TANGENT/BINORMAL |
+| `49bf02a13c364cd9` | `823115` | `yysls_no_cloth_49bf02a13c364cd9.hlsl` | TEXCOORD0 and TEXCOORD1, then TANGENT/BINORMAL |
+
+The second hash is the supplied `ShaderFixes/49bf02a13c364cd9-vs_replace.txt`.
+It uses the same b0-b3 constant-buffer family, `t11` position-deformation
+texture, `t14` historical skeleton map, and `SV_VertexID`-addressed cloth
+path as the first shader. It is not safe to reuse the first replacement because
+its input signature declares a second UV channel and different register layout.
 
 A custom no-cloth draw requires all of the following:
 
@@ -11,7 +25,7 @@ A custom no-cloth draw requires all of the following:
    and index count of the submesh.
 2. The game package's root `$costume_mods` switch is enabled.
 3. The original per-object draw conditions allow that object to be drawn.
-4. The current VS has hash `ab148fe238420411`, identified by filter `823114`.
+4. The current VS has one of the exact hashes and filter values in the table.
 
 The parent TextureOverride checks the original VS before assigning any mod
 VB, IB, or texture slot. For a matching VS, it invokes one CustomShader for
@@ -24,6 +38,11 @@ without a shader replacement. Keeping one body prevents the two paths from
 drifting in buffer bindings, texture assignments, object conditions or draw
 offsets. Per-object texture restoration remains after the object's draw,
 inside the shared list and therefore inside the selected shader scope.
+
+For a supported hash, the parent emits nested `vs == filter` routes. Each
+matching route enters the corresponding CustomShader asset; the final route
+runs the same shared list with the game's original VS. This keeps both shader
+variants draw-local without introducing a global switch or a guessed ABI.
 
 Do not revert to a CustomShader around only `drawindexed`: that selects the
 shader after submesh and object resources have already been replaced. The
@@ -42,15 +61,17 @@ original draw while enabled, but never invoke a CustomShader.
 
 ## Shader contract
 
-The asset is derived from the supplied working no-cloth replacement. Unused
-constant declarations and unreachable cloth branches are removed. Explicit
-constant offsets, bone-row swizzles, tangent safeguards, historical skeleton
-sampling, and output semantics are preserved.
+Both assets are derived from the supplied decompiled vertex-shader contracts.
+Unused constant declarations and unreachable cloth branches are removed.
+Explicit constant offsets, bone-row swizzles, tangent safeguards, historical
+skeleton sampling, UV channels, and output semantics are preserved.
 
-Compiling the asset and the supplied replacement with the same system compiler
-produced identical executable DXBC and identical input/output signatures.
-Reflection metadata is deliberately excluded from that comparison because
-unused declarations were removed.
+The first asset still compiles to identical executable DXBC and input/output
+signatures when compared with the backed-up working no-cloth replacement. The
+second asset compiles independently and has identical input/output signatures
+to the supplied `49bf02a13c364cd9` source; its executable necessarily differs
+because the t11 cloth reads are intentionally removed. Reflection metadata is
+deliberately excluded because unused declarations were removed.
 
 The shader no longer consumes the game's t11 cloth results. It does not stop
 the upstream physical simulation, and it does not implement a new solver.
@@ -100,13 +121,15 @@ Run from the addon root:
 python tools/test_yysls_cloth.py
 python tools/test_yysls_cloth_shader.py
 python tools/test_yysls_cloth_shader.py --reference <backed-up-vs_replace.txt>
+python tools/test_yysls_cloth_shader.py --reference-49bf-signature <49bf-vs_replace.txt>
 ```
 
-The first command runs ten tests without Blender, exercising the real
-exporter, builder, shared draw helper, and asset packaging. A small command
-model checks the emitted conditions but is not an actual 3Dmigoto parser.
-The shader test requires Windows and uses System32/d3dcompiler_47.dll without
-loading the mod loader or modifying a game process.
+The first command runs eleven tests without Blender, exercising the real
+exporter, builder, shared draw helper, both shader routes, and asset packaging.
+A small command model checks the emitted conditions but is not an actual
+3Dmigoto parser. The shader test compiles both assets on Windows with
+System32/d3dcompiler_47.dll without loading the mod loader or modifying a game
+process.
 
 In-game acceptance still needs these checks:
 
@@ -117,7 +140,7 @@ In-game acceptance still needs these checks:
 - Toggle object variants and hidden parts: no stale shader selection persists.
 - Reload repeatedly and test multiple exported mods for marker conflicts.
 
-This change deliberately does not extend the shader to other VS hashes.
-Other passes retain the previous exporter behavior, including any preexisting
-cloth or indirect-draw limitations. It does not add per-character instance
-selection beyond the existing index-buffer/submesh matches.
+This change deliberately does not apply either replacement to unknown VS
+hashes. Other passes retain the previous exporter behavior, including any
+preexisting cloth or indirect-draw limitations. It does not add per-character
+instance selection beyond the existing index-buffer/submesh matches.

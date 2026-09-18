@@ -1,11 +1,13 @@
-"""Compile the shipped YYSLS VS and optionally compare a working reference.
+"""Compile the shipped YYSLS vertex shader variants.
 
-Uses the Windows system HLSL compiler without installing the Windows SDK.
-No game process, mod-loader DLL, graphics hook, or shader cache is modified.
-The comparison ignores reflection/debug metadata and compares executable
-DXBC plus the input/output signatures. Matching these chunks demonstrates
-that removing dead cloth branches has not changed the compiled shader.
-This does not replace testing the generated INI in the user's game build.
+This tool uses the Windows system HLSL compiler without installing the Windows
+SDK. No game process, mod-loader DLL, graphics hook, or shader cache is
+modified. The optional reference comparison ignores reflection/debug metadata
+and compares executable DXBC plus the input/output signatures. Matching those
+chunks demonstrates that the original supported shader's dead cloth branches
+were removed without changing its compiled path. The second supplied variant
+is compiled independently because it has a different input signature and UV
+ABI; it has no no-cloth reference in the repository.
 """
 
 import argparse
@@ -21,6 +23,10 @@ PTR = ct.c_void_p
 UINT = ct.c_uint32
 HRESULT = ct.c_int32
 ROOT = Path(__file__).resolve().parents[1]
+SHADERS = (
+    ROOT / "resources" / "yysls_no_cloth.hlsl",
+    ROOT / "resources" / "yysls_no_cloth_49bf02a13c364cd9.hlsl",
+)
 
 
 def blob_call(blob, index, result):
@@ -33,7 +39,7 @@ def blob_call(blob, index, result):
 def compile_shader(path):
     """Return compiled DXBC bytes and release every compiler-owned blob."""
     # Explicit System32 lookup avoids loading a DLL from the mod directory.
-    # The compiler accepts the original source's UTF-8 comments as well.
+    # The compiler accepts the source's UTF-8 comments as well.
     system = Path(os.environ["SystemRoot"]) / "System32"
     compiler = ct.WinDLL(str(system / "d3dcompiler_47.dll"))
     compiler.D3DCompile.argtypes = [
@@ -44,8 +50,8 @@ def compile_shader(path):
     source = path.read_bytes()
     code, errors = PTR(), PTR()
     try:
-        # Use the normal optimization level for both reference and shipped VS.
-        # No include handler is needed: the asset must be self-contained.
+        # Use the normal optimization level for every shipped variant.
+        # No include handler is needed: each asset is self-contained.
         hr = compiler.D3DCompile(
             source, len(source), path.name.encode("utf-8"), None, None,
             b"main", b"vs_5_0", 0, 0, ct.byref(code), ct.byref(errors),
@@ -55,7 +61,7 @@ def compile_shader(path):
             raise AssertionError(message.decode("utf-8", errors="replace"))
         return ct.string_at(blob_call(code, 3, PTR), blob_call(code, 4, ct.c_size_t))
     finally:
-        # Warnings may allocate a blob even when compilation succeeded.
+        # Warnings may allocate a blob even when compilation succeeds.
         # Release both blobs after copying their contents into Python bytes.
         for blob in (errors, code):
             if blob:
@@ -76,25 +82,46 @@ def dxbc_chunks(data):
     return result
 
 
+def compare_reference(shipped, reference):
+    """Require executable and signature chunks to match a working reference."""
+    # Reflection differs because unused declarations were intentionally removed.
+    # Input/output signatures and executable DXBC must remain byte-identical.
+    for key in (b"ISGN", b"OSGN", b"SHDR", b"SHEX"):
+        assert shipped.get(key) == reference.get(key), "DXBC mismatch: " + str(key)
+
+
+def compare_signatures(shipped, reference):
+    """Require only input/output signatures to match a supplied source."""
+    # A no-cloth variant must remove cloth execution while retaining the source
+    # input layout and pixel-shader-facing output contract.
+    for key in (b"ISGN", b"OSGN"):
+        assert shipped.get(key) == reference.get(key), "Signature mismatch: " + str(key)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path)
+    parser.add_argument("--reference-49bf-signature", type=Path)
     args = parser.parse_args()
-    shader = ROOT / "resources" / "yysls_no_cloth.hlsl"
-    chunks = dxbc_chunks(compile_shader(shader))
-    assert b"SHDR" in chunks or b"SHEX" in chunks
-    print("PASS: shipped no-cloth shader compiles as vs_5_0")
 
-    # An optional original ShaderFixes file allows exact executable comparison.
-    # Reflection differs because unused declarations have intentionally gone.
-    # Input and output signatures must not differ from the working replacement.
-    # Byte-for-byte executable comparison also catches subtle swizzle mistakes.
-    # Merely compiling successfully would not detect those rendering changes.
+    compiled = []
+    for shader in SHADERS:
+        chunks = dxbc_chunks(compile_shader(shader))
+        assert b"SHDR" in chunks or b"SHEX" in chunks
+        compiled.append(chunks)
+        print("PASS: " + shader.name + " compiles as vs_5_0")
+
+    # The optional reference is for the original ab148 no-cloth asset only.
+    # The 49bf asset has a different input signature and is validated separately.
     if args.reference:
         reference = dxbc_chunks(compile_shader(args.reference))
-        for key in (b"ISGN", b"OSGN", b"SHDR", b"SHEX"):
-            assert chunks.get(key) == reference.get(key), "DXBC mismatch: " + str(key)
-        print("PASS: executable and input/output signatures match the reference exactly")
+        compare_reference(compiled[0], reference)
+        print("PASS: first variant matches its executable and signatures exactly")
+
+    if args.reference_49bf_signature:
+        reference = dxbc_chunks(compile_shader(args.reference_49bf_signature))
+        compare_signatures(compiled[1], reference)
+        print("PASS: second variant matches the supplied input/output signatures")
 
 
 if __name__ == "__main__":

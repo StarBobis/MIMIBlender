@@ -2,9 +2,10 @@
 YYSLS (Where Winds Meet) mod exporter.
 
 IB overrides, resource naming and draw-scoped cloth bypass are YYSLS-specific.
-The custom VS is used only for mod draws matching its verified original hash.
-Other shader passes keep their original VS; the shared export pipeline remains
-responsible for buffers, texture automation, branch keys and shape keys.
+The custom VS variants are used only for mod draws matching their verified
+original hashes. Other shader passes keep their original VS; the shared export
+pipeline remains responsible for buffers, texture automation, branch keys and
+shape keys.
 """
 
 from ..common.global_config import GlobalConfig
