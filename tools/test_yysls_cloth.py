@@ -8,11 +8,12 @@ compiles the real asset and can compare it with the working ShaderFixes VS.
 
 Coverage is intentionally separated into generation and shader validation:
 - Identification metadata must not contain a run or handling command.
-- A matching shader uses the custom VS for exactly one indexed draw.
+- A matching shader installs the custom VS before all submesh resources.
+- One shader scope covers every conditional draw in that submesh.
 - Other shaders keep the same draw arguments and their own shader object.
 - Disabling costume mods prevents skip, resource binding, and custom draws.
 - A hidden submesh produces no custom shader invocation at all.
-- Existing object conditions remain outside each wrapped draw.
+- Existing object conditions remain around their draws in the shared list.
 - Per-object texture replacement remains immediately before its draw.
 - Per-object texture restoration remains immediately after its draw.
 - Index offsets and base-vertex values are never reconstructed or guessed.
@@ -162,7 +163,7 @@ def parse_sections(builder):
     return result
 
 
-def simulate(sections, section_name, shader=823114, enabled=1, variant=1):
+def simulate(sections, section_name, shader=823114, enabled=1, variant=1, events=None):
     """Model the emitted subset; this is explicitly not a game integration test.
 
     Conditions are evaluated as the generated draw list executes.
@@ -175,8 +176,10 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1):
     Resource and handling commands are logged rather than sent to a driver.
     Their presence in a disabled trace therefore indicates a regression.
     Indexed draws record the shader that is active at the instant of drawing.
-    The run command models CustomShader's documented save/restore boundary.
-    This lets consecutive draws detect a missing shader-selection branch.
+    Only CustomShader models a documented shader save/restore boundary.
+    Plain CommandList calls run inside the caller's existing shader scope.
+    Optional events record the active shader at every resource binding.
+    This distinguishes early shader selection from merely changing at draw.
     It does not prove that a particular loader version restores shader state.
     That remaining acceptance check belongs to an in-game frame capture.
     No simulated state is written into the actual game's files or process.
@@ -185,6 +188,8 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1):
     # Log side effects so the disabled-mod case can require an empty trace.
     state = {"vs": shader, "$costume_mods": enabled, "$variant": variant}
     trace = []
+    if events is None:
+        events = []
 
     def condition(text):
         if " == " in text:
@@ -193,6 +198,15 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1):
         return bool(state[text])
 
     def execute(name):
+        # Shader declarations are setup metadata, applied before run commands.
+        # A normal CommandList must not save or restore the caller's shader.
+        # This is the important difference from the earlier draw-only model.
+        custom = name.startswith("CustomShader")
+        original_shader = state["vs"]
+        if custom:
+            declaration = next(line for line in sections[name] if line.startswith("vs = "))
+            state["vs"] = declaration.split(" = ", 1)[1]
+            events.append(("vs_enter", state["vs"], name))
         levels = [True]
         for line in sections[name]:
             if line.startswith("if "):
@@ -206,16 +220,23 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1):
                 if key in ("hash", "match_first_index", "match_index_count", "filter_index", "allow_duplicate_hash"):
                     continue
                 if key == "run":
-                    before = state["vs"]
                     execute(value)
-                    state["vs"] = before
                 elif key == "vs":
-                    state["vs"] = value
+                    # Already installed before command-list execution starts.
+                    assert custom
                 elif key == "drawindexed":
                     trace.append(("draw", state["vs"], value))
+                    events.append(("draw", state["vs"], value))
                 else:
                     trace.append((key, value))
+                    # Log bindings separately without altering earlier assertions.
+                    # Include both submesh and per-object texture assignments.
+                    if key == "ib" or key.startswith(("vb", "ps-t", "vs-t")):
+                        events.append(("bind", state["vs"], line))
         assert len(levels) == 1, "Unbalanced INI conditionals"
+        if custom:
+            state["vs"] = original_shader
+            events.append(("vs_restore", state["vs"], name))
 
     execute(section_name)
     return trace, state["vs"]
@@ -270,7 +291,7 @@ class ClothTests(unittest.TestCase):
         """Exercise the shared helper's most order-sensitive command sequence.
 
         The wrapper must not lift an object's draw outside its condition.
-        Texture setup/cleanup surrounds both shader-selection branches alike.
+        Both shader-selection branches share the same texture setup/cleanup.
         A negative base vertex is deliberately retained as a literal argument.
         """
         # Both draw arguments and surrounding texture commands are significant.
@@ -292,17 +313,72 @@ class ClothTests(unittest.TestCase):
 
         A single mod can contain several original index-buffer hashes.
         Identification is emitted by finalization, not by each DrawIB hook.
-        The second draw must also see the restored original shader marker.
+        Consecutive draws share one shader scope until the submesh finishes.
         """
         # No duplicate section names, no global parameter slot, no stale flag.
         first = make_model(draws=[make_draw(), make_draw("6,924,5")])
         _, builder = build([first, make_model("12345678")])
         sections = parse_sections(builder)
         self.assertEqual(sum(n.startswith("ShaderOverride") for n in sections), 1)
-        self.assertEqual(sum(n.startswith("CustomShader") for n in sections), 3)
-        trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0")
+        self.assertEqual(sum(n.startswith("CustomShader") for n in sections), 2)
+        self.assertEqual(sum(n.startswith("CommandList_YYSLS_Draw_") for n in sections), 2)
+        events = []
+        trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", events=events)
         self.assertEqual(sum(x[0] == "draw" for x in trace), 2)
+        self.assertEqual(sum(x[0] == "vs_enter" for x in events), 1)
+        self.assertEqual(sum(x[0] == "vs_restore" for x in events), 1)
+        self.assertEqual(events[-1][0], "vs_restore")
         self.assertEqual(restored, CLOTH.CLOTH_VS_FILTER)
+
+    def test_shader_installed_before_all_resource_bindings(self):
+        """Catch the reported late-switch failure with binding-time observations.
+
+        Checking only the active shader at drawindexed allowed the old order.
+        Include automatic submesh textures and conditional per-object textures,
+        as well as all three vertex buffers and the index buffer.
+        """
+        draw = make_draw(condition="$variant == 1")
+        draw.texture_lines = ["ps-t0 = ResourceObject"]
+        draw.restore_lines = ["ps-t0 = ResourceOriginal"]
+        model = make_model(draws=[draw])
+        model.get_submesh_texture_markup_info_list = lambda sub: [
+            NS(mark_type="Slot", mark_slot="ps-t8", get_resource_name=lambda: "ResourceSubmesh")]
+        _, builder = build([model])
+        sections = parse_sections(builder)
+        for shader in (CLOTH.CLOTH_VS_FILTER, 123456):
+            # Both routes must use identical bindings, but with their own VS.
+            # The target path must enter CustomShader before the first binding.
+            events = []
+            simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader, events=events)
+            bound = [event for event in events if event[0] == "bind"]
+            expected_shader = CLOTH.CLOTH_SHADER_FILENAME if shader == CLOTH.CLOTH_VS_FILTER else shader
+            self.assertEqual(len(bound), 7)
+            self.assertTrue(all(event[1] == expected_shader for event in bound))
+            if shader == CLOTH.CLOTH_VS_FILTER:
+                self.assertEqual(events[0][0], "vs_enter")
+                self.assertEqual(events[-1][0], "vs_restore")
+            else:
+                self.assertFalse(any(event[0].startswith("vs_") for event in events))
+
+    def test_parent_only_routes_and_both_paths_share_one_body(self):
+        """Assert the structural invariant independently of command simulation.
+
+        No mod resource assignment may precede the shader check in the parent.
+        The CustomShader delegates setup and drawing instead of drawing alone.
+        The fallback calls the exact same body without replacing any shader.
+        """
+        _, builder = build([make_model()])
+        sections = parse_sections(builder)
+        suffix = "LOD0.31e22cc3_0"
+        parent = sections["TextureOverride_" + suffix]
+        custom = "CustomShader_YYSLS_NoCloth_" + suffix
+        shared = "CommandList_YYSLS_Draw_" + suffix
+        self.assertFalse(any(line.startswith(("vb", "ib =", "ps-t", "vs-t", "drawindexed")) for line in parent))
+        self.assertEqual(sections[custom], ["vs = " + CLOTH.CLOTH_SHADER_FILENAME, "run = " + shared])
+        self.assertIn("run = " + custom, parent)
+        self.assertIn("run = " + shared, parent)
+        self.assertTrue(sections[shared][0].startswith("vb2 = "))
+        self.assertIn("drawindexed = 924,0,0", sections[shared])
 
     def test_full_export_packages_shader_and_serializes_marker(self):
         """Check the production serializer as well as in-memory sections.

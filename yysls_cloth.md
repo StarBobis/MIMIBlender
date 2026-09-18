@@ -13,12 +13,21 @@ A custom no-cloth draw requires all of the following:
 3. The original per-object draw conditions allow that object to be drawn.
 4. The current VS has hash `ab148fe238420411`, identified by filter `823114`.
 
-Each actual `drawindexed` is wrapped independently. On a matching VS, a
-CustomShader replaces only VS and issues that same indexed draw. When it
-returns, 3Dmigoto restores the previous shader object. On any other VS, the
-original Mod `drawindexed` command is retained without a shader replacement.
-Per-object texture binding and restoration commands remain in their original
-order outside the wrapper.
+The parent TextureOverride checks the original VS before assigning any mod
+VB, IB, or texture slot. For a matching VS, it invokes one CustomShader for
+the submesh. CustomShader installs VS first, then calls a shared CommandList
+containing the complete binding and conditional drawing sequence. The
+original shader is restored only after that shared list returns.
+
+On another VS, the parent invokes the same shared CommandList directly,
+without a shader replacement. Keeping one body prevents the two paths from
+drifting in buffer bindings, texture assignments, object conditions or draw
+offsets. Per-object texture restoration remains after the object's draw,
+inside the shared list and therefore inside the selected shader scope.
+
+Do not revert to a CustomShader around only `drawindexed`: that selects the
+shader after submesh and object resources have already been replaced. The
+regression suite now checks the active VS at each binding, not just at draw.
 
 The ShaderOverride section contains only hash identification metadata. It
 never draws, skips, or replaces anything on unrelated game meshes. Generated
@@ -67,6 +76,22 @@ running loader retains the removed global replacement, restart the game.
 The current package uses F6 for `$costume_mods`; that variable is supplied by
 its root d3dx.ini, not declared separately by every generated mod.
 
+Update the actually installed addon copy first, then save your Blender work
+and reload its modules or restart Blender before exporting again. Installed
+addon folders may be independent copies rather than links to this checkout;
+a restart alone will not copy repository changes into them. The examined
+Blender 5.2 installation had old independent copies named MIMIBlender and
+MIMIBlenderV1017. Neither copy was silently overwritten during this fix.
+
+An already running Blender may also retain an old Python exporter in memory.
+Merely copying the local HLSL beside an INI does not activate it: the INI must
+contain ShaderOverride identification, the early VS check, CustomShader, and
+the shared binding/draw CommandList.
+The reported failure was followed by an on-disk INI in the old format with
+no CustomShader invocation; its newly exported draw count of 9654 for part 1
+is preserved by the follow-up migration. This observation does not establish
+which configuration was loaded at the instant the screenshot was taken.
+
 ## Validation
 
 Run from the addon root:
@@ -77,7 +102,7 @@ python tools/test_yysls_cloth_shader.py
 python tools/test_yysls_cloth_shader.py --reference <backed-up-vs_replace.txt>
 ```
 
-The first command runs eight tests without Blender, exercising the real
+The first command runs ten tests without Blender, exercising the real
 exporter, builder, shared draw helper, and asset packaging. A small command
 model checks the emitted conditions but is not an actual 3Dmigoto parser.
 The shader test requires Windows and uses System32/d3dcompiler_47.dll without

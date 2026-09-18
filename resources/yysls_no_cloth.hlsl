@@ -1,8 +1,9 @@
 // YYSLS local no-cloth vertex shader for hash ab148fe238420411 only.
 // Derived from the user's working no-cloth ShaderFixes replacement.
 // This file is an asset for CustomShader, never a global hash replacement.
-// The exporter checks the currently bound VS immediately before each draw.
-// CustomShader restores the original shader object after that draw returns.
+// The exporter checks the original VS before binding any mod resources.
+// CustomShader installs VS before the shared resource/draw list executes.
+// The original shader is restored after the whole submesh list returns.
 // Other vertex shaders must not use this implementation.
 //
 // Only unused constant declarations and unreachable deformation branches
@@ -24,7 +25,8 @@
 // - First-index and index-count matches keep the selection draw-specific.
 // - The package's costume switch must be enabled before replacing the draw.
 // - The currently active VS must carry the exact verified hash marker.
-// - Only then may a CustomShader bind this asset and issue the mod draw.
+// - CustomShader binds this asset before any VB, IB or texture replacement.
+// - Its shared command list then binds resources and issues the mod draws.
 // - The old VS is restored by CustomShader before returning to the caller.
 // - The hash marker itself must never run this shader on unrelated meshes.
 //

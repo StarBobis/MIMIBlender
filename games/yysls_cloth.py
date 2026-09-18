@@ -1,8 +1,9 @@
 """Draw-scoped no-cloth support for one verified YYSLS vertex shader.
 
-The hash marker never replaces or draws a shader by itself. Each generated
-mod draw checks the current VS, then calls a CustomShader for that draw only.
-Other VS hashes keep their original draw command and original shader object.
+The hash marker never replaces or draws a shader by itself. Each submesh
+checks the original VS before modifying any vertex, index, or texture slot.
+A matching CustomShader binds VS first, then invokes the shared resource and
+draw command list. Other VS hashes invoke that list without a shader change.
 No global frame flag, IniParams slot, or deformation resource is modified.
 """
 
@@ -47,39 +48,45 @@ def add_shader_check(ini_builder):
     ini_builder.append_section(section)
 
 
-def append_scoped_draws(section, custom_section, draw_lines, name_suffix):
-    """Wrap only actual drawindexed commands, preserving object conditions.
+def append_scoped_submesh(section, command_section, mod_lines, name_suffix):
+    """Select VS before running any submesh resource bindings or draws.
 
     The caller has already matched the submesh and checked the mod switch.
-    Leave texture save/bind/restore commands in their original order. Testing
-    the VS at each draw avoids leaking a decision across objects or contexts.
+    Keep one shared command list for both shader paths so buffer bindings,
+    texture bindings, object conditions and draw offsets cannot drift apart.
+    CustomShader installs VS before running its command list, then restores
+    the original shader after the entire submesh list returns.
     """
-    for line_index, line in enumerate(draw_lines):
-        command = line.strip()
-        # Branches, mesh comments and per-object texture bindings must not
-        # move into a different branch or execute an extra time.
-        if not command.lower().startswith("drawindexed ="):
-            section.append(line)
-            continue
+    custom_name = "CustomShader_YYSLS_NoCloth_" + name_suffix
+    draw_name = "CommandList_YYSLS_Draw_" + name_suffix
 
-        # Every draw keeps its literal index count, start index and base vertex.
-        # A unique section name also preserves separate draws in switch branches.
-        indent = line[:len(line) - len(line.lstrip())]
-        custom_name = "CustomShader_YYSLS_NoCloth_" + name_suffix + "_" + str(line_index)
-        section.append(indent + "; Use the no-cloth VS only for this matching mod draw.")
-        section.append(indent + "if vs == " + str(CLOTH_VS_FILTER))
-        section.append(indent + "  run = " + custom_name)
-        section.append(indent + "else")
-        section.append(indent + "  " + command)
-        section.append(indent + "endif")
+    # Do not bind VB/IB/textures in the parent TextureOverride. That would
+    # recreate the late shader switch which this scope is intended to avoid.
+    # Evaluate the marker while all game bindings are still the originals.
+    section.append("; Check the original VS before changing any mod resource slots.")
+    section.append("if vs == " + str(CLOTH_VS_FILTER))
+    section.append("  run = " + custom_name)
+    section.append("else")
+    section.append("  run = " + draw_name)
+    section.append("endif")
 
-        # CustomShader saves/restores shader objects around the draw. Only
-        # VS is replaced, so the game's PS/GS/HS/DS and render state remain.
-        # No resource slots are borrowed here, hence no extra slot restoration
-        # or global shader-state variable is necessary.
-        custom_section.append("[" + custom_name + "]")
-        custom_section.append("; The caller checks the original VS before entering.")
-        custom_section.append("; CustomShader restores that VS when this draw returns.")
-        custom_section.append("vs = " + CLOTH_SHADER_FILENAME)
-        custom_section.append(command)
-        custom_section.new_line()
+    # Only the matched path replaces VS. CustomShader binds the shader before
+    # executing run; a plain CommandList call does not establish shader scope.
+    # Leave other shader stages and the game's ranged constant buffers alone.
+    command_section.append("[" + custom_name + "]")
+    command_section.append("; Install VS first, then bind resources and draw the submesh.")
+    command_section.append("; Restore the original VS only after the shared list returns.")
+    command_section.append("vs = " + CLOTH_SHADER_FILENAME)
+    command_section.append("run = " + draw_name)
+    command_section.new_line()
+
+    # Include the complete original binding/drawing sequence exactly once.
+    # Object texture save/restore commands stay beside their conditional draw.
+    # All draws in this submesh execute under the selected shader scope.
+    # No global shader flag or additional resource slot is introduced here.
+    command_section.append("[" + draw_name + "]")
+    command_section.append("; Reached with either the scoped no-cloth VS or the original VS.")
+    command_section.append("; Keep resource bindings before the original conditional draws.")
+    for line in mod_lines:
+        command_section.append(line)
+    command_section.new_line()
