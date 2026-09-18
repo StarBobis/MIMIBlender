@@ -98,6 +98,16 @@ def compare_signatures(shipped, reference):
         assert shipped.get(key) == reference.get(key), "Signature mismatch: " + str(key)
 
 
+def assert_no_cloth_deformation(path, bytecode):
+    """Reject accidental reintroduction of the t11 cloth solver path."""
+    # The local asset may keep comments describing the removed path, but source
+    # declarations and compiled bytecode must not contain its executable ABI.
+    source = path.read_text(encoding="utf-8")
+    for token in ("Texture2DArray", "cVertexDeformType", "cDeformationMisc", "register(t11)"):
+        assert token not in source, "cloth declaration remains: " + token
+    assert b"tPositionDeformTex" not in bytecode
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reference", type=Path)
@@ -106,10 +116,12 @@ def main():
 
     compiled = []
     for shader in SHADERS:
-        chunks = dxbc_chunks(compile_shader(shader))
+        bytecode = compile_shader(shader)
+        chunks = dxbc_chunks(bytecode)
         assert b"SHDR" in chunks or b"SHEX" in chunks
+        assert_no_cloth_deformation(shader, bytecode)
         compiled.append(chunks)
-        print("PASS: " + shader.name + " compiles as vs_5_0")
+        print("PASS: " + shader.name + " compiles as vs_5_0 and has no t11 cloth path")
 
     # The optional reference is for the original ab148 no-cloth asset only.
     # The 49bf asset has a different input signature and is validated separately.

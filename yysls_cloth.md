@@ -70,7 +70,11 @@ The first asset still compiles to identical executable DXBC and input/output
 signatures when compared with the backed-up working no-cloth replacement. The
 second asset compiles independently and has identical input/output signatures
 to the supplied `49bf02a13c364cd9` source; its executable necessarily differs
-because the t11 cloth reads are intentionally removed. Reflection metadata is
+because the t11 cloth reads are intentionally removed. Both assets are checked
+for the absence of `Texture2DArray`, `cVertexDeformType`, `cDeformationMisc`,
+and the compiled `tPositionDeformTex` resource. The remaining t14 historical
+skeleton-map branch is ordinary motion-vector skinning, not cloth solving, and
+is intentionally retained like the existing asset. Reflection metadata is
 deliberately excluded because unused declarations were removed.
 
 The shader no longer consumes the game's t11 cloth results. It does not stop
