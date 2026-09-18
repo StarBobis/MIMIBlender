@@ -79,8 +79,9 @@ Normal skeletal animation remains enabled.
 
 ## Migration from a global replacement
 
-A global `ShaderFixes/ab148fe238420411-vs_replace.txt` or its compiled `.bin`
-counterpart would still affect unrelated meshes. Back it up outside the
+Global `ShaderFixes/ab148fe238420411-vs_replace.txt` and
+`ShaderFixes/49bf02a13c364cd9-vs_replace.txt` files, or their compiled `.bin`
+counterparts, would still affect unrelated meshes. Back them up outside the
 loader's active ShaderFixes directory before enabling this local approach.
 Do not automatically delete arbitrary files from a user's game installation
 when exporting a new mod; the exporter only packages its own local asset.
