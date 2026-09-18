@@ -153,7 +153,12 @@ class MeshCreateHelper:
                     elif element.SemanticName.startswith("COLOR"):
                         store_raw_bytes(mesh, RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX + ":" + element.ElementName, data[:, 3:4], component_width)
 
-            
+            # Layout-aware YYSLS extraction describes interior byte gaps as
+            # RAWDATA. Keep them out of color management and vertex groups;
+            # point attributes carry the exact bytes through topology edits.
+            if logic_name == LogicName.YYSLS and element.SemanticName == "RAWDATA":
+                store_raw_bytes(mesh, "3DMigoto:YYSLS:" + element.ElementName, data, element.ByteWidth)
+
             data = FormatUtils.apply_format_conversion(data, element.Format)
             print("Shape after data conversion: " + str(data.shape))
 
@@ -251,8 +256,9 @@ class MeshCreateHelper:
             elif element.SemanticName == "RAWDATA":
                 # Reserved-region bytes in EFMI reverse-engineered products (stride gaps not declared in the
                 # input layout, flagged by EFMI-Tools fill_missing_semantics; officially named RAWDATA on
-                # the extraction side): read to keep stride alignment and vertex count consistent,
-                # but no Blender attribute is created -- it has no mappable semantic.
+                # the extraction side): read to keep stride alignment and vertex count consistent.
+                # YYSLS has already stored these bytes above; other presets retain
+                # their historical behavior without a mapped Blender attribute.
                 pass
             else:
                 raise Fatal("Unknown ElementName: " + element.ElementName)
@@ -279,7 +285,13 @@ class MeshCreateHelper:
             )
         else:
             _vg_component = None
-        MeshCreateHelper.import_vertex_groups(mesh, obj, blend_indices, blend_weights, _vg_component)
+        # A bone may occur in both EXT8 sets. Accumulate those contributions
+        # instead of replacing the first set's weight with the second set's.
+        # Other presets and ordinary four-weight YYSLS retain legacy behavior.
+        MeshCreateHelper.import_vertex_groups(
+            mesh, obj, blend_indices, blend_weights, _vg_component,
+            merge_duplicate_weights=logic_name == LogicName.YYSLS and len(blend_weights) > 1,
+        )
         print("Vertex group import complete")
 
         MeshCreateHelper.import_shapekeys(mesh, obj, shapekeys)
@@ -419,7 +431,7 @@ class MeshCreateHelper:
                 blender_uvs.data.foreach_set('uv', uv_array)
 
     @staticmethod
-    def import_vertex_groups(mesh, obj, blend_indices, blend_weights, component):
+    def import_vertex_groups(mesh, obj, blend_indices, blend_weights, component, merge_duplicate_weights=False):
         for semantic_index, bone_indices_list in blend_indices.items():
             arr = numpy.asarray(bone_indices_list)
             if arr.dtype.kind == 'f':
@@ -487,7 +499,7 @@ class MeshCreateHelper:
                                 vertex_group = obj.vertex_groups.new(name=str(target_group_id))
                             vertex_group_by_id[target_group_id] = vertex_group
 
-                        vertex_group.add((vertex.index,), float(w), 'REPLACE')
+                        vertex_group.add((vertex.index,), float(w), 'ADD' if merge_duplicate_weights else 'REPLACE')
 
     @staticmethod
     def import_shapekeys(mesh, obj, shapekeys):

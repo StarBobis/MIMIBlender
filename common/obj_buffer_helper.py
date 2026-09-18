@@ -7,6 +7,7 @@ from ..model.draw_call_model import DrawCallModel
 
 from ..utils.format_utils import FormatUtils
 from ..utils.vertexgroup_utils import VertexGroupUtils
+from ..utils.yysls_blend import has_extended_blend, pack_extended_blend
 from ..utils.timer_utils import TimerUtils
 from ..utils.tbn_codec import TBNCodec
 from ..utils.mmt_error_utils import MMTErrorUtils
@@ -585,8 +586,13 @@ class ObjBufferHelper:
 
         normalize_weights = "Blend" in d3d11_game_type.OrderedCategoryNameList
 
-        # normalize_weights = False
-        if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
+        # EXT8 weights are already jointly quantized below. The element loop
+        # must not normalize either four-column half again. Ordinary YYSLS
+        # layouts and every other game retain their existing code path.
+        yysls_extended = GlobalConfig.logic_name == LogicName.YYSLS and has_extended_blend(d3d11_game_type)
+        if yysls_extended:
+            blendweights_dict, blendindices_dict = pack_extended_blend(mesh, d3d11_game_type)
+        elif GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
             # print("Wuthering Waves test-only weight handling:")
             blendweights_dict, blendindices_dict = VertexGroupUtils.get_blendweights_blendindices_v4_fast(mesh=mesh,normalize_weights = normalize_weights,blend_size=blend_size)
 
@@ -674,7 +680,18 @@ class ObjBufferHelper:
                 data = ObjBufferHelper._parse_blendindices(blendindices_dict, d3d11_element)
                 
             elif d3d11_element_name.startswith('BLENDWEIGHT'):
-                data = ObjBufferHelper._parse_blendweight(blendweights_dict, d3d11_element)
+                if yysls_extended:
+                    # These bytes came from the single eight-channel quantizer.
+                    data = blendweights_dict[d3d11_element.SemanticIndex]
+                else:
+                    data = ObjBufferHelper._parse_blendweight(blendweights_dict, d3d11_element)
+
+            elif d3d11_element_name.startswith('RAWDATA') and GlobalConfig.logic_name == LogicName.YYSLS:
+                # Explicit input-layout gaps must retain their width. Preserve
+                # imported bytes; new/custom meshes can safely zero unused gaps.
+                raw = load_raw_bytes(mesh, "3DMigoto:YYSLS:" + d3d11_element_name, d3d11_element.ByteWidth)
+                data = raw[loop_vertex_indices] if raw is not None else numpy.zeros(
+                    (mesh_loops_length, d3d11_element.ByteWidth), dtype=numpy.uint8)
 
             # elif d3d11_element_name == 'ENCODEDDATA':
             #     if GlobalConfig.logic_name == LogicName.EFMI:
