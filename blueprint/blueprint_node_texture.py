@@ -138,19 +138,15 @@ def _find_owner_bind_node(item):
 
 
 def _resolve_upstream_submesh_name(node, depth=0):
-    '''Walk upstream through pass-through nodes to find an Object Info node.'''
-    if node is None or depth > 16:
-        return ""
-    if getattr(node, "bl_idname", "") == 'MIMINode_Object_Info':
-        submesh_name = str(getattr(node, "submesh_name", "") or "").strip()
-        if submesh_name:
-            return submesh_name
-        return str(getattr(node, "object_name", "") or "").strip()
-    for socket in getattr(node, "inputs", []):
-        for link in getattr(socket, "links", []):
-            found = _resolve_upstream_submesh_name(link.from_node, depth + 1)
-            if found:
-                return found
+    '''Find the first enabled upstream source, respecting list/group ports.'''
+    # The old Object-Info-only traversal left marked-texture dropdowns empty
+    # when an Object List or custom group fed the binding node.
+    from .blueprint_graph import iter_object_sources
+    for source in iter_object_sources(node):
+        submesh_name = str(getattr(source, "submesh_name", "") or "").strip()
+        object_name = str(getattr(source, "object_name", "") or "").strip()
+        if submesh_name or object_name:
+            return submesh_name or object_name
     return ""
 
 
@@ -257,7 +253,8 @@ class MMT_OT_TexBindAddItem(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}
@@ -282,7 +279,8 @@ class MMT_OT_TexBindRemoveItem(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}
@@ -307,7 +305,8 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}

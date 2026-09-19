@@ -231,6 +231,10 @@ class BlueprintExportHelper:
 
     @staticmethod
     def get_selected_blueprint_tree(selected_name="", context=None):
+        # An explicit stale/deleted name is not permission to modify a different
+        # blueprint. Only an unspecified target may use the preferred fallback.
+        if selected_name:
+            return BlueprintExportHelper.get_blueprint_tree_by_name(selected_name)
         preferred_name = BlueprintExportHelper.get_preferred_blueprint_name(
             selected_name=selected_name,
             context=context,
@@ -290,7 +294,6 @@ class BlueprintExportHelper:
                     return node
         return None
 
-    @staticmethod
     @staticmethod
     def get_node_from_bl_idname(tree, node_type:str):
         """Find the output node in the tree (assumes there is only one)"""

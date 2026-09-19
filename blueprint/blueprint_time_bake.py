@@ -289,6 +289,26 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
         """
         from .blueprint_node_object_list import _append_object_list_item
 
+        # A baked list belongs to a timeline instance, not to a source name.
+        # Two timelines can bake the same mesh; reusing a name-only match used
+        # to erase the other timeline's sockets and disconnect its animation.
+        list_name = str(node.get("_mimi_baked_list_name", ""))
+        list_node = tree.nodes.get(list_name) if list_name else None
+        if list_node is not None and list_node.bl_idname != 'MIMINode_Object_List':
+            list_node = None
+        if list_node is not None:
+            shared = any(link.to_node != node for socket in list_node.outputs for link in socket.links)
+            if shared:
+                list_node = None
+        if list_node is None:
+            # Never clear a user node merely because its display name matches.
+            # Blender appends a unique suffix if this readable name is taken.
+            list_node = tree.nodes.new('MIMINode_Object_List')
+            list_node.name = ("TB_" + source_obj.name + "_frames")[:60]
+            list_node.label = list_node.name
+            list_node.location = (node.location.x - 480, node.location.y + 60)
+        node["_mimi_baked_list_name"] = list_node.name
+
         # Frame sockets allow multiple links. Re-baking must replace the old
         # links explicitly, otherwise both old and new objects are drawn.
         for socket in node.inputs:
@@ -301,21 +321,10 @@ class MMT_OT_BakeAnimationToTimeSwitch(I18nOperator):
             node.inputs.remove(node.inputs[-1])
         renumber_time_switch_sockets(node)
 
-        # Re-bake: reuse the list node this operator created earlier. The
-        # deterministic name keeps the rebuild in place without touching
-        # user-made Object List nodes.
-        list_name = ("TB_" + source_obj.name + "_frames")[:60]
-        list_node = tree.nodes.get(list_name)
-        if list_node is not None:
-            while len(list_node.object_items) > 0:
-                list_node.object_items.remove(0)
-            while len(list_node.outputs) > 1:
-                list_node.outputs.remove(list_node.outputs[-1])
-        else:
-            list_node = tree.nodes.new('MIMINode_Object_List')
-            list_node.name = list_name
-            list_node.label = list_name
-            list_node.location = (node.location.x - 480, node.location.y + 60)
+        # Only this timeline's private list is rebuilt; other wires survive.
+        list_node.object_items.clear()
+        while len(list_node.outputs) > 1:
+            list_node.outputs.remove(list_node.outputs[-1])
         list_node.show_details = False
 
         for index, (frame_number, baked_obj) in enumerate(baked_objects):

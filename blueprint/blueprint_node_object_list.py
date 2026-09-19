@@ -36,7 +36,10 @@ ALL_SOCKET_NAME = "All"
 def _object_list_item_refresh_display(item):
     '''Rebuild the one-line display name shown inside the list widget.'''
     object_name = str(getattr(item, "object_name", "") or "").strip()
-    item.name = object_name if object_name else "?"
+    expected_name = object_name if object_name else "?"
+    # Avoid dirtying every blueprint on each integrity-timer tick.
+    if item.name != expected_name:
+        item.name = expected_name
 
 
 def _sync_item_socket_label(node, item):
@@ -70,6 +73,13 @@ def _object_list_item_changed(item):
         # contexts are read-only), so the width is maintained from property
         # updates and operators instead of draw_buttons.
         node._refresh_width()
+
+
+def _object_list_object_changed(item):
+    # Keep a native Blender reference in addition to the editable name.
+    # Pointer properties follow renames and survive save/load automatically.
+    item.object_ref = bpy.data.objects.get(str(item.object_name or ""))
+    _object_list_item_changed(item)
 
 
 def _find_owner_object_list_node(item):
@@ -113,7 +123,8 @@ def _remove_object_list_item(node, index):
 def _lookup_object_list_node(context, tree_name, node_name):
     '''Shared operator helper: resolve the target node from its names.'''
     tree = bpy.data.node_groups.get(tree_name) if tree_name else None
-    if tree is None:
+    # Never fall back to a different tree when an explicit target disappeared.
+    if tree is None and not tree_name:
         tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
     if tree is None:
         return None
@@ -133,11 +144,15 @@ class MIMIObjectListItem(PropertyGroup):
         default=True,
     ) # type: ignore
 
+    # The hidden pointer preserves identity when an object is renamed.
+    # The existing name remains the public/export format for older files.
+    object_ref: bpy.props.PointerProperty(type=bpy.types.Object) # type: ignore
+
     object_name: bpy.props.StringProperty(
         name=tr("Object Name"),
         description=tr("Blender object of this entry; parse falls back to object name resolution when the Submesh is empty"),
         default="",
-        update=lambda self, context: _object_list_item_changed(self),
+        update=lambda self, context: _object_list_object_changed(self),
     ) # type: ignore
 
     submesh_name: bpy.props.StringProperty(
@@ -340,6 +355,14 @@ def _sync_item_socket_integrity(node):
         node.outputs.new('MIMISocketObject', ALL_SOCKET_NAME)
         changed = True
     for index, item in enumerate(node.object_items):
+        # Migrate legacy names lazily and follow native object renames.
+        # Refresh outside drawing, where Blender permits datablock writes.
+        if item.object_ref is None and item.object_name:
+            item.object_ref = bpy.data.objects.get(item.object_name)
+        if item.object_ref is not None and item.object_name != item.object_ref.name:
+            item.object_name = item.object_ref.name
+            changed = True
+        _object_list_item_refresh_display(item)
         socket_index = index + 1
         if socket_index >= len(node.outputs):
             node.outputs.new('MIMISocketObject', item.name or "?")

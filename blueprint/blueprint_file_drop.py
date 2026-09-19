@@ -94,7 +94,8 @@ class MMT_OT_BlueprintFileDrop(I18nOperator):
 
     def invoke(self, context, event):
         space = getattr(context, "space_data", None)
-        tree = getattr(space, "node_tree", None) if space else None
+        # Drops inside an opened group belong to the edited child, not root.
+        tree = (getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)) if space else None
         if tree is None or getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
             return {'CANCELLED'}
 

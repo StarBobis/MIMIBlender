@@ -65,10 +65,17 @@ class ObjectPersistentIdManager:
         resolved_obj = None
         node_object_name = str(getattr(node, "object_name", "") or "")
         node_object_id = str(getattr(node, "object_id", "") or "")
-        if allow_name_fallback and node_object_name:
+        if node_object_id:
+            # Names can be reused after a rename. Prefer the saved UUID so a
+            # different object with the old name cannot hijack this node.
+            # An exact name+UUID match disambiguates freshly duplicated IDs.
+            named_obj = bpy.data.objects.get(node_object_name)
+            if named_obj and named_obj.get(OBJECT_PERSISTENT_ID_KEY) == node_object_id:
+                resolved_obj = named_obj
+            else:
+                resolved_obj = ObjectPersistentIdManager.find_by_id(node_object_id)
+        if resolved_obj is None and allow_name_fallback and node_object_name:
             resolved_obj = bpy.data.objects.get(node_object_name)
-        if resolved_obj is None and node_object_id:
-            resolved_obj = ObjectPersistentIdManager.find_by_id(node_object_id)
         return resolved_obj
 
     @staticmethod
@@ -162,13 +169,15 @@ class MMT_OT_SelectNodeObject(I18nOperator):
     object_id: bpy.props.StringProperty() # type: ignore
 
     def execute(self, context):
-        obj = None
-        if self.object_name:
-            obj = bpy.data.objects.get(self.object_name)
-        if obj is None and self.object_id:
-            obj = ObjectPersistentIdManager.find_by_id(self.object_id)
+        # Match refresh/export identity rules instead of selecting a new object
+        # that happens to reuse the referenced mesh's previous name.
+        obj = ObjectPersistentIdManager.find_by_id(self.object_id) if self.object_id else None
+        named_obj = bpy.data.objects.get(self.object_name) if self.object_name else None
+        if named_obj and (obj is None or named_obj.get(OBJECT_PERSISTENT_ID_KEY) == self.object_id):
+            obj = named_obj
 
-        if not obj:
+        if obj is None or obj.name not in context.view_layer.objects:
+            self.report({'WARNING'}, tr("Object not found"))
             return {'CANCELLED'}
 
         if obj:
@@ -668,47 +677,39 @@ class MMT_OT_View_Group_Objects(I18nOperator):
                 else:
                     with context.temp_override(area=view_3d_area, screen=target_screen):
                         bpy.ops.view3d.localview()
-            except Exception:
-                # Fallback: modify the space data directly instead of using the operator
-                for space in view_3d_area.spaces:
-                    if space.type == 'VIEW_3D':
-                        space.local_view = None
-                        break
+            except RuntimeError as error:
+                # SpaceView3D.local_view is read-only; assigning None raises
+                # another exception instead of recovering from a failed poll.
+                self.report({'WARNING'}, str(error))
+                return {'CANCELLED'}
             self.report({'INFO'}, tr("Exited local view"))
             return {'FINISHED'}
 
         objects_to_show = set()
-        checked_nodes = set()
-        visited_blueprints = set()
-
-        def collect_objects(current_node):
-            if current_node in checked_nodes:
-                return
-            checked_nodes.add(current_node)
-
-            if getattr(current_node, "bl_idname", "") == 'MIMINode_Object_Info':
-                obj_name = getattr(current_node, "object_name", "")
-                if obj_name:
-                    obj = bpy.data.objects.get(obj_name)
-                    if obj:
-                        objects_to_show.add(obj)
-
-
-            if hasattr(current_node, "inputs"):
-                for inp in current_node.inputs:
-                    if inp.is_linked:
-                        for link in inp.links:
-                            collect_objects(link.from_node)
-
-        collect_objects(node)
+        # Preview follows the same source ports as export, including Object
+        # List rows, reroutes, disabled nodes and nested custom groups.
+        from .blueprint_graph import iter_object_sources
+        target_view_layer = (target_window or context.window).view_layer
+        for source in iter_object_sources(node):
+            if getattr(source, "bl_idname", "") == 'MIMINode_Object_Info':
+                obj = ObjectPersistentIdManager.resolve_node_target(source)
+            else:
+                obj = getattr(source, "object_ref", None) or bpy.data.objects.get(source.object_name)
+            # Selecting an object outside the destination view layer raises.
+            # Skip it instead of aborting the whole preview after deselection.
+            if obj is not None and obj.name in target_view_layer.objects:
+                objects_to_show.add(obj)
 
         if not objects_to_show:
             self.report({'WARNING'}, tr("No objects found in this group"))
             return {'CANCELLED'}
 
         def deselect_all_safe():
-            for o in bpy.context.selected_objects:
-                o.select_set(False)
+            # A separate blueprint window can belong to another scene.
+            # Selection must be changed in the destination 3D view's layer.
+            for o in target_view_layer.objects:
+                if o.select_get(view_layer=target_view_layer):
+                    o.select_set(False, view_layer=target_view_layer)
 
         if context.mode != 'OBJECT':
             try:
@@ -718,7 +719,7 @@ class MMT_OT_View_Group_Objects(I18nOperator):
 
         deselect_all_safe()
         for obj in objects_to_show:
-            obj.select_set(True)
+            obj.select_set(True, view_layer=target_view_layer)
 
         # Get the 3D View space and configure it
         view_3d_space = None

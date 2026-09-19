@@ -17,6 +17,11 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
     bl_description = "Scans all object nodes in the blueprint and collects their shape keys"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # Explicit ownership keeps buttons on different outputs independent.
+    # Names also survive the operator context changing to a popup/other area.
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+
     @staticmethod
     def _get_shapekeys_from_object(obj):
         """Return the names of all shape keys of the object (skipping the first one, the Basis)."""
@@ -28,16 +33,17 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
         return [kb.name for kb in list(shape_keys.key_blocks)[1:]]
 
     def execute(self, context):
-        tree = context.space_data.edit_tree
+        space = getattr(context, 'space_data', None)
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else getattr(space, 'edit_tree', None)
         if not tree or getattr(tree, 'bl_idname', '') != 'MIMIBlueprintTreeType':
             self.report({'WARNING'}, tr("Please run this inside the MMT blueprint editor"))
             return {'CANCELLED'}
 
-        output_node = None
-        for node in tree.nodes:
-            if node.bl_idname == 'MIMINode_Result_Output':
-                output_node = node
-                break
+        output_node = tree.nodes.get(self.node_name) if self.node_name else tree.nodes.active
+        if not output_node or output_node.bl_idname != 'MIMINode_Result_Output':
+            # Preserve the legacy shortcut only when its target is unambiguous.
+            outputs = [node for node in tree.nodes if node.bl_idname == 'MIMINode_Result_Output']
+            output_node = outputs[0] if not self.node_name and len(outputs) == 1 else None
         if not output_node:
             self.report({'WARNING'}, tr("The current blueprint is missing a \"Generate Mod\" output node"))
             return {'CANCELLED'}
@@ -49,10 +55,15 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
         }
         seen = set()
         output_node.shapekey_items.clear()
-        for node in tree.nodes:
-            if node.bl_idname != 'MIMINode_Object_Info':
-                continue
-            obj = bpy.data.objects.get(node.object_name)
+        # Only sources connected to this output belong to its shape-key list.
+        # Object Lists and nested groups are equally valid source containers.
+        from .blueprint_graph import iter_object_sources
+        from .blueprint_node_obj import ObjectPersistentIdManager
+        for node in iter_object_sources(output_node):
+            if getattr(node, 'bl_idname', '') == 'MIMINode_Object_Info':
+                obj = ObjectPersistentIdManager.resolve_node_target(node)
+            else:
+                obj = getattr(node, 'object_ref', None) or bpy.data.objects.get(node.object_name)
             for sk_name in self._get_shapekeys_from_object(obj):
                 if sk_name in seen:
                     continue
@@ -74,7 +85,9 @@ def draw_shapekey_settings(node, layout):
 
     box = layout.box()
     row = box.row(align=True)
-    row.operator("mimi.refresh_shapekey_list", text=tr("Refresh List"), icon='FILE_REFRESH')
+    operator = row.operator("mimi.refresh_shapekey_list", text=tr("Refresh List"), icon='FILE_REFRESH')
+    operator.node_name = node.name
+    operator.tree_name = node.id_data.name
     row.label(text=tr("Total: {count}").format(count=len(node.shapekey_items)) if node.shapekey_items else tr("(Empty)"), icon='SHAPEKEY_DATA')
 
     for item in node.shapekey_items:

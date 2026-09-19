@@ -8,6 +8,24 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
 
 
+def _new_batch_input(node):
+    """Grow only node types whose data model supports extra input ports."""
+    # Having an update() callback does not imply a dynamic interface. Adding
+    # arbitrary ports to texture/custom-group nodes corrupts their contract.
+    prefixes = {
+        'MIMINode_Object_Group': ('Input', 1),
+        'MIMINode_Result_Output': ('Group', 1),
+        'MIMINode_Face_Mod_Export': ('Face Group', 1),
+        'MIMINode_SwitchKey': ('Status', 0),
+        'MIMINode_TimeSwitch': ('Frame', 0),
+        'MIMINode_TimePosSwitch': ('Frame', 0),
+    }
+    if node.bl_idname not in prefixes:
+        return None
+    prefix, start = prefixes[node.bl_idname]
+    return node.inputs.new('MIMISocketObject', f'{prefix} {len(node.inputs) + start}')
+
+
 class MMT_OT_CreateGroupFromSelection(I18nOperator):
     '''Create nodes from selected objects and group them under a new Group node'''
     bl_idname = "mimi.create_group_from_selection"
@@ -583,17 +601,11 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
             else:
                 # B is on the left: B -> A
                 source_nodes, target_nodes = nodes_b, nodes_a
-        elif a_has_output and not a_has_input and not b_has_output:
-            # A has only outputs, B has none: A -> B
+        elif a_has_output and b_has_input:
+            # Pass-through nodes can feed an input-only Generate Mod output.
+            # The old test inverted has_input and rejected this common pair.
             source_nodes, target_nodes = nodes_a, nodes_b
-        elif b_has_output and not b_has_input and not a_has_output:
-            # B has only outputs, A has none: B -> A
-            source_nodes, target_nodes = nodes_b, nodes_a
-        elif a_has_output and not b_has_input:
-            # A has outputs, B has no inputs: A -> B
-            source_nodes, target_nodes = nodes_a, nodes_b
-        elif b_has_output and not a_has_input:
-            # B has outputs, A has no inputs: B -> A
+        elif b_has_output and a_has_input:
             source_nodes, target_nodes = nodes_b, nodes_a
         else:
             self.report({'ERROR'}, tr("Cannot determine connection direction. Please check the node socket configuration."))
@@ -608,7 +620,8 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
         # Clear existing links
         for source_node in source_nodes:
             for output in source_node.outputs:
-                for link in output.links:
+                # Snapshot links before removing any RNA elements.
+                for link in list(output.links):
                     if link.to_node in target_nodes:
                         node_tree.links.remove(link)
 
@@ -632,9 +645,7 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
             # No free input socket: try creating a new one
             if not available_input:
                 try:
-                    if hasattr(target_node, 'update'):
-                        target_node.inputs.new('MIMISocketObject', "Input {count}".format(count=len(target_node.inputs) + 1))
-                        available_input = target_node.inputs[-1]
+                    available_input = _new_batch_input(target_node)
                 except Exception:
                     self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=target_node.name))
                     continue
@@ -685,7 +696,8 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
         # Clear existing links (only those between the selected nodes)
         for node in majority_nodes:
             for output in node.outputs:
-                for link in output.links:
+                # Snapshot links before removing any RNA elements.
+                for link in list(output.links):
                     if link.to_node in minority_nodes:
                         node_tree.links.remove(link)
 
@@ -720,10 +732,8 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
                 # No free input socket: try creating a new one (for nodes with dynamic sockets)
                 if not available_input:
                     try:
-                        # Some nodes (such as Group, Output) support dynamically added sockets
-                        if hasattr(minority_node, 'update'):
-                            minority_node.inputs.new('MIMISocketObject', "Input {count}".format(count=len(minority_node.inputs) + 1))
-                            available_input = minority_node.inputs[-1]
+                        # Only explicitly dynamic node interfaces may grow.
+                        available_input = _new_batch_input(minority_node)
                     except Exception:
                         self.report({'WARNING'}, tr("Node '{node_name}' has no available input socket").format(node_name=minority_node.name))
                         majority_index += 1

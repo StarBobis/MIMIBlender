@@ -1,0 +1,438 @@
+"""Real Blender regression coverage for blueprint UI and graph operations.
+
+Run with blender -b --factory-startup --python-exit-code 1 --python this_file.
+The suite uses a disposable factory scene and never opens a user's blend file.
+"""
+import importlib
+from pathlib import Path
+import sys
+import unittest
+from unittest.mock import patch
+import tempfile
+
+import bpy
+
+# Load the checkout as an addon so RNA registration is exercised as shipped.
+# Using the real entry point also exposes missing dependency registrations.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent))
+addon = importlib.import_module(ROOT.name)
+addon.register()
+base = addon.blueprint_node_base
+groups = addon.blueprint_node_group
+lists = addon.blueprint_node_object_list
+
+
+class BlueprintTests(unittest.TestCase):
+    def setUp(self):
+        # Each case owns its trees; a failure must not contaminate later cases.
+        self.tree = bpy.data.node_groups.new("audit", base.MIMIBlueprintTree.bl_idname)
+
+    def tearDown(self):
+        # Clear only this factory-process test data, never external files.
+        for tree in list(bpy.data.node_groups):
+            if tree.bl_idname == base.MIMIBlueprintTree.bl_idname:
+                bpy.data.node_groups.remove(tree)
+
+    def test_group_rna_properties(self):
+        # Deferred Python annotations must not swallow Blender properties.
+        node = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        self.assertIn("node_tree", node.bl_rna.properties)
+        self.assertIn("group_name", bpy.ops.mimi.make_group.get_rna_type().properties)
+
+    def test_socket_draw_labels(self):
+        # Socket circles are drawn by Blender, independently of this callback.
+        # Record labels for linked and unlinked input/output sockets alike.
+        node = self.tree.nodes.new("MIMINode_Object_List")
+        labels = []
+
+        class Layout:
+            def label(self, **kwargs):
+                labels.append(kwargs["text"])
+
+        base.MIMISocketObject.draw(node.outputs[0], bpy.context, Layout(), node, "All")
+        self.assertEqual(labels, ["All"])
+
+    def test_clone_object_list(self):
+        # Item collections and dynamic output sockets must survive grouping.
+        node = self.tree.nodes.new("MIMINode_Object_List")
+        lists._append_object_list_item(node, "body")
+        lists._append_object_list_item(node, "hair")
+        node.object_items[1].enabled = False
+        child = bpy.data.node_groups.new("child", self.tree.bl_idname)
+        clone = groups._clone_node(node, child)
+        self.assertEqual([item.object_name for item in clone.object_items], ["body", "hair"])
+        self.assertFalse(clone.object_items[1].enabled)
+        self.assertEqual([socket.name for socket in clone.outputs], ["All", "body", "hair"])
+
+    def test_group_roundtrip(self):
+        # Exercise the real node editor context, not a simulated graph.
+        # The Object List exposes two independent boundary outputs.
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        area.spaces.active.tree_type = self.tree.bl_idname
+        area.spaces.active.node_tree = self.tree
+        source = self.tree.nodes.new("MIMINode_Object_List")
+        lists._append_object_list_item(source, "body")
+        lists._append_object_list_item(source, "hair")
+        target = self.tree.nodes.new("MIMINode_SwitchKey")
+        target.inputs.new("MIMISocketObject", "Status 1")
+        self.tree.links.new(source.outputs[1], target.inputs[0])
+        self.tree.links.new(source.outputs[2], target.inputs[1])
+        target.select = False
+        source.select = True
+        with bpy.context.temp_override(area=area):
+            group = groups.make_group_from_selection(bpy.context)
+        self.assertEqual(len(group.outputs), 2)
+        self.assertEqual(len(self.tree.links), 2)
+        # Refreshing an unchanged interface must never disconnect the caller.
+        groups.sync_group_node_sockets(group)
+        self.assertEqual(len(self.tree.links), 2)
+        groups.ungroup_node(self.tree, group)
+        self.assertEqual(len(self.tree.links), 2)
+        self.assertEqual([link.from_socket.name for link in self.tree.links], ["body", "hair"])
+
+    def parser(self):
+        # Keep real graph traversal; isolate external workspace file lookups.
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+        model = BluePrintModel.__new__(BluePrintModel)
+        model._group_instance_stack = []
+        model._emit_object_source = lambda **kwargs: emitted.append(kwargs['object_name'])
+        emitted = []
+        return model, emitted
+
+    def test_reroute_and_cycle_export(self):
+        # Reroutes must pass data through, while a cycle gives a useful error.
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = 'mesh'
+        reroute = self.tree.nodes.new('NodeReroute')
+        self.tree.links.new(source.outputs[0], reroute.inputs[0])
+        model, emitted = self.parser()
+        model.parse_single_node(reroute, [])
+        self.assertEqual(emitted, ['mesh'])
+        first = self.tree.nodes.new('MIMINode_Object_Group')
+        second = self.tree.nodes.new('MIMINode_Object_Group')
+        self.tree.links.new(first.outputs[0], second.inputs[0])
+        self.tree.links.new(second.outputs[0], first.inputs[0])
+        with self.assertRaisesRegex(ValueError, 'cycle'):
+            model.parse_single_node(first, [])
+        self.assertFalse(model._active_parse_path)
+
+    def test_group_export_ports_and_preview(self):
+        # Two outputs from one child must remain separate at export/preview.
+        from MIMIBlender.blueprint.blueprint_graph import iter_object_sources
+        child = bpy.data.node_groups.new('child', self.tree.bl_idname)
+        source = child.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, 'body')
+        lists._append_object_list_item(source, 'hair')
+        output = child.nodes.new('NodeGroupOutput')
+        for index, name in enumerate(('body', 'hair')):
+            child.interface.new_socket(name=name, in_out='OUTPUT', socket_type='MIMISocketObject')
+            child.links.new(source.outputs[index + 1], output.inputs[index])
+        group = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        group.node_tree = child
+        target = self.tree.nodes.new('MIMINode_Object_Group')
+        self.tree.links.new(group.outputs[1], target.inputs[0])
+        model, emitted = self.parser()
+        model.parse_single_node(target, [])
+        self.assertEqual(emitted, ['hair'])
+        self.assertEqual([row.object_name for row in iter_object_sources(target)], ['hair'])
+        # Renaming and adding interfaces must preserve the existing caller wire.
+        child.interface.items_tree[1].name = 'renamed'
+        child.interface.new_socket(name='extra', in_out='OUTPUT', socket_type='MIMISocketObject')
+        # Run the deferred custom-tree interface synchronization explicitly.
+        groups._sync_group_interfaces()
+        self.assertEqual(len(group.outputs), 3)
+        self.assertEqual(len(self.tree.links), 1)
+        self.assertEqual(self.tree.links[0].from_socket.name, 'renamed')
+
+    def test_group_failure_rolls_back(self):
+        # This used to dereference removed NodeLink structs and crash Blender.
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        area.spaces.active.tree_type = self.tree.bl_idname
+        area.spaces.active.node_tree = self.tree
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        target = self.tree.nodes.new('MIMINode_SwitchKey')
+        target.select = False
+        self.tree.links.new(source.outputs[0], target.inputs[0])
+        with bpy.context.temp_override(area=area):
+            with patch.object(groups, '_clone_node', side_effect=RuntimeError('injected')):
+                with self.assertRaisesRegex(RuntimeError, 'injected'):
+                    groups.make_group_from_selection(bpy.context)
+        self.assertEqual(len(self.tree.nodes), 2)
+        self.assertEqual(len(self.tree.links), 1)
+        self.assertTrue(source.select)
+
+    def test_object_identity_after_rename(self):
+        # Reusing the old name must not redirect an existing object reference.
+        objects = addon.blueprint_node_obj
+        mesh = bpy.data.objects.new('original', None)
+        node = self.tree.nodes.new('MIMINode_Object_Info')
+        node.object_name = mesh.name
+        listed = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(listed, mesh.name)
+        mesh.name = 'renamed'
+        other = bpy.data.objects.new('original', None)
+        self.assertEqual(objects.ObjectPersistentIdManager.resolve_node_target(node), mesh)
+        lists._sync_item_socket_integrity(listed)
+        self.assertEqual(listed.object_items[0].object_name, mesh.name)
+        self.assertEqual(listed.outputs[1].name, mesh.name)
+        bpy.data.objects.remove(mesh)
+        bpy.data.objects.remove(other)
+
+    def test_nested_group_passthrough(self):
+        # Group Input inside a nested switch must resolve the outer caller.
+        # The final ungroup also covers a child containing only a direct wire.
+        def passthrough(name):
+            tree = bpy.data.node_groups.new(name, self.tree.bl_idname)
+            tree.interface.new_socket(name='in', in_out='INPUT', socket_type='MIMISocketObject')
+            tree.interface.new_socket(name='out', in_out='OUTPUT', socket_type='MIMISocketObject')
+            first, last = groups._make_group_input_output(tree)
+            return tree, first, last
+        inner, inner_in, inner_out = passthrough('inner')
+        switch = inner.nodes.new('MIMINode_SwitchKey')
+        inner.links.new(inner_in.outputs[0], switch.inputs[0])
+        inner.links.new(switch.outputs[0], inner_out.inputs[0])
+        outer, outer_in, outer_out = passthrough('outer')
+        nested = outer.nodes.new(groups.GROUP_NODE_IDNAME)
+        nested.node_tree = inner
+        outer.links.new(outer_in.outputs[0], nested.inputs[0])
+        outer.links.new(nested.outputs[0], outer_out.inputs[0])
+        instance = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        instance.node_tree = outer
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = 'nested_mesh'
+        self.tree.links.new(source.outputs[0], instance.inputs[0])
+        model, emitted = self.parser()
+        model.parse_single_node(instance, [], instance.outputs[0])
+        self.assertEqual(emitted, ['nested_mesh'])
+        self.assertFalse(model._group_instance_stack)
+        # Replace the outer's internal group with a direct interface wire.
+        outer.nodes.remove(nested)
+        outer.links.new(outer_in.outputs[0], outer_out.inputs[0])
+        target = self.tree.nodes.new('MIMINode_Object_Group')
+        self.tree.links.new(instance.outputs[0], target.inputs[0])
+        groups.ungroup_node(self.tree, instance)
+        self.assertEqual(len(self.tree.links), 1)
+        self.assertEqual(self.tree.links[0].from_node, source)
+
+    def test_shape_refresh_owns_output(self):
+        # Refresh must affect its own output and include Object List meshes.
+        mesh = bpy.data.meshes.new('shape_mesh')
+        obj = bpy.data.objects.new('shape_object', mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.shape_key_add(name='Basis')
+        obj.shape_key_add(name='Smile')
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, obj.name)
+        first = self.tree.nodes.new('MIMINode_Result_Output')
+        second = self.tree.nodes.new('MIMINode_Result_Output')
+        first.shapekey_items.add().shapekey_name = 'keep'
+        self.tree.links.new(source.outputs[0], second.inputs[0])
+        result = bpy.ops.mimi.refresh_shapekey_list(tree_name=self.tree.name, node_name=second.name)
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in second.shapekey_items], ['Smile'])
+        self.assertEqual(first.shapekey_items[0].shapekey_name, 'keep')
+        bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.meshes.remove(mesh)
+
+    def test_group_output_batch_connect(self):
+        # A pass-through group can connect to the input-only Generate Mod node.
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        area.spaces.active.tree_type = self.tree.bl_idname
+        area.spaces.active.node_tree = self.tree
+        source = self.tree.nodes.new('MIMINode_Object_Group')
+        target = self.tree.nodes.new('MIMINode_Result_Output')
+        with bpy.context.temp_override(area=area):
+            result = bpy.ops.mimi.batch_connect_nodes()
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(len(self.tree.links), 1)
+        self.assertEqual(self.tree.links[0].from_node, source)
+        self.assertEqual(self.tree.links[0].to_node, target)
+
+    def test_save_load_collections_and_ports(self):
+        # Library roundtrip exercises Blender serialization without replacing
+        # the running test's context or loading any user-owned blend file.
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, 'first')
+        lists._append_object_list_item(source, 'second')
+        target = self.tree.nodes.new('MIMINode_SwitchKey')
+        self.tree.links.new(source.outputs[2], target.inputs[0])
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = str(Path(directory) / 'blueprint.blend')
+            bpy.data.libraries.write(filepath, {self.tree})
+            with bpy.data.libraries.load(filepath) as (saved, loaded):
+                loaded.node_groups = saved.node_groups
+            restored = loaded.node_groups[0]
+        lists._sync_item_socket_integrity(restored.nodes[source.name])
+        self.assertEqual(len(restored.links), 1)
+        self.assertEqual(restored.links[0].from_socket.name, 'second')
+        self.assertEqual(len(restored.nodes[source.name].object_items), 2)
+
+    def test_clone_all_node_types(self):
+        # Every registered node should be groupable without losing its ports.
+        # This includes collection-backed shape and texture settings.
+        child = bpy.data.node_groups.new('clones', self.tree.bl_idname)
+        node_types = [cls.bl_idname for cls in base.MIMINodeBase.__subclasses__()] + ['NodeReroute', 'NodeFrame']
+        for node_type in node_types:
+            with self.subTest(node=node_type):
+                node = self.tree.nodes.new(node_type)
+                clone = groups._clone_node(node, child)
+                self.assertEqual(len(node.inputs), len(clone.inputs))
+                self.assertEqual(len(node.outputs), len(clone.outputs))
+
+    def test_dynamic_target_group_roundtrip(self):
+        # Removing all incoming wires can delete a Group node's empty sockets.
+        # Both transformations must keep every target port alive until rewired.
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        area.spaces.active.tree_type = self.tree.bl_idname
+        area.spaces.active.node_tree = self.tree
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        for name in ('body', 'hair', 'clothes'):
+            lists._append_object_list_item(source, name)
+        target = self.tree.nodes.new('MIMINode_Object_Group')
+        for socket in list(source.outputs)[1:]:
+            self.tree.links.new(socket, target.inputs[-1])
+        target.select = False
+        with bpy.context.temp_override(area=area):
+            group = groups.make_group_from_selection(bpy.context)
+        self.assertEqual(len(self.tree.links), 3)
+        group.location.x += 100
+        groups.ungroup_node(self.tree, group)
+        self.assertEqual(len(self.tree.links), 3)
+        self.assertEqual([link.from_socket.name for link in self.tree.links], ['body', 'hair', 'clothes'])
+        clone = self.tree.links[0].from_node
+        self.assertAlmostEqual(clone.location.x, 100)
+
+    def test_exit_group_without_runtime_stack(self):
+        # A restored Blender path must not trap the user inside a group.
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        space = area.spaces.active
+        space.tree_type = self.tree.bl_idname
+        space.node_tree = self.tree
+        child = bpy.data.node_groups.new('child', self.tree.bl_idname)
+        group = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        group.node_tree = child
+        groups._enter_group(space, group)
+        groups._navigation_state.clear()
+        groups._exit_group(space)
+        self.assertEqual(len(space.path), 1)
+        self.assertEqual(space.edit_tree, self.tree)
+
+    def test_stale_explicit_tree_is_not_retargeted(self):
+        # Stale buttons must cancel rather than delete/edit another blueprint.
+        helper = addon.blueprint_node_obj.BlueprintExportHelper
+        self.tree.use_fake_user = True
+        helper.set_runtime_blueprint_tree(self.tree)
+        self.assertIsNone(helper.get_selected_blueprint_tree('deleted_tree', bpy.context))
+        node = self.tree.nodes.new('MIMINode_Object_List')
+        area = bpy.context.screen.areas[0]
+        area.type = 'NODE_EDITOR'
+        area.spaces.active.tree_type = self.tree.bl_idname
+        area.spaces.active.node_tree = self.tree
+        with bpy.context.temp_override(area=area):
+            result = bpy.ops.mimi.objlist_add_item(tree_name='deleted_tree', node_name=node.name)
+        self.assertEqual(result, {'CANCELLED'})
+        self.assertFalse(node.object_items)
+
+    def test_reused_group_instances_are_not_cycles(self):
+        # Serial instances share child RNA addresses but represent a valid DAG.
+        from MIMIBlender.blueprint.blueprint_graph import iter_object_sources
+        child = bpy.data.node_groups.new('shared', self.tree.bl_idname)
+        child.interface.new_socket(name='in', in_out='INPUT', socket_type='MIMISocketObject')
+        child.interface.new_socket(name='out', in_out='OUTPUT', socket_type='MIMISocketObject')
+        first, last = groups._make_group_input_output(child)
+        switch = child.nodes.new('MIMINode_SwitchKey')
+        child.links.new(first.outputs[0], switch.inputs[0])
+        child.links.new(switch.outputs[0], last.inputs[0])
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = 'shared_mesh'
+        instances = [self.tree.nodes.new(groups.GROUP_NODE_IDNAME) for _ in range(2)]
+        for instance in instances:
+            instance.node_tree = child
+        self.tree.links.new(source.outputs[0], instances[0].inputs[0])
+        self.tree.links.new(instances[0].outputs[0], instances[1].inputs[0])
+        model, emitted = self.parser()
+        model.parse_single_node(instances[1], [], instances[1].outputs[0])
+        self.assertEqual(emitted, ['shared_mesh'])
+        self.assertEqual([row.object_name for row in iter_object_sources(instances[1])], ['shared_mesh'])
+
+    def test_texture_settings_survive_group_clone(self):
+        # PropertyGroup rows, enum selections and disabled flags are user data.
+        # Copy them without needing external workspace marks or image files.
+        source = self.tree.nodes.new('MIMINode_Texture_Bind')
+        item = source.texture_slot_items.add()
+        item.source_type = 'RESOURCE'
+        item.resource_name = 'ResourceBody'
+        item.slot = 'ps-t2'
+        item.enabled = False
+        item.restore_after_draw = True
+        child = bpy.data.node_groups.new('child', self.tree.bl_idname)
+        clone = groups._clone_node(source, child)
+        copied = clone.texture_slot_items[0]
+        self.assertEqual(copied.source_type, 'RESOURCE')
+        self.assertEqual(copied.resource_name, 'ResourceBody')
+        self.assertEqual(copied.slot, 'ps-t2')
+        self.assertFalse(copied.enabled)
+        self.assertTrue(copied.restore_after_draw)
+
+    def test_ungroup_failure_preserves_original(self):
+        # An exception after creating a clone must remove only temporary nodes.
+        child = bpy.data.node_groups.new('child', self.tree.bl_idname)
+        child.nodes.new('MIMINode_Object_List')
+        group = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        group.node_tree = child
+        clone_node = groups._clone_node
+
+        def fail_after_clone(source, tree):
+            clone_node(source, tree)
+            raise RuntimeError('injected clone failure')
+
+        with patch.object(groups, '_clone_node', side_effect=fail_after_clone):
+            with self.assertRaisesRegex(RuntimeError, 'injected clone failure'):
+                groups.ungroup_node(self.tree, group)
+        self.assertEqual(list(self.tree.nodes), [group])
+        self.assertEqual(group.node_tree, child)
+
+    def test_orphan_list_port_rejected(self):
+        # A stale extra port must not silently export the entire object list.
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, 'body')
+        orphan = source.outputs.new('MIMISocketObject', 'orphan')
+        model, emitted = self.parser()
+        with self.assertRaisesRegex(ValueError, 'no matching item'):
+            model.parse_single_node(source, [], orphan)
+        self.assertFalse(emitted)
+
+    def test_batch_ports_respect_node_contracts(self):
+        # Fixed texture/group interfaces cannot acquire arbitrary extra inputs.
+        menu = addon.blueprint_node_menu
+        texture = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.assertIsNone(menu._new_batch_input(texture))
+        self.assertEqual(len(texture.inputs), 1)
+        timeline = self.tree.nodes.new('MIMINode_TimeSwitch')
+        self.assertEqual(menu._new_batch_input(timeline).name, 'Frame 1')
+
+    def test_highlight_restore_saved_color(self):
+        # ID properties deserialize arrays as IDPropertyArray, not Python lists.
+        # Simulate a reload by clearing the nonpersistent pointer cache.
+        highlight = addon.blueprint_node_highlight
+        node = self.tree.nodes.new("MIMINode_Object_List")
+        original = tuple(node.color)
+        highlight._set_highlight(node, (0.0, 0.26, 0.27))
+        highlight._base_color_cache.clear()
+        highlight._restore_base_color(node)
+        for actual, expected in zip(node.color, original):
+            self.assertAlmostEqual(actual, expected)
+
+
+if __name__ == "__main__":
+    # Blender's --python-exit-code turns failed assertions into a failing job.
+    result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(BlueprintTests))
+    addon.unregister()
+    if not result.wasSuccessful():
+        raise AssertionError("Blueprint regression suite failed")

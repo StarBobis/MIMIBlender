@@ -168,7 +168,8 @@ class MMT_OT_TexHashBindAddItem(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}
@@ -192,7 +193,8 @@ class MMT_OT_TexHashBindRemoveItem(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}
@@ -217,7 +219,8 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
 
     def execute(self, context):
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
-        if tree is None:
+        # Explicit targets must not fall back to another open blueprint.
+        if tree is None and not self.tree_name:
             tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
         if tree is None:
             return {'CANCELLED'}

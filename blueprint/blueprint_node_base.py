@@ -27,12 +27,12 @@ class MIMISocketObject(NodeSocket):
         return (0.0, 0.8, 0.8, 1.0) # Cyan/Teal
 
     def draw(self, context, layout, node, text):
-        # Blender requires NodeSocket subclasses to define draw(); delegate
-        # to the C++ default so the clickable circle (dot) renders next to
-        # the label. Drawing the label alone (the old override) made every
-        # MMT socket invisible, so users had to guess the exact edge
-        # position to start or receive a wire.
-        super().draw(context, layout, node, text)
+        # Blender draws the socket circle outside this callback. The Python
+        # NodeSocket base has no draw() method, so super().draw() raises on
+        # every repaint and leaves all socket labels blank.
+        # Keep linked sockets labelled too: Object List outputs rely on their
+        # names to distinguish individual objects from the aggregate output.
+        layout.label(text=text or self.name)
 
 # 1. Define the custom node tree type
 
@@ -43,6 +43,17 @@ class MIMIBlueprintTree(NodeTree):
     bl_idname = 'MIMIBlueprintTreeType'
     bl_label = 'MMT Blueprint'
     bl_icon = 'NODETREE'
+
+    def interface_update(self, context):
+        # Custom group nodes are not native Geometry/Shader group nodes.
+        # Mirror interface edits into every instance without rebuilding wires.
+        from .blueprint_node_group import GROUP_NODE_IDNAME, sync_group_node_sockets
+        for tree in bpy.data.node_groups:
+            if getattr(tree, "bl_idname", "") != self.bl_idname:
+                continue
+            for node in tree.nodes:
+                if node.bl_idname == GROUP_NODE_IDNAME and node.node_tree == self:
+                    sync_group_node_sockets(node)
 
 
 # 2. Define the base nodes

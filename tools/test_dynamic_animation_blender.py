@@ -472,29 +472,40 @@ def test_bake_range_prefill_and_static_tail():
 
 
 def test_rebake_wiring_and_large_ranges():
-    """Re-baking replaces existing multi-links instead of drawing both sets.
-
-    A small graph stand-in is sufficient here: the function only edits links,
-    socket labels and node placement. Mesh evaluation is tested separately.
-    """
-    sockets = [types.SimpleNamespace(name="old", links=[object()]) for _ in range(2)]
-    old_links = [socket.links[0] for socket in sockets]
-    def remove_link(link):
-        for socket in sockets:
-            if link in socket.links:
-                socket.links.remove(link)
-    def new_link(output, socket):
-        socket.links.append(output)
-    tree = types.SimpleNamespace(
-        nodes=types.SimpleNamespace(new=lambda name: types.SimpleNamespace(outputs=[object()])),
-        links=types.SimpleNamespace(remove=remove_link, new=new_link),
-    )
-    node = types.SimpleNamespace(inputs=sockets, location=types.SimpleNamespace(x=0, y=0))
-    source = types.SimpleNamespace(name="source")
-    baked = [(1, types.SimpleNamespace(name="frame1")), (2, types.SimpleNamespace(name="frame2"))]
-    MMT_OT_BakeAnimationToTimeSwitch._rebuild_node_wiring(None, tree, node, baked, "abcd1234-0", source)
-    assert all(len(socket.links) == 1 and socket.links[0] not in old_links for socket in sockets)
-    assert [socket.name for socket in sockets] == ["Frame 0", "Frame 1"]
+    """Re-baking replaces a timeline's private Object List without cross-talk."""
+    from animation_test_addon.blueprint.blueprint_node_base import MIMISocketObject, MIMIBlueprintTree
+    from animation_test_addon.blueprint.blueprint_node_object_list import MIMIObjectListItem, MIMINode_Object_List
+    from animation_test_addon.blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
+    classes = [MIMISocketObject, MIMIBlueprintTree, MIMIObjectListItem, MIMINode_Object_List, MIMINode_TimeSwitch]
+    tree = None
+    try:
+        # The old stand-in modeled Object Info nodes and missed list ownership
+        # bugs. Real RNA exercises list rows, socket removal and shared links.
+        for cls in classes:
+            bpy.utils.register_class(cls)
+        tree = bpy.data.node_groups.new('rebake', 'MIMIBlueprintTreeType')
+        first = tree.nodes.new('MIMINode_TimeSwitch')
+        second = tree.nodes.new('MIMINode_TimeSwitch')
+        source = types.SimpleNamespace(name='source')
+        baked = [(1, types.SimpleNamespace(name='frame1')), (2, types.SimpleNamespace(name='frame2'))]
+        rebuild = MMT_OT_BakeAnimationToTimeSwitch._rebuild_node_wiring
+        rebuild(None, tree, first, baked, 'abcd1234-0', source)
+        first_list = first.inputs[0].links[0].from_node
+        rebuild(None, tree, second, baked, 'abcd1234-0', source)
+        second_list = second.inputs[0].links[0].from_node
+        assert first_list != second_list
+        rebuild(None, tree, first, baked[:1], 'abcd1234-0', source)
+        assert len(first.inputs) == 1 and len(first.inputs[0].links) == 1
+        assert first.inputs[0].links[0].from_node == first_list
+        assert len(second.inputs) == 2 and all(len(socket.links) == 1 for socket in second.inputs)
+        assert [socket.name for socket in second.inputs] == ['Frame 0', 'Frame 1']
+        assert len(second_list.object_items) == 2
+    finally:
+        # Always release the disposable RNA classes before later tests register.
+        if tree is not None:
+            bpy.data.node_groups.remove(tree)
+        for cls in reversed(classes):
+            bpy.utils.unregister_class(cls)
     # The UI asks for len() before enforcing its sample cap. A lazy range
     # avoids allocating billions of Python integers for an accidental input.
     settings = types.SimpleNamespace(frame_start=1, frame_end=1000000000, frame_step=1)

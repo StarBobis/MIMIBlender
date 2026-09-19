@@ -82,10 +82,19 @@ def _exit_group(space):
     state = _navigation_state.get(_navigation_key(space), {})
     stack = state.get("stack", [])
     group_node = stack[-1] if stack else None
-    if group_node is None or getattr(group_node, "node_tree", None) != _tree_from_space(space):
-        raise GroupingError(tr("Cannot determine the parent instance of the current group"))
+    # Blender saves its editor path, but our Python navigation stack is not
+    # saved. Exiting must still work after loading a file or using breadcrumbs.
+    # Only remember a reverse action when the actual instance is unambiguous.
+    try:
+        if group_node is None or group_node.node_tree != _tree_from_space(space):
+            parent_tree = space.path[-2].node_tree
+            matches = [node for node in parent_tree.nodes if node.bl_idname == GROUP_NODE_IDNAME and node.node_tree == _tree_from_space(space)]
+            group_node = matches[0] if len(matches) == 1 else None
+    except ReferenceError:
+        group_node = None
     space.path.pop()
-    stack.pop()
+    if stack:
+        stack.pop()
     _remember_navigation(space, "EXIT", group_node)
 
 
@@ -194,6 +203,33 @@ _RNA_EXCLUDE = {
 }
 
 
+def _copy_collection_items(source, target):
+    """Copy RNA collections recursively, including disabled rows and settings."""
+    # ID-property deepcopy does not copy Blender PropertyGroup collections.
+    # Rebuild each collection explicitly so grouping cannot discard user data.
+    # Native read-only collections (such as node warnings) are not settings.
+    # Only PropertyGroup collections expose add/clear for reconstruction.
+    if not hasattr(target, "add") or not hasattr(target, "clear"):
+        return
+    target.clear()
+    for source_item in source:
+        target_item = target.add()
+        for prop in source_item.bl_rna.properties:
+            name = prop.identifier
+            if name == "rna_type":
+                continue
+            if prop.type == "COLLECTION":
+                _copy_collection_items(getattr(source_item, name), getattr(target_item, name))
+            elif not prop.is_readonly:
+                if prop.type == "ENUM" and name in source_item.keys():
+                    # Dynamic texture-mark enums need upstream links, which
+                    # are restored only after cloning. Preserve the stored
+                    # RNA value without triggering an unavailable dropdown.
+                    target_item[name] = _copy_value(source_item[name])
+                else:
+                    setattr(target_item, name, _copy_value(getattr(source_item, name)))
+
+
 def _copy_node_properties(source, target):
     for prop in source.bl_rna.properties:
         identifier = prop.identifier
@@ -210,6 +246,11 @@ def _copy_node_properties(source, target):
             except Exception:
                 pass
     _copy_id_properties(source, target)
+    # Copy addon collections after generic properties; row update callbacks
+    # may depend on the scalar configuration already being available.
+    for prop in source.bl_rna.properties:
+        if prop.identifier not in _RNA_EXCLUDE and prop.type == "COLLECTION":
+            _copy_collection_items(getattr(source, prop.identifier), getattr(target, prop.identifier))
 
 
 def _socket_key(socket):
@@ -262,14 +303,19 @@ def _clone_node(source, target_tree):
     target.location = source.location
     target["ssmt_uuid"] = uuid.uuid4().hex
 
-    # Dynamic MMT nodes need their collections/socket count established first.
-    if len(getattr(source, "inputs", ())) > len(getattr(target, "inputs", ())):
-        for sock in list(source.inputs)[len(target.inputs):]:
-            try:
-                target.inputs.new(sock.bl_idname, sock.name)
-            except Exception as exc:
-                raise GroupingError(tr("Cannot copy the dynamic sockets of node {name}: {error}").format(name=source.name, error=exc)) from exc
     _copy_node_properties(source, target)
+    # Both directions can be dynamic (Object List has per-object outputs).
+    # Clone identifiers, not just names: removed/re-added sockets may have
+    # identifiers that differ from their labels or their current positions.
+    if isinstance(source, MIMINodeBase):
+        for direction in ("inputs", "outputs"):
+            source_sockets = getattr(source, direction)
+            target_sockets = getattr(target, direction)
+            target_sockets.clear()
+            for socket in source_sockets:
+                target_sockets.new(socket.bl_idname, socket.name, identifier=socket.identifier)
+    # Native Frame/Reroute sockets are owned by Blender and cannot be removed.
+    # Their constructor already creates the correct ports; links set the type.
     if getattr(source, "bl_idname", "") == GROUP_NODE_IDNAME and getattr(source, "node_tree", None):
         if would_create_group_cycle(target_tree, source.node_tree):
             raise GroupingError(tr("Copying node {name} would create a recursive node group").format(name=source.name))
@@ -294,6 +340,14 @@ def _new_interface_socket(tree, source_socket, direction, name):
 
 def _interface_identifier(item):
     return getattr(item, "identifier", "") or getattr(item, "name", "")
+
+
+def get_group_output_node(tree):
+    """Choose one output even in custom trees without a native active flag."""
+    # Blender does not automatically activate Group Output in custom trees.
+    # Prefer an explicit active output, then the first output for legacy files.
+    outputs = [node for node in tree.nodes if node.bl_idname == GROUP_OUTPUT_IDNAME]
+    return next((node for node in outputs if node.is_active_output), outputs[0] if outputs else None)
 
 
 def _make_group_input_output(tree):
@@ -326,19 +380,106 @@ def _group_socket_for_interface(group_node, group_tree, item, direction):
 
 
 def sync_group_node_sockets(group_node):
-    """Rebuild a custom group node from its child tree's single interface."""
+    """Synchronize interfaces in place so existing wires keep their identity."""
     tree = getattr(group_node, "node_tree", None)
-    if tree is None:
-        return
-    for sockets in (group_node.inputs, group_node.outputs):
+    items = _all_interface_items(tree) if tree is not None else []
+    for direction, sockets in (("INPUT", group_node.inputs), ("OUTPUT", group_node.outputs)):
+        wanted = [item for item in items if item.in_out == direction]
+        retained = set()
+        # Socket ID properties are unsupported on some Blender socket types.
+        # Store legacy-to-interface mappings on the owning node instead.
+        map_key = "ssmt_interface_" + direction.lower()
+        previous_ids = json.loads(group_node.get(map_key, "{}"))
+        current_ids = {}
+        for index, item in enumerate(wanted):
+            identifier = _interface_identifier(item)
+            socket_type = _interface_socket_type(item)
+            if not socket_type:
+                raise GroupingError(tr("Interface {name} has no usable socket type").format(name=item.name))
+            # The identifier survives interface renames and reordering.
+            # Legacy sockets have no stored ID; adopt their positional match.
+            socket_id = previous_ids.get(identifier, identifier)
+            socket = next((sock for sock in sockets if sock.identifier == socket_id), None)
+            if socket is None and not group_node.get("ssmt_interface_synced") and index < len(sockets):
+                candidate = sockets[index]
+                if candidate not in retained:
+                    socket = candidate
+            if socket is not None and socket.bl_idname != socket_type:
+                sockets.remove(socket)
+                socket = None
+            if socket is None:
+                socket = sockets.new(socket_type, item.name, identifier=identifier)
+            current_ids[identifier] = socket.identifier
+            socket.name = item.name
+            retained.add(socket)
+            sockets.move(list(sockets).index(socket), index)
+        # Only removed interface items lose their wires; unchanged items stay.
         for socket in list(sockets):
-            sockets.remove(socket)
-    for item in _all_interface_items(tree):
-        socket_type = _interface_socket_type(item)
-        if not socket_type:
-            raise GroupingError(tr("Interface {name} has no usable socket type").format(name=item.name))
-        sockets = group_node.inputs if item.in_out == "INPUT" else group_node.outputs
-        sockets.new(socket_type, item.name)
+            if socket not in retained:
+                sockets.remove(socket)
+        group_node[map_key] = json.dumps(current_ids)
+    group_node["ssmt_interface_synced"] = True
+    group_node["ssmt_interface_signature"] = _interface_signature(tree)
+
+
+def _interface_signature(tree):
+    # Plain strings persist through undo/load without stale RNA pointers.
+    items = _all_interface_items(tree) if tree is not None else []
+    return json.dumps([(item.identifier, item.name, item.in_out, _interface_socket_type(item)) for item in items])
+
+
+def _sync_group_interfaces():
+    """Fallback for custom-tree interface edits without native notifications."""
+    # Blender's interface_update callback is not emitted for every custom-tree
+    # edit. Only synchronize changed schemas; idle ticks must not dirty files.
+    for tree in bpy.data.node_groups:
+        if getattr(tree, "bl_idname", "") != TREE_IDNAME:
+            continue
+        for node in tree.nodes:
+            if node.bl_idname == GROUP_NODE_IDNAME:
+                signature = _interface_signature(node.node_tree)
+                if node.get("ssmt_interface_signature") != signature:
+                    sync_group_node_sockets(node)
+
+
+def _group_interface_timer():
+    try:
+        _sync_group_interfaces()
+    except (ReferenceError, RuntimeError) as error:
+        # Retry after a transient undo/load/read-only transition.
+        print(f"[MMT Group Interface] {error}")
+    return 0.5
+
+
+@bpy.app.handlers.persistent
+def _clear_navigation_after_load(_scene=None):
+    # Pointer-keyed editor state belongs only to the current blend session.
+    _navigation_state.clear()
+
+
+def _snapshot_links(tree):
+    # Dynamic nodes may delete empty sockets when a link is removed. Capture
+    # socket metadata too, never dereference a removed socket during rollback.
+    return [((link.from_node, link.from_socket.identifier, link.from_socket.name, link.from_socket.bl_idname),
+             (link.to_node, link.to_socket.identifier, link.to_socket.name, link.to_socket.bl_idname))
+            for link in tree.links]
+
+
+def _restore_links(tree, snapshot):
+    # Recreate sockets removed by dynamic update callbacks before reconnecting.
+    # Node instances are retained until the final successful transaction step.
+    for link in list(tree.links):
+        tree.links.remove(link)
+    for source, target in snapshot:
+        endpoints = []
+        for saved, direction in ((source, "outputs"), (target, "inputs")):
+            node, identifier, name, socket_type = saved
+            sockets = getattr(node, direction)
+            socket = next((item for item in sockets if item.identifier == identifier), None)
+            if socket is None:
+                socket = sockets.new(socket_type, name, identifier=identifier)
+            endpoints.append(socket)
+        tree.links.new(*endpoints)
 
 
 def make_group_from_selection(context, group_name="Group"):
@@ -354,13 +495,16 @@ def make_group_from_selection(context, group_name="Group"):
     internal, incoming, outgoing = partition_links(parent_tree, selected)
     group_tree = None
     group_node = None
-    old_links = list(parent_tree.links)
+    # RNA NodeLink wrappers become invalid as soon as a link is removed.
+    # Store socket endpoints now; dereferencing deleted links can crash Blender.
+    old_links = _snapshot_links(parent_tree)
     old_selection = [(node, node.select) for node in parent_tree.nodes]
     try:
         clean_name = str(group_name or "Group").strip() or "Group"
         group_tree = bpy.data.node_groups.new(clean_name, TREE_IDNAME)
         group_tree["ssmt_is_group"] = True
-        group_tree["ssmt_group_schema_version"] = 1
+        # Version 2 stores root positions relative to the group instance.
+        group_tree["ssmt_group_schema_version"] = 2
         group_tree["ssmt_interface_map"] = "{}"
         group_input, group_output = _make_group_input_output(group_tree)
         for node in selected:
@@ -368,6 +512,16 @@ def make_group_from_selection(context, group_name="Group"):
                 node["ssmt_uuid"] = uuid.uuid4().hex
         node_map = {node: _clone_node(node, group_tree) for node in selected}
         _restore_node_parents(node_map)
+        # Store child roots relative to the new group's world-space center.
+        # Frame children already use relative coordinates and must not shift.
+        center = tuple(sum(_absolute_location(node)[axis] for node in selected) / len(selected) for axis in (0, 1))
+        for cloned in node_map.values():
+            if cloned.parent is None:
+                cloned.location.x -= center[0]
+                cloned.location.y -= center[1]
+        # Keep submesh search choices available when editing inside the group.
+        for source_item in parent_tree.ssmt_submesh_items:
+            group_tree.ssmt_submesh_items.add().name = source_item.name
 
         for link in _ordered_links(internal):
             group_tree.links.new(node_map[link.from_node].outputs[link.from_socket.identifier],
@@ -415,12 +569,11 @@ def make_group_from_selection(context, group_name="Group"):
 
         group_node = parent_tree.nodes.new(GROUP_NODE_IDNAME)
         group_node.node_tree = group_tree
-        if selected:
-            group_node.location = tuple(sum(node.location[i] for node in selected) / len(selected) for i in (0, 1))
+        group_node.location = center
 
-        for link in list(parent_tree.links):
-            if link.from_node in selected or link.to_node in selected:
-                parent_tree.links.remove(link)
+        # Wire replacements before removing sources. Dynamic targets keep
+        # their sockets alive while at least one link still occupies the port.
+        # Removing the selected nodes below clears their old links atomically.
         for boundary, item in input_map.items():
             group_socket = _group_socket_for_interface(group_node, group_tree, item, "INPUT")
             if group_socket:
@@ -439,17 +592,11 @@ def make_group_from_selection(context, group_name="Group"):
         return group_node
     except Exception:
         # Restore links before removing the temporary node/tree.
-        if group_node is not None and group_node in parent_tree.nodes:
+        if group_node is not None and parent_tree.nodes.get(group_node.name) == group_node:
             parent_tree.nodes.remove(group_node)
-        for link in list(parent_tree.links):
-            parent_tree.links.remove(link)
-        for link in old_links:
-            try:
-                parent_tree.links.new(link.from_socket, link.to_socket)
-            except Exception:
-                pass
+        _restore_links(parent_tree, old_links)
         for node, selected_state in old_selection:
-            if node in parent_tree.nodes:
+            if parent_tree.nodes.get(node.name) == node:
                 node.select = selected_state
         if group_tree is not None and group_tree.users == 0:
             bpy.data.node_groups.remove(group_tree, do_unlink=True)
@@ -457,6 +604,25 @@ def make_group_from_selection(context, group_name="Group"):
 
 
 def ungroup_node(parent_tree, group_node):
+    """Expand atomically; a failed clone must leave the original group intact."""
+    # Keep endpoints, not RNA links, because removing nodes invalidates links.
+    # All risky copies happen before the original group is removed.
+    existing_nodes = set(parent_tree.nodes)
+    old_links = _snapshot_links(parent_tree)
+    old_selection = [(node, node.select) for node in parent_tree.nodes]
+    try:
+        return _ungroup_node_impl(parent_tree, group_node)
+    except Exception:
+        for node in list(parent_tree.nodes):
+            if node not in existing_nodes:
+                parent_tree.nodes.remove(node)
+        _restore_links(parent_tree, old_links)
+        for node, selected in old_selection:
+            node.select = selected
+        raise
+
+
+def _ungroup_node_impl(parent_tree, group_node):
     """Expand one independent group instance back into its parent tree."""
     group_tree = getattr(group_node, "node_tree", None)
     if group_tree is None:
@@ -467,9 +633,19 @@ def ungroup_node(parent_tree, group_node):
     ]
 
     input_node = next((node for node in group_tree.nodes if node.bl_idname == GROUP_INPUT_IDNAME), None)
-    output_node = next((node for node in group_tree.nodes if node.bl_idname == GROUP_OUTPUT_IDNAME), None)
+    output_node = get_group_output_node(group_tree)
     node_map = {node: _clone_node(node, parent_tree) for node in child_nodes}
     _restore_node_parents(node_map)
+    # Ungroup where the instance is now, not where it was originally created.
+    # Preserve frame-relative positions and account for a parent frame too.
+    center = _absolute_location(group_node)
+    # Schema-1 files stored absolute child positions. Keep their old layout
+    # instead of applying the new relative-coordinate offset a second time.
+    if group_tree.get("ssmt_group_schema_version", 2) >= 2:
+        for cloned in node_map.values():
+            if cloned.parent is None:
+                cloned.location.x += center[0]
+                cloned.location.y += center[1]
     for link in _ordered_links(list(group_tree.links)):
         if link.from_node in node_map and link.to_node in node_map:
             parent_tree.links.new(
@@ -496,10 +672,14 @@ def ungroup_node(parent_tree, group_node):
             for link in socket.links:
                 if link.from_node in node_map:
                     output_sources[index].append(node_map[link.from_node].outputs[link.from_socket.identifier])
+                elif link.from_node == input_node:
+                    # A direct Group Input -> Group Output is a valid wire.
+                    # Preserve it even when the child contains no ordinary nodes.
+                    input_index = list(input_node.outputs).index(link.from_socket)
+                    output_sources[index].extend(inbound.get(input_index, []))
 
-    for link in list(parent_tree.links):
-        if link.from_node == group_node or link.to_node == group_node:
-            parent_tree.links.remove(link)
+    # Keep the old instance linked until replacements occupy its targets.
+    # Otherwise dynamic target nodes may delete the saved input sockets.
     for index, source_sockets in inbound.items():
         for source_socket in source_sockets:
             for target_socket in input_targets.get(index, []):
@@ -613,9 +793,9 @@ class MMT_OT_GroupEnter(I18nOperator):
 
     @classmethod
     def poll(cls, context):
-        tree = _tree_from_context(context)
-        node = tree.nodes.get(getattr(context, "active_node", None).name) if tree and getattr(context, "active_node", None) else None
-        return bool(node and node.bl_idname == GROUP_NODE_IDNAME and node.node_tree)
+        # A node's own Enter button supplies node_name after polling.
+        # Requiring the active node to be a group disables other groups' buttons.
+        return _tree_from_context(context) is not None
 
     def execute(self, context):
         tree = _tree_from_context(context)
@@ -705,8 +885,18 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    if not bpy.app.timers.is_registered(_group_interface_timer):
+        bpy.app.timers.register(_group_interface_timer, first_interval=0.5, persistent=True)
+    if _clear_navigation_after_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_clear_navigation_after_load)
 
 
 def unregister():
+    # Stop callbacks before their RNA classes disappear during addon reload.
+    if bpy.app.timers.is_registered(_group_interface_timer):
+        bpy.app.timers.unregister(_group_interface_timer)
+    if _clear_navigation_after_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_clear_navigation_after_load)
+    _navigation_state.clear()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

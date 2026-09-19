@@ -286,6 +286,27 @@ class BluePrintModel:
                     self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
 
     def parse_single_node(self, unknown_node:bpy.types.Node, chain_key_list:list[M_Key], from_socket:bpy.types.NodeSocket=None):
+        """Reject cycles on the active path without suppressing valid fan-out."""
+        # A global visited set would incorrectly drop repeated objects in
+        # separate switch branches. Only nodes on the current path are cycles.
+        # Socket identity permits independent outputs of one group instance.
+        node_id = unknown_node.as_pointer() if hasattr(unknown_node, "as_pointer") else id(unknown_node)
+        socket_id = from_socket.as_pointer() if hasattr(from_socket, "as_pointer") else id(from_socket)
+        # Two sequential instances of the same group share child RNA nodes,
+        # but are not a cycle. Include the current instance context in the key.
+        instances = tuple(node.as_pointer() if hasattr(node, "as_pointer") else id(node) for node in getattr(self, "_group_instance_stack", ()))
+        key = (node_id, socket_id, instances)
+        if not hasattr(self, "_active_parse_path"):
+            self._active_parse_path = set()
+        if key in self._active_parse_path:
+            raise ValueError("Blueprint contains a cycle at node: " + unknown_node.name)
+        self._active_parse_path.add(key)
+        try:
+            return self._parse_single_node_impl(unknown_node, chain_key_list, from_socket)
+        finally:
+            self._active_parse_path.remove(key)
+
+    def _parse_single_node_impl(self, unknown_node:bpy.types.Node, chain_key_list:list[M_Key], from_socket:bpy.types.NodeSocket=None):
         '''
         Recursive method.
         Parse the current node, gathering info about all nodes connected to it and parsing them by type.
@@ -295,7 +316,16 @@ class BluePrintModel:
             return
 
         if unknown_node.bl_idname == GROUP_NODE_IDNAME:
-            self._parse_custom_group(unknown_node, chain_key_list)
+            self._parse_custom_group(unknown_node, chain_key_list, from_socket)
+
+        elif unknown_node.bl_idname == GROUP_INPUT_IDNAME:
+            # Switch/timeline branches call parse_single_node directly too.
+            # Resolve group inputs here rather than only in plain groups.
+            self._parse_group_input(unknown_node, from_socket, chain_key_list)
+
+        elif unknown_node.bl_idname == 'NodeReroute':
+            # Rerouting a wire must not silently remove its objects at export.
+            self.parse_current_node(unknown_node, chain_key_list)
 
         elif unknown_node.bl_idname == MIMINode_Object_Group.bl_idname:
             # If it is a plain group node, pass through without further processing
@@ -412,19 +442,26 @@ class BluePrintModel:
             # enabled item in list order.
             node_label = str(getattr(unknown_node, "label", "") or getattr(unknown_node, "name", "") or "Object List")
             output_sockets = list(unknown_node.outputs)
-            selected_items = []
-            if from_socket is not None and from_socket in output_sockets:
+            selected_items = list(unknown_node.object_items)
+            if from_socket is not None:
+                # A stale/foreign socket must not silently expand to All.
+                # Fail before emitting unrelated geometry into the export.
+                if from_socket not in output_sockets:
+                    raise ValueError("Object List has an unknown output socket: " + node_label)
                 output_index = output_sockets.index(from_socket)
-                if output_index > 0 and output_index - 1 < len(unknown_node.object_items):
+                if output_index > len(unknown_node.object_items):
+                    raise ValueError("Object List output has no matching item: " + node_label)
+                if output_index > 0:
                     selected_items = [unknown_node.object_items[output_index - 1]]
-            if not selected_items:
-                selected_items = list(unknown_node.object_items)
 
             emitted_names = []
             for item in selected_items:
                 if not item.enabled:
                     continue
-                object_name = str(getattr(item, "object_name", "") or "").strip()
+                # Export may run before the rename-sync timer has ticked.
+                # Read the stable pointer first without writing during traversal.
+                object_ref = getattr(item, "object_ref", None)
+                object_name = object_ref.name if object_ref is not None else str(getattr(item, "object_name", "") or "").strip()
                 if not object_name:
                     LOG.warning("BluePrintModel: Object List node '" + node_label + "' has an empty object entry; skipped")
                     continue
@@ -447,8 +484,12 @@ class BluePrintModel:
                 )
 
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:
+            # Nested groups may be parsed before their display names refresh.
+            # Resolve UUIDs read-only so a reused name cannot redirect export.
+            from ..blueprint.blueprint_node_obj import ObjectPersistentIdManager
+            resolved = ObjectPersistentIdManager.resolve_node_target(unknown_node)
             self._emit_object_source(
-                object_name=str(unknown_node.object_name),
+                object_name=resolved.name if resolved is not None else str(unknown_node.object_name),
                 submesh_name=str(getattr(unknown_node, 'submesh_name', '') or ""),
                 original_object_name=str(getattr(unknown_node, 'original_object_name', '') or ""),
                 chain_key_list=chain_key_list,
@@ -743,16 +784,29 @@ class BluePrintModel:
             + " draw call(s) as Time Position Switch frames"
         )
 
-    def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key]):
-        """Expand an MMT group through its Group Output nodes."""
+    def _parse_custom_group(self, group_node: bpy.types.Node, chain_key_list: list[M_Key], from_socket=None):
+        """Expand only the connected output of this particular group instance."""
         group_tree = getattr(group_node, "node_tree", None)
         if group_tree is None:
             return
+        # A corrupt legacy file can contain recursive group datablocks even
+        # though the current UI rejects assigning them.
+        if any(instance.node_tree == group_tree for instance in self._group_instance_stack):
+            raise ValueError("Blueprint contains a recursive group cycle: " + group_node.name)
+        # Exporting every output duplicates objects and bypasses switch states.
+        # The caller's socket position corresponds to the child interface order.
+        output_index = list(group_node.outputs).index(from_socket) if from_socket is not None else None
         self._group_instance_stack.append(group_node)
         try:
-            for output_node in group_tree.nodes:
-                if getattr(output_node, "bl_idname", "") == GROUP_OUTPUT_IDNAME:
-                    self.parse_current_node(output_node, chain_key_list)
+            from ..blueprint.blueprint_node_group import get_group_output_node
+            output_node = get_group_output_node(group_tree)
+            if output_node is not None:
+                sockets = list(output_node.inputs)
+                if output_index is not None:
+                    sockets = sockets[output_index:output_index + 1]
+                for socket in sockets:
+                    for link in socket.links:
+                        self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
         finally:
             self._group_instance_stack.pop()
 
@@ -780,8 +834,15 @@ class BluePrintModel:
         )
         if parent_socket is None:
             return
-        for link in parent_socket.links:
-            self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
+        # We are crossing into the caller's tree. Pop the current instance
+        # while resolving its inputs, otherwise nested groups resolve outer
+        # Group Input nodes against the wrong interface (or recurse forever).
+        self._group_instance_stack.pop()
+        try:
+            for link in parent_socket.links:
+                self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
+        finally:
+            self._group_instance_stack.append(group_node)
 
     def _unico_split_object(
         self,

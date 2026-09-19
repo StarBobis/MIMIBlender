@@ -71,7 +71,9 @@ def _restore_base_color(node):
         base_color = _node_get(node, _BASE_COLOR_KEY)
     if base_use_color is not None:
         node.use_custom_color = bool(base_use_color)
-    if isinstance(base_color, (list, tuple)) and len(base_color) == 3:
+    # Saved ID properties use IDPropertyArray after a blend-file reload.
+    # Accept that sequence as well as the in-memory list/tuple cache.
+    if base_color is not None and len(base_color) == 3:
         node.color = tuple(base_color)
     _node_del(node, _STATE_KEY)
     _node_del(node, _BASE_USE_COLOR_KEY)
@@ -79,14 +81,11 @@ def _restore_base_color(node):
 
 
 def _matches_selected_object(node, selected_objects) -> bool:
-    object_name = str(getattr(node, "object_name", "") or "")
-    object_id = str(getattr(node, "object_id", "") or "")
-    for obj in selected_objects:
-        if object_name and obj.name == object_name:
-            return True
-        if object_id and object_id == str(obj.get(OBJECT_PERSISTENT_ID_KEY, "") or ""):
-            return True
-    return False
+    # Use the same identity rules as export after renames or name reuse.
+    # A stale display name alone must not highlight an unrelated object.
+    from .blueprint_node_obj import ObjectPersistentIdManager
+    target = ObjectPersistentIdManager.resolve_node_target(node)
+    return target is not None and target in selected_objects
 
 
 def _matches_object_list_item(node, selected_objects) -> bool:
@@ -96,7 +95,11 @@ def _matches_object_list_item(node, selected_objects) -> bool:
         return False
     selected_names = {obj.name for obj in selected_objects}
     for item in items:
-        object_name = str(getattr(item, "object_name", "") or "").strip()
+        # Disabled rows do not contribute geometry or selection highlights.
+        if not item.enabled:
+            continue
+        reference = getattr(item, "object_ref", None)
+        object_name = reference.name if reference is not None else str(getattr(item, "object_name", "") or "").strip()
         if object_name and object_name in selected_names:
             return True
     return False
@@ -104,18 +107,14 @@ def _matches_object_list_item(node, selected_objects) -> bool:
 
 def _sync_highlights():
     """Apply only changed colors, keeping this safe to run as a short timer."""
-    selected_meshes = ()
+    selected_meshes = set()
     for window in getattr(getattr(bpy.context, "window_manager", None), "windows", ()):
-        for area in window.screen.areas:
-            if area.type == "VIEW_3D":
-                selected_meshes = tuple(
-                    obj
-                    for obj in getattr(bpy.context, "selected_objects", ())
-                    if obj.type == "MESH"
-                )
-                break
-        if selected_meshes:
-            break
+        if not any(area.type == "VIEW_3D" for area in window.screen.areas):
+            continue
+        # A standalone blueprint window may have a different active scene.
+        # Read each visible 3D window's own layer rather than global context.
+        layer = window.view_layer
+        selected_meshes.update(obj for obj in layer.objects if obj.type == "MESH" and obj.select_get(view_layer=layer))
 
     for tree in bpy.data.node_groups:
         if getattr(tree, "bl_idname", "") != TREE_IDNAME:
@@ -157,7 +156,16 @@ def _restore_all_highlights():
             _restore_base_color(node)
 
 
+@bpy.app.handlers.persistent
+def _clear_highlight_cache_after_load(_scene=None):
+    # Pointer addresses can be reused by a different node after loading a file.
+    # Persisted base colors remain on each node and are the correct fallback.
+    _base_color_cache.clear()
+
+
 def register():
+    if _clear_highlight_cache_after_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_clear_highlight_cache_after_load)
     if not bpy.app.timers.is_registered(_highlight_timer):
         bpy.app.timers.register(_highlight_timer, first_interval=0.2, persistent=True)
 
@@ -166,3 +174,6 @@ def unregister():
     if bpy.app.timers.is_registered(_highlight_timer):
         bpy.app.timers.unregister(_highlight_timer)
     _restore_all_highlights()
+    _base_color_cache.clear()
+    if _clear_highlight_cache_after_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_clear_highlight_cache_after_load)
