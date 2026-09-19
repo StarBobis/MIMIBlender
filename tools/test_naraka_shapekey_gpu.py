@@ -83,7 +83,7 @@ def succeeded(hr, label):
         raise RuntimeError(label + " failed: 0x" + format(hr & 0xffffffff, "08x"))
 
 
-def run(base, shape, stride=40, animated_seed=False):
+def run(base, shape, stride=40, animated_seed=False, shader_source=None, result_checker=None, seed_data=None):
     """Compile real shaders and check base + deltas, including animated seeds.
 
     The position-only and full-vertex shaders share the same slot contract.
@@ -145,7 +145,11 @@ def run(base, shape, stride=40, animated_seed=False):
 
         # Compile the actual shipped shader, not a simplified stand-in.
         shader_file = "Shapes.hlsl" if stride == 40 else "shapes_position.hlsl"
-        source = (Path(__file__).resolve().parents[1] / "resources" / shader_file).read_bytes()
+        # Optional emitted source lets the YYSLS test share the real D3D11 ABI
+        # harness while keeping its packed-data oracle outside this helper.
+        source = shader_source
+        if source is None:
+            source = (Path(__file__).resolve().parents[1] / "resources" / shader_file).read_bytes()
         code, errors = PTR(), PTR()
         compiler.D3DCompile.argtypes = [PTR, ct.c_size_t, ct.c_char_p, PTR, PTR,
                                         ct.c_char_p, ct.c_char_p, UINT, UINT,
@@ -206,6 +210,18 @@ def run(base, shape, stride=40, animated_seed=False):
         uavs = (PTR * 1)(working_view.value)
         call(context, 68, None, [UINT, UINT, ct.POINTER(PTR), PTR], 5, 1, uavs, None)
 
+        if shader_source is not None:
+            # YYSLS retains float deltas in a separate 32-byte-per-vertex UAV.
+            # Its layout is independent of the packed output vertex stride.
+            scratch_desc = BufferDesc(count * 32, 0, 128, 0, 64, 32)
+            scratch = create(3, [ct.POINTER(BufferDesc), PTR], ct.byref(scratch_desc), None)
+            scratch_view = view(scratch, unordered=True)
+            # A single-key export allocates one dummy record, not count records.
+            # Multi-key exports require the full scratch array for all passes.
+            tiny_desc = BufferDesc(32, 0, 128, 0, 64, 32)
+            tiny = create(3, [ct.POINTER(BufferDesc), PTR], ct.byref(tiny_desc), None)
+            tiny_view = view(tiny, unordered=True)
+
         # The intermediate result has RAW only, not RAW|STRUCTURED.
         # Validate the exact R32_TYPELESS BUFFEREX SRV used by raw reads.
         # Validate both consumers: raw SRV for skinning and VB for the shared
@@ -222,13 +238,28 @@ def run(base, shape, stride=40, animated_seed=False):
         # A nontrivial animated seed catches the old cancellation bug at
         # weight=1: subtracting the seed instead of base would erase animation.
         seed_values = [value + (2.0 if animated_seed else 0.0) for value in original]
-        seed_buffer = buffer(struct.pack("<" + "f" * len(seed_values), *seed_values))
-        for weights in ((0.0,), (0.3,), (1.0,), (0.0,), (0.2, 0.5)):
+        # Packed words must never round-trip through Python float conversion:
+        # NaN bit patterns in color/UV/padding are legitimate opaque bytes.
+        if result_checker is not None:
+            seed_bytes = base if seed_data is None else seed_data
+        else:
+            seed_bytes = struct.pack("<" + "f" * len(seed_values), *seed_values)
+        seed_buffer = buffer(seed_bytes)
+        for weights in ((0.0,), (0.3,), (0.5,), (1.0,), (0.0,), (0.2, 0.5), (0.5, -0.5)):
             call(context, 47, None, [PTR, PTR], working, seed_buffer)
-            for weight in weights:
+            if shader_source is not None:
+                # Match the generated single-key/multi-key resource dimensions.
+                selected_view = tiny_view if len(weights) == 1 else scratch_view
+                scratch_uavs = (PTR * 1)(selected_view.value)
+                call(context, 68, None, [UINT, UINT, ct.POINTER(PTR), PTR], 6, 1, scratch_uavs, None)
+            for shape_index, weight in enumerate(weights):
                 # IniParams[88].x carries the weight exactly as x88 does.
                 params = (ct.c_float * (89 * 4))()
                 params[88 * 4] = weight
+                # Shared shaders ignore y/z; YYSLS uses them for first/last pass.
+                # Set both explicitly so previous dispatch state cannot leak.
+                params[88 * 4 + 1] = int(shape_index == 0)
+                params[88 * 4 + 2] = int(shape_index == len(weights) - 1)
                 initial = InitialData(ct.cast(params, PTR), 0, 0)
                 desc = TextureDesc(89, 1, 1, 2, 0, 8, 0, 0)
                 texture = create(4, [ct.POINTER(TextureDesc), ct.POINTER(InitialData)],
@@ -245,6 +276,12 @@ def run(base, shape, stride=40, animated_seed=False):
                            readback, 0, 1, 0, ct.byref(mapped)), "Map readback")
             result = ct.string_at(mapped.data, len(base))
             call(context, 15, None, [PTR, UINT], readback, 0)
+            if result_checker is not None:
+                # The caller checks packed fields and preserved bytes itself.
+                # Resource creation, compilation, dispatch, and readback remain real.
+                result_checker(base, shape, seed_bytes, result, weights)
+                print("OK: WARP packed shape, weights=" + str(weights) + ", vertices=" + str(count))
+                continue
             actual = struct.unpack("<" + "f" * len(original), result)
             expected = [seed + (b - a) * sum(weights) for seed, a, b in zip(seed_values, original, target)]
             for index, (a, b) in enumerate(zip(actual, expected)):

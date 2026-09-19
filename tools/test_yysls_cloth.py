@@ -64,8 +64,12 @@ def load_module(name, filename):
 def setup_modules():
     """Install small dependency stubs and import the real export path."""
     sys.modules[PACKAGE] = types.ModuleType(PACKAGE)
-    for name in ("common", "games", "games.base"):
+    for name in ("common", "games", "games.base", "blueprint"):
         install_module(name)
+    # Existing cloth fixtures have no shape keys; load the real optional path.
+    # This keeps the regression test sensitive to accidental unguarded hooks.
+    install_module("blueprint.blueprint_export_helper", BlueprintExportHelper=NS(
+        get_current_shapekeyname_mkey_dict=lambda: {}))
     config = NS(generated_mod_number=0, output="")
     config.path_generate_mod_folder = lambda: config.output
     config.path_generatemod_buffer_folder = lambda: config.output
@@ -103,6 +107,7 @@ def setup_modules():
     builder = load_module("common.m_ini_builder", "common/m_ini_builder.py")
     load_module("games.base.standard_exporter", "games/base/standard_exporter.py")
     cloth = load_module("games.yysls_cloth", "games/yysls_cloth.py")
+    load_module("games.yysls_shapekeys", "games/yysls_shapekeys.py")
     exporter = load_module("games.yysls", "games/yysls.py")
     return config, builder, cloth, exporter.ExportYYSLS
 

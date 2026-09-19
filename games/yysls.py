@@ -4,8 +4,8 @@ YYSLS (Where Winds Meet) mod exporter.
 IB overrides, resource naming and draw-scoped cloth bypass are YYSLS-specific.
 The custom VS variants are used only for mod draws matching their verified
 original hashes. Other shader passes keep their original VS; the shared export
-pipeline remains responsible for buffers, texture automation, branch keys and
-shape keys.
+pipeline remains responsible for buffers, texture automation, and branch keys.
+Packed shape keys use a YYSLS-specific, draw-local compute backend.
 """
 
 from ..common.global_config import GlobalConfig
@@ -15,6 +15,7 @@ from ..common.m_ini_helper import M_IniHelper
 from .base.standard_exporter import StandardExporter
 from .base import sections
 from . import yysls_cloth
+from . import yysls_shapekeys
 
 
 class ExportYYSLS(StandardExporter):
@@ -23,15 +24,25 @@ class ExportYYSLS(StandardExporter):
     def generate_buffer_files(self):
         # Package the shader with each mod instead of installing a global fix.
         # This also keeps exported mods portable to another game installation.
+        # Validate packed layouts before writing mesh files. Other presets keep
+        # the shared shape pipeline; only YYSLS packages these layout shaders.
+        yysls_shapekeys.write_shaders(self.drawib_model_list)
         super().generate_buffer_files()
         yysls_cloth.copy_shader_asset()
 
     def add_final_sections(self, ini_builder, drawib_drawibmodel_dict):
-        # Keep shared branch/shape-key behavior, then identify the target VS.
-        # This hook runs once, even when the mod contains several DrawIBs.
-        # The marker carries no render commands and cannot affect other meshes.
-        # Actual shader selection is deferred until each enabled object draw.
-        super().add_final_sections(ini_builder, drawib_drawibmodel_dict)
+        # Keep shared branches and Position animation, but replace the generic
+        # shape pipeline: YYSLS has packed normals and draw-local computation.
+        # Weight hotkeys and time animations still use the shared state machine.
+        models = list(drawib_drawibmodel_dict.values())
+        M_IniHelper.add_branch_key_sections(
+            ini_builder=ini_builder,
+            key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict,
+            blueprint_model=self.blueprint_model,
+            drawib_models=models,
+        )
+        yysls_shapekeys.add_ini_sections(ini_builder, models)
+        # Shader identification remains inert until an enabled submesh draw.
         yysls_cloth.add_shader_check(ini_builder)
 
     def add_drawib_sections(self, ini_builder: M_IniBuilder, drawib_model):
@@ -84,6 +95,11 @@ class ExportYYSLS(StandardExporter):
             # The matching CustomShader must install VS before these commands.
             # The fallback invokes the same list with the original shader intact.
             mod_lines = []
+            # Compute before any VB binding on both cloth and fallback paths.
+            # The per-DrawIB cache prevents duplicate work in later submeshes.
+            # This command remains inside the costume_mods gate above.
+            if yysls_shapekeys.shape_names(drawib_model):
+                mod_lines.append("run = " + yysls_shapekeys.command_name(drawib_model))
             for original_category_name in d3d11_game_type.CategoryDrawCategoryDict.keys():
                 category_original_slot = d3d11_game_type.CategoryExtractSlotDict[original_category_name]
                 mod_lines.append(category_original_slot + " = Resource" + draw_ib + original_category_name)
