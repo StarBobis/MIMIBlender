@@ -387,8 +387,11 @@ class MIMINode_Texture_Bind(MIMINodeBase):
 
         row = layout.row()
         # The list shows the compact one-line summary of every binding row.
+        # The list id must be unique per node: the uiList runtime state
+        # (scroll offset and resize-grip height) is keyed by this id, so a
+        # constant id would sync the height of every Texture Bind node.
         row.template_list(
-            "UI_UL_list", "mimi_texture_bind",
+            "UI_UL_list", "mimi_texture_bind_" + self.name,
             self, "texture_slot_items",
             self, "texture_slot_index",
             rows=3,

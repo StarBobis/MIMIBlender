@@ -300,8 +300,13 @@ class MIMINode_Object_List(MIMINodeBase):
             return
 
         row = layout.row()
+        # The uiList runtime state (scroll offset and the resize-grip height)
+        # is keyed by this list id inside the node editor region. A constant
+        # id made every Object List node share one state, so dragging the
+        # list grip of one node resized the lists of all the others too.
+        # Appending the unique node name gives each node its own state.
         row.template_list(
-            "UI_UL_list", "mimi_object_list",
+            "UI_UL_list", "mimi_object_list_" + self.name,
             self, "object_items",
             self, "object_index",
             rows=4,

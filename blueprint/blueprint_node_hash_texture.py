@@ -300,8 +300,10 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
 
         row = layout.row()
+        # Unique list id per node; see the Texture Bind node for why a
+        # constant id would share the scroll/height state between nodes.
         row.template_list(
-            "UI_UL_list", "mimi_texture_hash_bind",
+            "UI_UL_list", "mimi_texture_hash_bind_" + self.name,
             self, "texture_hash_items",
             self, "texture_hash_index",
             rows=3,
