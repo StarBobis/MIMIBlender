@@ -12,7 +12,7 @@ from ..utils.material_texture_utils import apply_image_texture_to_material, find
 
 class MMTImportHelper:
 	@staticmethod
-	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None):
+	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None, submesh_name_prefix:str = ""):
 		submesh_json = SubmeshJson(json_file_path)
 
 		elements, vb_data, vb_vertex_count, shapekey_buffers = MMTImportHelper.parse_category_buffers(submesh_json)
@@ -22,6 +22,13 @@ class MMTImportHelper:
 		mesh_name = os.path.splitext(submesh_json.FileName)[0]
 		logic_name = submesh_json.GamePreset
 		gametypename = submesh_json.WorkGameType
+
+		# When the caller passes a submesh_name_prefix (usually the DrawIB folder name),
+		# switch to the classic Submesh naming scheme {DrawIB}-{IndexCount}-{FirstIndex}
+		# (e.g. 94517393-16884-0) instead of the raw Json file name.
+		use_classic_submesh_name = bool(str(submesh_name_prefix).strip())
+		if use_classic_submesh_name:
+			mesh_name = str(submesh_name_prefix).strip() + "-" + str(ib_count) + "-0"
 
 		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
 		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and MIMIGlobalProperties.is_merged_mode()) else None
@@ -46,7 +53,15 @@ class MMTImportHelper:
 
 			imported_obj_list = []
 			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
-				if len(draw_call_segments) == 1:
+				if use_classic_submesh_name:
+					# Classic per-drawcall Submesh name: {DrawIB}-{IndexCount}-{FirstIndex},
+					# built from this segment's own drawindexed parameters.
+					segment_mesh_name = (
+						str(submesh_name_prefix).strip()
+						+ "-" + str(segment_info["index_count"])
+						+ "-" + str(segment_info["index_offset"])
+					)
+				elif len(draw_call_segments) == 1:
 					segment_mesh_name = mesh_name
 				else:
 					segment_mesh_name = mesh_name + "-" + str(segment_index + 1).zfill(2)

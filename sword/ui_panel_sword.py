@@ -308,9 +308,11 @@ class SwordImportAllReversed(I18nOperator):
     def _import_ssmt_fmt(self, context, reverse_output_folder_path):
         '''
         ssmt_fmt format import:
-        Walk all subfolders of the reverse output folder. Each subfolder may contain several Json files,
-        and the file name of each Json file is its data type. Create a drawib_<data type> collection
-        for each Json file and import it.
+        Walk all subfolders of the reverse output folder. Each subfolder is named
+        after its DrawIB (e.g. 1fbe8217, 056da8f3) and may contain several Json
+        files (one per data type). Create one drawib_<DrawIB> collection per
+        subfolder and import every Json file of that subfolder into it, naming
+        the meshes with the classic Submesh scheme {DrawIB}-{IndexCount}-{FirstIndex}.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
@@ -326,24 +328,29 @@ class SwordImportAllReversed(I18nOperator):
         imported_count = 0
         for subfolder_path in subfolder_path_list:
 
-            # Get all .json files; the file name of each Json file is its data type
+            # The subfolder name is the DrawIB this group of meshes belongs to
+            drawib_folder_name = os.path.basename(subfolder_path)
+
+            # Get all .json files first; skip subfolders without any Json file
+            # so we never create empty drawib collections.
             json_files = []
             for file in os.listdir(subfolder_path):
                 if file.endswith('.json'):
                     json_files.append(os.path.join(subfolder_path, file))
 
+            if not json_files:
+                continue
+
+            # Create one collection per DrawIB subfolder, named after the folder
+            # (not after the Json data-type file name).
+            datatype_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + drawib_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
+
             for json_filepath in json_files:
-                # Get the file name including the extension
-                filename_with_extension = os.path.basename(json_filepath)
-                # Remove the extension to get the data type name
-                datatype_name = os.path.splitext(filename_with_extension)[0]
-
-                # Create a drawib_<data type> collection from the name of each Json file
-                datatype_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + datatype_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
-
                 try:
-                    # Call the ssmt_fmt format import function
-                    MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection)
+                    # Call the ssmt_fmt format import function; the DrawIB folder name
+                    # is passed as the classic Submesh naming prefix so the imported
+                    # objects are named {DrawIB}-{IndexCount}-{FirstIndex}.
+                    MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection, submesh_name_prefix=drawib_folder_name)
                     imported_count += 1
                 except Exception as e:
                     error_msg = tr("Import failed, skipped: {path} | Error: {error}").format(path=json_filepath, error=e)
