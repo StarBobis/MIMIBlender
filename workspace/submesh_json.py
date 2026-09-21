@@ -42,6 +42,10 @@ class SubmeshDrawCallSegment:
 	IndexOffset:int
 	IndexCount:int
 	DrawStartIndex:int = 0
+	# Part alias from the INI comment line above the drawindexed statement
+	# (e.g. "; Skirk Body Knees (636)"), written by the reverse tool; empty
+	# when the draw statement had no comment.
+	Alias:str = ""
 
 
 @dataclass
@@ -142,6 +146,8 @@ class SubmeshJson:
 				IndexOffset=int(draw_call_segment_json.get("IndexOffset", 0)),
 				IndexCount=int(draw_call_segment_json.get("IndexCount", 0)),
 				DrawStartIndex=int(draw_call_segment_json.get("DrawStartIndex", 0)),
+				# Part alias written by the reverse tool from the INI comment.
+				Alias=str(draw_call_segment_json.get("Alias", "")).strip(),
 			)
 			self.DrawCallSegmentList.append(draw_call_segment)
 

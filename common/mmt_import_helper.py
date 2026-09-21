@@ -98,6 +98,13 @@ class MMTImportHelper:
 				else:
 					segment_mesh_name = mesh_name + "-" + str(segment_index + 1).zfill(2)
 
+				# Append the part alias (the INI comment above the drawindexed,
+				# e.g. "Skirk Body Knees (636)") at the end of the object name,
+				# so the imported object directly shows which body part it is.
+				segment_alias = str(segment_info.get("alias", "")).strip()
+				if segment_alias:
+					segment_mesh_name = MMTImportHelper.append_alias_to_mesh_name(segment_mesh_name, segment_alias)
+
 				# Each segment compresses its own vertex range [vertex_min, vertex_max]:
 				# VB element data and shape key data are sliced by the same range, and the IB is rebased to 0.
 				segment_vb_data = {}
@@ -190,6 +197,32 @@ class MMTImportHelper:
 		return imported_obj
 
 	@staticmethod
+	def append_alias_to_mesh_name(mesh_name:str, alias:str):
+		'''
+		Append ".<alias>" to a mesh name.
+
+		Blender ID names are limited to 63 bytes of UTF-8; when the combined
+		name would exceed the limit the alias tail is truncated first (at a
+		character boundary) so the base identity part stays fully readable.
+		'''
+		suffix = "." + alias.strip()
+		name_bytes = mesh_name.encode("utf-8")
+		suffix_bytes = suffix.encode("utf-8")
+		if len(name_bytes) + len(suffix_bytes) <= 63:
+			return mesh_name + suffix
+
+		# Truncate the suffix at a UTF-8 character boundary (drop trailing
+		# continuation bytes) so the decoded name stays valid text.
+		keep_bytes = 63 - len(name_bytes)
+		if keep_bytes <= 1:
+			# No room for ".x"; keep the base name rather than a bare dot.
+			return mesh_name
+		truncated_bytes = suffix_bytes[:keep_bytes]
+		while truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0x80:
+			truncated_bytes = truncated_bytes[:-1]
+		return mesh_name + truncated_bytes.decode("utf-8", errors="ignore")
+
+	@staticmethod
 	def resolve_draw_call_segments(submesh_json:SubmeshJson, ib_data_list:list, ib_entry_array_indices:list, ib_data_full, vb_vertex_count:int):
 		'''
 		Resolve DrawCall segment info, returning [(segment_ib_data, vertex_min, vertex_max, segment_info)].
@@ -227,6 +260,8 @@ class MMTImportHelper:
 						"ib_index": draw_call_segment.IBIndex,
 						"index_offset": draw_call_segment.IndexOffset,
 						"index_count": draw_call_segment.IndexCount,
+						# Part alias from the INI comment above the drawindexed.
+						"alias": draw_call_segment.Alias,
 					},
 				))
 		elif len(submesh_json.DrawCallIndexList) > 0:
@@ -244,7 +279,7 @@ class MMTImportHelper:
 					for index_count in index_count_list:
 						raw_segments.append((
 							ib_data_full[index_offset:index_offset + index_count],
-							{"ib_index": -1, "index_offset": index_offset, "index_count": index_count},
+							{"ib_index": -1, "index_offset": index_offset, "index_count": index_count, "alias": ""},
 						))
 						index_offset += index_count
 				else:
