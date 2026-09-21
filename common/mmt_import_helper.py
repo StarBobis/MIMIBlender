@@ -24,11 +24,17 @@ class MMTImportHelper:
 		gametypename = submesh_json.WorkGameType
 
 		# When the caller passes a submesh_name_prefix (usually the DrawIB folder name),
-		# switch to the classic Submesh naming scheme {DrawIB}-{IndexCount}-{FirstIndex}
-		# (e.g. 94517393-16884-0) instead of the raw Json file name.
+		# switch to the classic Submesh naming scheme instead of the raw Json file name:
+		# - the Submesh itself is named {DrawIB}-{MatchIndexCount}-{MatchFirstIndex},
+		#   where the match values are the Json top-level IndexCount/IndexOffset
+		#   (the draw range this Submesh occupies in the original model);
+		# - each draw call segment appends its own .{IndexCount}-{FirstIndex} suffix,
+		#   so the object name always shows which Submesh it belongs to.
 		use_classic_submesh_name = bool(str(submesh_name_prefix).strip())
+		match_submesh_name = ""
 		if use_classic_submesh_name:
-			mesh_name = str(submesh_name_prefix).strip() + "-" + str(ib_count) + "-0"
+			match_submesh_name = str(submesh_name_prefix).strip() + "-" + str(submesh_json.IndexCount) + "-" + str(submesh_json.IndexOffset)
+			mesh_name = match_submesh_name
 
 		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
 		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and MIMIGlobalProperties.is_merged_mode()) else None
@@ -54,13 +60,19 @@ class MMTImportHelper:
 			imported_obj_list = []
 			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
 				if use_classic_submesh_name:
-					# Classic per-drawcall Submesh name: {DrawIB}-{IndexCount}-{FirstIndex},
-					# built from this segment's own drawindexed parameters.
-					segment_mesh_name = (
-						str(submesh_name_prefix).strip()
-						+ "-" + str(segment_info["index_count"])
-						+ "-" + str(segment_info["index_offset"])
-					)
+					segment_index_count = segment_info["index_count"]
+					segment_first_index = segment_info["index_offset"]
+					if (
+						len(draw_call_segments) == 1
+						and segment_index_count == submesh_json.IndexCount
+						and segment_first_index == submesh_json.IndexOffset
+					):
+						# A single segment covering the whole Submesh IS the Submesh
+						# itself; the dotted suffix would carry no extra information.
+						segment_mesh_name = match_submesh_name
+					else:
+						# {DrawIB}-{MatchIndexCount}-{MatchFirstIndex}.{IndexCount}-{FirstIndex}
+						segment_mesh_name = match_submesh_name + "." + str(segment_index_count) + "-" + str(segment_first_index)
 				elif len(draw_call_segments) == 1:
 					segment_mesh_name = mesh_name
 				else:

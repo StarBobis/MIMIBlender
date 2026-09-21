@@ -72,6 +72,11 @@ class SubmeshJson:
 	VertexCompressionParams:list = field(init=False, default_factory=list)
 	VertexOffset:int = field(init=False, default=0)
 	VertexCount:int = field(init=False, default=-1)
+	# Top-level IndexOffset/IndexCount describe the draw range this whole Submesh
+	# occupies in the original model; they are the Submesh's match identity
+	# (match_first_index / match_index_count in the exported ini).
+	IndexOffset:int = field(init=False, default=0)
+	IndexCount:int = field(init=False, default=0)
 	MatchCS:str = field(init=False, default="")
 	MatchUAVBytes:int = field(init=False, default=0)
 	CB4Hash:str = field(init=False, default="")
@@ -110,6 +115,9 @@ class SubmeshJson:
 		self.SubMeshRole = role if role in {"Face", "Neck", "Eye"} else ""
 		self.VertexOffset = int(self.JsonDict.get("VertexOffset", 0))
 		self.VertexCount = int(self.JsonDict.get("VertexCount", -1))
+		# Older Json files may miss the top-level IndexOffset/IndexCount; default to 0.
+		self.IndexOffset = int(self.JsonDict.get("IndexOffset", 0))
+		self.IndexCount = int(self.JsonDict.get("IndexCount", 0))
 		self.MatchCS = str(self.JsonDict.get("match_cs", "") or "").strip()
 		self.MatchUAVBytes = int(self.JsonDict.get("match_uav_bytes", 0) or 0)
 		self.CB4Hash = self.JsonDict.get("CB4Hash", "")
