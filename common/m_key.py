@@ -46,6 +46,17 @@ class M_Key:
     toggle_key: str = ""
     start_enabled: bool = True
 
+    # Playback driver of a time timeline:
+    # - "loop": wall-clock autoplay, repeating the timeline forever (the
+    #   optional toggle key switches playback on/off, off selects frame 0).
+    # - "trigger": the key becomes a one-shot trigger. Every press replays
+    #   the timeline once from frame zero; past the timeline period the
+    #   variable returns to zero and stays there until the next press.
+    #   Implemented with type=activate + run (3Dmigoto Override.cpp:
+    #   KeyOverride::DownEvent -> Override::Activate -> RunCommandList runs
+    #   the activate command list on EVERY key-down, no toggle state).
+    playback_mode: str = "loop"
+
     # Used for passing data through chain_key_list
     tmp_value: int = 0
 
@@ -59,14 +70,24 @@ class M_Key:
         normalizing whitespace, so a pasted multiline value cannot add commands.
         Shared-alias comparison uses this normalized binding and default state.
         """
+        # Older blend files have no playback mode property; they are loops.
+        mode = str(getattr(node, "playback_mode", "LOOP") or "LOOP").strip().lower()
+        if mode not in ("loop", "trigger"):
+            raise ValueError("Playback mode must be Loop or Key Trigger")
         binding = str(getattr(node, "toggle_key", "") or "")
         if any(char in binding for char in "\r\n;=[]"):
             raise ValueError("Animation toggle key must be a single key binding, such as F6 or CTRL F6")
         self.toggle_key = " ".join(binding.upper().split())
+        self.playback_mode = mode
+        # A one-shot trigger without a key could never start playing.
+        if self.playback_mode == "trigger" and not self.toggle_key:
+            raise ValueError("Key Trigger playback requires a trigger key, such as F6 or CTRL F6")
         self.start_enabled = bool(getattr(node, "start_enabled", True)) if self.toggle_key else True
         # Shape weights have a real zero/off state, unlike draw-frame indices.
-        # Initialize it before the first Present so disabled exports start at Basis.
-        if self.key_type == "time_shapekey" and not self.start_enabled:
+        # Initialize it before the first Present so disabled exports start at
+        # Basis. A one-shot trigger starts disarmed as well, so its pre-Press
+        # weight must be zero too.
+        if self.key_type == "time_shapekey" and (not self.start_enabled or self.playback_mode == "trigger"):
             self.initialize_value = 0
 
     def animation_control_name(self):

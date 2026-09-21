@@ -743,8 +743,8 @@ class BluePrintModel:
                 )
             # One alias owns one runtime switch. Conflicting node settings
             # must not make the chosen hotkey depend on traversal order.
-            if (existing_key.toggle_key, existing_key.start_enabled) != (m_key.toggle_key, m_key.start_enabled):
-                raise ValueError("Dynamic mod timeline nodes sharing alias '" + m_key.key_name + "' must use the same animation toggle key and start state")
+            if (existing_key.toggle_key, existing_key.start_enabled, existing_key.playback_mode) != (m_key.toggle_key, m_key.start_enabled, m_key.playback_mode):
+                raise ValueError("Dynamic mod timeline nodes sharing alias '" + m_key.key_name + "' must use the same playback mode, animation toggle key and start state")
             m_key = existing_key
 
         # Tag only draw calls reached through this position node. A shared

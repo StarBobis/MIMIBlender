@@ -87,6 +87,23 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
     def update_comment(self, context):
         self.update_node_width(self.width_texts())
 
+    def update_playback_mode(self, context):
+        self.update_node_width(self.width_texts())
+
+    # Playback driver dropdown. LOOP keeps the legacy autoplay behavior;
+    # TRIGGER turns the key into a one-shot trigger (every press replays
+    # the timeline once from frame 0, then the base Position is restored
+    # until the next press).
+    playback_mode: bpy.props.EnumProperty(
+        name=tr("Playback Mode"),
+        description=tr("Loop: repeat the timeline forever. Key Trigger: each key press plays the timeline once from frame 0"),
+        items=[
+            ("LOOP", tr("Loop"), tr("Repeat the timeline forever; the key (if set) toggles playback on/off")),
+            ("TRIGGER", tr("Key Trigger (Play Once)"), tr("Each key press plays the timeline once from frame 0; pressing again restarts it")),
+        ],
+        default="LOOP",
+        update=update_playback_mode,
+    ) # type: ignore
     fps: bpy.props.FloatProperty(
         name=tr("FPS"),
         description=tr("Frames shown per second of wall-clock time; playback speed never depends on the game's frame rate"),
@@ -131,17 +148,24 @@ class MIMINode_TimePosSwitch(MIMINodeBase):
         self.color = (0.52, 0.40, 0.60)
 
     def draw_buttons(self, context, layout):
+        layout.prop(self, "playback_mode", text=tr("Playback Mode"))
         layout.prop(self, "fps", text=tr("FPS"))
         layout.prop(self, "time_alias", text=tr("Time Variable Alias"))
         layout.prop(self, "comment", text=tr("Comment"))
+        # In trigger mode the key IS the playback trigger, so the initial
+        # on/off state is meaningless and its widget stays disabled.
+        is_trigger = self.playback_mode == "TRIGGER"
         # Expose the off behavior beside the key so it is not confused with
         # hiding the model or freezing its last deformed frame.
-        layout.prop(self, "toggle_key", text=tr("Animation Toggle Key"))
+        layout.prop(self, "toggle_key", text=tr("Trigger Key") if is_trigger else tr("Animation Toggle Key"))
         controls = layout.column()
-        controls.enabled = bool(self.toggle_key.strip())
+        controls.enabled = bool(self.toggle_key.strip()) and not is_trigger
         controls.prop(self, "start_enabled", text=tr("Start Enabled"))
         if self.toggle_key.strip():
-            layout.label(text=tr("When off: restore base Position"), icon='INFO')
+            if is_trigger:
+                layout.label(text=tr("Press: play once, then restore base Position"), icon='INFO')
+            else:
+                layout.label(text=tr("When off: restore base Position"), icon='INFO')
 
         # The socket add/remove operators of the Time Switch node are generic
         # (they only append/remove "Frame N" input sockets by node name), so

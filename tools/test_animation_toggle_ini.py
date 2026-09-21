@@ -115,6 +115,12 @@ class Runtime:
             for name, lines in self.sections.items():
                 if not name.startswith("KeyMimiAnimation_") or "key = " + press not in lines:
                     continue
+                if "type = activate" in lines:
+                    # One-shot trigger: Override::Activate runs the section's
+                    # "run =" command list on every key-down (no cycle state).
+                    run_line = next(line for line in lines if line.startswith("run = "))
+                    self.run(self.sections[run_line[6:]], time)
+                    continue
                 assert "smart = true" in lines and "type = cycle" in lines
                 assignment = next(line for line in lines if line.startswith("$"))
                 variable, sequence = assignment.split(" = ", 1)
@@ -125,13 +131,13 @@ class Runtime:
         self.run([line[5:] for line in present if line.startswith("post ")], time)
 
 
-def build_combined(modules, start_enabled):
+def build_combined(modules, start_enabled, playback_mode="LOOP"):
     """Use all real writers, including shared shape output and Position copies."""
     helper = modules[support.TEST_PKG + ".common.m_ini_helper"].M_IniHelper
     builder = modules[support.TEST_PKG + ".common.m_ini_builder"].M_IniBuilder()
     blueprint = support.make_fake_blueprint_model(modules)
     timeline = blueprint.keyname_mkey_dict["$dyntime0"]
-    settings = types.SimpleNamespace(toggle_key=" f6 ", start_enabled=start_enabled)
+    settings = types.SimpleNamespace(toggle_key=" f6 ", start_enabled=start_enabled, playback_mode=playback_mode)
     timeline.fps = 10
     timeline.configure_animation_toggle(settings)
     key_type = modules[support.TEST_PKG + ".common.m_key"].M_Key
@@ -198,6 +204,54 @@ def test_toggle_lifecycle(modules):
     print("PASS: both defaults, first press, disable, restart, copy cache and compute ordering")
 
 
+def test_trigger_lifecycle(modules):
+    # fps=10 with three frames: step 0.1 s, period 0.3 s per play-through.
+    runtime = build_combined(modules, True, playback_mode="TRIGGER")
+    target = "Resource65b9cf5aPositionTimeBase"
+    original = "Resource65b9cf5aPositionTimeOriginal"
+    frame_prefix = "Resource65b9cf5aPositionTimeFrame.dyntime0_"
+    # Before any press the timeline is disarmed: frame zero, zero weight,
+    # base Position, and waiting must never start playback on its own.
+    runtime.step(100)
+    assert runtime.values["$dyntime0"] == 0
+    assert runtime.values["$shapekey0"] == 0
+    assert runtime.resources[target] == original
+    runtime.step(500)
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0
+    # First press starts a play-through at frame 0.
+    runtime.step(600, press="F6")
+    assert runtime.values["$mimi_anim_dyntime0_playing"] == 1
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0.25
+    assert runtime.resources[target] == frame_prefix + "0"
+    runtime.step(600.125)
+    assert runtime.values["$dyntime0"] == 1 and runtime.values["$shapekey0"] == 0.6
+    assert runtime.resources[target] == frame_prefix + "1"
+    # A mid-play press restarts from frame 0 (activate = no toggle state).
+    runtime.step(600.2, press="F6")
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0.25
+    assert runtime.resources[target] == frame_prefix + "0"
+    runtime.step(600.45)
+    assert runtime.values["$dyntime0"] == 2 and runtime.values["$shapekey0"] == 1.0
+    # Past the period the timeline rests: frame zero, zero weight, base
+    # Position restored, and the playing flag disarmed for the next press.
+    runtime.step(600.55)
+    assert runtime.values["$mimi_anim_dyntime0_playing"] == 0
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0
+    assert runtime.resources[target] == original
+    # The timeline must never wrap into a second loop while disarmed.
+    runtime.step(600.75)
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0
+    # A later press replays the whole timeline once more.
+    runtime.step(900, press="F6")
+    assert runtime.values["$mimi_anim_dyntime0_playing"] == 1
+    assert runtime.values["$dyntime0"] == 0 and runtime.values["$shapekey0"] == 0.25
+    runtime.step(900.25)
+    assert runtime.values["$dyntime0"] == 2 and runtime.values["$shapekey0"] == 1.0
+    weights, resources = runtime.dispatches[-1]
+    assert weights["$shapekey0"] == 1.0 and resources[target] == frame_prefix + "2"
+    print("PASS: trigger press, mid-play restart, one-shot disarm, no wrap, replay")
+
+
 def test_configuration(modules):
     key = modules[support.TEST_PKG + ".common.m_key"].M_Key()
     key.configure_animation_toggle(types.SimpleNamespace(toggle_key=" ctrl   f6 ", start_enabled=False))
@@ -215,6 +269,24 @@ def test_configuration(modules):
             pass
         else:
             raise AssertionError("Expected invalid binding to fail")
+    # Trigger mode requires a key; mode strings are normalized to lowercase.
+    key.configure_animation_toggle(types.SimpleNamespace(toggle_key=" f6 ", playback_mode="TRIGGER"))
+    assert key.playback_mode == "trigger" and key.toggle_key == "F6"
+    try:
+        key.configure_animation_toggle(types.SimpleNamespace(playback_mode="TRIGGER"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected Key Trigger without a key to fail")
+    try:
+        key.configure_animation_toggle(types.SimpleNamespace(toggle_key="F6", playback_mode="sideways"))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected an unknown playback mode to fail")
+    # Old files without the property stay loops, even with a key set.
+    key.configure_animation_toggle(types.SimpleNamespace(toggle_key="F6"))
+    assert key.playback_mode == "loop"
     print("PASS: old-file defaults, binding normalization and delimiter rejection")
 
 
@@ -224,4 +296,5 @@ if __name__ == "__main__":
     modules = support.load_real_modules()
     test_configuration(modules)
     test_toggle_lifecycle(modules)
+    test_trigger_lifecycle(modules)
     print("ALL ANIMATION TOGGLE INI TESTS PASSED")

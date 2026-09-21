@@ -25,6 +25,17 @@ TRANSLATIONS_ZH_CN = {
     "When off: show frame 0": "关闭时：显示第 0 帧",
     "When off: restore base Position": "关闭时：恢复基础 Position",
     "When off: set shape weight to 0": "关闭时：形态键权重归零",
+    # ---- Playback mode dropdown (loop vs one-shot trigger) ----
+    "Playback Mode": "播放模式",
+    "Loop": "循环播放",
+    "Key Trigger (Play Once)": "按键触发（播放一次）",
+    "Loop: repeat the timeline forever. Key Trigger: each key press plays the timeline once from frame 0": "循环播放：时间轴永远循环。按键触发：每次按键从第 0 帧完整播放一次",
+    "Repeat the timeline forever; the key (if set) toggles playback on/off": "永远循环播放时间轴；设置按键后可开关播放",
+    "Each key press plays the timeline once from frame 0; pressing again restarts it": "每次按键从第 0 帧播放一次；播放中再次按键会重新开始",
+    "Trigger Key": "触发按键",
+    "Press: play once from frame 0": "按下：从第 0 帧播放一次",
+    "Press: play once, then restore base Position": "按下：播放一次，结束后恢复基础 Position",
+    "Press: play once, then weight returns to 0": "按下：播放一次，结束后权重归零",
     # ---- Fragments (leading/trailing spaces are significant) ----
     " (LOD: {lod})": "（LOD：{lod}）",
     " Success!": " 成功！",

@@ -739,6 +739,9 @@ class M_IniHelper:
         """
         expression = m_key.timeline_expression()
         is_shape = m_key.key_type == "time_shapekey"
+        if m_key.playback_mode == "trigger":
+            M_IniHelper.add_trigger_animation_sections(ini_builder, present_section, m_key)
+            return
         if not m_key.toggle_key:
             if is_shape:
                 M_IniHelper.append_time_shapekey_weight_lines(present_section, m_key)
@@ -789,6 +792,80 @@ class M_IniHelper:
         commands.append("  " + m_key.key_name + " = 0")
         commands.append("endif")
         commands.append(previous + " = " + enabled)
+        ini_builder.append_section(commands)
+        present_section.append("post run = " + command_name)
+
+    @staticmethod
+    def add_trigger_animation_sections(ini_builder, present_section, m_key):
+        """Emit a one-shot timeline replayed from frame zero by a trigger key.
+
+        3Dmigoto source facts backing this design (bo3b/3Dmigoto, DirectX11):
+        - [Key] sections accept "run = CommandListX" (Override.cpp
+          Override::ParseIniSection, ParseRunExplicitCommandList).
+        - With "type = activate" (the default, IniHandler.cpp
+          KeyOverrideType::ACTIVATE), KeyOverride::DownEvent calls
+          Override::Activate every key-down, which runs that command list
+          (Override.cpp RunCommandList) -- no toggle state, so every press
+          captures a fresh epoch and restarts playback at frame zero.
+        - The post-Present command list then maps elapsed time since the
+          epoch to the frame expression while the play-through is inside
+          the timeline period; past the period it resets the variable to
+          zero and disarms the playing flag, so the timeline never wraps
+          into a second loop and the next press starts clean.
+        """
+        control = m_key.animation_control_name()
+        playing = control + "_playing"
+        epoch = control + "_start"
+        elapsed = control + "_elapsed"
+        suffix = m_key.key_name.lstrip("$")
+        trigger_command_name = "CommandListMimiAnimationTrigger_" + suffix
+        command_name = "CommandListMimiAnimation_" + suffix
+        is_shape = m_key.key_type == "time_shapekey"
+        # Precompute the period literal: frame_count / fps seconds.
+        period = repr(len(m_key.value_list) / m_key.fps)
+
+        constants = M_IniSection(M_SectionType.Constants)
+        # Runtime-only state (plain "global", never persisted): a reload
+        # starts disarmed at frame zero, matching the toggle clock rules.
+        constants.append("global " + playing + " = 0")
+        constants.append("global " + epoch + " = 0")
+        ini_builder.append_section(constants)
+
+        key_section = M_IniSection(M_SectionType.Key)
+        key_section.append("[KeyMimiAnimation_" + suffix + "]")
+        key_section.append("key = " + m_key.toggle_key)
+        # type=activate runs the command list on EVERY key-down, which is
+        # exactly the "press to replay once" trigger semantic.
+        key_section.append("type = activate")
+        key_section.append("run = " + trigger_command_name)
+        ini_builder.append_section(key_section)
+
+        trigger_commands = M_IniSection(M_SectionType.CommandList)
+        trigger_commands.append("[" + trigger_command_name + "]")
+        trigger_commands.append(epoch + " = time")
+        trigger_commands.append(playing + " = 1")
+        ini_builder.append_section(trigger_commands)
+
+        commands = M_IniSection(M_SectionType.CommandList)
+        commands.append("[" + command_name + "]")
+        commands.append("if " + playing + " == 1")
+        commands.append("  local " + elapsed)
+        commands.append("  " + elapsed + " = time - " + epoch)
+        commands.append("  if " + elapsed + " < " + period)
+        if is_shape:
+            M_IniHelper.append_time_shapekey_weight_lines(commands, m_key, "    ", elapsed)
+        else:
+            commands.append("    " + m_key.key_name + " = " + m_key.timeline_expression(elapsed))
+        commands.append("  else")
+        # The play-through ended: return to frame zero and disarm, so the
+        # timeline never wraps and the next press starts a fresh one.
+        commands.append("    " + m_key.key_name + " = 0")
+        commands.append("    " + playing + " = 0")
+        commands.append("  endif")
+        commands.append("else")
+        # Disarmed (never triggered, finished or reloaded): hold frame zero.
+        commands.append("  " + m_key.key_name + " = 0")
+        commands.append("endif")
         ini_builder.append_section(commands)
         present_section.append("post run = " + command_name)
 

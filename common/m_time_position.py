@@ -138,7 +138,11 @@ def append_time_position_sections(ini_builder: M_IniBuilder, blueprint_model, dr
                 # The draw timeline uses frame zero when disabled, but Position
                 # must restore the separately connected base, not frame zero.
                 # Keep enabled in the selection gate so the cache sees -1/off.
-                if timeline.toggle_key:
+                if getattr(timeline, "playback_mode", "loop") == "trigger":
+                    # One-shot playback gates on the playing flag: after the
+                    # play-through the base Position is restored again.
+                    conditions.append(timeline.animation_control_name() + "_playing == 1")
+                elif timeline.toggle_key:
                     conditions.append(timeline.animation_control_name() + "_enabled == 1")
                 # Group validation guarantees that all providers share a gate.
                 for key in getattr(frames[value][0], "work_key_list", []):
