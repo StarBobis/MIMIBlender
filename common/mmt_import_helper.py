@@ -62,17 +62,37 @@ class MMTImportHelper:
 				if use_classic_submesh_name:
 					segment_index_count = segment_info["index_count"]
 					segment_first_index = segment_info["index_offset"]
+
+					# The match identity of a segment is the draw range of the IB
+					# partition it belongs to. Newer reverse outputs record
+					# IndexOffset/IndexCount per IndexBufferList entry; older ones
+					# only have the Json top-level pair, used as the fallback
+					# (also for the DrawCallIndexList fallback whose ib_index is -1).
+					match_index_count = submesh_json.IndexCount
+					match_first_index = submesh_json.IndexOffset
+					ib_entry_index = segment_info["ib_index"]
+					if 0 <= ib_entry_index < len(submesh_json.IndexBufferList):
+						ib_entry = submesh_json.IndexBufferList[ib_entry_index]
+						if ib_entry.IndexCount > 0:
+							match_index_count = ib_entry.IndexCount
+							match_first_index = ib_entry.IndexOffset
+					segment_match_name = (
+						str(submesh_name_prefix).strip()
+						+ "-" + str(match_index_count)
+						+ "-" + str(match_first_index)
+					)
+
 					if (
 						len(draw_call_segments) == 1
-						and segment_index_count == submesh_json.IndexCount
-						and segment_first_index == submesh_json.IndexOffset
+						and segment_index_count == match_index_count
+						and segment_first_index == match_first_index
 					):
 						# A single segment covering the whole Submesh IS the Submesh
 						# itself; the dotted suffix would carry no extra information.
-						segment_mesh_name = match_submesh_name
+						segment_mesh_name = segment_match_name
 					else:
 						# {DrawIB}-{MatchIndexCount}-{MatchFirstIndex}.{IndexCount}-{FirstIndex}
-						segment_mesh_name = match_submesh_name + "." + str(segment_index_count) + "-" + str(segment_first_index)
+						segment_mesh_name = segment_match_name + "." + str(segment_index_count) + "-" + str(segment_first_index)
 				elif len(draw_call_segments) == 1:
 					segment_mesh_name = mesh_name
 				else:

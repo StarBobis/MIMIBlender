@@ -14,6 +14,13 @@ class SubmeshIndexBuffer:
 	# Written by MMT into the IndexBufferList entry as "NanoCatPartTexture";
 	# the value is a bare PNG file name lying flat in the reverse output root.
 	NanoCatPartTexture:str = ""
+	# Per-IB match identity (match_first_index / match_index_count semantics).
+	# Newer reverse outputs write these per entry so multi-IB groups can tell
+	# which IB partition (Submesh) each draw call segment belongs to.
+	# Older Json files lack them; both default to 0 and callers fall back to
+	# the Json top-level IndexOffset/IndexCount.
+	IndexOffset:int = 0
+	IndexCount:int = 0
 
 	def bind_dir_path(self, dir_path:str):
 		self.FilePath = os.path.join(dir_path, self.FileName)
@@ -146,6 +153,9 @@ class SubmeshJson:
 				# Optional MMT/NanoCat preview texture contract; absent means unassigned.
 				NanoCatPartTexture=index_buffer_json.get("NanoCatPartTexture", "")
 			)
+			# Per-IB match identity; absent on older reverse outputs (defaults 0).
+			index_buffer.IndexOffset = int(index_buffer_json.get("IndexOffset", 0))
+			index_buffer.IndexCount = int(index_buffer_json.get("IndexCount", 0))
 			index_buffer.bind_dir_path(self.DirPath)
 			self.IndexBufferList.append(index_buffer)
 
