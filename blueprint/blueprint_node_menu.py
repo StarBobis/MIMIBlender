@@ -304,16 +304,24 @@ class MMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
 
         updated_count = 0
         for node in node_tree.nodes:
-            if not node.select or getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
+            if not node.select:
                 continue
-            node.submesh_name = target_submesh
-            updated_count += 1
+            if getattr(node, "bl_idname", "") == 'MIMINode_Object_Info':
+                node.submesh_name = target_submesh
+                updated_count += 1
+            elif getattr(node, "bl_idname", "") == 'MIMINode_Object_List':
+                # Object List nodes hold many object entries instead of one
+                # submesh_name; the batch action covers every entry in the list.
+                for item in node.object_items:
+                    item.submesh_name = target_submesh
+                    updated_count += 1
+                node._refresh_width()
 
         if updated_count == 0:
-            self.report({'WARNING'}, tr("No object info nodes are currently selected"))
+            self.report({'WARNING'}, tr("No object info nodes or object list nodes are currently selected"))
             return {'CANCELLED'}
 
-        self.report({'INFO'}, tr("Set {count} object info nodes to submesh: {submesh}").format(count=updated_count, submesh=target_submesh))
+        self.report({'INFO'}, tr("Set {count} object entries to submesh: {submesh}").format(count=updated_count, submesh=target_submesh))
         return {'FINISHED'}
 
 

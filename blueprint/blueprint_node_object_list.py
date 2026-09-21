@@ -27,6 +27,7 @@ import bpy
 from bpy.types import PropertyGroup
 
 from ..i18n.i18n import I18nOperator, tr, translatable
+from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_base import MIMINodeBase
 
 # Fixed name of the aggregate output socket; it always sits at outputs[0].
@@ -226,6 +227,91 @@ class MMT_OT_ObjectListAddSelected(I18nOperator):
         return {'FINISHED'}
 
 
+class MMT_OT_ObjectListBatchSetSubmesh(I18nOperator):
+    '''Open the Submesh picker; the choice is applied to every item of this Object List node'''
+    bl_idname = "mimi.objlist_batch_set_submesh"
+    bl_label = "Batch Set Submesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+
+    def invoke(self, context, event):
+        node = _lookup_object_list_node(context, self.tree_name, self.node_name)
+        if node is None:
+            return {'CANCELLED'}
+
+        tree = node.id_data
+        BlueprintExportHelper.set_runtime_blueprint_tree(tree)
+        submesh_names = BlueprintExportHelper.get_tree_submesh_names(tree=tree)
+        if not submesh_names:
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
+            return {'CANCELLED'}
+
+        # The popup needs the target node identity baked into every entry,
+        # because the apply operator runs in a fresh context after the pick.
+        node_name = self.node_name
+        tree_name = self.tree_name
+
+        def draw_submesh_popup(menu, popup_context):
+            layout = menu.layout
+            for submesh_name in submesh_names:
+                op = layout.operator(
+                    "mimi.objlist_apply_submesh",
+                    text=submesh_name,
+                    icon='OUTLINER_COLLECTION',
+                )
+                op.target_submesh = submesh_name
+                op.node_name = node_name
+                op.tree_name = tree_name
+
+        context.window_manager.popup_menu(
+            draw_submesh_popup,
+            title=tr("Target Submesh"),
+            icon='OUTLINER_COLLECTION',
+        )
+        return {'FINISHED'}
+
+    def execute(self, context):
+        return self.invoke(context, None)
+
+
+class MMT_OT_ObjectListApplySubmesh(I18nOperator):
+    '''Apply the chosen Submesh to every item of the target Object List node'''
+    bl_idname = "mimi.objlist_apply_submesh"
+    bl_label = "Set All Items to Specified Submesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+    target_submesh: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
+
+    def execute(self, context):
+        node = _lookup_object_list_node(context, self.tree_name, self.node_name)
+        if node is None:
+            self.report({'WARNING'}, tr("The target Object List node no longer exists"))
+            return {'CANCELLED'}
+
+        target_submesh = str(self.target_submesh or "").strip()
+        if not target_submesh:
+            self.report({'WARNING'}, tr("Please select a valid Submesh."))
+            return {'CANCELLED'}
+
+        # A uiList has no multi-selection, so batch means every item of the list.
+        updated_count = 0
+        for item in node.object_items:
+            item.submesh_name = target_submesh
+            updated_count += 1
+
+        if updated_count == 0:
+            self.report({'WARNING'}, tr("The Object List node has no items"))
+            return {'CANCELLED'}
+
+        node._refresh_width()
+        self.report({'INFO'}, tr("Set {count} object entries to submesh: {submesh}").format(count=updated_count, submesh=target_submesh))
+        return {'FINISHED'}
+
+
 @translatable
 class MIMINode_Object_List(MIMINodeBase):
     '''Object List emits many objects from one collapsible node: per-item sockets for individual wiring, an All socket for the whole set'''
@@ -322,6 +408,11 @@ class MIMINode_Object_List(MIMINodeBase):
         add_selected_operator = column.operator("mimi.objlist_add_selected", text="", icon='SELECT_EXTEND')
         add_selected_operator.node_name = self.name
         add_selected_operator.tree_name = tree.name if tree else ""
+        # Batch Submesh pick: applies the chosen Submesh to every list item,
+        # the Object List counterpart of the node context menu batch action.
+        batch_submesh_operator = column.operator("mimi.objlist_batch_set_submesh", text="", icon='OUTLINER_COLLECTION')
+        batch_submesh_operator.node_name = self.name
+        batch_submesh_operator.tree_name = tree.name if tree else ""
 
         index = int(self.object_index)
         if not (0 <= index < len(self.object_items)):
@@ -339,6 +430,8 @@ classes = (
     MMT_OT_ObjectListAddItem,
     MMT_OT_ObjectListRemoveItem,
     MMT_OT_ObjectListAddSelected,
+    MMT_OT_ObjectListBatchSetSubmesh,
+    MMT_OT_ObjectListApplySubmesh,
     MIMINode_Object_List,
 )
 
