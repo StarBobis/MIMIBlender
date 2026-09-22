@@ -36,6 +36,8 @@ import zipfile
 import shutil
 import threading
 import fnmatch
+# Stdlib XML parser, used by the GitHub engine to read Atom feeds.
+import xml.etree.ElementTree as xml_etree
 from datetime import datetime, timedelta
 
 # Blender imports, used in limited cases.
@@ -722,19 +724,19 @@ class SingletonUpdater:
             return result_string.decode()
 
     def get_api(self, url):
-        """Result of all api calls, decoded into json format."""
+        """Fetch a URL and return the raw response text (or None on error).
+
+        Payload interpretation is left to each engine's parse_tags():
+        GitLab/Bitbucket decode JSON, while the GitHub engine parses Atom
+        XML. Keeping transport separate from payload format is what allows
+        the GitHub engine to use github.com feeds that are not subject to
+        the api.github.com rate limit.
+        """
         get = None
         get = self.get_raw(url)
         if get is not None:
-            try:
-                return json.JSONDecoder().decode(get)
-            except Exception as e:
-                self._error = "API response has invalid JSON format"
-                self._error_msg = str(e.reason)
-                self._update_ready = None
-                print(self._error, self._error_msg)
-                self.print_trace()
-                return None
+            # get_raw() already decoded the bytes into text.
+            return get
         else:
             return None
 
@@ -1656,6 +1658,13 @@ class BitbucketEngine:
     def parse_tags(self, response, updater):
         if response is None:
             return list()
+        # get_api() now returns raw text, so decode the JSON payload here.
+        try:
+            response = json.loads(response)
+        except ValueError:
+            # Invalid JSON: treat as "no tags" instead of crashing.
+            updater.print_verbose("Invalid JSON in Bitbucket tags response")
+            return list()
         return [
             {
                 "name": tag["name"],
@@ -1664,33 +1673,93 @@ class BitbucketEngine:
 
 
 class GithubEngine:
-    """Integration to Github API"""
+    """Integration to GitHub based on the public Atom feeds.
+
+    Tags (or releases) are read from the repository's Atom feed, and update
+    archives are downloaded as direct source zips. Both are served by
+    github.com / codeload.github.com and therefore do NOT consume the
+    api.github.com rate-limit quota (60 requests/hour for anonymous IPs),
+    which previously caused HTTP 403 errors for users on shared IPs.
+    """
 
     def __init__(self):
+        # Kept only for interface parity with the other engines (the
+        # updater exposes it via the api_url property); no request is
+        # made to this host anymore.
         self.api_url = 'https://api.github.com'
+        # Base web URL from which the feed and archive URLs are built.
+        self.web_url = 'https://github.com'
         self.token = None
         self.name = "github"
 
     def form_repo_url(self, updater):
-        return "{}/repos/{}/{}".format(
-            self.api_url, updater.user, updater.repo)
+        # Public web page of the repository; used for display and as the
+        # base for the feed/archive URLs below.
+        return "{}/{}/{}".format(
+            self.web_url, updater.user, updater.repo)
 
     def form_tags_url(self, updater):
+        # Atom feeds are served by github.com itself and do not count
+        # against the api.github.com rate limit.
         if updater.use_releases:
-            return "{}/releases".format(self.form_repo_url(updater))
+            return "{}/releases.atom".format(self.form_repo_url(updater))
         else:
-            return "{}/tags".format(self.form_repo_url(updater))
+            return "{}/tags.atom".format(self.form_repo_url(updater))
 
     def form_branch_list_url(self, updater):
+        # Interface parity only; the updater never calls this for GitHub.
         return "{}/branches".format(self.form_repo_url(updater))
 
     def form_branch_url(self, branch, updater):
-        return "{}/zipball/{}".format(self.form_repo_url(updater), branch)
+        # Direct source-archive URL for a branch (served by codeload).
+        return "{}/archive/refs/heads/{}.zip".format(
+            self.form_repo_url(updater), branch)
+
+    def get_zip_url(self, name, updater):
+        # Direct source-archive URL for a tag (served by codeload).
+        return "{}/archive/refs/tags/{}.zip".format(
+            self.form_repo_url(updater), name)
 
     def parse_tags(self, response, updater):
+        """Parse the Atom XML feed into the tag dicts the updater expects.
+
+        Returns [{"name": tag_name, "zipball_url": archive_url}, ...].
+        Feed entries are already ordered newest-first, which matches the
+        updater's assumption that the first entry is the latest version.
+        """
         if response is None:
             return list()
-        return response
+        try:
+            root = xml_etree.fromstring(response)
+        except xml_etree.ParseError:
+            # Not valid XML (e.g. an error page): treat as "no tags"
+            # instead of crashing the background check thread.
+            updater.print_verbose("Invalid Atom XML in GitHub tags feed")
+            return list()
+
+        tags = list()
+        # All Atom elements live in this namespace; find() requires it.
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        for entry in root.findall("atom:entry", ns):
+            # The entry id looks like
+            # "tag:github.com,2008:Repository/<id>/<tag>", so its last
+            # path segment is the tag name; the entry title holds the
+            # same value in tags.atom feeds and is used as a fallback.
+            name = None
+            entry_id = entry.find("atom:id", ns)
+            if entry_id is not None and entry_id.text and "/" in entry_id.text:
+                name = entry_id.text.rsplit("/", 1)[-1].strip()
+            if not name:
+                title = entry.find("atom:title", ns)
+                if title is not None and title.text:
+                    name = title.text.strip()
+            if not name:
+                continue
+            tags.append({
+                "name": name,
+                "zipball_url": self.get_zip_url(name, updater)
+            })
+        return tags
 
 
 class GitlabEngine:
@@ -1728,6 +1797,13 @@ class GitlabEngine:
 
     def parse_tags(self, response, updater):
         if response is None:
+            return list()
+        # get_api() now returns raw text, so decode the JSON payload here.
+        try:
+            response = json.loads(response)
+        except ValueError:
+            # Invalid JSON: treat as "no tags" instead of crashing.
+            updater.print_verbose("Invalid JSON in GitLab tags response")
             return list()
         return [
             {
