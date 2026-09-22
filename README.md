@@ -1,6 +1,6 @@
 # MIMIBlender
 
-MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 SSMT4 与 3Dmigoto 使用的游戏 Mod 制作工具。
+MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 MMT 与 3Dmigoto 使用的游戏 Mod 制作工具。
 它负责「建模 / 反向导入 / Mod 生成」这一段工作流，把 Blender 里的模型按游戏预设导出为 3Dmigoto 可直接加载的 Mod（缓冲区文件 + INI）。
 
 - 仓库地址：https://github.com/StarBobis/MIMIBlender
@@ -64,7 +64,7 @@ MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 SSMT4 与 3Dm
 ## 这个工具不能做什么（重要，请先读）
 
 1. **它不是独立可用的 Mod 工具。** 它只覆盖工作流中「Blender 内的建模与导出」这一段：
-   - 游戏配置、工作空间、游戏内加载由 **SSMT4 / MMT** 提供；
+   - 游戏配置与工作空间由 **MMT** 提供；
    - Mod 在游戏内生效依赖 **3Dmigoto**。没有这套环境，插件本身无法让任何 Mod 进游戏。
 2. **它不解包游戏。** 插件不能从游戏客户端里提取模型或贴图；反向导入的数据来源是 3Dmigoto 帧分析 dump 出来、经 MMT 工作空间整理好的缓冲区文件。
 3. **它只支持已注册导出器的游戏预设。** 未注册的预设（如 DOAV、APMI、NEMI）选择「生成 Mod」会直接报「当前游戏预设暂不支持生成 Mod」。支持范围以上表与代码中的 `LogicName -> exporter` 注册表为准。
@@ -94,12 +94,12 @@ MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 SSMT4 与 3Dm
 
 ## 快速上手
 
-1. 在 **SSMT4** 中选择游戏、创建并打开工作空间（插件从这里读取 `main.json` 全局配置：游戏名、预设、工作空间、缓存路径）。
+1. 在 **MMT** 中选择游戏、创建并打开工作空间（插件从这里读取 `main.json` 全局配置：游戏名、预设、工作空间、缓存路径）。
 2. Blender 3D 视图按 `N` → **MIMITools** 分类 → 基础信息面板：确认当前配置 / 游戏预设 / 工作空间无误。
 3. 点 **Import All From MMT Workspace** 一键导入并自动建蓝图（或 **Import MMT Model** 手动导入单个模型）。
 4. 在节点编辑器中打开 MIMITools 蓝图，按需调整对象、贴图、形态键、时间开关等节点逻辑。
 5. 回到基础信息面板，选择蓝图后点 **Generate Mod**，生成的 Mod 会写入 MMT 的 Mod 输出目录。
-6. 通过 SSMT4 / 3Dmigoto 在游戏中加载验证。
+6. 通过 MMT 与 3Dmigoto 在游戏中加载验证。
 
 ## 目录结构（源码）
 
@@ -135,13 +135,13 @@ release.ps1            维护者用的一键发布脚本（见下）
 
 - 贴图合并（texcomb）集成自 [material-combiner-addon](https://github.com/Grim-es/material-combiner-addon)（Grim-es）。
 - 自动更新基于 [Blender Addon Updater](https://github.com/CGCookie/blender-addon-updater)。
-- 3Dmigoto（bo3b / DarkStarSword）与 XXMI / SSMT 社区。
+- 3Dmigoto（bo3b / DarkStarSword）、XXMI 社区与 MMT 工具链。
 
 ---
 
 # MIMIBlender (English)
 
-MIMIBlender is the **Blender add-on half of MIMITools**: a game-mod authoring tool that works together with SSMT4 and 3Dmigoto. It covers the "model / reverse-import / mod generation" part of the pipeline, exporting Blender scenes into 3Dmigoto-loadable mods (buffer files + INI) per game preset. **Blender 5.2+, Windows only.**
+MIMIBlender is the **Blender add-on half of MIMITools**: a game-mod authoring tool that works together with MMT and 3Dmigoto. It covers the "model / reverse-import / mod generation" part of the pipeline, exporting Blender scenes into 3Dmigoto-loadable mods (buffer files + INI) per game preset. **Blender 5.2+, Windows only.**
 
 ## What it can do
 
@@ -155,7 +155,7 @@ MIMIBlender is the **Blender add-on half of MIMITools**: a game-mod authoring to
 
 ## What it cannot do
 
-- **It is not standalone**: it requires SSMT4/MMT (game configs, workspaces, in-game loading) and 3Dmigoto. It cannot put a mod into any game by itself.
+- **It is not standalone**: it requires MMT (game configs and workspaces) and 3Dmigoto (in-game loading). It cannot put a mod into any game by itself.
 - **It does not unpack games**: imports come from 3Dmigoto frame-analysis dumps organized in an MMT workspace, never from the game client directly.
 - **Only presets with a registered exporter** can generate mods; DOAV/APMI/NEMI are reserved/unsupported.
 - **Blender 5.2+ only; Windows/DX11-12 only** for the actual mod pipeline.
@@ -168,7 +168,7 @@ MIMIBlender is the **Blender add-on half of MIMITools**: a game-mod authoring to
 ## Install & quick start
 
 1. Download `MIMIBlenderVxxxx.zip` from [Releases](https://github.com/StarBobis/MIMIBlender/releases) → Blender → Edit → Preferences → Add-ons → **Install from Disk** → enable **MIMIBlender** (older installs can use the in-addon updater instead).
-2. In **SSMT4**, pick a game and open a workspace.
+2. In **MMT**, pick a game and open a workspace.
 3. Blender 3D Viewport → `N` sidebar → **MIMITools** → confirm the config, then **Import All From MMT Workspace**.
-4. Adjust the blueprint node graph, then **Generate Mod**; load it in game via SSMT4 / 3Dmigoto.
+4. Adjust the blueprint node graph, then **Generate Mod**; load it in game via MMT and 3Dmigoto.
 5. For the texture combiner, click **Install Pillow** in the MatCombiner panel first.
