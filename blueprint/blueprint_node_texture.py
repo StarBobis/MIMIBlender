@@ -150,7 +150,7 @@ def _resolve_upstream_submesh_name(node, depth=0):
     return ""
 
 
-def _load_submesh_mark_dicts(submesh_name):
+def _load_submesh_mark_dicts(submesh_name, dedupe_names=True):
     '''Texture marks of one Submesh as normalized plain dicts.
 
     Shared by the mark dropdowns, the auto-fill operators and the
@@ -185,7 +185,9 @@ def _load_submesh_mark_dicts(submesh_name):
                 "filename": str(getattr(raw_mark, "MarkFileName", "") or "").strip(),
             }
         normalized = mark_name.lower()
-        if not mark_name or normalized in seen_names:
+        # Conditional dropdowns identify marks by name; the global scanner
+        # identifies them by hash and must also see repeated semantic names.
+        if not mark_name or (dedupe_names and normalized in seen_names):
             continue
         seen_names.add(normalized)
         mark_dict_list.append(mark_dict)

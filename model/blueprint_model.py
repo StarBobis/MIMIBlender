@@ -585,15 +585,31 @@ class BluePrintModel:
                         node_label = str(getattr(node, "label", "") or getattr(node, "name", "") or "Global Hash Texture Bind")
                         for item in getattr(node, "texture_hash_items", []):
                             file_path = str(getattr(item, "file_path", "") or "").strip()
+                            detected = bool(getattr(item, "global_detected", False))
+                            # A scan populates all marks, not all overrides.
+                            # Untouched rows must leave automatic textures alone.
+                            restore_original = detected and (not file_path or not item.enabled)
+                            if restore_original:
+                                # Only edited rows need restoration. Untouched
+                                # scan results never overwrite manual outputs.
+                                if not item.global_replacement_used or item.mark_missing:
+                                    continue
+                                if not item.mark_source_file_path:
+                                    raise ValueError("Global Hash Texture Bind: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
+                                file_path = item.mark_source_file_path
+                            if detected and getattr(item, "mark_missing", False):
+                                raise ValueError("Global Hash Texture Bind: mark " + item.texture_hash + " no longer exists; refresh, clear its replacement or disable the row.")
                             if file_path:
                                 try:
                                     file_path = bpy.path.abspath(file_path)
                                 except Exception:
                                     pass
                             bindings.append({
-                                "enabled": bool(getattr(item, "enabled", True)),
+                                "enabled": True if restore_original else bool(getattr(item, "enabled", True)),
+                                "restore_original": restore_original,
                                 "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
-                                "source_type": str(getattr(item, "source_type", "") or ""),
+                                "source_type": "FILE" if detected else str(getattr(item, "source_type", "") or ""),
+                                "preserve_mark_filename": detected,
                                 "file_path": file_path,
                                 "mark_name": str(getattr(item, "mark_source_name", "") or ""),
                                 "mark_source_submesh": str(getattr(item, "mark_source_submesh", "") or ""),

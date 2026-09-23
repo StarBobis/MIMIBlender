@@ -5,7 +5,7 @@ import shutil
 from .m_ini_builder import *
 from .m_control_flow import M_ControlFlow
 from .m_key import M_Key
-from .texture_naming import default_texture_resource_name
+from .texture_naming import default_texture_resource_name, normalize_texture_role
 from ..model.draw_call_model import DrawCallModel
 from ..model.drawib_model import DrawIBModel
 from ..utils.json_utils import JsonUtils
@@ -262,7 +262,7 @@ class M_IniHelper:
         # Global rows are not attached to a DrawIB, so they need an explicit
         # second collection pass before the automatic hash pipeline runs.
         for row in global_hash_texture_binding_list or []:
-            if not row.get("enabled", True):
+            if not row.get("enabled", True) or row.get("restore_original", False):
                 continue
             managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
 
@@ -280,12 +280,22 @@ class M_IniHelper:
         # broken row from leaving a half-written global texture set behind.
         resolved_rows = []
         seen_hashes = set()
+        # A replacement in another global node takes precedence over restoring
+        # a cleared row. Restoration must not claim a managed hash or emit INI.
+        active_hashes = {
+            str(row.get("texture_hash", "")).strip().lower()
+            for row in global_hash_texture_binding_list or []
+            if row.get("enabled", True) and not row.get("restore_original", False)
+        }
         for binding in global_hash_texture_binding_list or []:
             if not binding.get("enabled", True):
                 continue
 
             node_label = str(binding.get("node_label", "") or "Global Hash Texture Bind")
             texture_hash = str(binding.get("texture_hash", "") or "").strip().lower()
+            restore_original = bool(binding.get("restore_original", False))
+            if restore_original and (texture_hash in active_hashes or texture_hash in seen_hashes):
+                continue
             if _GLOBAL_HASH_PATTERN.fullmatch(texture_hash) is None:
                 raise ValueError(
                     "Global Hash Texture Bind node '" + node_label
@@ -328,11 +338,18 @@ class M_IniHelper:
                 # find and prevent two source basenames from colliding.
                 resource_name = "ResourceHashGlobal_" + texture_hash
                 target_filename = texture_hash + "_global" + file_suffix
+                if binding.get("preserve_mark_filename", False):
+                    # Scanned replacements keep the familiar hash/mark name.
+                    # Keep the real extension for PNG/JPEG too; never disguise
+                    # encoded image bytes as DDS by changing only the suffix.
+                    role = normalize_texture_role(binding.get("mark_name", ""))
+                    target_filename = texture_hash + "_" + role + file_suffix
                 resolved_rows.append({
                     "texture_hash": texture_hash,
                     "resource_name": resource_name,
                     "target_filename": target_filename,
                     "source_path": source_path,
+                    "restore_original": restore_original,
                 })
             elif source_type == "RESOURCE":
                 resource_name = str(binding.get("resource_name", "") or "").strip()
@@ -378,6 +395,8 @@ class M_IniHelper:
         resource_section = M_IniSection(M_SectionType.ResourceTexture)
         override_section = M_IniSection(M_SectionType.TextureOverrideTexture)
         for row in resolved_rows:
+            if row.get("restore_original", False):
+                continue
             resource_name = row["resource_name"]
             target_filename = row["target_filename"]
             if target_filename:

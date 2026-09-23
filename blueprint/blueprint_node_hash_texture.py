@@ -23,9 +23,9 @@ Texture sources for the conditional node:
 - FILE: copy an external image file into the generated mod.
 - RESOURCE: reference an existing resource name.
 
-Texture sources for the global node are MARK, FILE and RESOURCE. A global
-node discovers Hash-style marks across the current workspace instead of using
-an upstream Submesh.
+The global node scans workspace Hash marks with a Refresh button. Each
+unique hash has an original image and an optional external replacement.
+Legacy source fields remain readable for saved blueprints, not as UI choices.
 '''
 import os
 import re
@@ -36,6 +36,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
+from .hash_texture_preview import texture_icon, clear_previews
 from .blueprint_node_texture import (
     _MARK_NAME_NONE,
     _find_submesh_mark_by_name,
@@ -86,9 +87,14 @@ def _texture_hash_item_file_path_changed(item, context):
     if str(getattr(item, "file_path", "") or "").strip():
         if str(getattr(item, "source_type", "") or "") != 'FILE':
             item.source_type = 'FILE'
-        item.mark_source_submesh = ""
-        item.mark_source_name = ""
-        item.mark_source_file_path = ""
+        # Global rows need the original mark alongside the replacement image.
+        # Changing the replacement must not erase the left-hand preview.
+        if getattr(item, "global_detected", False):
+            item.global_replacement_used = True
+        else:
+            item.mark_source_submesh = ""
+            item.mark_source_name = ""
+            item.mark_source_file_path = ""
     _texture_hash_item_refresh_display(item)
 
 
@@ -109,22 +115,11 @@ def _find_hash_item_owner(item):
 def _workspace_submesh_names_for_global_marks():
     '''Return every workspace Submesh name that can own a Hash-style mark.'''
     try:
-        from ..workspace.mmt_workspace import MMTWorkSpace
+        from ..workspace.mmt_workspace import WorkSpaceModel
 
-        submesh_name_list = []
-        lod_folder_dict = MMTWorkSpace.get_lod_submesh_folderpath_dict()
-        for lod_name, folder_path_list in lod_folder_dict.items():
-            for folder_path in folder_path_list:
-                folder_name = os.path.basename(os.path.normpath(folder_path))
-                submesh_name_list.append(
-                    (lod_name + "." + folder_name) if lod_name else folder_name
-                )
-
-        if not submesh_name_list:
-            for folder_path in MMTWorkSpace.get_submesh_folderpath_list():
-                submesh_name_list.append(os.path.basename(os.path.normpath(folder_path)))
-
-        return sorted(set(name for name in submesh_name_list if name))
+        # Use the same LOD/component mapping as the import and export paths.
+        # This includes short names and avoids ambiguous aliases in identities.
+        return WorkSpaceModel().get_all_new_format_names()
     except Exception:
         # A missing workspace should leave the dropdown usable and empty.
         return []
@@ -137,14 +132,12 @@ def _find_global_mark_source_path(submesh_name, mark_filename):
     try:
         from ..workspace.mmt_workspace import MMTWorkSpace
 
-        submesh_folder = MMTWorkSpace.get_submesh_folder_path(submesh_name)
-        if not os.path.isdir(submesh_folder):
-            return ""
-        wanted_name = os.path.basename(str(mark_filename)).casefold()
-        for root, _, filenames in os.walk(submesh_folder):
-            for filename in filenames:
-                if filename.casefold() == wanted_name:
-                    return os.path.join(root, filename)
+        # The active SubmeshJson selects the correct TYPE folder. Do not pick
+        # an arbitrary same-named image from another extracted game type.
+        json_path = MMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
+        candidate = os.path.join(os.path.dirname(json_path), mark_filename)
+        if os.path.isfile(candidate):
+            return candidate
     except Exception:
         pass
     return ""
@@ -156,7 +149,7 @@ def _load_global_hash_mark_entries():
     seen_keys = set()
     for submesh_name in _workspace_submesh_names_for_global_marks():
         try:
-            mark_dict_list = _load_submesh_mark_dicts(submesh_name)
+            mark_dict_list = _load_submesh_mark_dicts(submesh_name, dedupe_names=False)
         except Exception:
             # One incomplete Submesh must not hide valid marks elsewhere.
             continue
@@ -185,6 +178,119 @@ def _load_global_hash_mark_entries():
                 "source_path": source_path,
             })
     return entries
+
+
+def _refresh_global_hash_rows(node):
+    '''Reconcile scanned marks by hash while preserving replacement choices.'''
+    entries = _load_global_hash_mark_entries()
+    marks = {}
+    for entry in entries:
+        texture_hash = entry["hash"].strip().lower()
+        if _TEXTURE_HASH_PATTERN.fullmatch(texture_hash) is None:
+            continue
+        # Hashes are globally shared. Prefer an available original image when
+        # multiple Submeshes refer to the same texture, but emit only one row.
+        if texture_hash not in marks or not marks[texture_hash]["source_path"]:
+            marks[texture_hash] = entry
+
+    saved = {}
+    selected_hash = ""
+    for index, item in enumerate(node.texture_hash_items):
+        texture_hash = item.texture_hash.strip().lower()
+        if index == node.texture_hash_index:
+            selected_hash = texture_hash
+        state = {
+            "file_path": item.file_path,
+            "enabled": item.enabled,
+            "replacement_used": item.global_replacement_used,
+            "name": item.mark_source_name,
+            "submesh_name": item.mark_source_submesh,
+            "source_path": item.mark_source_file_path,
+        }
+        if texture_hash not in saved or state["file_path"]:
+            saved[texture_hash] = state
+
+    # Discovery finishes before mutating RNA. Existing choices are keyed by
+    # hash rather than list index, so inserting/reordering marks is harmless.
+    node.texture_hash_items.clear()
+    for texture_hash in sorted(set(marks) | set(saved)):
+        entry = marks.get(texture_hash)
+        previous = saved.get(texture_hash, {})
+        if entry is None and not previous.get("file_path"):
+            continue
+        item = node.texture_hash_items.add()
+        item.global_detected = True
+        item.texture_hash = texture_hash
+        item.source_type = 'FILE'
+        item.enabled = previous.get("enabled", True)
+        item.global_replacement_used = previous.get("replacement_used", False)
+        item.file_path = previous.get("file_path", "")
+        # Retain a configured missing mark for review instead of silently
+        # deleting its replacement. Export will reject active stale entries.
+        original = entry or previous
+        item.mark_missing = entry is None
+        item.mark_source_name = original.get("name", "")
+        item.mark_source_submesh = original.get("submesh_name", "")
+        item.mark_source_file_path = original.get("source_path", "")
+        item.name = texture_hash + " - " + item.mark_source_name
+        if texture_hash == selected_hash:
+            node.texture_hash_index = len(node.texture_hash_items) - 1
+    node.texture_hash_index = min(max(0, node.texture_hash_index), max(0, len(node.texture_hash_items) - 1))
+    clear_previews()
+    return len(marks)
+
+
+class MMT_OT_GlobalHashRefresh(I18nOperator):
+    '''Scan workspace Hash marks without requiring any object connections.'''
+    bl_idname = "mimi.global_hash_refresh"
+    bl_label = "Refresh Hash Texture Marks"
+    bl_description = "Scan all workspace Hash marks and keep existing replacement images"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        node = _find_hash_node_for_operator(self, context)
+        if getattr(node, "bl_idname", "") != 'MIMINode_Hash_Texture_Global':
+            return {'CANCELLED'}
+        try:
+            count = _refresh_global_hash_rows(node)
+        except Exception as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, tr("Detected {count} Hash texture marks").format(count=count))
+        return {'FINISHED'}
+
+
+class MIMI_UL_GlobalHashTextures(bpy.types.UIList):
+    '''Compact original/replacement thumbnails with a selectable detail view.'''
+    bl_idname = "MIMI_UL_global_hash_textures"
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
+        row = layout.row(align=True)
+        row.prop(item, "enabled", text="")
+        row.label(text=item.mark_source_name or item.texture_hash,
+                  icon_value=texture_icon(item.mark_source_file_path))
+        row.label(text="", icon='FORWARD')
+        row.label(text=bpy.path.basename(item.file_path) if item.file_path else tr("Unchanged"),
+                  icon_value=texture_icon(item.file_path))
+        if item.mark_missing:
+            row.label(text="", icon='ERROR')
+
+
+def _draw_global_texture_preview(layout, title, file_path):
+    '''Draw thumbnails side by side without altering Blender Image datablocks.'''
+    box = layout.box()
+    box.label(text=tr(title))
+    icon_id = texture_icon(file_path)
+    if icon_id:
+        box.template_icon(icon_value=icon_id, scale=6.0)
+    else:
+        message = "Preview unavailable" if file_path or title == "Original marked texture" else "Unchanged"
+        box.label(text=tr(message), icon='IMAGE_DATA')
+    if file_path:
+        box.label(text=bpy.path.basename(file_path))
 
 
 def _find_global_hash_mark_by_identifier(identifier):
@@ -244,6 +350,13 @@ class MIMITextureHashItem(PropertyGroup):
     mark_source_submesh: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     mark_source_name: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     mark_source_file_path: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    # Scanned rows are optional replacements, not automatic MARK overrides.
+    # Keep stale configured rows visible so a refresh never loses user work.
+    global_detected: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
+    # Remember edited rows so clearing/disabling can restore the original
+    # bytes under a previously overwritten marked output filename.
+    global_replacement_used: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
+    mark_missing: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 
     file_path: bpy.props.StringProperty(
         name=tr("Texture File"),
@@ -651,69 +764,47 @@ class MIMINode_Hash_Texture_Global(MIMINodeBase):
         # This node deliberately has no sockets: hash replacements are global
         # and must not be tied to an individual object's draw path.
         self.label = tr("Global Hash Texture Bind")
-        self.width = 360
+        self.width = 480
         self.use_custom_color = True
         self.color = (0.25, 0.48, 0.30)
 
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
 
-        row = layout.row()
-        row.template_list(
-            "UI_UL_list", "mimi_texture_hash_global_" + self.name,
-            self, "texture_hash_items",
-            self, "texture_hash_index",
-            rows=3,
-        )
-        column = row.column(align=True)
-        add_operator = column.operator("mimi.texhashbind_add_item", text="", icon='ADD')
-        add_operator.node_name = self.name
-        add_operator.tree_name = tree.name if tree else ""
-        remove_operator = column.operator("mimi.texhashbind_remove_item", text="", icon='REMOVE')
-        remove_operator.node_name = self.name
-        remove_operator.tree_name = tree.name if tree else ""
-
+        refresh = layout.operator("mimi.global_hash_refresh", text=tr("Refresh Hash Texture Marks"), icon='FILE_REFRESH')
+        refresh.node_name = self.name
+        refresh.tree_name = tree.name if tree else ""
         if not self.texture_hash_items:
-            layout.label(text=tr("No global hash overrides configured"), icon='INFO')
+            layout.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
             return
 
-        index = int(self.texture_hash_index)
-        if not (0 <= index < len(self.texture_hash_items)):
-            return
+        # No manual +/- or source enum: select a detected mark and choose its
+        # replacement. The hash is read-only context, never required input.
+        layout.template_list(
+            "MIMI_UL_global_hash_textures", "mimi_texture_hash_global_" + self.name,
+            self, "texture_hash_items", self, "texture_hash_index", rows=4,
+        )
+        index = min(max(0, int(self.texture_hash_index)), len(self.texture_hash_items) - 1)
         item = self.texture_hash_items[index]
-
         box = layout.box()
-        box.prop(item, "enabled")
-        box.prop(item, "texture_hash")
-        box.prop(item, "source_type")
-
-        source_type = str(item.source_type or "")
-        if source_type == 'MARK':
-            box.prop(item, "mark_name")
-            if not item.mark_source_file_path:
-                box.label(text=tr("Marked texture source file was not found"), icon='ERROR')
-        elif source_type == 'FILE':
-            _draw_hash_file_picker(
-                layout=box,
-                item=item,
-                node=self,
-                tree=tree,
-                item_index=index,
-            )
-        elif source_type == 'RESOURCE':
-            box.prop(item, "resource_name")
-        else:
-            box.label(text=tr("Global node accepts Marked Texture, External File or Existing Resource"), icon='ERROR')
-
-        hash_text = str(item.texture_hash or "").strip().lower()
-        if hash_text and _TEXTURE_HASH_PATTERN.match(hash_text) is None:
-            layout.label(text=tr("Texture hash looks wrong; expected 8 hexadecimal characters (a 32-bit texture hash)"), icon='ERROR')
-
-        active_count = len([row_item for row_item in self.texture_hash_items if row_item.enabled])
-        layout.label(text=tr("{count} global hash replacement(s)").format(count=active_count), icon='TEXTURE_DATA')
+        box.label(text=item.texture_hash + " - " + item.mark_source_name)
+        box.label(text=item.mark_source_submesh)
+        if item.mark_missing:
+            box.label(text=tr("Mark no longer exists; clear its replacement or disable this row"), icon='ERROR')
+        elif not item.global_detected:
+            box.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
+        previews = box.row(align=True)
+        _draw_global_texture_preview(previews.column(), "Original marked texture", item.mark_source_file_path)
+        _draw_global_texture_preview(previews.column(), "Replacement texture", item.file_path)
+        _draw_hash_file_picker(box, item, self, tree, index)
+        if item.file_path and not os.path.isfile(bpy.path.abspath(item.file_path)):
+            box.label(text=tr("Replacement file was not found"), icon='ERROR')
+        layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
 
 
 classes = (
+    MMT_OT_GlobalHashRefresh,
+    MIMI_UL_GlobalHashTextures,
     MMT_OT_TexHashBindSelectFile,
     MMT_OT_TexHashBindClearFile,
     MMT_OT_TexHashBindAddItem,
@@ -732,6 +823,7 @@ def register():
 
 
 def unregister():
+    clear_previews()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     bpy.utils.unregister_class(MIMITextureHashItem)
