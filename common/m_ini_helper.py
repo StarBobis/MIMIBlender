@@ -548,10 +548,23 @@ class M_IniHelper:
         ini_builder: M_IniBuilder,
         drawib_drawibmodel_dict: dict[str, DrawIBModel],
         global_hash_texture_binding_list: list | None = None,
+        resource_prefix: str = "",
+        guard_with_object_detected: bool = False,
     ):
         """
         Hash style textures: generate texture config sections (Resource_Texture + TextureOverride) and copy the texture files.
         Overall flow: iterate over DrawIB -> iterate over SubMesh -> process each texture.
+
+        ``resource_prefix`` disambiguates the generated resource and override
+        section names for presets that write one INI per object (WWMI): every
+        INI of such a mod shares one 3Dmigoto namespace, so two objects using
+        the same texture hash would otherwise collide. Other presets write a
+        single INI and keep the default empty prefix.
+
+        ``guard_with_object_detected`` wraps the replacement into
+        ``if $object_detected``. That is what keeps the override from changing
+        the texture for every other object in the scene that happens to use the
+        same texture; it requires the preset to maintain that variable.
         """
 
         # ═══════════════════════════════════════════════════
@@ -655,6 +668,15 @@ class M_IniHelper:
                         texture_markup_info.mark_hash,
                         texture_markup_info.mark_name,
                     )
+                    if resource_prefix:
+                        # Keep the "Resource" head intact: 3Dmigoto only treats a
+                        # section as a resource when its name starts with it.
+                        hash_style_resource_name = hash_style_resource_name + "_" + resource_prefix
+                    # The override section name follows the resource so two
+                    # prefixed resources never claim the same override name.
+                    hash_style_override_section_name = "TextureOverride_" + texture_markup_info.mark_hash
+                    if resource_prefix:
+                        hash_style_override_section_name = hash_style_override_section_name + "_" + resource_prefix
 
                     # Assemble the target path
                     target_texture_file_path = (
@@ -674,7 +696,7 @@ class M_IniHelper:
                     )
                     resource_texture_section.new_line()
                     resource_texture_section.append(
-                        "[TextureOverride_" + texture_markup_info.mark_hash + "]",
+                        "[" + hash_style_override_section_name + "]",
                     )
                     resource_texture_section.append(
                         "; " + texture_markup_info.mark_filename,
@@ -683,9 +705,16 @@ class M_IniHelper:
                         "hash = " + texture_markup_info.mark_hash,
                     )
                     resource_texture_section.append("match_priority = 0")
-                    resource_texture_section.append(
-                        "this = " + hash_style_resource_name,
-                    )
+                    if guard_with_object_detected:
+                        resource_texture_section.append("if $object_detected")
+                        resource_texture_section.append(
+                            "  this = " + hash_style_resource_name,
+                        )
+                        resource_texture_section.append("endif")
+                    else:
+                        resource_texture_section.append(
+                            "this = " + hash_style_resource_name,
+                        )
                     resource_texture_section.new_line()
                     ini_builder.append_section(resource_texture_section)
 
@@ -1360,6 +1389,13 @@ class M_IniHelper:
             for i in range(GlobalConfig.generated_mod_number):
                 constants_section.append("global $active" + str(i))
 
+            # One flag for "any part of this mod is on screen". Hotkeys use it
+            # instead of a single $activeN, because a mod may consist of several
+            # draw ranges and only one of them is usually visible: binding the
+            # keys to $active0 made them dead whenever that first range was off
+            # screen.
+            constants_section.append("global $mod_visible = 0")
+
             for mkey in key_name_mkey_dict.values():
                 if getattr(mkey, 'key_type', 'key') == "time":
                     # Timeline indices are runtime-only, not user settings.
@@ -1379,6 +1415,9 @@ class M_IniHelper:
 
             for i in range(GlobalConfig.generated_mod_number):
                 present_section.append("post $active" + str(i) + " = 0")
+            # Cleared together with the per range flags, set again by whichever
+            # draw range is drawn in the frame that follows.
+            present_section.append("post $mod_visible = 0")
 
             # Recompute every time-driven variable once per frame.  [Present]
             # is a command list run at every DXGI::Present call (3Dmigoto
@@ -1418,8 +1457,10 @@ class M_IniHelper:
                 
                 # key_section.append("condition = $active" + str(key_number) + " == 1")
 
-                # XXX: due to a BUG here, we always use $active0 to detect activation; not making it more complex.
-                key_section.append("condition = $active0 == 1")
+                # Any visible draw range of this mod activates the hotkeys. A
+                # mod can consist of several draw ranges and the keys must work
+                # whichever of them is currently on screen.
+                key_section.append("condition = $mod_visible == 1")
 
                 if mkey.initialize_vk_str != "":
                     key_section.append("key = " + mkey.initialize_vk_str)

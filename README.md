@@ -54,9 +54,20 @@ MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 MMT 与 3Dmig
 > 预设列表在代码中以 `LogicName` 为准；DOAV、APMI（蓝色星原）、NEMI 等为保留或暂未开放生成的槽位。
 
 - **WWMI（鸣潮）的 Submesh 覆盖规则**：一个 DrawIB 里的每个 Submesh 都会生成自己的 `[TextureOverrideComponentN]` 段，即使蓝图里没有任何物体指定它。这样组件编号、`match_first_index` / `match_index_count` 与顶点组范围始终和真实的 Component 对应，不会因为中间某个 Submesh 没被使用而整体错位。
-  - 没有物体指定的 Submesh：段照常生成（含 `$object_detected`、按状态的顶点组范围与骨骼合并），只写 `handling = skip` 而不写 `drawindexed`，所以开启 Mod 时这部分**不再渲染**。
+  - 没有物体指定的 Submesh：段照常生成（含 `$object_detected`），只写 `handling = skip` 而不写 `drawindexed`，所以开启 Mod 时这部分**不再渲染**。它也不参与骨骼合并——组件级顶点组范围并不描述合并后的顶点组布局，替它合并会覆盖掉别的组件已经收集正确的骨骼数据。
   - 有物体指定的 Submesh：照常写 `drawindexed`，行为不变。
   - Blend Remap 的资源编号与 `vg_count` 同样按真实 Component 索引，和上面的段一一对应。
+
+- **WWMI（鸣潮）的每个 DrawIB 各自独立命名**：WWMI 会为每个 DrawIB 生成一个 INI，而一个 Mod 的所有 INI 共用同一个 3Dmigoto 命名空间。3Dmigoto 对重复的 `global` 变量只保留第一次声明（其余报 "Redeclaration" 后整行丢弃），对重复的 section 名也只读取第一次出现的定义（按文件名字典序）。
+  - 因此凡是描述「一个绘制范围」的符号都会带上 DrawIB 后缀：顶点/索引缓冲区、形态键缓冲区、命令列表、自定义着色器段、合并骨骼资源，以及 `$mesh_vertex_count` / `$object_guid` / `$shapekey_vertex_count` 这类全局变量。
+  - 去掉后缀就会出现「一个 Mod 里第二个 DrawIB 用第一个 DrawIB 的顶点数和缓冲区」的问题。
+  - `$\WWMIv1\...` 与 `Resource\WWMIv1\...` 属于 WWMI 运行时自己的命名空间，**一律不加后缀**；`$mod_id`、`$mod_enabled`、`$object_detected`、`$required_wwmi_version` 描述整个 Mod，也保持全局唯一。
+
+- **WWMI（鸣潮）要求的运行时版本为 `1.00`**：生成的 INI 会写 `global $required_wwmi_version = 1.00`，WWMI 运行时会据此禁用版本过旧的 Mod 并弹窗提示，避免在不支持所用 API 的运行时上静默出错。
+
+- **WWMI（鸣潮）的骨骼合并带标记守卫**：WWMI 的 `SkeletonMerger` 计算着色器会无条件地把 `cs-cb8` 的内容当作 256 根骨骼写入合并骨骼缓冲区，因此合并前必须确认该常量缓冲区里真的是骨骼数据。
+  - 只有带 `filter_index = 3381.7777` 标记（由 `[TextureOverrideMarkBoneDataCB]` 打上）的常量缓冲区才会被合并；常规骨骼在 `vs-cb4`，附加骨骼（抗锯齿等 pass 使用）只有在 `vs-cb4` 与 `vs-cb3` **同时**带标记时才可靠可辨。
+  - 每个组件通过 `$merge_status_id_<DrawIB>_N` 跟踪本帧的合并进度（0 → 常规 → 附加），每帧由 `[Present]` 重置，所以同一组件每帧最多合并两次，既不重复计算，也不会把非骨骼数据写进骨骼缓冲区。
 
 - **Simulate XXMI Tail Comments（模拟 XXMI 结尾注释）**：Generate Mod 节点上的可选勾选框，默认关闭。开启后生成的 INI 会在结尾追加与 [XXMI Tools](https://github.com/leotorrez/XXMITools) 完全相同的收尾注释（照搬其 `templates/base.ini.j2`，但去掉了该工具的版本号）：
 

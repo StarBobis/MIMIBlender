@@ -384,6 +384,8 @@ def append_draw_overrides(lines: list[str], drawib_model_list,
 
             if len(keyname_mkey_dict.keys()) != 0:
                 lines.append(f"$active{active_index} = 1")
+                # A visible range marks the whole mod as on screen for the hotkeys.
+                lines.append("$mod_visible = 1")
 
         lines.append("")
 

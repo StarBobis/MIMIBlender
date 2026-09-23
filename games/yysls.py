@@ -138,6 +138,8 @@ class ExportYYSLS(StandardExporter):
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
+                # A visible range marks the whole mod as on screen for the hotkeys.
+                texture_override_ib_section.append("$mod_visible = 1")
 
             texture_override_ib_section.append("endif")
             texture_override_ib_section.new_line()

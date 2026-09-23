@@ -77,6 +77,8 @@ class ExportZZMI(StandardExporter):
                 # Activate the key variable unconditionally; otherwise it may not take effect in some cases
                 if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                     texture_override_vb_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
+                    # A visible range marks the whole mod as on screen for the hotkeys.
+                    texture_override_vb_section.append("$mod_visible = 1")
                 texture_override_vb_section.append("if DRAW_TYPE == 2 || DRAW_TYPE == 4")
 
                 texcoord_category_slot = d3d11_game_type.CategoryExtractSlotDict["Texcoord"]

@@ -2,12 +2,17 @@
 WWMI shape key INI sections.
 
 Everything related to the WWMI shape key pipeline lives here:
+
 - the shape key entries / batches derived from the blueprint and the
   WWMI metadata,
 - the texture override + resource sections driving the WWMI shape key
   compute shaders,
 - the optional custom apply-shapekeys command lists (with the HLSL
   shaders copied next to the generated INI).
+
+Every resource and command list that belongs to one draw range carries the
+DrawIB as a suffix, because all INI files of a mod share one 3Dmigoto
+namespace. See ``names.py``.
 """
 
 import os
@@ -19,6 +24,7 @@ from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
 from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 from .model import DrawIBModelWWMI
+from .names import scoped_global, scoped_name, scoped_section
 
 
 def get_safe_shapekey_name(shapekey_name: str) -> str:
@@ -103,6 +109,7 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
 
 def add_texture_override_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
     """Texture overrides + command lists driving the WWMI shape key loader."""
+    draw_ib = draw_ib_model.draw_ib
     shapekey_batches = get_wwmi_shapekey_batches(draw_ib_model)
     if not shapekey_batches:
         return
@@ -111,75 +118,79 @@ def add_texture_override_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: Dra
 
     shapekey_offsets_hash = draw_ib_model.wwmi_info.shapekeys.offsets_hash
     if shapekey_offsets_hash != "":
-        texture_override_shapekeys_section.append("[TextureOverrideShapeKeyOffsets]")
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyOffsets", draw_ib))
         texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
         texture_override_shapekeys_section.append("match_priority = 0")
         texture_override_shapekeys_section.append("override_byte_stride = 24")
-        texture_override_shapekeys_section.append("override_vertex_count = $mesh_vertex_count")
+        texture_override_shapekeys_section.append(
+            "override_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib)
+        )
         texture_override_shapekeys_section.new_line()
 
     shapekey_scale_hash = draw_ib_model.wwmi_info.shapekeys.scale_hash
     if shapekey_scale_hash != "":
-        texture_override_shapekeys_section.append("[TextureOverrideShapeKeyScale]")
-        texture_override_shapekeys_section.append("hash = " + draw_ib_model.wwmi_info.shapekeys.scale_hash)
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyScale", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_scale_hash)
         texture_override_shapekeys_section.append("match_priority = 0")
         texture_override_shapekeys_section.append("override_byte_stride = 4")
-        texture_override_shapekeys_section.append("override_vertex_count = $mesh_vertex_count")
+        texture_override_shapekeys_section.append(
+            "override_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib)
+        )
         texture_override_shapekeys_section.new_line()
 
-    texture_override_shapekeys_section.append("[CommandListSetupShapeKeysBatch]")
+    texture_override_shapekeys_section.append(scoped_section("CommandListSetupShapeKeysBatch", draw_ib))
     for batch_id, batch in enumerate(shapekey_batches):
         texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_checksum_batch" + str(batch_id) + " = " + str(batch["checksum"]))
         texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_offset_original_batch" + str(batch_id) + " = " + str(batch["original_vertex_offset"]))
-        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_offset_custom_batch" + str(batch_id) + " = $shapekey_vertex_offset_batch" + str(batch_id))
-    texture_override_shapekeys_section.append("cs-t33 = ResourceShapeKeyOffsetBuffer")
-    texture_override_shapekeys_section.append("cs-u5 = ResourceCustomShapeKeyValuesRW")
-    texture_override_shapekeys_section.append("cs-u6 = ResourceShapeKeyCBRW")
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_offset_custom_batch" + str(batch_id) + " = " + scoped_global("shapekey_vertex_offset_batch" + str(batch_id), draw_ib))
+    texture_override_shapekeys_section.append("cs-t33 = " + scoped_name("ResourceShapeKeyOffsetBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-u5 = " + scoped_name("ResourceCustomShapeKeyValuesRW", draw_ib))
+    texture_override_shapekeys_section.append("cs-u6 = " + scoped_name("ResourceShapeKeyCBRW", draw_ib))
     texture_override_shapekeys_section.append("run = CustomShader\\WWMIv1\\ShapeKeyBatchOverrider")
     texture_override_shapekeys_section.new_line()
 
-    texture_override_shapekeys_section.append("[CommandListLoadShapeKeysBatch]")
+    texture_override_shapekeys_section.append(scoped_section("CommandListLoadShapeKeysBatch", draw_ib))
     for batch_id, batch in enumerate(shapekey_batches):
         texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_dispatch_size_y_original_batch" + str(batch_id) + " = " + str(batch["dispatch_y"]))
-        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_count_batch" + str(batch_id) + " = $shapekey_vertex_count_batch" + str(batch_id))
-    texture_override_shapekeys_section.append("cs-t0 = ResourceShapeKeyVertexIdBuffer")
-    texture_override_shapekeys_section.append("cs-t1 = ResourceShapeKeyVertexOffsetBuffer")
-    texture_override_shapekeys_section.append("cs-u6 = ResourceShapeKeyCBRW")
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_count_batch" + str(batch_id) + " = " + scoped_global("shapekey_vertex_count_batch" + str(batch_id), draw_ib))
+    texture_override_shapekeys_section.append("cs-t0 = " + scoped_name("ResourceShapeKeyVertexIdBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-t1 = " + scoped_name("ResourceShapeKeyVertexOffsetBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-u6 = " + scoped_name("ResourceShapeKeyCBRW", draw_ib))
     texture_override_shapekeys_section.append("run = CommandList\\WWMIv1\\LoadShapeKeysBatch")
     texture_override_shapekeys_section.new_line()
 
     if shapekey_offsets_hash != "":
-        texture_override_shapekeys_section.append("[TextureOverrideShapeKeyLoaderCallback]")
-        texture_override_shapekeys_section.append("hash = " + draw_ib_model.wwmi_info.shapekeys.offsets_hash)
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyLoaderCallback", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
         texture_override_shapekeys_section.append("match_priority = 0")
         texture_override_shapekeys_section.append("if $mod_enabled")
         if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
-            texture_override_shapekeys_section.append("  if cs == 3381.3333 && ResourceMergedSkeleton !== null")
+            texture_override_shapekeys_section.append("  if cs == 3381.3333 && " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
         else:
             texture_override_shapekeys_section.append("  if cs == 3381.3333")
         texture_override_shapekeys_section.append("    handling = skip")
-        texture_override_shapekeys_section.append("    run = CommandListSetupShapeKeysBatch")
-        texture_override_shapekeys_section.append("    run = CommandListLoadShapeKeysBatch")
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListSetupShapeKeysBatch", draw_ib))
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListLoadShapeKeysBatch", draw_ib))
         texture_override_shapekeys_section.append("  endif")
         texture_override_shapekeys_section.append("endif")
         texture_override_shapekeys_section.new_line()
 
-    texture_override_shapekeys_section.append("[CommandListMultiplyShapeKeys]")
-    texture_override_shapekeys_section.append("$\\WWMIv1\\custom_vertex_count = $mesh_vertex_count")
+    texture_override_shapekeys_section.append(scoped_section("CommandListMultiplyShapeKeys", draw_ib))
+    texture_override_shapekeys_section.append("$\\WWMIv1\\custom_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib))
     texture_override_shapekeys_section.append("run = CustomShader\\WWMIv1\\ShapeKeyMultiplier")
     texture_override_shapekeys_section.new_line()
 
     if shapekey_offsets_hash != "":
-        texture_override_shapekeys_section.append("[TextureOverrideShapeKeyMultiplierCallback]")
-        texture_override_shapekeys_section.append("hash = " + draw_ib_model.wwmi_info.shapekeys.offsets_hash)
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyMultiplierCallback", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
         texture_override_shapekeys_section.append("match_priority = 0")
         texture_override_shapekeys_section.append("if $mod_enabled")
         if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
-            texture_override_shapekeys_section.append("  if cs == 3381.4444 && ResourceMergedSkeleton !== null")
+            texture_override_shapekeys_section.append("  if cs == 3381.4444 && " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
         else:
             texture_override_shapekeys_section.append("  if cs == 3381.4444")
         texture_override_shapekeys_section.append("    handling = skip")
-        texture_override_shapekeys_section.append("    run = CommandListMultiplyShapeKeys")
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListMultiplyShapeKeys", draw_ib))
         texture_override_shapekeys_section.append("  endif")
         texture_override_shapekeys_section.append("endif")
         texture_override_shapekeys_section.new_line()
@@ -188,18 +199,24 @@ def add_texture_override_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: Dra
 
 
 def add_resource_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
-    """Resource declarations for the WWMI shape key override buffers."""
+    """Resource declarations for the WWMI shape key override buffers.
+
+    The buffers are DrawIB scoped as well: their ``array`` size follows the
+    batch count of the DrawIB, so a shared name would leave a DrawIB with a
+    differently sized buffer than its own shape key batches expect.
+    """
+    draw_ib = draw_ib_model.draw_ib
     shapekey_batches = get_wwmi_shapekey_batches(draw_ib_model)
     if not shapekey_batches:
         return
 
     resource_shapekeys_section = M_IniSection(M_SectionType.ResourceShapeKeysOverride)
     resource_shapekeys_section.append("; Resources: Shape Keys Override -------------------------")
-    resource_shapekeys_section.append("[ResourceShapeKeyCBRW]")
+    resource_shapekeys_section.append(scoped_section("ResourceShapeKeyCBRW", draw_ib))
     resource_shapekeys_section.append("type = RWBuffer")
     resource_shapekeys_section.append("format = R32G32B32A32_UINT")
     resource_shapekeys_section.append("array = 66")
-    resource_shapekeys_section.append("[ResourceCustomShapeKeyValuesRW]")
+    resource_shapekeys_section.append(scoped_section("ResourceCustomShapeKeyValuesRW", draw_ib))
     resource_shapekeys_section.append("type = RWBuffer")
     resource_shapekeys_section.append("format = R32G32B32A32_FLOAT")
     resource_shapekeys_section.append("array = " + str(32 * len(shapekey_batches)))
@@ -213,6 +230,7 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     shaders; they are only emitted when the blueprint defines shape keys
     that exist on this DrawIB.
     """
+    draw_ib = draw_ib_model.draw_ib
     shapekey_entries = get_wwmi_shapekey_entries(draw_ib_model)
     if not shapekey_entries:
         return
@@ -260,7 +278,7 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
         if m_key.initialize_vk_str == "":
             continue
 
-        key_section.append("[Key_ShapeKey_" + shapekey_name + "]")
+        key_section.append("[Key_ShapeKey_" + shapekey_name + "_" + draw_ib + "]")
         comment = getattr(m_key, 'comment', '')
         if comment:
             key_section.append("; " + comment)
@@ -271,26 +289,28 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     ini_builder.append_section(key_section)
 
     commandlist_section = M_IniSection(M_SectionType.CommandList)
-    commandlist_section.append("[CommandListApplyShapeKeysPosition]")
+    commandlist_section.append(scoped_section("CommandListApplyShapeKeysPosition", draw_ib))
     # CustomShader restores shader objects, not the CS slots borrowed by this
     # command list. Preserve the game's bindings instead of leaving them null.
     for slot in ("cs-t50", "cs-t51", "cs-u5"):
-        commandlist_section.append("ResourceShapeBackup_" + slot + " = ref " + slot)
-    commandlist_section.append("ResourcePositionBufferRW = copy ResourcePositionBufferFloat")
+        commandlist_section.append(scoped_name("ResourceShapeBackup_" + slot, draw_ib) + " = ref " + slot)
+    commandlist_section.append(scoped_name("ResourcePositionBufferRW", draw_ib) + " = copy " + scoped_name("ResourcePositionBufferFloat", draw_ib))
     commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 3))
-    commandlist_section.append("cs-t50 = ResourcePositionBufferFloat")
-    commandlist_section.append("cs-u5 = ResourcePositionBufferRW")
+    commandlist_section.append("cs-t50 = " + scoped_name("ResourcePositionBufferFloat", draw_ib))
+    commandlist_section.append("cs-u5 = " + scoped_name("ResourcePositionBufferRW", draw_ib))
     for shapekey_name, safe_name, m_key in shapekey_entries:
         commandlist_section.append("; ShapeKey: " + shapekey_name)
         commandlist_section.append("x88 = " + m_key.key_name)
-        commandlist_section.append("cs-t51 = ResourceShapeKeyPosition_" + safe_name)
-        commandlist_section.append("run = CustomShaderComputeWWMIShapeKeyPosition")
+        commandlist_section.append("cs-t51 = " + scoped_name("ResourceShapeKeyPosition_" + safe_name, draw_ib))
+        commandlist_section.append("run = " + scoped_name("CustomShaderComputeWWMIShapeKeyPosition", draw_ib))
     for slot in ("cs-t50", "cs-t51", "cs-u5"):
-        commandlist_section.append(slot + " = ref ResourceShapeBackup_" + slot)
-    commandlist_section.append("ResourcePositionBufferShapeKeyVB = copy ResourcePositionBufferRW")
+        commandlist_section.append(slot + " = ref " + scoped_name("ResourceShapeBackup_" + slot, draw_ib))
+    commandlist_section.append(scoped_name("ResourcePositionBufferShapeKeyVB", draw_ib) + " = copy " + scoped_name("ResourcePositionBufferRW", draw_ib))
     commandlist_section.new_line()
 
-    commandlist_section.append("[CustomShaderComputeWWMIShapeKeyPosition]")
+    # The custom shader section name is DrawIB scoped: its dispatch size is
+    # derived from the vertex count of this DrawIB, so it cannot be shared.
+    commandlist_section.append(scoped_section("CustomShaderComputeWWMIShapeKeyPosition", draw_ib))
     commandlist_section.append("cs = ShapesWWMIPosition.hlsl")
     commandlist_section.append("vs = null")
     commandlist_section.append("ps = null")
@@ -300,26 +320,26 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     commandlist_section.append("dispatch = " + str((draw_ib_model.mesh_vertex_count * 3 + 63) // 64) + ", 1, 1")
     commandlist_section.new_line()
 
-    commandlist_section.append("[CommandListApplyShapeKeysVector]")
+    commandlist_section.append(scoped_section("CommandListApplyShapeKeysVector", draw_ib))
     # Position and Vector lists run sequentially, so they may reuse backups.
     # Restore after each list so unrelated game dispatches keep their state.
     for slot in ("cs-t50", "cs-t51", "cs-u5"):
-        commandlist_section.append("ResourceShapeBackup_" + slot + " = ref " + slot)
-    commandlist_section.append("ResourceVectorBufferRW = copy ResourceVectorBufferInt")
+        commandlist_section.append(scoped_name("ResourceShapeBackup_" + slot, draw_ib) + " = ref " + slot)
+    commandlist_section.append(scoped_name("ResourceVectorBufferRW", draw_ib) + " = copy " + scoped_name("ResourceVectorBufferInt", draw_ib))
     commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 2))
-    commandlist_section.append("cs-t50 = ResourceVectorBufferInt")
-    commandlist_section.append("cs-u5 = ResourceVectorBufferRW")
+    commandlist_section.append("cs-t50 = " + scoped_name("ResourceVectorBufferInt", draw_ib))
+    commandlist_section.append("cs-u5 = " + scoped_name("ResourceVectorBufferRW", draw_ib))
     for shapekey_name, safe_name, m_key in shapekey_entries:
         commandlist_section.append("; ShapeKey: " + shapekey_name)
         commandlist_section.append("x88 = " + m_key.key_name)
-        commandlist_section.append("cs-t51 = ResourceShapeKeyVector_" + safe_name)
-        commandlist_section.append("run = CustomShaderComputeWWMIShapeKeyVector")
+        commandlist_section.append("cs-t51 = " + scoped_name("ResourceShapeKeyVector_" + safe_name, draw_ib))
+        commandlist_section.append("run = " + scoped_name("CustomShaderComputeWWMIShapeKeyVector", draw_ib))
     for slot in ("cs-t50", "cs-t51", "cs-u5"):
-        commandlist_section.append(slot + " = ref ResourceShapeBackup_" + slot)
-    commandlist_section.append("ResourceVectorBufferShapeKeyVB = copy ResourceVectorBufferRW")
+        commandlist_section.append(slot + " = ref " + scoped_name("ResourceShapeBackup_" + slot, draw_ib))
+    commandlist_section.append(scoped_name("ResourceVectorBufferShapeKeyVB", draw_ib) + " = copy " + scoped_name("ResourceVectorBufferRW", draw_ib))
     commandlist_section.new_line()
 
-    commandlist_section.append("[CustomShaderComputeWWMIShapeKeyVector]")
+    commandlist_section.append(scoped_section("CustomShaderComputeWWMIShapeKeyVector", draw_ib))
     commandlist_section.append("cs = ShapesWWMIVector.hlsl")
     commandlist_section.append("vs = null")
     commandlist_section.append("ps = null")
@@ -333,45 +353,45 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
     resource_section = M_IniSection(M_SectionType.ResourceBuffer)
     # Empty resources hold references only; no extra buffer files are needed.
     for slot in ("cs-t50", "cs-t51", "cs-u5"):
-        resource_section.append("[ResourceShapeBackup_" + slot + "]")
+        resource_section.append(scoped_section("ResourceShapeBackup_" + slot, draw_ib))
         resource_section.new_line()
-    resource_section.append("[ResourcePositionBufferRW]")
+    resource_section.append(scoped_section("ResourcePositionBufferRW", draw_ib))
     resource_section.append("type = RWBuffer")
     resource_section.append("format = R32_FLOAT")
     resource_section.append("array = " + str(draw_ib_model.mesh_vertex_count * 3))
     resource_section.new_line()
-    resource_section.append("[ResourcePositionBufferFloat]")
+    resource_section.append(scoped_section("ResourcePositionBufferFloat", draw_ib))
     resource_section.append("type = Buffer")
     resource_section.append("format = R32_FLOAT")
-    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib_model.draw_ib + "-Position.buf"))
+    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Position.buf"))
     resource_section.new_line()
-    resource_section.append("[ResourcePositionBufferShapeKeyVB]")
+    resource_section.append(scoped_section("ResourcePositionBufferShapeKeyVB", draw_ib))
     resource_section.append("type = Buffer")
     resource_section.append("stride = 12")
     resource_section.new_line()
-    resource_section.append("[ResourceVectorBufferRW]")
+    resource_section.append(scoped_section("ResourceVectorBufferRW", draw_ib))
     resource_section.append("type = RWBuffer")
     resource_section.append("format = R8_SINT")
     resource_section.append("array = " + str(draw_ib_model.mesh_vertex_count * 8))
     resource_section.new_line()
-    resource_section.append("[ResourceVectorBufferInt]")
+    resource_section.append(scoped_section("ResourceVectorBufferInt", draw_ib))
     resource_section.append("type = Buffer")
     resource_section.append("format = R8_SINT")
-    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib_model.draw_ib + "-Vector.buf"))
+    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Vector.buf"))
     resource_section.new_line()
-    resource_section.append("[ResourceVectorBufferShapeKeyVB]")
+    resource_section.append(scoped_section("ResourceVectorBufferShapeKeyVB", draw_ib))
     resource_section.append("type = Buffer")
     resource_section.append("stride = 8")
     resource_section.new_line()
     for shapekey_name, safe_name, _m_key in shapekey_entries:
-        resource_section.append("[ResourceShapeKeyPosition_" + safe_name + "]")
+        resource_section.append(scoped_section("ResourceShapeKeyPosition_" + safe_name, draw_ib))
         resource_section.append("type = Buffer")
         resource_section.append("format = R32_FLOAT")
-        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib_model.draw_ib + "-Position." + safe_name + ".buf"))
+        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Position." + safe_name + ".buf"))
         resource_section.new_line()
-        resource_section.append("[ResourceShapeKeyVector_" + safe_name + "]")
+        resource_section.append(scoped_section("ResourceShapeKeyVector_" + safe_name, draw_ib))
         resource_section.append("type = Buffer")
         resource_section.append("format = R8_SINT")
-        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib_model.draw_ib + "-Vector." + safe_name + ".buf"))
+        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Vector." + safe_name + ".buf"))
         resource_section.new_line()
     ini_builder.append_section(resource_section)
