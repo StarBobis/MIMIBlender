@@ -71,6 +71,7 @@ class Exporter:
         M_IniHelper.generate_hash_style_global_texture_ini(
             ini_builder=tex_ini_builder,
             global_hash_texture_binding_list=global_hash_rows,
+            drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
         if not MIMIGlobalProperties.forbid_auto_texture_ini():
             sections.append_texture_resources(lines, self.drawib_model_list)
@@ -92,6 +93,7 @@ class Exporter:
         M_IniHelper.generate_hash_style_object_texture_ini(
             ini_builder=tex_ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+            global_hash_texture_binding_list=global_hash_rows,
         )
         # Copy explicit replacements last so marked filenames keep the
         # external bytes instead of being restored by automatic Hash export.

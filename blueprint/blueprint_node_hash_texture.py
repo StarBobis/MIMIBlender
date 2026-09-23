@@ -188,6 +188,7 @@ def _load_global_hash_mark_entries(submesh_names=None):
                 "submesh_name": submesh_name,
                 "hash": mark_dict["hash"].lower(),
                 "filename": mark_dict["filename"],
+                "slot": str(mark_dict.get("slot", "") or "").strip().lower(),
                 "source_path": source_path,
             })
     return entries
@@ -222,6 +223,7 @@ def _refresh_global_hash_rows(node):
             "name": item.mark_source_name,
             "submesh_name": item.mark_source_submesh,
             "source_path": item.mark_source_file_path,
+            "slot": item.mark_source_slot,
         }
         if texture_hash not in saved or state["file_path"]:
             saved[texture_hash] = state
@@ -248,6 +250,7 @@ def _refresh_global_hash_rows(node):
         item.mark_source_name = original.get("name", "")
         item.mark_source_submesh = original.get("submesh_name", "")
         item.mark_source_file_path = original.get("source_path", "")
+        item.mark_source_slot = str(original.get("slot", "") or "").strip().lower()
         item.name = texture_hash + " - " + item.mark_source_name
         if texture_hash == selected_hash:
             node.texture_hash_index = len(node.texture_hash_items) - 1
@@ -367,6 +370,10 @@ class MIMITextureHashItem(PropertyGroup):
     mark_source_submesh: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     mark_source_name: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     mark_source_file_path: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    # Texture slot of the marked texture (such as ps-t0). A row that knows its
+    # slot can bind the replacement inside the owning object's draw section,
+    # which scopes the replacement to that object instead of the whole hash.
+    mark_source_slot: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     # Scanned rows are optional replacements, not automatic MARK overrides.
     # Keep stale configured rows visible so a refresh never loses user work.
     global_detected: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
@@ -406,16 +413,20 @@ def _texture_hash_item_mark_changed(item):
             item.mark_source_submesh = global_mark["submesh_name"]
             item.mark_source_name = global_mark["name"]
             item.mark_source_file_path = global_mark["source_path"]
+            item.mark_source_slot = str(global_mark.get("slot", "") or "").strip().lower()
         else:
             item.mark_source_submesh = ""
             item.mark_source_name = ""
             item.mark_source_file_path = ""
+            item.mark_source_slot = ""
         _texture_hash_item_refresh_display(item)
         return
 
     mark_dict = _find_submesh_mark_by_name(item, _find_owner_hash_bind_node)
     if mark_dict and mark_dict["hash"]:
         item.texture_hash = mark_dict["hash"]
+        # The slot lets this row bind per object instead of per hash.
+        item.mark_source_slot = str(mark_dict.get("slot", "") or "").strip().lower()
     _texture_hash_item_refresh_display(item)
 
 

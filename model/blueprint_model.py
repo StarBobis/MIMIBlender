@@ -615,6 +615,7 @@ class BluePrintModel:
                                 "mark_name": str(getattr(item, "mark_source_name", "") or ""),
                                 "mark_source_submesh": str(getattr(item, "mark_source_submesh", "") or ""),
                                 "mark_source_file_path": str(getattr(item, "mark_source_file_path", "") or ""),
+                                "mark_slot": str(getattr(item, "mark_source_slot", "") or "").strip().lower(),
                                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                                 "node_label": node_label,
                             })
@@ -699,6 +700,7 @@ class BluePrintModel:
                 "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
                 "source_type": "FILE" if detected else str(getattr(item, "source_type", "") or ""),
                 "mark_name": item.mark_source_name if detected else normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "mark_slot": str(getattr(item, "mark_source_slot", "") or "").strip().lower(),
                 "preserve_mark_filename": detected,
                 "restore_original": restore_original,
                 "file_path": file_path,

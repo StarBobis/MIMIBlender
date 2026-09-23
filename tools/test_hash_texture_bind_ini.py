@@ -322,6 +322,92 @@ def test_resolve_hash_bindings(modules, source_dir):
     print("test_resolve_hash_bindings OK")
 
 
+def test_resolve_hash_slot_bindings(modules, source_dir):
+    """Slot aware rows bind per object and never share one generated file."""
+    draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
+
+    first_file = os.path.join(source_dir, "components_0.dds")
+    second_file = os.path.join(source_dir, "components_2.dds")
+    with open(first_file, "wb") as file:
+        file.write(b"global picture bytes")
+    with open(second_file, "wb") as file:
+        file.write(b"object picture bytes")
+
+    # Two objects replace the same texture hash with two different images.
+    # They must land in two files: sharing one name let the second copy
+    # overwrite the first, so the global replacement silently disappeared.
+    global_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Component0", submesh_name="94517393-0")
+    global_call.hash_texture_binding_list = [
+        make_binding("FILE", HASH_RED, file_path=first_file, mark_name="DiffuseMap", mark_slot="ps-t0"),
+    ]
+    object_call = draw_call_mod.DrawCallModel(obj_name="94517393-2.Component2", submesh_name="94517393-2")
+    object_call.hash_texture_binding_list = [
+        make_binding("FILE", HASH_RED, file_path=second_file, mark_name="DiffuseMap", mark_slot="ps-t0"),
+    ]
+    shared_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Component1", submesh_name="94517393-0")
+    shared_call.hash_texture_binding_list = [
+        make_binding("FILE", HASH_RED, file_path=first_file, mark_name="DiffuseMap", mark_slot="ps-t0"),
+    ]
+
+    submesh_list = [
+        FakeSubmeshModel("94517393-0", [global_call, shared_call]),
+        FakeSubmeshModel("94517393-2", [object_call]),
+    ]
+    drawib_model = make_drawib(modules, "94517393", submesh_list, {})
+    drawib_model.resolve_hash_texture_bindings()
+
+    # Nothing becomes a hash override section: every row bound per object.
+    for call in (global_call, shared_call, object_call):
+        assert call.resolved_hash_texture_binding_list == [], call.resolved_hash_texture_binding_list
+        assert call.resolved_hash_slot_binding_list[0]["slot"] == "ps-t0"
+        assert len(call.resolved_texture_slot_lines) == 1, call.resolved_texture_slot_lines
+        assert call.resolved_texture_slot_lines[0].startswith("ps-t0 = ResourceTex_"), call.resolved_texture_slot_lines
+    managed = ini_helper_mod.M_IniHelper._collect_hash_binding_managed_hashes({"94517393": drawib_model})
+    assert managed == {HASH_RED}, managed
+
+    # Equal images are reused, different images get their own target file.
+    targets = [job[2] for job in drawib_model.object_texture_binding_file_list]
+    assert len(drawib_model.object_texture_binding_file_list) == 2, drawib_model.object_texture_binding_file_list
+    assert len(set(targets)) == 2, targets
+    assert all(target.startswith(HASH_RED + "_DiffuseMap_") for target in targets), targets
+
+    config_mod = sys.modules[TEST_PKG + ".common.global_config"]
+    config_mod.GlobalConfig._texture_root = source_dir
+    ini_helper_mod.M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
+    written = {}
+    for resource_name, source_path, target_filename in drawib_model.object_texture_binding_file_list:
+        with open(os.path.join(source_dir, "94517393", target_filename), "rb") as file:
+            written[source_path] = file.read()
+    assert written[first_file] == b"global picture bytes", written
+    assert written[second_file] == b"object picture bytes", written
+
+    # A switch state wraps the per-object line, so another state of the same
+    # object still sees the default the global hash section binds.
+    state_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.State", submesh_name="94517393-0")
+    set_condition(modules, state_call, "$swapkey0", 1)
+    state_call.hash_texture_binding_list = [
+        make_binding("FILE", HASH_RED, file_path=second_file, mark_name="DiffuseMap", mark_slot="ps-t0"),
+    ]
+    state_model = make_drawib(modules, "94517393", [FakeSubmeshModel("94517393-0", [state_call])], {})
+    state_model.resolve_hash_texture_bindings()
+    section = modules[TEST_PKG + ".common.m_ini_builder"].M_IniSection(
+        modules[TEST_PKG + ".common.m_ini_builder"].M_SectionType.TextureOverrideIB,
+    )
+    ini_helper_mod.M_IniHelper.append_drawindexed_with_slot_lines(
+        section=section,
+        ordered_draw_obj_model_list=[state_call],
+        slot_line_provider=lambda obj_model: [],
+    )
+    lines = list(section.SectionLineList)
+    assert "if $swapkey0 == 1" in lines, lines
+    bind_line = [line for line in lines if line.startswith("  ps-t0 = ")][0]
+    assert lines.index("if $swapkey0 == 1") < lines.index(bind_line), lines
+    assert lines.index(bind_line) < [index for index, line in enumerate(lines) if "drawindexed" in line][0], lines
+
+    print("test_resolve_hash_slot_bindings OK")
+
+
 def test_resolve_hash_validation(modules, source_dir):
     """Invalid rows fail loudly instead of reaching the generated INI."""
     draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
@@ -374,6 +460,38 @@ def test_resolve_hash_validation(modules, source_dir):
         {},
         "invalid resource name",
     )
+    # A malformed mark slot cannot be bound inside a draw section.
+    expect_error(
+        [make_binding("RESOURCE", HASH_RED, resource_name="ResourceX", mark_slot="t0")],
+        {},
+        "invalid mark slot",
+    )
+    # Two hash rows on one object may not claim the same slot.
+    expect_error(
+        [
+            make_binding("RESOURCE", HASH_RED, resource_name="ResourceX", mark_slot="ps-t0"),
+            make_binding("RESOURCE", HASH_BLUE, resource_name="ResourceY", mark_slot="ps-t0"),
+        ],
+        {},
+        "bound twice for object",
+    )
+
+    # The dedicated Slot Texture Bind node is more specific than a hash row,
+    # so the conflict is reported instead of silently picking one binding.
+    conflict_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair", submesh_name="94517393-0")
+    conflict_call.texture_slot_binding_list = [{"enabled": True, "slot": "ps-t0"}]
+    conflict_call.hash_texture_binding_list = [
+        make_binding("RESOURCE", HASH_RED, resource_name="ResourceX", mark_slot="ps-t0"),
+    ]
+    conflict_model = make_drawib(
+        modules, "94517393", [FakeSubmeshModel("94517393-0", [conflict_call])], {},
+    )
+    try:
+        conflict_model.resolve_hash_texture_bindings()
+    except ValueError as error:
+        assert "already bound by a Slot Texture Bind node" in str(error), str(error)
+    else:
+        raise AssertionError("expected a slot conflict error")
 
     print("test_resolve_hash_validation OK")
 
@@ -455,10 +573,10 @@ def test_global_hash_override(modules, texture_root):
         ini_text = file.read()
 
     assert "[ResourceHashGlobal_" + HASH_BLUE + "]" in ini_text, ini_text
-    assert "[TextureOverride_Texture_" + HASH_BLUE + "_Global]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_BLUE + "]" in ini_text, ini_text
     assert "this = ResourceHashGlobal_" + HASH_BLUE in ini_text, ini_text
     assert "[ResourceHashGlobal_" + HASH_RED + "]" in ini_text, ini_text
-    assert "[TextureOverride_Texture_" + HASH_RED + "_Global]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_RED + "]" in ini_text, ini_text
 
     target_path = os.path.join(texture_root, "global", HASH_BLUE + "_global.png")
     assert os.path.exists(target_path), target_path
@@ -483,12 +601,19 @@ def test_global_hash_override(modules, texture_root):
     )
     assert managed == {HASH_BLUE, HASH_RED}, managed
 
-    # A global default must serialize before a conditional refinement for the
-    # same hash, so a false condition returns to the global replacement.
+    # One section per hash: the global replacement is the default and the
+    # object scoped switch states override it inside that same section. Two
+    # sections for one hash would make 3Dmigoto report a duplicate hash
+    # override and leave the fallback between them undefined.
     ordered_builder = ini_builder_mod.M_IniBuilder()
     ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
         ini_builder=ordered_builder,
         global_hash_texture_binding_list=global_rows,
+        drawib_drawibmodel_dict={
+            "94517393": make_resolved_drawib("94517393", [
+                ("$swapkey0 == 0", [(HASH_BLUE, "ResourceConditional")]),
+            ]),
+        },
     )
     ini_helper_mod.M_IniHelper.generate_hash_style_object_texture_ini(
         ini_builder=ordered_builder,
@@ -497,12 +622,23 @@ def test_global_hash_override(modules, texture_root):
                 ("$swapkey0 == 0", [(HASH_BLUE, "ResourceConditional")]),
             ]),
         },
+        global_hash_texture_binding_list=global_rows,
     )
     ordered_path = os.path.join(texture_root, "global_hash_order.ini")
     ordered_builder.save_to_file(ordered_path)
     with open(ordered_path, "r", encoding="utf-8") as file:
         ordered_text = file.read()
-    assert ordered_text.index("[TextureOverride_Texture_" + HASH_BLUE + "_Global]") < ordered_text.index("[TextureOverride_Texture_" + HASH_BLUE + "_Switch]"), ordered_text
+    assert ordered_text.count("[TextureOverride_Texture_" + HASH_BLUE + "]") == 1, ordered_text
+    assert "[TextureOverride_Texture_" + HASH_BLUE + "_Switch]" not in ordered_text, ordered_text
+    assert (
+        "[TextureOverride_Texture_" + HASH_BLUE + "]\n"
+        "hash = " + HASH_BLUE + "\n"
+        "match_priority = 0\n"
+        "this = ResourceHashGlobal_" + HASH_BLUE + "\n"
+        "if $swapkey0 == 0\n"
+        "  this = ResourceConditional\n"
+        "endif\n"
+    ) in ordered_text, ordered_text
 
     print("test_global_hash_override OK")
 
@@ -517,7 +653,7 @@ def test_section_generation(modules, texture_root):
         ]),
     }
     ini_text = build_section_text(modules, texture_root, drawib_dict)
-    assert "[TextureOverride_Texture_" + HASH_RED + "_Switch]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_RED + "]" in ini_text, ini_text
     assert "hash = " + HASH_RED in ini_text, ini_text
     assert "match_priority = 0" in ini_text, ini_text
     assert (
@@ -532,7 +668,7 @@ def test_section_generation(modules, texture_root):
         ]),
     }
     ini_text = build_section_text(modules, texture_root, drawib_dict)
-    assert "[TextureOverride_Texture_" + HASH_BLUE + "_Switch]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_BLUE + "]" in ini_text, ini_text
     assert "this = ResourceTexHash_Always" in ini_text, ini_text
     assert "if " not in ini_text, ini_text
 
@@ -611,6 +747,7 @@ def main():
         source_dir = os.path.join(temp_dir, "sources")
         os.makedirs(source_dir, exist_ok=True)
         test_resolve_hash_bindings(modules, source_dir)
+        test_resolve_hash_slot_bindings(modules, source_dir)
         test_resolve_hash_validation(modules, source_dir)
         test_global_hash_override(modules, temp_dir)
         test_section_generation(modules, temp_dir)

@@ -38,14 +38,21 @@ class DrawCallModel:
 
     # Per-object hash texture bindings collected from Hash Texture Bind
     # blueprint nodes this object passed through (list of plain dicts).
-    # Unlike slot bindings these become blueprint-global conditional
-    # "this = ..." blocks inside [TextureOverride_Texture_<hash>] sections.
+    # A row without a texture slot becomes a blueprint-global conditional
+    # "this = ..." block inside [TextureOverride_Texture_<hash>]; a row that
+    # knows its slot binds inside this object's draw section instead.
     hash_texture_binding_list:list = field(init=False,repr=False,default_factory=list)
 
     # Rows resolved by DrawIBModel.resolve_hash_texture_bindings(): each row
     # is {"texture_hash", "condition_str", "resource_name"} and carries the
     # object condition captured at resolution time.
     resolved_hash_texture_binding_list:list = field(init=False,repr=False,default_factory=list)
+
+    # Rows resolved into this object's draw section instead (each row is
+    # {"texture_hash", "slot", "resource_name"}). They replace a texture hash
+    # for this object only, so the hash still counts as managed by a Hash
+    # Texture Bind node and keeps the automatic hash override away.
+    resolved_hash_slot_binding_list:list = field(init=False,repr=False,default_factory=list)
 
     # Set by traversal through a Time Position Switch, not by alias matching.
     # An ordinary DrawIndexed branch may legally share this clock variable.

@@ -256,8 +256,9 @@ class M_IniHelper:
         for draw_ib_model in drawib_drawibmodel_dict.values():
             for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
                 for draw_model in getattr(submesh_model, "drawcall_model_list", []):
-                    for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
-                        managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
+                    for attribute in ("resolved_hash_texture_binding_list", "resolved_hash_slot_binding_list"):
+                        for row in getattr(draw_model, attribute, None) or []:
+                            managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
 
         # Global rows are not attached to a DrawIB, so they need an explicit
         # second collection pass before the automatic hash pipeline runs.
@@ -269,24 +270,82 @@ class M_IniHelper:
         managed_hash_set.discard("")
         return managed_hash_set
 
+    @staticmethod
+    def _collect_hash_switch_entry_dict(drawib_drawibmodel_dict: dict | None) -> dict:
+        '''Object scoped hash rows that could not bind per draw, keyed by hash.
+
+        Rows carrying a texture slot bind inside their object's draw section,
+        so they never reach this collection.
+        '''
+        binding_entry_dict: dict[str, list] = {}
+        for draw_ib_model in (drawib_drawibmodel_dict or {}).values():
+            for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
+                for draw_model in getattr(submesh_model, "drawcall_model_list", []):
+                    for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
+                        texture_hash = str(row.get("texture_hash", "") or "").strip().lower()
+                        if not texture_hash:
+                            continue
+                        condition_str = str(row.get("condition_str", "") or "").strip()
+                        resource_name = str(row.get("resource_name", "") or "").strip()
+                        binding_entry_dict.setdefault(texture_hash, []).append((condition_str, resource_name))
+        return binding_entry_dict
+
+    @staticmethod
+    def _normalize_hash_switch_entries(texture_hash: str, entry_list: list) -> tuple:
+        '''Dedupe switch entries and reject contradictory assignments.'''
+        resource_by_condition: dict[str, str] = {}
+        condition_order: list[str] = []
+        has_unconditional = False
+        for condition_str, resource_name in entry_list:
+            if not condition_str:
+                has_unconditional = True
+            if condition_str in resource_by_condition:
+                if resource_by_condition[condition_str] != resource_name:
+                    raise ValueError(
+                        "Hash Texture Bind: texture hash " + texture_hash + " is bound with condition '"
+                        + (condition_str or "<always>") + "' to both " + resource_by_condition[condition_str]
+                        + " and " + resource_name + "; give each switch state one texture."
+                    )
+                continue
+            resource_by_condition[condition_str] = resource_name
+            condition_order.append(condition_str)
+        return resource_by_condition, condition_order, has_unconditional
+
+    @staticmethod
+    def _collect_global_active_hashes(global_hash_texture_binding_list: list | None) -> set:
+        '''Hashes that carry a real global replacement (not a restore row).'''
+        return {
+            str(row.get("texture_hash", "")).strip().lower()
+            for row in global_hash_texture_binding_list or []
+            if row.get("enabled", True) and not row.get("restore_original", False)
+        }
+
     @classmethod
     def generate_hash_style_global_texture_ini(
         cls,
         ini_builder: M_IniBuilder,
         global_hash_texture_binding_list: list | None,
+        drawib_drawibmodel_dict: dict | None = None,
     ):
-        '''Emit unconditional replacements from unconnected global hash nodes.'''
+        '''Emit one hash override section per hash, global replacement first.
+
+        The global replacement is the default of its hash. Object scoped rows
+        that could not bind inside their own draw section are merged into the
+        same section as conditional overrides, because 3Dmigoto reports a
+        duplicate hash override when two sections claim the same texture hash:
+        a second section could never act as a fallback for the first one.
+
+        The default assignment comes first and every matching condition
+        overrides it, which is what makes the global image the fallback for
+        every object and switch state that is not listed explicitly.
+        '''
         # Resolve and validate every row before copying anything. This keeps a
         # broken row from leaving a half-written global texture set behind.
         resolved_rows = []
         seen_hashes = set()
         # A replacement in another global node takes precedence over restoring
         # a cleared row. Restoration must not claim a managed hash or emit INI.
-        active_hashes = {
-            str(row.get("texture_hash", "")).strip().lower()
-            for row in global_hash_texture_binding_list or []
-            if row.get("enabled", True) and not row.get("restore_original", False)
-        }
+        active_hashes = cls._collect_global_active_hashes(global_hash_texture_binding_list)
         for binding in global_hash_texture_binding_list or []:
             if not binding.get("enabled", True):
                 continue
@@ -389,9 +448,9 @@ class M_IniHelper:
                 continue
             shutil.copy2(source_path, target_path)
 
-        # Keep resource declarations before all hash overrides. The separate
-        # section types also preserve the intended order when a global default
-        # and a conditional object row target the same hash.
+        # Keep resource declarations before all hash overrides. One section per
+        # hash carries the global default plus every object scoped override.
+        switch_entry_dict = cls._collect_hash_switch_entry_dict(drawib_drawibmodel_dict)
         resource_section = M_IniSection(M_SectionType.ResourceTexture)
         override_section = M_IniSection(M_SectionType.TextureOverrideTexture)
         for row in resolved_rows:
@@ -403,67 +462,63 @@ class M_IniHelper:
                 resource_section.append("[" + resource_name + "]")
                 resource_section.append("filename = " + GlobalConfig.ini_texture_filename(target_filename))
                 resource_section.new_line()
-            override_section.append("[TextureOverride_Texture_" + row["texture_hash"] + "_Global]")
-            override_section.append("hash = " + row["texture_hash"])
+            texture_hash = str(row["texture_hash"] or "").strip().lower()
+            resource_by_condition, condition_order, has_unconditional = cls._normalize_hash_switch_entries(
+                texture_hash, switch_entry_dict.get(texture_hash, []),
+            )
+            if has_unconditional:
+                raise ValueError(
+                    "Hash Texture Bind: texture hash " + texture_hash
+                    + " uses a global replacement and an object binding without a switch state;"
+                    + " connect the object through a Switch Key node, or remove the global replacement for that hash."
+                )
+            override_section.append("[TextureOverride_Texture_" + texture_hash + "]")
+            override_section.append("hash = " + texture_hash)
             override_section.append("match_priority = 0")
+            # Default first, then the listed states override it. Every object
+            # and state that is not listed therefore keeps the global image.
             override_section.append("this = " + resource_name)
+            for condition_str in condition_order:
+                override_section.append("if " + condition_str)
+                override_section.append("  this = " + resource_by_condition[condition_str])
+                override_section.append("endif")
             override_section.new_line()
 
         ini_builder.append_section(resource_section)
         ini_builder.append_section(override_section)
 
     @classmethod
-    def generate_hash_style_object_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
-        '''Conditional hash-style overrides driven by Hash Texture Bind nodes.
+    def generate_hash_style_object_texture_ini(
+        cls,
+        ini_builder: M_IniBuilder,
+        drawib_drawibmodel_dict: dict,
+        global_hash_texture_binding_list: list | None = None,
+    ):
+        '''Conditional hash sections for rows that cannot bind per object.
 
-        One [TextureOverride_Texture_<hash>_Switch] section per managed hash,
-        shared by the whole blueprint: every resolved binding row becomes an
-        if/endif block around "this = ResourceXXX", so the switch conditions
-        collected upstream decide which texture is bound. Rows without a
-        condition become a plain unconditional this= line.
+        Only rows without a texture slot reach this generator: a row that
+        knows its slot binds inside the owning object's draw section instead.
+        A hash that also carries a global replacement is owned by
+        generate_hash_style_global_texture_ini, which merges these same
+        conditions into its single section, so this method skips it to avoid
+        two overrides claiming one texture hash.
 
         Emitted even when forbid_auto_texture_ini is on, for the same reason
         as the slot bindings: a Hash Texture Bind node is explicit user
         intent, not part of the automatic texture pipeline.
         '''
-        # hash -> ordered list of (condition_str, resource_name)
-        binding_entry_dict: dict[str, list] = {}
-        for draw_ib_model in drawib_drawibmodel_dict.values():
-            for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
-                for draw_model in getattr(submesh_model, "drawcall_model_list", []):
-                    for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
-                        texture_hash = str(row.get("texture_hash", "") or "").strip().lower()
-                        if not texture_hash:
-                            continue
-                        condition_str = str(row.get("condition_str", "") or "").strip()
-                        resource_name = str(row.get("resource_name", "") or "").strip()
-                        binding_entry_dict.setdefault(texture_hash, []).append((condition_str, resource_name))
-
+        binding_entry_dict = cls._collect_hash_switch_entry_dict(drawib_drawibmodel_dict)
         if not binding_entry_dict:
             return
+        global_active_hashes = cls._collect_global_active_hashes(global_hash_texture_binding_list)
 
         for texture_hash, entry_list in binding_entry_dict.items():
-            # Normalize: identical (condition, resource) pairs dedupe, the
-            # same condition with two different resources is a contradiction
-            # and mixing an unconditional row with conditional ones makes the
-            # result depend on line order, so both fail loudly.
-            resource_by_condition: dict[str, str] = {}
-            condition_order: list[str] = []
-            has_unconditional = False
-            for condition_str, resource_name in entry_list:
-                if not condition_str:
-                    has_unconditional = True
-                if condition_str in resource_by_condition:
-                    if resource_by_condition[condition_str] != resource_name:
-                        raise ValueError(
-                            "Hash Texture Bind: texture hash " + texture_hash + " is bound with condition '"
-                            + (condition_str or "<always>") + "' to both " + resource_by_condition[condition_str]
-                            + " and " + resource_name + "; give each switch state one texture."
-                        )
-                    continue
-                resource_by_condition[condition_str] = resource_name
-                condition_order.append(condition_str)
-
+            if texture_hash in global_active_hashes:
+                # Owned by the merged global section for this hash.
+                continue
+            resource_by_condition, condition_order, has_unconditional = cls._normalize_hash_switch_entries(
+                texture_hash, entry_list,
+            )
             if has_unconditional and len(condition_order) > 1:
                 raise ValueError(
                     "Hash Texture Bind: texture hash " + texture_hash + " mixes an unconditional binding with "
@@ -471,7 +526,7 @@ class M_IniHelper:
                 )
 
             switch_section = M_IniSection(M_SectionType.TextureOverrideTexture)
-            switch_section.append("[TextureOverride_Texture_" + texture_hash + "_Switch]")
+            switch_section.append("[TextureOverride_Texture_" + texture_hash + "]")
             switch_section.append("hash = " + texture_hash)
             # Same priority as the automatic hash overrides, so the managed
             # section behaves like a drop-in replacement for them.

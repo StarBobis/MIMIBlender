@@ -382,6 +382,11 @@ class Exporter:
     def generate_unreal_vs_config_ini(self):
         """Generate one INI per DrawIB, keeping the append order of sections."""
         config_ini_builder = M_IniBuilder()
+        # Every INI of one mod shares a single 3Dmigoto namespace, so a hash
+        # override may only be declared once for the whole mod. Emitting it in
+        # every DrawIB INI made 3Dmigoto report a duplicate hash override and
+        # left the fallback between its sections undefined.
+        hash_sections_written = False
 
         for draw_ib, draw_ib_model in self.drawib_drawibmodel_dict.items():
             self.add_constants_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
@@ -413,10 +418,6 @@ class Exporter:
 
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start generating Hash texture INI...")
             global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
-            M_IniHelper.generate_hash_style_global_texture_ini(
-                ini_builder=config_ini_builder,
-                global_hash_texture_binding_list=global_hash_rows,
-            )
             M_IniHelper.generate_hash_style_texture_ini(
                 ini_builder=config_ini_builder,
                 drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
@@ -426,12 +427,22 @@ class Exporter:
             # Texture Bind node FILE resources are explicit user intent and
             # must exist even when the automatic texture pipeline is off.
             M_IniHelper.add_object_texture_binding_resource_sections(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
-            # Conditional hash overrides from Hash Texture Bind nodes follow
-            # the same explicit-intent rule (full dict, like the generators above).
-            M_IniHelper.generate_hash_style_object_texture_ini(
-                ini_builder=config_ini_builder,
-                drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
-            )
+            if not hash_sections_written:
+                # The global default and every object scoped switch state live
+                # in one section per hash. It is written once per mod, after
+                # the resource sections it references.
+                M_IniHelper.generate_hash_style_global_texture_ini(
+                    ini_builder=config_ini_builder,
+                    global_hash_texture_binding_list=global_hash_rows,
+                    drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
+                )
+                # Rows without a texture slot keep their own switch section.
+                M_IniHelper.generate_hash_style_object_texture_ini(
+                    ini_builder=config_ini_builder,
+                    drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
+                    global_hash_texture_binding_list=global_hash_rows,
+                )
+                hash_sections_written = True
             # Copy explicit object texture replacements after automatic Hash
             # generation so a marked filename is not overwritten by its
             # original extracted bytes.

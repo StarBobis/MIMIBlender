@@ -419,6 +419,13 @@ class DrawIBModel:
             if getattr(draw_model, "texture_slot_binding_list", None)
         ]
         if not binding_owner_list:
+            # This pass owns both per-object line fields, so they are cleared
+            # even without bindings. Resolving twice (a repeated export in one
+            # session) must not keep appending to the previous result.
+            for submesh_model in self.submesh_model_list:
+                for draw_model in submesh_model.drawcall_model_list:
+                    draw_model.resolved_texture_slot_lines = []
+                    draw_model.resolved_texture_slot_restore_lines = []
             return
 
         print("DrawIBModel: resolving per-object texture slot bindings, DrawIB: " + self.draw_ib)
@@ -577,20 +584,41 @@ class DrawIBModel:
         self.object_texture_binding_resource_list.append((resource_name, target_filename))
         return resource_name
 
+    @staticmethod
+    def _allocate_object_target_filename(base_name, suffix, source_key, target_owner_by_name):
+        '''Return a generated texture filename that no other source claimed.
+
+        Two different images must never be copied onto the same file in the
+        generated Textures folder: the last copy would silently win and both
+        resource sections would reference the wrong picture.
+        '''
+        candidate = base_name + suffix
+        counter = 2
+        while candidate in target_owner_by_name and target_owner_by_name[candidate] != source_key:
+            candidate = base_name + "_" + str(counter) + suffix
+            counter += 1
+        target_owner_by_name[candidate] = source_key
+        return candidate
+
     def resolve_hash_texture_bindings(self):
-        '''Resolve Hash Texture Bind node rows for the conditional this= sections.
+        '''Resolve Hash Texture Bind node rows onto the objects that own them.
 
-        Each resolved row carries the object's switch condition (captured via
-        get_condition_str, so Switch Key and Time Switch states both work)
-        plus the resource name to bind. The actual
-        [TextureOverride_Texture_<hash>_Switch] sections are emitted once per
-        hash for the whole blueprint by M_IniHelper, because hash overrides
-        are global: they apply wherever the game binds the hash.
+        A row that knows the mark's texture slot binds its replacement inside
+        the owning object's draw section (the same list the Slot Texture Bind
+        node fills), so the replacement applies to that draw call only. The
+        object's own switch condition already wraps that line, and an object
+        whose state does not match keeps whatever the shared hash section
+        binds - the global replacement therefore stays the default.
 
-        FILE sources (and MARK sources, resolved through the workspace
-        extract folders) reuse the same copy jobs and resource sections as
-        the slot bindings. When a Hash Source Mark is selected, the copy job
-        retains that mark's automatic ``<mark_hash>_<mark_name>.dds`` name.
+        A row without a slot (legacy MARK / FILE / RESOURCE rows saved before
+        slots were recorded) falls back to the shared
+        [TextureOverride_Texture_<hash>_Switch] section that M_IniHelper emits.
+        Emitting one section per hash is what keeps 3Dmigoto from reporting a
+        duplicate hash override for the same texture.
+
+        FILE sources (and MARK sources, resolved through the workspace extract
+        folders) reuse the same copy jobs and resource sections as the slot
+        bindings, but keep their own generated filename per object.
         '''
         binding_owner_list = [
             (submesh_model, draw_model)
@@ -609,13 +637,19 @@ class DrawIBModel:
 
         used_resource_names = set()
         file_resource_by_source = {}
+        # Generated filename -> source key, shared by every object of this
+        # DrawIB so equal images reuse one file and different images do not.
+        target_owner_by_name = {}
 
         for submesh_model, draw_model in binding_owner_list:
             markup_list = self.get_submesh_texture_markup_info_list(submesh_model)
             condition_str = str(draw_model.get_condition_str() or "").strip()
             owner_name = str(getattr(draw_model, "obj_name", "") or draw_model)
             resolved_rows = []
+            slot_rows = []
             seen_hashes = set()
+            bound_slots = set()
+            slot_lines = list(getattr(draw_model, "resolved_texture_slot_lines", None) or [])
 
             for binding in draw_model.hash_texture_binding_list:
                 if not binding.get("enabled", True):
@@ -634,12 +668,80 @@ class DrawIBModel:
                     )
                 seen_hashes.add(texture_hash)
 
+                # A cleared or disabled row means "no local replacement": the
+                # object keeps the global replacement, so nothing is bound and
+                # the object specific file is simply left unused.
+                if binding.get("restore_original", False) and str(binding.get("mark_slot", "") or "").strip():
+                    continue
+
                 source_type = str(binding.get("source_type", "") or "")
+                source_path = ""
+                if source_type == "MARK":
+                    # Resolve the Hash-style mark's source file, then manage the
+                    # copy and resource ourselves so the binding stays self
+                    # contained even when the automatic hash pipeline is skipped
+                    # for this managed hash.
+                    source_path = self._resolve_hash_mark_source_path(
+                        binding, markup_list, node_label, owner_name, submesh_model,
+                    )
+                elif source_type == "FILE":
+                    source_path = str(binding.get("file_path", "") or "").strip()
+                elif source_type != "RESOURCE":
+                    raise ValueError(
+                        "Hash Texture Bind node '" + node_label + "': unknown source type '" + source_type
+                        + "' for object '" + owner_name + "'."
+                    )
+
+                mark_slot = str(binding.get("mark_slot", "") or "").strip().lower()
+                if mark_slot and OBJECT_TEXTURE_SLOT_PATTERN.match(mark_slot) is None:
+                    raise ValueError(
+                        "Hash Texture Bind node '" + node_label + "': invalid mark slot '" + mark_slot
+                        + "' for object '" + owner_name + "'; expected the form ps-t0."
+                    )
+                if mark_slot:
+                    # The dedicated Slot Texture Bind node is more specific
+                    # than a hash replacement, so the conflict is reported
+                    # instead of silently picking one of the two.
+                    slot_owner_slots = {
+                        str(row.get("slot", "") or "").strip().lower()
+                        for row in (getattr(draw_model, "texture_slot_binding_list", None) or [])
+                        if row.get("enabled", True)
+                    }
+                    if mark_slot in slot_owner_slots:
+                        raise ValueError(
+                            "Hash Texture Bind node '" + node_label + "': slot '" + mark_slot + "' of object '" + owner_name
+                            + "' is already bound by a Slot Texture Bind node; remove one of the two bindings."
+                        )
+                    if mark_slot in bound_slots:
+                        raise ValueError(
+                            "Hash Texture Bind node '" + node_label + "': slot '" + mark_slot + "' is bound twice for object '"
+                            + owner_name + "'; keep one hash replacement per slot."
+                        )
+                    bound_slots.add(mark_slot)
+
                 target_filename_override = ""
-                if binding.get("preserve_mark_filename", False):
-                    # Scanned rows already identify a mark from the connected
-                    # scope. Do not resolve the name again on every passing
-                    # object: another Submesh may use the same name/hash.
+                if mark_slot:
+                    # Object scoped copies need their own filename: the global
+                    # row owns "<hash>_<role>.dds" and both used to share it,
+                    # so one replacement silently overwrote the other. The
+                    # allocator keeps one file per distinct image, so every
+                    # object that picked the same image reuses one resource.
+                    role = normalize_texture_role(binding.get("mark_name", "") or mark_slot)
+                    suffix = os.path.splitext(source_path)[1].lower()
+                    base_name = (
+                        texture_hash
+                        + "_" + role
+                        + "_" + self._object_texture_resource_slug(self.draw_ib, 16)
+                    )
+                    source_key = source_path.casefold() if source_path else ""
+                    target_filename_override = self._allocate_object_target_filename(
+                        base_name=base_name,
+                        suffix=suffix,
+                        source_key=source_key,
+                        target_owner_by_name=target_owner_by_name,
+                    )
+                elif binding.get("preserve_mark_filename", False):
+                    # Legacy scanned section row keeps the familiar name.
                     if not condition_str:
                         suffix = os.path.splitext(binding.get("file_path", ""))[1].lower()
                         role = normalize_texture_role(binding.get("mark_name", ""))
@@ -657,25 +759,7 @@ class DrawIBModel:
                     )
                     target_filename_override = self._get_hash_mark_filename(matched_markup)
 
-                if source_type == "MARK":
-                    # Resolve the Hash-style mark's source file, then manage
-                    # the copy and resource ourselves so the binding stays
-                    # self-contained even when the automatic hash pipeline
-                    # is skipped for this managed hash.
-                    source_path = self._resolve_hash_mark_source_path(binding, markup_list, node_label, owner_name, submesh_model)
-                    resource_name = self._resolve_file_texture_resource(
-                        binding, node_label, owner_name, "hash" + texture_hash[:8],
-                        used_resource_names, file_resource_by_source,
-                        source_path_override=source_path,
-                        target_filename_override=target_filename_override,
-                    )
-                elif source_type == "FILE":
-                    resource_name = self._resolve_file_texture_resource(
-                        binding, node_label, owner_name, "hash" + texture_hash[:8],
-                        used_resource_names, file_resource_by_source,
-                        target_filename_override=target_filename_override,
-                    )
-                elif source_type == "RESOURCE":
+                if source_type == "RESOURCE":
                     resource_name = str(binding.get("resource_name", "") or "").strip()
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
@@ -684,10 +768,23 @@ class DrawIBModel:
                         )
                     used_resource_names.add(resource_name)
                 else:
-                    raise ValueError(
-                        "Hash Texture Bind node '" + node_label + "': unknown source type '" + source_type
-                        + "' for object '" + owner_name + "'."
+                    resource_name = self._resolve_file_texture_resource(
+                        binding, node_label, owner_name, "hash" + texture_hash[:8],
+                        used_resource_names, file_resource_by_source,
+                        source_path_override=source_path,
+                        target_filename_override=target_filename_override,
                     )
+
+                if mark_slot:
+                    # Bind inside this object's draw section instead of
+                    # replacing the texture hash for every object in the game.
+                    slot_lines.append(mark_slot + " = " + resource_name)
+                    slot_rows.append({
+                        "texture_hash": texture_hash,
+                        "slot": mark_slot,
+                        "resource_name": resource_name,
+                    })
+                    continue
 
                 # An unconditional cleared row only restores the output file.
                 # A switch branch instead binds its original image in that
@@ -700,7 +797,9 @@ class DrawIBModel:
                     "resource_name": resource_name,
                 })
 
+            draw_model.resolved_texture_slot_lines = slot_lines
             draw_model.resolved_hash_texture_binding_list = resolved_rows
+            draw_model.resolved_hash_slot_binding_list = slot_rows
 
     def _find_hash_mark_markup(self, binding, markup_list, node_label, owner_name, submesh_model):
         '''Find the selected Hash mark and validate its style.'''

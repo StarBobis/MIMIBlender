@@ -98,6 +98,7 @@ def setup_modules():
     # Shared finalization is not replaced, only its unrelated Blender helpers.
     # This exercises the actual once-per-export shader marker insertion hook.
     for name in ("generate_hash_style_texture_ini", "generate_shared_slot_style_texture_ini",
+                 "generate_hash_style_global_texture_ini",
                  "generate_hash_style_object_texture_ini", "move_slot_style_textures",
                  "move_object_texture_binding_files", "add_branch_key_sections",
                  "add_shapekey_ini_sections"):

@@ -84,6 +84,7 @@ class ExportSRMI:
         M_IniHelper.generate_hash_style_global_texture_ini(
             ini_builder=ini_builder,
             global_hash_texture_binding_list=global_hash_rows,
+            drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
         M_IniHelper.generate_hash_style_texture_ini(
             ini_builder=ini_builder,
@@ -99,6 +100,7 @@ class ExportSRMI:
         M_IniHelper.generate_hash_style_object_texture_ini(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+            global_hash_texture_binding_list=global_hash_rows,
         )
         print("ExportSRMI: Hash style texture config generation done")
 

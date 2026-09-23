@@ -91,11 +91,12 @@ class StandardExporter:
         }
 
         # Global hash rows are explicit and independent of object traversal.
-        # Emit them first so conditional rows can refine their default value.
+        # They carry the default of their hash; object scoped rows override it.
         global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
         M_IniHelper.generate_hash_style_global_texture_ini(
             ini_builder=ini_builder,
             global_hash_texture_binding_list=global_hash_rows,
+            drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
 
         # Automatic Hash / SharedSlot texture INI sections and file copies.
@@ -114,6 +115,7 @@ class StandardExporter:
         M_IniHelper.generate_hash_style_object_texture_ini(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+            global_hash_texture_binding_list=global_hash_rows,
         )
 
         # Per-DrawIB sections: the game-specific content comes from the hook.

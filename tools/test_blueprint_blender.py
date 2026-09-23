@@ -131,9 +131,10 @@ class BlueprintTests(unittest.TestCase):
                 self.tree.links.new(upstream.outputs[0], downstream.inputs[0])
 
             marks = []
-            for name, texture_hash in (('DiffuseMap', '6077b727'), ('LightMap', '10d9df5f')):
+            for name, texture_hash, slot in (('DiffuseMap', '6077b727', 'ps-t0'), ('LightMap', '10d9df5f', 'ps-t1')):
                 mark = TextureMarkUpInfo()
                 mark.mark_name, mark.mark_type, mark.mark_hash = name, 'Hash', texture_hash
+                mark.mark_slot = slot
                 mark.mark_filename = name + '.dds'
                 marks.append(mark)
             # Stable enum items isolate discovery, not the actual RNA rows or
@@ -141,11 +142,17 @@ class BlueprintTests(unittest.TestCase):
             stack.enter_context(patch.object(addon.blueprint_node_hash_texture, '_texture_hash_bind_mark_name_items', return_value=[
                 ('DiffuseMap', 'DiffuseMap', ''), ('LightMap', 'LightMap', ''),
             ]))
-            for name, texture_hash, source_type in (('DiffuseMap', '6077b727', 'FILE'), ('LightMap', '10d9df5f', 'MARK')):
+            for name, texture_hash, source_type, slot in (
+                ('DiffuseMap', '6077b727', 'FILE', 'ps-t0'),
+                ('LightMap', '10d9df5f', 'MARK', 'ps-t1'),
+            ):
                 item = bind.texture_hash_items.add()
                 item.mark_name = name
                 item.texture_hash = texture_hash
                 item.source_type = source_type
+                # A refreshed row records the mark slot, which is what scopes
+                # the replacement to the objects below instead of the hash.
+                item.mark_source_slot = slot
                 if source_type == 'FILE':
                     item.file_path = str(source)
 
@@ -195,19 +202,68 @@ class BlueprintTests(unittest.TestCase):
             self.assertIs(model.submesh_model_list[0].drawcall_model_list[0], model.submesh_drawcall_groups[0][0])
             self.assertEqual(M_IniHelper._collect_hash_binding_managed_hashes({'94517393': model}), {'6077b727', '10d9df5f'})
 
+            # A slot-bearing row binds inside the owning object's draw section,
+            # so it never becomes a hash override that would also hit every
+            # other object using the same texture.
+            for draw_model in model.submesh_model_list[0].drawcall_model_list:
+                self.assertEqual(len(draw_model.resolved_hash_texture_binding_list), 0)
+                self.assertEqual(len(draw_model.resolved_texture_slot_lines), 2)
+            self.assertTrue(
+                all(line.startswith('ps-t0 = ') or line.startswith('ps-t1 = ')
+                    for line in model.submesh_model_list[0].drawcall_model_list[0].resolved_texture_slot_lines)
+            )
+
             builder = M_IniBuilder()
             M_IniHelper.add_object_texture_binding_resource_sections(builder, model)
-            M_IniHelper.generate_hash_style_object_texture_ini(builder, {'94517393': model})
+            M_IniHelper.generate_hash_style_object_texture_ini(
+                builder, {'94517393': model}, global_hash_texture_binding_list=[],
+            )
             text = '\n'.join(line for section in builder.ini_section_list for line in section.SectionLineList)
-            self.assertIn('filename = Textures\\6077b727_DiffuseMap.dds', text)
-            self.assertIn('[TextureOverride_Texture_6077b727_Switch]', text)
+            self.assertNotIn('[TextureOverride_Texture_', text)
+            # The draw section carries the per-object bindings in the shared
+            # emitter used by every game preset, before the drawindexed line.
+            from MIMIBlender.common.m_ini_builder import M_IniSection, M_SectionType
+            draw_section = M_IniSection(M_SectionType.TextureOverrideIB)
+            M_IniHelper.append_drawindexed_with_slot_lines(
+                section=draw_section,
+                ordered_draw_obj_model_list=model.submesh_model_list[0].drawcall_model_list,
+                slot_line_provider=lambda obj_model: [],
+            )
+            draw_text = '\n'.join(draw_section.SectionLineList)
+            self.assertIn('ps-t0 = ResourceTex_', draw_text)
+            self.assertLess(draw_text.index('ps-t0 = ResourceTex_'), draw_text.index('drawindexed'))
+
             M_IniHelper.move_object_texture_binding_files(model)
-            self.assertEqual(target.read_bytes(), source.read_bytes())
-            self.assertEqual((output / '10d9df5f_LightMap.dds').read_bytes(), mark_source.read_bytes())
+            # Object scoped copies use their own filename, so the global
+            # replacement of the same hash can no longer be overwritten.
+            object_target = output / '6077b727_DiffuseMap_94517393.dds'
+            self.assertEqual(object_target.read_bytes(), source.read_bytes())
+            self.assertEqual((output / '10d9df5f_LightMap_94517393.dds').read_bytes(), mark_source.read_bytes())
             # Re-export must refresh an existing generated file, not skip it.
             source.write_bytes(b'changed external bytes')
             M_IniHelper.move_object_texture_binding_files(model)
-            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual(object_target.read_bytes(), source.read_bytes())
+
+            # With a global replacement for the same hash, one section carries
+            # the global default and the object switch state overrides it.
+            global_builder = M_IniBuilder()
+            global_rows = [{
+                'enabled': True, 'texture_hash': '6077b727', 'source_type': 'FILE',
+                'file_path': str(source), 'mark_name': 'DiffuseMap', 'node_label': 'GlobalTest',
+            }]
+            switch_model = SimpleNamespace(submesh_model_list=[SimpleNamespace(drawcall_model_list=[
+                SimpleNamespace(resolved_hash_texture_binding_list=[
+                    {'texture_hash': '6077b727', 'condition_str': '$swapkey0 == 0', 'resource_name': 'ResourceObject'},
+                ]),
+            ])])
+            M_IniHelper.generate_hash_style_global_texture_ini(
+                global_builder, global_rows, drawib_drawibmodel_dict={'94517393': switch_model},
+            )
+            global_text = '\n'.join(line for section in global_builder.ini_section_list for line in section.SectionLineList)
+            self.assertEqual(global_text.count('[TextureOverride_Texture_6077b727]'), 1)
+            self.assertIn('this = ResourceHashGlobal_6077b727', global_text)
+            self.assertIn('if $swapkey0 == 0', global_text)
+            self.assertIn('  this = ResourceObject', global_text)
 
     def test_socket_draw_labels(self):
         # Socket circles are drawn by Blender, independently of this callback.

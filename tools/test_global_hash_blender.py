@@ -161,7 +161,7 @@ class GlobalHashTests(unittest.TestCase):
             M_IniHelper.generate_hash_style_global_texture_ini(builder, bindings)
             text = '\n'.join(line for section in builder.ini_section_list for line in section.SectionLineList)
             self.assertIn('filename = Textures\\6077b727_DiffuseMap.png', text)
-            self.assertIn('[TextureOverride_Texture_6077b727_Global]', text)
+            self.assertIn('[TextureOverride_Texture_6077b727]', text)
             self.assertEqual((output / '6077b727_DiffuseMap.png').read_bytes(), self.image_path.read_bytes())
             # Same output name, changed source bytes: refresh the exported copy.
             self.image_path.write_bytes(b'updated replacement bytes')
@@ -266,21 +266,27 @@ class GlobalHashTests(unittest.TestCase):
         model = SimpleNamespace(draw_ib='94517393', d3d11_game_type=None,
                                 submesh_model_list=[submesh], submesh_texturemarkinfolist_dict={})
         DrawIBModel.resolve_texture_bindings_for_model(model)
-        self.assertEqual(call.resolved_hash_texture_binding_list[0]['texture_hash'], '6077b727')
+        # The scanned row carries the mark slot, so it binds inside this
+        # object's draw section instead of replacing the hash globally.
+        self.assertEqual(call.resolved_hash_texture_binding_list, [])
+        self.assertEqual(call.resolved_hash_slot_binding_list[0]['texture_hash'], '6077b727')
+        self.assertEqual(call.resolved_hash_slot_binding_list[0]['slot'], 'ps-t0')
+        self.assertEqual(len(call.resolved_texture_slot_lines), 1)
+        self.assertTrue(call.resolved_texture_slot_lines[0].startswith('ps-t0 = ResourceTex_'))
         output_path = self.root / 'Textures'
+        object_target = output_path / '6077b727_DiffuseMap_94517393.png'
         with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output_path)):
             M_IniHelper.move_object_texture_binding_files(model)
-        self.assertEqual((output_path / '6077b727_DiffuseMap.png').read_bytes(), self.image_path.read_bytes())
-        # Clearing a scanned, unconditional binding restores the original
-        # file without emitting a redundant managed-hash override.
+        self.assertEqual(object_target.read_bytes(), self.image_path.read_bytes())
+
+        # Clearing a scanned row drops the local replacement, so the object
+        # falls back to the global replacement of that hash.
         item.file_path = ''
         call.hash_texture_binding_list = BluePrintModel._collect_hash_texture_bindings(connected)
         self.assertTrue(call.hash_texture_binding_list[0]['restore_original'])
         DrawIBModel.resolve_texture_bindings_for_model(model)
-        self.assertEqual(call.resolved_hash_texture_binding_list, [])
-        with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output_path)):
-            M_IniHelper.move_object_texture_binding_files(model)
-        self.assertEqual((output_path / '6077b727_DiffuseMap.png').read_bytes(), Path(original_path).read_bytes())
+        self.assertEqual(call.resolved_hash_slot_binding_list, [])
+        self.assertEqual(call.resolved_texture_slot_lines, [])
         item.file_path = str(self.image_path)
 
         # Replacing the wire changes discovery, not just the displayed list.
