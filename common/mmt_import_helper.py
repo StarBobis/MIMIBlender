@@ -1,6 +1,7 @@
 import bpy
 import numpy
 import os
+import re
 
 from .d3d11_element import D3D11Element
 from .mesh_create_helper import MeshCreateHelper
@@ -67,11 +68,18 @@ class MMTImportHelper:
 
 			imported_obj_list = []
 			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
-				# Part alias from the INI comment above the drawindexed
-				# (e.g. "Skirk Body Knees (636)"); empty when the draw statement
-				# had no comment. Resolved first because the classic naming below
-				# decides from it whether the numeric draw-range suffix is needed.
-				segment_alias = str(segment_info.get("alias", "")).strip()
+				# Part alias from the INI comment above the drawindexed.
+				# WWMI may prefix it with the source ordinal, for example
+				# "Draw Component 3.3手套". Keep that ordinal separate from the
+				# readable part name so the final name does not repeat it.
+				raw_segment_alias = str(segment_info.get("alias", "")).strip()
+				alias_component_index, cleaned_alias = MMTImportHelper.parse_draw_component_alias(raw_segment_alias)
+				segment_alias = cleaned_alias if alias_component_index is not None else raw_segment_alias
+				try:
+					explicit_component_index = int(segment_info.get("component_index", -1))
+				except (TypeError, ValueError):
+					explicit_component_index = -1
+				segment_component_index = explicit_component_index if explicit_component_index >= 0 else alias_component_index
 
 				if use_classic_submesh_name:
 					segment_index_count = segment_info["index_count"]
@@ -105,6 +113,7 @@ class MMTImportHelper:
 						match_index_count=match_index_count,
 						match_first_index=match_first_index,
 						match_component_map=match_component_map,
+						component_index=segment_component_index,
 					)
 
 					if (
@@ -227,22 +236,38 @@ class MMTImportHelper:
 		return imported_obj
 
 	@staticmethod
-	def build_match_submesh_name(submesh_name_prefix:str, match_index_count:int, match_first_index:int, match_component_map:dict | None = None):
+	def parse_draw_component_alias(alias:str):
+		'''
+		Parse a WWMI alias prefix such as "Draw Component 3.3手套".
+
+		Returns (component_index, cleaned_alias). A non-WWMI alias returns
+		(None, original_alias), so normal part aliases remain untouched.
+		'''
+		alias_text = str(alias).strip()
+		match = re.match(r"^draw\s+component\s+(\d+)(?:\.\s*(.*))?$", alias_text, re.IGNORECASE)
+		if match is None:
+			return None, alias_text
+		component_index = int(match.group(1))
+		cleaned_alias = (match.group(2) or "").strip()
+		return component_index, cleaned_alias
+
+	@staticmethod
+	def build_match_submesh_name(submesh_name_prefix:str, match_index_count:int, match_first_index:int, match_component_map:dict | None = None, component_index:int | None = None):
 		'''
 		Build the Submesh match part of a classic mesh name.
 
-		Default form: {Prefix}-{MatchIndexCount}-{MatchFirstIndex}.
-		When the caller passes the folder-level match_component_map (the
-		DrawIB's IB partitions sorted by draw-range size ascending), the
-		numeric pair is replaced by its ordinal "Component N", which is
-		shorter and stays consistent across every data type of the same
-		DrawIB. A range missing from the map keeps the numeric fallback.
+		An explicit source component ordinal always wins. The map is then
+		used for newer range-aware outputs that expose no ordinal, and its
+		size-sorted numbering is retained only as a legacy fallback. A range
+		missing from the map keeps the numeric match-range name.
 		'''
 		prefix = str(submesh_name_prefix).strip()
+		if component_index is not None and int(component_index) >= 0:
+			return prefix + "-Component " + str(int(component_index))
 		if match_component_map:
-			component_index = match_component_map.get((int(match_first_index), int(match_index_count)))
-			if component_index is not None:
-				return prefix + "-Component " + str(component_index)
+			mapped_component_index = match_component_map.get((int(match_first_index), int(match_index_count)))
+			if mapped_component_index is not None:
+				return prefix + "-Component " + str(mapped_component_index)
 		return prefix + "-" + str(match_index_count) + "-" + str(match_first_index)
 
 	@staticmethod
@@ -316,6 +341,7 @@ class MMTImportHelper:
 						# segment can be attributed to the right Component.
 						"match_first_index": draw_call_segment.MatchFirstIndex,
 						"match_index_count": draw_call_segment.MatchIndexCount,
+						"component_index": draw_call_segment.ComponentIndex,
 					},
 				))
 		elif len(submesh_json.DrawCallIndexList) > 0:
