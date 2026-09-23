@@ -1,5 +1,10 @@
 # WWMI 预设生成 Mod —— 对比 WWMI-Tools 的缺陷审查与修复方案
 
+> **状态：已全部实施，随 v1.0.30 发布。** 本文档保留为设计依据与回归索引，落地情况见文末「实施结果」。
+> 三个待决问题按以下选择执行：Q1 → **(b)** 只把描述绘制范围的符号加作用域，`$object_guid` 仍取排序最前的 DrawIB；
+> Q2 → **提到 `1.00`**；Q3 → **两项都做**（`ps-t8`，以及 `if $object_detected` 守卫——通过新增的
+> `guard_with_object_detected` 参数只在 WWMI 下启用，不影响其他预设）。
+
 审查对象：`games/wwmi/`（exporter.py / model.py / blend_remap.py / shapekeys.py）与它调用的 `common/m_ini_helper.py`。
 对照实现：`SpectrumQT/WWMI-Tools` v1.7.3（模板 `templates/merged.ini.j2`、`per_component.ini.j2`）与 `SpectrumQT/WWMI` 运行时 1.0.0（`WuWa-Model-Importer.ini`、`Shaders/*.hlsl`）。
 另一份用于判定引擎语义的权威依据：本仓库 `tmp/3dmigoto-src/DirectX11/*.cpp`（IniHandler.cpp / CommandList.cpp）。
@@ -336,3 +341,30 @@ endif
 - **没有真机验证**：所有结论来自源码对照、3Dmigoto 引擎源码语义和 Blender 无头实测，未在游戏内加载验证过任何一条。
 - **只审了 WWMI 预设**：GIMI / SRMI / ZZMI / EFMI / NTEMI 等未做同类对照。
 - **A6/Q2 的版本区间没有实证**：`required_wwmi_version` 从 0.91 到 1.00 之间具体哪个版本支持哪些 `$\WWMIv1\*` 变量，WWMI 运行时仓库没有历史标签可查，属于需要你按社区经验判断的项。
+
+---
+
+## 七、实施结果（v1.0.30）
+
+| 编号 | 状态 | 落地位置 |
+|---|---|---|
+| A1 多 DrawIB 全局变量撞名 | 已修 | `games/wwmi/names.py`（新增，作用域规则单点定义）；`exporter.py` / `blend_remap.py` / `shapekeys.py` 全部改为作用域命名；`common/m_ini_helper.py` 的 `generate_hash_style_texture_ini` 新增 `resource_prefix` |
+| A2 骨骼合并无守卫 | 已修 | `blend_remap.py` 的 `add_commandlist_merge_skeleton_section`，`BONE_DATA_FILTER_INDEX = "3381.7777"` 抽为具名常量，两处 `if` 守卫 |
+| A3 缺三态合并跟踪 | 已修 | 同上；`$merge_status_id_<DrawIB>` + `$merge_status_id_<DrawIB>_N`，由 `add_commandlist_update_merged_skeleton` 每帧重置 |
+| A4 空组件仍参与合并 | 已修 | `exporter.py` 的 `add_texture_override_component`：空组件只写 `handling = skip`，不写 vg_offset/vg_count、不跑任何 `run =` |
+| A5 少 `ps-t8` | 已修 | `exporter.py` 改为按 0..8 循环生成 `CheckTextureOverride = ps-tN` |
+| A6 运行时版本 | 已修 | `names.py` 的 `WWMI_REQUIRED_RUNTIME_VERSION = "1.00"`，`exporter.py` 引用 |
+| A7 快捷键绑 `$active0` | 已修 | `common/m_ini_helper.py` 新增 `global $mod_visible`（含 `post $mod_visible = 0`），`[Key]` 条件改为 `$mod_visible == 1`；13 处 `$activeN = 1` 旁全部补 `$mod_visible = 1` |
+| A8 自动 Hash 替换无守卫 | 已修 | `common/m_ini_helper.py` 新增 `guard_with_object_detected`，仅 WWMI 传入 `True` |
+| B1–B4 功能缺口 | 未做 | 按方案第四节，建议单独排期 |
+
+另外顺手修掉的：mod 信息段（`[ResourceModName]` 等）与 Hash 段改为每个 Mod 只写一次，不再随 DrawIB 重复；形态键的 `[CustomShaderComputeWWMIShapeKey*]` 与 `[Key_ShapeKey_*]` 也按 DrawIB 作用域（它们的 dispatch 与按键绑定依赖各自 DrawIB 的顶点数）。
+
+**回归覆盖**
+
+- 新增 `tools/test_wwmi_multi_drawib_ini.py`：三个顶点数各不相同的 DrawIB 跑真实导出循环，断言文件间**没有任何**同名全局变量或同名 section（`$\WWMIv1\*` 与 Mod 级符号显式豁免）。
+- 扩展 `tools/test_wwmi_components_blender.py`：新增骨骼合并守卫、三态跟踪、每帧状态重置、空组件不合并、快捷键可见性共 15 个用例。
+- 两个套件都登记进 `tools/run_blueprint_checks.py`。
+- 全量 13 个套件结果：12 通过；`test_dynamic_animation_blender.py` 失败，但已用 `git stash` 在未改动的基线上复现同一失败，属**既有问题**，与本次改动无关。
+
+**仍然需要你做的**：真机验证（V6）。本次改动只保证生成结果符合参考实现与引擎语义，没有任何一条在游戏内加载验证过。
