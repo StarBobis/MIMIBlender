@@ -233,6 +233,12 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
         default=True,
     ) # type: ignore
 
+    simulate_xxmi_tail_comments: bpy.props.BoolProperty(
+        name=tr("Simulate XXMI Tail Comments"),
+        description=tr("When enabled, the generated INI ends with the same closing comments that XXMI Tools writes, so the file looks like one produced by that tool; the sha256 line stays the last line"),
+        default=False,
+    ) # type: ignore
+
     @classmethod
     def _instance(cls):
         return bpy.context.scene.mimi_global_properties
@@ -265,6 +271,11 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
     @classmethod
     def use_specific_generate_mod_folder_path(cls):
         return cls._instance().use_specific_generate_mod_folder_path
+
+    @classmethod
+    def simulate_xxmi_tail_comments(cls) -> bool:
+        """Whether generated INIs end with the simulated XXMI tail comments."""
+        return bool(cls._instance().simulate_xxmi_tail_comments)
 
     @classmethod
     def generate_mod_folder_path(cls):

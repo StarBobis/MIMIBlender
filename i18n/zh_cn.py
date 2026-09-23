@@ -657,6 +657,8 @@ TRANSLATIONS_ZH_CN = {
     "Specify Generate Mod Folder": "指定 Mod 生成文件夹",
     "Current Generate Mod Folder: ": "当前 Mod 生成文件夹：",
     "Select Generate Mod Folder": "选择 Mod 生成文件夹",
+    "Simulate XXMI Tail Comments": "模拟 XXMI 结尾注释",
+    "When enabled, the generated INI ends with the same closing comments that XXMI Tools writes, so the file looks like one produced by that tool; the sha256 line stays the last line": "开启后，生成的 INI 会在结尾写入与 XXMI Tools 相同的收尾注释，让文件看起来像是该工具生成的；sha256 行仍然保持在最后一行",
     "Please select a valid folder": "请选择一个有效的文件夹",
     "Generate Mod folder set to: {path}": "Mod 生成文件夹已设为：{path}",
     "Recalculate COLOR set to: ": "重算 COLOR 已设为：",

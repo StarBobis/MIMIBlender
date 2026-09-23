@@ -11,6 +11,7 @@ import hashlib
 
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_helper import M_IniHelper
+from ...common.m_ini_builder import get_xxmi_tail_comment_lines
 from ...common.global_config import GlobalConfig
 from .parts import resource_token, part_name
 
@@ -471,6 +472,11 @@ def palette_filename(submesh_model) -> str:
 
 def write_ini(filepath: str, lines: list[str]):
     """Write the INI only when its content changed (sha256 change detection)."""
+    # Optional tail comments, added before hashing so toggling the option
+    # rewrites the file. sha256 stays the last line.
+    tail_lines = get_xxmi_tail_comment_lines()
+    if tail_lines:
+        lines = lines + [""] + tail_lines
     content = "\n".join(lines)
     # Add SHA256 for change detection
     sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()

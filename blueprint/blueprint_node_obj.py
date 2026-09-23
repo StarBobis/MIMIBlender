@@ -612,6 +612,10 @@ class MIMINode_Result_Output(MIMINodeBase):
 
             layout.operator("mimi.select_generate_mod_folder", text=tr("Select Generate Mod Folder"), icon='FILE_FOLDER')
 
+        # Optional tail comments: the generated INI then ends with the same
+        # closing lines XXMI Tools writes.
+        layout.prop(context.scene.mimi_global_properties, "simulate_xxmi_tail_comments", text=tr("Simulate XXMI Tail Comments"))
+
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
             self.inputs.new('MIMISocketObject', "Group {count}".format(count=len(self.inputs) + 1))
