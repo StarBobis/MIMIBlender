@@ -32,6 +32,8 @@ class LayoutRecorder:
         self.properties = []
         self.operators = []
         self.icons = []
+        self.labels = []
+        self.button_texts = []
 
     def row(self, **kwargs):
         return self
@@ -40,13 +42,14 @@ class LayoutRecorder:
     box = row
 
     def label(self, **kwargs):
-        pass
+        self.labels.append(kwargs.get('text', ''))
 
     def prop(self, data, name, **kwargs):
         self.properties.append(name)
 
     def operator(self, name, **kwargs):
         self.operators.append(name)
+        self.button_texts.append(kwargs.get('text', ''))
         return SimpleNamespace()
 
     def template_list(self, *args, **kwargs):
@@ -221,6 +224,151 @@ class GlobalHashTests(unittest.TestCase):
         previews.clear_previews()
         self.assertIsNone(previews._collection)
         self.assertEqual(len(previews._stamps), 0)
+
+    def test_connected_scope_ports_refresh_and_export(self):
+        from MIMIBlender.model.drawib_model import DrawIBModel
+        lists = addon.blueprint_node_object_list
+        groups = addon.blueprint_node_group
+        # Workspace discovery sees both components, but the connected node
+        # must only follow the selected Object List/custom group output port.
+        self.mark_json('LOD0', '94517393-10-0', [self.mark('6077b727')])
+        self.mark_json('LOD0', '94517393-10-10', [self.mark('0cefa11c')])
+        connected = self.tree.nodes.new('MIMINode_Hash_Texture_Bind')
+        child = bpy.data.node_groups.new('scope_group', self.tree.bl_idname)
+        self.addCleanup(bpy.data.node_groups.remove, child)
+        for name in ('one', 'two'):
+            child.interface.new_socket(name=name, in_out='OUTPUT', socket_type='MIMISocketObject')
+        output = child.nodes.new(groups.GROUP_OUTPUT_IDNAME)
+        source = child.nodes.new('MIMINode_Object_List')
+        for index, name in enumerate(('mesh_a', 'mesh_b')):
+            lists._append_object_list_item(source, name)
+            source.object_items[index].submesh_name = 'LOD0.94517393-' + str(index)
+            child.links.new(source.outputs[index + 1], output.inputs[index])
+        group = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        group.node_tree = child
+        self.tree.links.new(group.outputs[0], connected.inputs[0])
+        self.refresh()
+        self.assertEqual(len(self.node.texture_hash_items), 2)
+        bpy.ops.mimi.global_hash_refresh(node_name=connected.name, tree_name=self.tree.name)
+        self.assertEqual([item.texture_hash for item in connected.texture_hash_items], ['6077b727'])
+        self.assertEqual(BluePrintModel._collect_hash_texture_bindings(connected), [])
+        item = connected.texture_hash_items[0]
+        item.file_path = str(self.image_path)
+        original_path = item.mark_source_file_path
+        bindings = BluePrintModel._collect_hash_texture_bindings(connected)
+        self.assertEqual(bindings[0]['mark_name'], 'DiffuseMap')
+
+        # Use the same adapter used by WWMI. An object elsewhere in this scope
+        # need not have the selected mark name in its own Submesh metadata.
+        call = SimpleNamespace(obj_name='mesh_a', hash_texture_binding_list=bindings,
+                               get_condition_str=lambda: '')
+        submesh = SimpleNamespace(submesh_name='LOD0.94517393-0', drawcall_model_list=[call])
+        model = SimpleNamespace(draw_ib='94517393', d3d11_game_type=None,
+                                submesh_model_list=[submesh], submesh_texturemarkinfolist_dict={})
+        DrawIBModel.resolve_texture_bindings_for_model(model)
+        self.assertEqual(call.resolved_hash_texture_binding_list[0]['texture_hash'], '6077b727')
+        output_path = self.root / 'Textures'
+        with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output_path)):
+            M_IniHelper.move_object_texture_binding_files(model)
+        self.assertEqual((output_path / '6077b727_DiffuseMap.png').read_bytes(), self.image_path.read_bytes())
+        # Clearing a scanned, unconditional binding restores the original
+        # file without emitting a redundant managed-hash override.
+        item.file_path = ''
+        call.hash_texture_binding_list = BluePrintModel._collect_hash_texture_bindings(connected)
+        self.assertTrue(call.hash_texture_binding_list[0]['restore_original'])
+        DrawIBModel.resolve_texture_bindings_for_model(model)
+        self.assertEqual(call.resolved_hash_texture_binding_list, [])
+        with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output_path)):
+            M_IniHelper.move_object_texture_binding_files(model)
+        self.assertEqual((output_path / '6077b727_DiffuseMap.png').read_bytes(), Path(original_path).read_bytes())
+        item.file_path = str(self.image_path)
+
+        # Replacing the wire changes discovery, not just the displayed list.
+        # Keep the old configured entry visibly stale rather than losing it.
+        self.tree.links.new(group.outputs[1], connected.inputs[0])
+        bpy.ops.mimi.global_hash_refresh(node_name=connected.name, tree_name=self.tree.name)
+        by_hash = {row.texture_hash: row for row in connected.texture_hash_items}
+        self.assertTrue(by_hash['6077b727'].mark_missing)
+        self.assertFalse(by_hash['0cefa11c'].mark_missing)
+        self.assertEqual(by_hash['6077b727'].mark_source_file_path, original_path)
+        with self.assertRaisesRegex(ValueError, 'connected scope'):
+            BluePrintModel._collect_hash_texture_bindings(connected)
+        by_hash['6077b727'].file_path = ''
+        for link in list(connected.inputs[0].links):
+            self.tree.links.remove(link)
+        bpy.ops.mimi.global_hash_refresh(node_name=connected.name, tree_name=self.tree.name)
+        self.assertEqual(len(connected.texture_hash_items), 0)
+
+    def test_conditional_states_keep_distinct_image_files(self):
+        from MIMIBlender.model.drawib_model import DrawIBModel
+        # Two states of the same hash must not overwrite one shared basename.
+        # This exercises scanned rows, not the retained legacy source enums.
+        alternate = self.root / 'alternate.png'
+        alternate.write_bytes(b'alternate texture bytes')
+        calls = []
+        for state, path in enumerate((self.image_path, alternate)):
+            binding = {'enabled': True, 'texture_hash': '6077b727', 'source_type': 'FILE',
+                       'file_path': str(path), 'mark_name': 'DiffuseMap', 'preserve_mark_filename': True}
+            calls.append(SimpleNamespace(obj_name='mesh', hash_texture_binding_list=[binding],
+                                         get_condition_str=lambda state=state: '$state == ' + str(state)))
+        submesh = SimpleNamespace(submesh_name='LOD0.94517393-0', drawcall_model_list=calls)
+        model = SimpleNamespace(draw_ib='94517393', d3d11_game_type=None,
+                                submesh_model_list=[submesh], submesh_texturemarkinfolist_dict={})
+        DrawIBModel.resolve_texture_bindings_for_model(model)
+        self.assertEqual(len({job[2] for job in model.object_texture_binding_file_list}), 2)
+        builder = M_IniBuilder()
+        M_IniHelper.generate_hash_style_object_texture_ini(builder, {'94517393': model})
+        text = '\n'.join(line for section in builder.ini_section_list for line in section.SectionLineList)
+        self.assertIn('if $state == 0', text)
+        self.assertIn('if $state == 1', text)
+        with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(self.root / 'Textures')):
+            M_IniHelper.move_object_texture_binding_files(model)
+        for _, source, target in model.object_texture_binding_file_list:
+            self.assertEqual((self.root / 'Textures' / target).read_bytes(), Path(source).read_bytes())
+
+    def test_hash_ui_live_chinese_and_one_file_chooser(self):
+        from MIMIBlender.i18n import i18n
+        base = addon.blueprint_node_base
+        previous = i18n.get_language()
+        self.addCleanup(i18n.apply_language, previous)
+        i18n.apply_language('en')
+        connected = self.tree.nodes.new('MIMINode_Hash_Texture_Bind')
+        custom = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+        custom.label = 'User custom title'
+        # Simulate existing English labels loaded from an older blueprint.
+        self.node.label = 'Global Hash Texture Bind'
+        connected.label = 'Hash Texture Bind'
+        for node in (self.node, connected):
+            item = node.texture_hash_items.add()
+            item.global_detected = True
+            item.texture_hash = '6077b727'
+            item.mark_source_name = 'DiffuseMap'
+            item.mark_source_file_path = str(self.image_path)
+            item.file_path = str(self.image_path)
+        i18n.apply_language('zh')
+        self.assertEqual(self.node.label, '全局Hash贴图绑定')
+        self.assertEqual(connected.label, 'Hash贴图绑定')
+        self.assertEqual(custom.label, 'User custom title')
+        for node in (self.node, connected):
+            layout = LayoutRecorder()
+            with patch.object(nodes, 'texture_icon', return_value=1):
+                node.draw_buttons(bpy.context, layout)
+            self.assertIn('刷新检测Hash标记贴图', layout.button_texts)
+            self.assertIn('选择替换贴图', layout.button_texts)
+            self.assertIn('原标记贴图', layout.labels)
+            self.assertIn('替换贴图', layout.labels)
+            self.assertEqual(layout.operators.count('mimi.texhashbind_select_file'), 1)
+            # A FILE_PATH property adds its own folder icon; forbid it here.
+            self.assertNotIn('file_path', layout.properties)
+            self.assertNotIn('source_type', layout.properties)
+            self.assertNotIn('mimi.texhashbind_add_item', layout.operators)
+            self.assertEqual(len(layout.icons), 2)
+        layout = LayoutRecorder()
+        base.MIMISocketObject.draw(connected.outputs[0], bpy.context, layout, connected, 'Output')
+        self.assertIn('输出', layout.labels)
+        i18n.apply_language('en')
+        self.assertEqual(connected.label, 'Hash Texture Bind')
+        self.assertEqual(self.node.label, 'Global Hash Texture Bind')
 
     def test_removed_mark_keeps_choice_but_blocks_export(self):
         metadata = self.mark_json('LOD0', '94517393-10-0', [self.mark('6077b727')])

@@ -31,6 +31,7 @@ This is a platform limitation, not a bug; both still display the language
 that was active when the add-on was loaded.
 '''
 import bpy
+import sys
 
 from .zh_cn import TRANSLATIONS_ZH_CN
 
@@ -96,6 +97,15 @@ def apply_language(value):
             setattr(cls, attr, tr(original))
         except Exception:
             # A half-registered class must never break the language switch.
+            pass
+    # Saved node labels override class titles, so translating bl_label alone
+    # leaves existing blueprints in the old language. Reuse the safe default-
+    # title migration after a live switch, without importing modules mid-load.
+    node_base = sys.modules.get(_ADDON_MODULE_NAME + ".blueprint.blueprint_node_base")
+    if node_base is not None:
+        try:
+            node_base.migrate_legacy_node_titles()
+        except (AttributeError, ReferenceError, RuntimeError):
             pass
 
 

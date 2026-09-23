@@ -677,16 +677,30 @@ class BluePrintModel:
         bindings = []
         for item in getattr(bind_node, "texture_hash_items", []):
             file_path = str(getattr(item, "file_path", "") or "").strip()
+            detected = bool(getattr(item, "global_detected", False))
+            restore_original = detected and (not file_path or not item.enabled)
+            # Refreshed rows are optional replacements. Preserve legacy rows
+            # for old blend files until the user explicitly refreshes them.
+            if restore_original:
+                if not item.global_replacement_used or item.mark_missing:
+                    continue
+                file_path = item.mark_source_file_path
+                if not file_path:
+                    raise ValueError("Hash Texture Bind: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
+            if detected and item.mark_missing:
+                raise ValueError("Hash Texture Bind: mark " + item.texture_hash + " is outside the connected scope; refresh, clear its replacement or disable the row.")
             if file_path:
                 try:
                     file_path = bpy.path.abspath(file_path)
                 except Exception:
                     pass
             bindings.append({
-                "enabled": bool(getattr(item, "enabled", True)),
+                "enabled": True if restore_original else bool(getattr(item, "enabled", True)),
                 "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
-                "source_type": str(getattr(item, "source_type", "") or ""),
-                "mark_name": normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "source_type": "FILE" if detected else str(getattr(item, "source_type", "") or ""),
+                "mark_name": item.mark_source_name if detected else normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "preserve_mark_filename": detected,
+                "restore_original": restore_original,
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Hash Texture Bind"),

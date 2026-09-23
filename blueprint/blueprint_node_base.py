@@ -32,7 +32,15 @@ class MIMISocketObject(NodeSocket):
         # every repaint and leaves all socket labels blank.
         # Keep linked sockets labelled too: Object List outputs rely on their
         # names to distinguish individual objects from the aggregate output.
-        layout.label(text=text or self.name)
+        caption = text or self.name
+        if node.bl_idname in {'MIMINode_Hash_Texture_Bind', 'MIMINode_Hash_Texture_Global'}:
+            # Translate visible socket captions without rewriting socket IDs
+            # or breaking links in blueprints saved in another language.
+            for source in ("Object", "Output"):
+                if caption in _historical_titles(source):
+                    caption = tr(source)
+                    break
+        layout.label(text=caption)
 
 # 1. Define the custom node tree type
 
@@ -89,6 +97,10 @@ _LEGACY_TITLES_BY_IDNAME = {
     # the default title for a few days and is added explicitly because the
     # dictionary pairing below only knows the current label.
     'MIMINode_Texture_Bind': _historical_titles(tr("Slot Texture Bind")) + ("Texture Bind",),
+    # Hash titles used to stay in the creation language even after switching
+    # addon languages. Recognize both defaults without changing custom labels.
+    'MIMINode_Hash_Texture_Bind': _historical_titles("Hash Texture Bind"),
+    'MIMINode_Hash_Texture_Global': _historical_titles("Global Hash Texture Bind"),
 }
 
 
@@ -130,7 +142,9 @@ def migrate_legacy_node_titles(scene=None):
             node.label = tr(type(node).bl_label)
             # The new title is longer than the old one, so the node has to grow
             # as well; every node type listed above provides these two methods.
+            old_width = node.width
             node.update_node_width(node.width_texts())
+            node.width = max(old_width, node.width)
             updated_count += 1
     return updated_count
 

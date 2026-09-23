@@ -6,6 +6,7 @@ import re
 from ..common.d3d11_gametype import D3D11GameType
 from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
+from ..common.texture_naming import normalize_texture_role
 
 from ..utils.json_utils import JsonUtils
 from ..workspace.texture_metadata_helper import TextureMetadataResolver
@@ -635,7 +636,18 @@ class DrawIBModel:
 
                 source_type = str(binding.get("source_type", "") or "")
                 target_filename_override = ""
-                if source_type in ("MARK", "FILE") and str(binding.get("mark_name", "") or "").strip():
+                if binding.get("preserve_mark_filename", False):
+                    # Scanned rows already identify a mark from the connected
+                    # scope. Do not resolve the name again on every passing
+                    # object: another Submesh may use the same name/hash.
+                    if not condition_str:
+                        suffix = os.path.splitext(binding.get("file_path", ""))[1].lower()
+                        role = normalize_texture_role(binding.get("mark_name", ""))
+                        target_filename_override = texture_hash + "_" + role + suffix
+                    # Conditional states need distinct resources/files. Sharing
+                    # the marked basename would make the last copied image win
+                    # regardless of the active switch state.
+                elif source_type in ("MARK", "FILE") and str(binding.get("mark_name", "") or "").strip():
                     # A selected Hash Source Mark identifies the generated
                     # filename that the user expects to see in Textures. Keep
                     # that name even when the replacement bytes come from an
@@ -677,6 +689,11 @@ class DrawIBModel:
                         + "' for object '" + owner_name + "'."
                     )
 
+                # An unconditional cleared row only restores the output file.
+                # A switch branch instead binds its original image in that
+                # state, so other branches can still use replacement images.
+                if binding.get("restore_original", False) and not condition_str:
+                    continue
                 resolved_rows.append({
                     "texture_hash": texture_hash,
                     "condition_str": condition_str,
