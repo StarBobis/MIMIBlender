@@ -595,6 +595,9 @@ class BluePrintModel:
                                 "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
                                 "source_type": str(getattr(item, "source_type", "") or ""),
                                 "file_path": file_path,
+                                "mark_name": str(getattr(item, "mark_source_name", "") or ""),
+                                "mark_source_submesh": str(getattr(item, "mark_source_submesh", "") or ""),
+                                "mark_source_file_path": str(getattr(item, "mark_source_file_path", "") or ""),
                                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                                 "node_label": node_label,
                             })

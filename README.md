@@ -22,7 +22,7 @@ MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 MMT 与 3Dmig
 ### 2. 蓝图（Blueprint）节点化 Mod 逻辑编辑器
 在节点编辑器中以可视化节点组织一个 Mod 的全部逻辑，节点类型包括：
 - **对象节点 / 对象列表节点**：引用场景对象，对象列表支持折叠扇出与批量设置子网格。
-- **贴图绑定 / Hash 贴图节点**：绑定贴图资源；Hash 贴图支持连接物体的条件替换，以及不连接任何节点的全局 Hash 外部贴图替换。
+- **贴图绑定 / Hash 贴图节点**：绑定贴图资源；Hash 贴图支持连接物体的条件替换，以及不连接任何节点的全局 Hash 替换（可直接复用工作空间中已标记的 Hash 贴图）。
 - **形态键节点**：按按键切换形态键数值。
 - **时间开关系列节点**（Time Switch / Time Position Switch / Time Shape Key）：按时间轴驱动的动画切换，支持循环与按键触发单次播放模式，附带动画烘焙器。
 - **面部 Mod 导出节点**：按面部分组导出。
@@ -146,7 +146,7 @@ MIMIBlender is the **Blender add-on half of MIMITools**: a game-mod authoring to
 ## What it can do
 
 - **One-click reverse import** from an MMT workspace ("Import All From MMT Workspace" / "Import MMT Model"): DrawIB-based naming, part aliases, shape keys, paired baked-mirror workflow, and a lossless raw-byte round-trip channel for GIMI/SRMI vertex payloads Blender cannot natively represent.
-- **Blueprint node editor**: visual node graphs for mod logic — object / object-list, per-object texture & conditional hash-texture bind, unconnected global hash-texture replacement, shape key, time-switch animation nodes (loop or key-triggered, with baking), face-mod export, groups, result outputs, file drag-and-drop, Naraka-specific nodes.
+- **Blueprint node editor**: visual node graphs for mod logic — object / object-list, per-object texture & conditional hash-texture bind, unconnected global hash-texture replacement (including marked workspace textures), shape key, time-switch animation nodes (loop or key-triggered, with baking), face-mod export, groups, result outputs, file drag-and-drop, Naraka-specific nodes.
 - **One-click Generate Mod**: exports buffers + INI into the MMT mod output folder for the registered presets (GIMI, SRMI, ZZMI/ZZMIDX12, WWMI, HIMI, EFMI, NTEMI, YYSLS, Naraka/NarakaM, SnowBreak, IdentityV, GF2, AILIMIT — see the table above).
 - **Model processing panel**: split by UV loose parts / vertex groups / DrawIndexed, batch vertex-group management, basic bone generation, TANGENT/COLOR recomputation, perfect mesh mirroring, and more.
 - **Fast texture panel**: DedupedTextures loading, LOD list, apply/preview textures.

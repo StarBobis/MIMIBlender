@@ -16,8 +16,8 @@ directly. The test checks that:
    unconditional + conditional) raise ValueError;
 4. the automatic hash pipeline skip hands managed hashes over to the
    conditional sections;
-5. unconnected global hash rows copy an external file and emit an
-   unconditional global override, refreshing the copy on re-export.
+5. unconnected global hash rows copy external and marked texture files and
+   emit unconditional global overrides, refreshing copies on re-export.
 """
 
 import importlib.util
@@ -406,14 +406,27 @@ def test_global_hash_override(modules, texture_root):
     config_mod.GlobalConfig._texture_root = texture_root
 
     source_file = os.path.join(texture_root, "global_source.png")
+    marked_source_file = os.path.join(texture_root, "marked_source.dds")
     with open(source_file, "wb") as file:
         file.write(b"global bytes v1")
+    with open(marked_source_file, "wb") as file:
+        file.write(b"marked bytes")
 
     global_rows = [{
         "enabled": True,
         "texture_hash": HASH_BLUE,
         "source_type": "FILE",
         "file_path": source_file,
+        "resource_name": "",
+        "node_label": "GlobalTest",
+    }, {
+        "enabled": True,
+        "texture_hash": HASH_RED,
+        "source_type": "MARK",
+        "file_path": "",
+        "mark_name": "DiffuseMap",
+        "mark_source_submesh": "94517393-0",
+        "mark_source_file_path": marked_source_file,
         "resource_name": "",
         "node_label": "GlobalTest",
     }]
@@ -430,11 +443,16 @@ def test_global_hash_override(modules, texture_root):
     assert "[ResourceHashGlobal_" + HASH_BLUE + "]" in ini_text, ini_text
     assert "[TextureOverride_Texture_" + HASH_BLUE + "_Global]" in ini_text, ini_text
     assert "this = ResourceHashGlobal_" + HASH_BLUE in ini_text, ini_text
+    assert "[ResourceHashGlobal_" + HASH_RED + "]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_RED + "_Global]" in ini_text, ini_text
 
     target_path = os.path.join(texture_root, "global", HASH_BLUE + "_global.png")
     assert os.path.exists(target_path), target_path
     with open(target_path, "rb") as file:
         assert file.read() == b"global bytes v1"
+    marked_target_path = os.path.join(texture_root, "global", HASH_RED + "_global.dds")
+    with open(marked_target_path, "rb") as file:
+        assert file.read() == b"marked bytes"
 
     # An explicit node selection refreshes an existing generated copy.
     with open(source_file, "wb") as file:
@@ -449,7 +467,7 @@ def test_global_hash_override(modules, texture_root):
     managed = ini_helper_mod.M_IniHelper._collect_hash_binding_managed_hashes(
         {}, global_hash_texture_binding_list=global_rows
     )
-    assert managed == {HASH_BLUE}, managed
+    assert managed == {HASH_BLUE, HASH_RED}, managed
 
     # A global default must serialize before a conditional refinement for the
     # same hash, so a false condition returns to the global replacement.

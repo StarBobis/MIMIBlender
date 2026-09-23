@@ -23,8 +23,9 @@ Texture sources for the conditional node:
 - FILE: copy an external image file into the generated mod.
 - RESOURCE: reference an existing resource name.
 
-Texture sources for the global node are FILE and RESOURCE. A global node has
-no upstream Submesh, so it cannot resolve a mark name safely.
+Texture sources for the global node are MARK, FILE and RESOURCE. A global
+node discovers Hash-style marks across the current workspace instead of using
+an upstream Submesh.
 '''
 import os
 import re
@@ -82,8 +83,12 @@ def _texture_hash_item_refresh_display(item):
 
 def _texture_hash_item_file_path_changed(item, context):
     '''Treat a manually typed path as an explicit FILE source.'''
-    if str(getattr(item, "file_path", "") or "").strip() and str(getattr(item, "source_type", "") or "") != 'FILE':
-        item.source_type = 'FILE'
+    if str(getattr(item, "file_path", "") or "").strip():
+        if str(getattr(item, "source_type", "") or "") != 'FILE':
+            item.source_type = 'FILE'
+        item.mark_source_submesh = ""
+        item.mark_source_name = ""
+        item.mark_source_file_path = ""
     _texture_hash_item_refresh_display(item)
 
 
@@ -101,14 +106,97 @@ def _find_hash_item_owner(item):
     return None
 
 
+def _workspace_submesh_names_for_global_marks():
+    '''Return every workspace Submesh name that can own a Hash-style mark.'''
+    try:
+        from ..workspace.mmt_workspace import MMTWorkSpace
+
+        submesh_name_list = []
+        lod_folder_dict = MMTWorkSpace.get_lod_submesh_folderpath_dict()
+        for lod_name, folder_path_list in lod_folder_dict.items():
+            for folder_path in folder_path_list:
+                folder_name = os.path.basename(os.path.normpath(folder_path))
+                submesh_name_list.append(
+                    (lod_name + "." + folder_name) if lod_name else folder_name
+                )
+
+        if not submesh_name_list:
+            for folder_path in MMTWorkSpace.get_submesh_folderpath_list():
+                submesh_name_list.append(os.path.basename(os.path.normpath(folder_path)))
+
+        return sorted(set(name for name in submesh_name_list if name))
+    except Exception:
+        # A missing workspace should leave the dropdown usable and empty.
+        return []
+
+
+def _find_global_mark_source_path(submesh_name, mark_filename):
+    '''Find a marked texture file below one workspace Submesh folder.'''
+    if not submesh_name or not mark_filename:
+        return ""
+    try:
+        from ..workspace.mmt_workspace import MMTWorkSpace
+
+        submesh_folder = MMTWorkSpace.get_submesh_folder_path(submesh_name)
+        if not os.path.isdir(submesh_folder):
+            return ""
+        wanted_name = os.path.basename(str(mark_filename)).casefold()
+        for root, _, filenames in os.walk(submesh_folder):
+            for filename in filenames:
+                if filename.casefold() == wanted_name:
+                    return os.path.join(root, filename)
+    except Exception:
+        pass
+    return ""
+
+
+def _load_global_hash_mark_entries():
+    '''Build stable enum records for Hash marks across the workspace.'''
+    entries = []
+    seen_keys = set()
+    for submesh_name in _workspace_submesh_names_for_global_marks():
+        try:
+            mark_dict_list = _load_submesh_mark_dicts(submesh_name)
+        except Exception:
+            # One incomplete Submesh must not hide valid marks elsewhere.
+            continue
+        for mark_dict in mark_dict_list:
+            if mark_dict["type"] != "Hash" or not mark_dict["hash"]:
+                continue
+            mark_name = str(mark_dict["name"] or "").strip()
+            source_path = _find_global_mark_source_path(
+                submesh_name=submesh_name,
+                mark_filename=mark_dict["filename"],
+            )
+            source_key = (submesh_name, mark_name.lower(), mark_dict["hash"].lower())
+            if not mark_name or source_key in seen_keys:
+                continue
+            seen_keys.add(source_key)
+            safe_submesh = re.sub(r"[^A-Za-z0-9_]", "_", submesh_name)
+            safe_mark = re.sub(r"[^A-Za-z0-9_]", "_", mark_name)
+            identifier = "global_hash_" + mark_dict["hash"].lower() + "_" + safe_submesh + "_" + safe_mark
+            entries.append({
+                "identifier": identifier[:63],
+                "label": mark_name + " [" + submesh_name + "]",
+                "name": mark_name,
+                "submesh_name": submesh_name,
+                "hash": mark_dict["hash"].lower(),
+                "filename": mark_dict["filename"],
+                "source_path": source_path,
+            })
+    return entries
+
+
+def _find_global_hash_mark_by_identifier(identifier):
+    '''Find the workspace mark represented by a global enum identifier.'''
+    for entry in _load_global_hash_mark_entries():
+        if entry["identifier"] == str(identifier or ""):
+            return entry
+    return None
+
+
 def _texture_hash_source_type_items(item, context):
-    '''Hide mark sources on a global node that has no Submesh.'''
-    owner = _find_hash_item_owner(item)
-    if getattr(owner, "bl_idname", "") == 'MIMINode_Hash_Texture_Global':
-        return [
-            ('FILE', tr("External File"), tr("Copy an external image file into the generated mod")),
-            ('RESOURCE', tr("Existing Resource"), tr("Reference an existing [ResourceXXX] section by name")),
-        ]
+    '''Return source choices for either conditional or global hash nodes.'''
     return [
         ('FILE', tr("External File"), tr("Copy an external image file into the generated mod")),
         ('MARK', tr("Marked Texture"), tr("Reuse the source file of a Hash-style mark from the SSMT5 texture mark page of this Submesh")),
@@ -151,6 +239,12 @@ class MIMITextureHashItem(PropertyGroup):
         update=lambda self, context: _texture_hash_item_mark_changed(self),
     ) # type: ignore
 
+    # Global mark selections keep their source identity separately because the
+    # same mark label can occur in many Submeshes in one workspace.
+    mark_source_submesh: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    mark_source_name: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    mark_source_file_path: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+
     file_path: bpy.props.StringProperty(
         name=tr("Texture File"),
         description=tr("Image file (dds, png, jpg, bmp or tga) copied into the generated mod at export time"),
@@ -173,7 +267,22 @@ def _find_owner_hash_bind_node(item):
 
 
 def _texture_hash_item_mark_changed(item):
-    '''Picking a mark fills the texture hash from the mark's MarkHash value.'''
+    '''Picking a mark fills the hash and source metadata automatically.'''
+    owner = _find_owner_hash_bind_node(item)
+    if getattr(owner, "bl_idname", "") == 'MIMINode_Hash_Texture_Global':
+        global_mark = _find_global_hash_mark_by_identifier(item.mark_name)
+        if global_mark:
+            item.texture_hash = global_mark["hash"]
+            item.mark_source_submesh = global_mark["submesh_name"]
+            item.mark_source_name = global_mark["name"]
+            item.mark_source_file_path = global_mark["source_path"]
+        else:
+            item.mark_source_submesh = ""
+            item.mark_source_name = ""
+            item.mark_source_file_path = ""
+        _texture_hash_item_refresh_display(item)
+        return
+
     mark_dict = _find_submesh_mark_by_name(item, _find_owner_hash_bind_node)
     if mark_dict and mark_dict["hash"]:
         item.texture_hash = mark_dict["hash"]
@@ -181,10 +290,16 @@ def _texture_hash_item_mark_changed(item):
 
 
 def _texture_hash_bind_mark_name_items(item):
-    '''Enum items for the mark name dropdown: Hash-style marks of the upstream Submesh.'''
+    '''Enum items for conditional or workspace-wide Hash mark dropdowns.'''
     empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
     try:
         node = _find_owner_hash_bind_node(item)
+        if getattr(node, "bl_idname", "") == 'MIMINode_Hash_Texture_Global':
+            global_items = list(empty_items)
+            for entry in _load_global_hash_mark_entries():
+                global_items.append((entry["identifier"], entry["label"], entry["source_path"] or entry["filename"]))
+            return global_items
+
         submesh_name = _resolve_upstream_submesh_name(node)
         if not submesh_name:
             return empty_items
@@ -564,7 +679,11 @@ class MIMINode_Hash_Texture_Global(MIMINodeBase):
         box.prop(item, "source_type")
 
         source_type = str(item.source_type or "")
-        if source_type == 'FILE':
+        if source_type == 'MARK':
+            box.prop(item, "mark_name")
+            if not item.mark_source_file_path:
+                box.label(text=tr("Marked texture source file was not found"), icon='ERROR')
+        elif source_type == 'FILE':
             _draw_hash_file_picker(
                 layout=box,
                 item=item,
@@ -575,7 +694,7 @@ class MIMINode_Hash_Texture_Global(MIMINodeBase):
         elif source_type == 'RESOURCE':
             box.prop(item, "resource_name")
         else:
-            box.label(text=tr("Global node accepts External File or Existing Resource"), icon='ERROR')
+            box.label(text=tr("Global node accepts Marked Texture, External File or Existing Resource"), icon='ERROR')
 
         hash_text = str(item.texture_hash or "").strip().lower()
         if hash_text and _TEXTURE_HASH_PATTERN.match(hash_text) is None:

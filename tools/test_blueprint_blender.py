@@ -59,14 +59,42 @@ class BlueprintTests(unittest.TestCase):
             filepath=str(source_path),
         )
         self.assertIn('FINISHED', result)
+        source_ids = [entry[0] for entry in addon.blueprint_node_hash_texture._texture_hash_source_type_items(item, bpy.context)]
+        self.assertIn('MARK', source_ids)
+
+        mark_source_path = Path(tempfile.gettempdir()) / "mimi_global_mark_test.dds"
+        mark_source_path.write_bytes(b"marked dds")
+        mark_item = node.texture_hash_items.add()
+        mark_identifier = "global_hash_fedc9876_94517393_0_DiffuseMap"
+        old_loader = addon.blueprint_node_hash_texture._load_global_hash_mark_entries
+        addon.blueprint_node_hash_texture._load_global_hash_mark_entries = lambda: [{
+            "identifier": mark_identifier,
+            "label": "DiffuseMap [94517393-0]",
+            "name": "DiffuseMap",
+            "submesh_name": "94517393-0",
+            "hash": "fedc9876",
+            "filename": "diffuse.dds",
+            "source_path": str(mark_source_path),
+        }]
+        try:
+            mark_item.source_type = 'MARK'
+            mark_item.mark_name = mark_identifier
+            self.assertEqual(mark_item.texture_hash, "fedc9876")
+            self.assertEqual(mark_item.mark_source_file_path, str(mark_source_path))
+        finally:
+            addon.blueprint_node_hash_texture._load_global_hash_mark_entries = old_loader
 
         from MIMIBlender.model.blueprint_model import BluePrintModel
-        source_path.unlink(missing_ok=True)
         rows = BluePrintModel._collect_global_hash_texture_bindings(self.tree)
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["texture_hash"], "0123abcd")
         self.assertEqual(rows[0]["source_type"], "FILE")
         self.assertEqual(rows[0]["file_path"], bpy.path.abspath(str(source_path)))
+        self.assertEqual(rows[1]["texture_hash"], "fedc9876")
+        self.assertEqual(rows[1]["source_type"], "MARK")
+        self.assertEqual(rows[1]["mark_source_file_path"], str(mark_source_path))
+        source_path.unlink(missing_ok=True)
+        mark_source_path.unlink(missing_ok=True)
 
     def test_socket_draw_labels(self):
         # Socket circles are drawn by Blender, independently of this callback.

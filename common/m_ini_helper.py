@@ -301,8 +301,11 @@ class M_IniHelper:
             seen_hashes.add(texture_hash)
 
             source_type = str(binding.get("source_type", "") or "")
-            if source_type == "FILE":
-                source_path = str(binding.get("file_path", "") or "").strip()
+            if source_type in ("FILE", "MARK"):
+                if source_type == "MARK":
+                    source_path = str(binding.get("mark_source_file_path", "") or "").strip()
+                else:
+                    source_path = str(binding.get("file_path", "") or "").strip()
                 if not source_path:
                     raise ValueError(
                         "Global Hash Texture Bind node '" + node_label
@@ -348,7 +351,7 @@ class M_IniHelper:
                 raise ValueError(
                     "Global Hash Texture Bind node '" + node_label
                     + "': source type '" + source_type
-                    + "' is not supported; use External File or Existing Resource."
+                    + "' is not supported; use Marked Texture, External File or Existing Resource."
                 )
 
         if not resolved_rows:
