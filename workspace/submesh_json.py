@@ -57,6 +57,13 @@ class SubmeshDrawCallSegment:
 
 
 @dataclass
+class SubmeshMatchComponent:
+	ComponentIndex:int
+	MatchFirstIndex:int
+	MatchIndexCount:int
+
+
+@dataclass
 class SubmeshCategoryBuffer:
 	FileName:str
 	Type:str
@@ -106,6 +113,7 @@ class SubmeshJson:
 	ShapeKeysInfo:dict = field(init=False, default_factory=dict)
 	DrawCallIndexList:list[str] = field(init=False, default_factory=list)
 	DrawCallSegmentList:list[SubmeshDrawCallSegment] = field(init=False, default_factory=list)
+	MatchComponentList:list[SubmeshMatchComponent] = field(init=False, default_factory=list)
 	IndexBufferList:list[SubmeshIndexBuffer] = field(init=False, default_factory=list)
 	CategoryBufferList:list[SubmeshCategoryBuffer] = field(init=False, default_factory=list)
 	ShapeKeyPositionBufferList:list[SubmeshShapeKeyPositionBuffer] = field(init=False, default_factory=list)
@@ -161,6 +169,16 @@ class SubmeshJson:
 				MatchIndexCount=int(draw_call_segment_json.get("MatchIndexCount", 0) or 0),
 			)
 			self.DrawCallSegmentList.append(draw_call_segment)
+
+		self.MatchComponentList = []
+		for match_component_json in self.JsonDict.get("MatchComponentList", []):
+			self.MatchComponentList.append(
+				SubmeshMatchComponent(
+					ComponentIndex=int(match_component_json.get("ComponentIndex", 0) or 0),
+					MatchFirstIndex=int(match_component_json.get("MatchFirstIndex", 0) or 0),
+					MatchIndexCount=int(match_component_json.get("MatchIndexCount", 0) or 0),
+				)
+			)
 
 		self.IndexBufferList = []
 		for index_buffer_json in self.JsonDict.get("IndexBufferList", []):

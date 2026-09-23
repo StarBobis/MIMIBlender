@@ -314,14 +314,18 @@ class SwordImportAllReversed(I18nOperator):
         Every Json of one DrawIB folder describes the same index buffers with
         a different candidate vertex layout, so the recorded match ranges
         (IndexOffset, IndexCount) are identical across the files; unioning
-        them is only a safeguard. The ranges are sorted by their draw-range
-        size (IndexCount) ascending and numbered Component 0, 1, 2, ...
+        them is only a safeguard. A complete MatchComponentList preserves
+        source Component numbers, including entries with no draw segment.
+        Older JSON files fall back to range-size ordering.
         Returns a dict mapping (IndexOffset, IndexCount) -> component index.
         '''
         # Ranges from per-segment match identities (single-IB multi-component
         # groups such as WWMI, where one IB entry can only hold one
         # whole-buffer range) and from per-IB-entry identities (multi-IB
         # groups such as GIMI). Per-segment identities win when present.
+        # New WWMI outputs provide the complete source table, including empty
+        # Component sections. It is authoritative when available.
+        declared_component_ranges = {}
         segment_ranges = set()
         entry_ranges_all = set()
         top_level_ranges = set()
@@ -334,6 +338,12 @@ class SwordImportAllReversed(I18nOperator):
                 print("Component map: failed to read " + json_filepath + ": " + str(e))
                 continue
 
+            for match_component in submesh_json.MatchComponentList:
+                if match_component.MatchIndexCount > 0:
+                    declared_component_ranges[
+                        (match_component.MatchFirstIndex, match_component.MatchIndexCount)
+                    ] = match_component.ComponentIndex
+
             for draw_call_segment in submesh_json.DrawCallSegmentList:
                 if draw_call_segment.MatchIndexCount > 0:
                     segment_ranges.add((draw_call_segment.MatchFirstIndex, draw_call_segment.MatchIndexCount))
@@ -343,6 +353,11 @@ class SwordImportAllReversed(I18nOperator):
                     entry_ranges_all.add((index_buffer.IndexOffset, index_buffer.IndexCount))
             if submesh_json.IndexCount > 0:
                 top_level_ranges.add((submesh_json.IndexOffset, submesh_json.IndexCount))
+
+        if declared_component_ranges:
+            # Empty source Components are intentionally present in this map;
+            # they receive a number but never produce an imported mesh object.
+            return declared_component_ranges
 
         if segment_ranges:
             # Segments carry their own component identity: the IB entry only
@@ -374,10 +389,10 @@ class SwordImportAllReversed(I18nOperator):
         lands in a separate collection, so wrong candidates can be toggled or
         deleted collection by collection instead of picking single objects out
         of one big pile of identically named meshes.
-        Meshes are named {DrawIB}-Component {N}.{Alias}: the Component ordinal
-        numbers the DrawIB's IB partitions sorted by draw-range size (the same
-        partition gets the same number in every data type), and segments
-        without an alias fall back to the classic numeric draw-range suffix.
+        Meshes are named {DrawIB}-Component {N}.{Alias}: newer WWMI JSON
+        preserves the source Component table, including empty entries; older
+        JSON falls back to range-size ordering. Segments without an alias fall
+        back to the classic numeric draw-range suffix.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
