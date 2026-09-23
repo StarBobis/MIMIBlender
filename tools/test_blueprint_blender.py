@@ -96,6 +96,119 @@ class BlueprintTests(unittest.TestCase):
         source_path.unlink(missing_ok=True)
         mark_source_path.unlink(missing_ok=True)
 
+    def test_wwmi_connected_hash_file_export(self):
+        # Exercise the screenshot's real node chain and the WWMI constructor.
+        # Only geometry assembly and workspace lookups are mocked: parsing,
+        # binding resolution, INI sections and file copying stay real.
+        from contextlib import ExitStack
+        from types import SimpleNamespace
+        from MIMIBlender.games.wwmi import model as wwmi
+        from MIMIBlender.model.draw_call_model import DrawCallModel
+        from MIMIBlender.common.m_ini_helper import M_IniHelper
+        from MIMIBlender.common.m_ini_builder import M_IniBuilder
+        from MIMIBlender.workspace.texture_metadata_helper import TextureMarkUpInfo
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            source = root / 'Components-0 t=679ad2f5.dds'
+            source.write_bytes(b'external replacement bytes')
+            mark_source = root / 'light.dds'
+            mark_source.write_bytes(b'marked light bytes')
+            output = root / 'Textures'
+            output.mkdir()
+            target = output / '6077b727_DiffuseMap.dds'
+            target.write_bytes(b'old generated texture')
+
+            # Object List -> Group -> Hash Bind -> Group -> Generate Mod.
+            objects = self.tree.nodes.new('MIMINode_Object_List')
+            for name in ('mesh_a', 'mesh_b'):
+                lists._append_object_list_item(objects, name)
+            before = self.tree.nodes.new('MIMINode_Object_Group')
+            bind = self.tree.nodes.new('MIMINode_Hash_Texture_Bind')
+            after = self.tree.nodes.new('MIMINode_Object_Group')
+            result = self.tree.nodes.new('MIMINode_Result_Output')
+            for upstream, downstream in ((objects, before), (before, bind), (bind, after), (after, result)):
+                self.tree.links.new(upstream.outputs[0], downstream.inputs[0])
+
+            marks = []
+            for name, texture_hash in (('DiffuseMap', '6077b727'), ('LightMap', '10d9df5f')):
+                mark = TextureMarkUpInfo()
+                mark.mark_name, mark.mark_type, mark.mark_hash = name, 'Hash', texture_hash
+                mark.mark_filename = name + '.dds'
+                marks.append(mark)
+            # Stable enum items isolate discovery, not the actual RNA rows or
+            # the blueprint collector that serializes the user's selection.
+            stack.enter_context(patch.object(addon.blueprint_node_hash_texture, '_texture_hash_bind_mark_name_items', return_value=[
+                ('DiffuseMap', 'DiffuseMap', ''), ('LightMap', 'LightMap', ''),
+            ]))
+            for name, texture_hash, source_type in (('DiffuseMap', '6077b727', 'FILE'), ('LightMap', '10d9df5f', 'MARK')):
+                item = bind.texture_hash_items.add()
+                item.mark_name = name
+                item.texture_hash = texture_hash
+                item.source_type = source_type
+                if source_type == 'FILE':
+                    item.file_path = str(source)
+
+            parser, _ = self.parser()
+            parser.ordered_draw_obj_data_model_list = []
+            submesh_name = 'LOD0.94517393-0'
+            def emit(**kwargs):
+                parser.ordered_draw_obj_data_model_list.append(DrawCallModel(
+                    obj_name=kwargs['object_name'], submesh_name=submesh_name,
+                ))
+            parser._emit_object_source = emit
+            parser.parse_current_node(result, [])
+            self.assertEqual(len(parser.ordered_draw_obj_data_model_list), 2)
+            self.assertTrue(all(len(draw.hash_texture_binding_list) == 2 for draw in parser.ordered_draw_obj_data_model_list))
+
+            # WWMI owns a separate model and does not run DrawIBModel.__init__.
+            # Mock expensive geometry while still calling WWMI.__post_init__.
+            game_type = SimpleNamespace(GameTypeName='test', CategoryStrideDict={'Position': 12})
+            merged = bpy.data.objects.new('wwmi_texture_test', None)
+            merged_name = merged.name
+            self.addCleanup(lambda: bpy.data.objects.remove(bpy.data.objects[merged_name]) if merged_name in bpy.data.objects else None)
+            stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'get_drawib_aliasname_dict', return_value={}))
+            stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'check_and_get_submesh_json_path', return_value='test.json'))
+            stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'get_ordered_submesh_name_list_by_drawib', return_value=[submesh_name]))
+            stack.enter_context(patch.object(wwmi, 'SubmeshJson', return_value=SimpleNamespace(JsonDict={})))
+            stack.enter_context(patch.object(wwmi.D3D11GameType, 'from_submesh_json_dict', return_value=game_type))
+            stack.enter_context(patch.object(wwmi.WWMIInfoHelper, 'build_from_json_list', return_value=SimpleNamespace()))
+            stack.enter_context(patch.object(wwmi.DrawIBModelWWMI, 'build_merged_object', return_value=SimpleNamespace(object=merged, components=[])))
+            stack.enter_context(patch.object(wwmi.TextureMetadataResolver, 'load_submesh_texture_markup_info_from_all_submeshes', return_value={submesh_name: marks}))
+            # No vertex buffers are needed to test a texture export. Keep the
+            # constructor running past resolution with a zero-sized Position
+            # buffer, rather than bypassing the constructor under test.
+            stack.enter_context(patch.object(wwmi.ObjBufferHelper, 'check_and_verify_attributes'))
+            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_obj_element_context', return_value=SimpleNamespace(mesh=None, original_elementname_data_dict={}, final_elementname_data_dict={})))
+            stack.enter_context(patch.object(wwmi.ObjBufferHelper, 'convert_to_element_vertex_ndarray', return_value={}))
+            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_wwmi_obj_buffer_result', return_value=SimpleNamespace(category_buffer_dict={'Position': b''})))
+            stack.enter_context(patch.object(M_IniHelper, '_get_slot_texture_source_path', return_value=str(mark_source)))
+            # Explicit bindings must still work with automatic textures off.
+            # Redirect all copy destinations into the disposable test folder;
+            # this test must never overwrite a user's generated Mod textures.
+            stack.enter_context(patch.object(wwmi.MIMIGlobalProperties, 'forbid_auto_texture_ini', return_value=True))
+            stack.enter_context(patch.object(wwmi.GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output)))
+            model = wwmi.DrawIBModelWWMI(draw_ib='94517393', blueprint_model=parser)
+            # Check both job generation and object identity: detached copies
+            # would leave the INI writer looking at unresolved draw calls.
+            self.assertEqual(len(model.object_texture_binding_file_list), 2)
+            self.assertIs(model.submesh_model_list[0].drawcall_model_list[0], model.submesh_drawcall_groups[0][0])
+            self.assertEqual(M_IniHelper._collect_hash_binding_managed_hashes({'94517393': model}), {'6077b727', '10d9df5f'})
+
+            builder = M_IniBuilder()
+            M_IniHelper.add_object_texture_binding_resource_sections(builder, model)
+            M_IniHelper.generate_hash_style_object_texture_ini(builder, {'94517393': model})
+            text = '\n'.join(line for section in builder.ini_section_list for line in section.SectionLineList)
+            self.assertIn('filename = Textures\\6077b727_DiffuseMap.dds', text)
+            self.assertIn('[TextureOverride_Texture_6077b727_Switch]', text)
+            M_IniHelper.move_object_texture_binding_files(model)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual((output / '10d9df5f_LightMap.dds').read_bytes(), mark_source.read_bytes())
+            # Re-export must refresh an existing generated file, not skip it.
+            source.write_bytes(b'changed external bytes')
+            M_IniHelper.move_object_texture_binding_files(model)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+
     def test_socket_draw_labels(self):
         # Socket circles are drawn by Blender, independently of this callback.
         # Record labels for linked and unlinked input/output sockets alike.

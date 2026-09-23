@@ -366,6 +366,28 @@ class DrawIBModel:
         slug = re.sub(r"_+", "_", slug).strip("_")
         return (slug or "obj")[:limit]
 
+    @classmethod
+    def resolve_texture_bindings_for_model(cls, model):
+        '''Resolve bindings for a game-specific model without assembling buffers.
+
+        WWMI builds geometry independently and never runs our constructor.
+        Use a metadata-only adapter so it shares the same binding validation,
+        resource naming and copy jobs rather than duplicating those rules.
+        The Submesh views must contain the original DrawCallModel instances:
+        resolved rows are then visible to the game's INI writer as well.
+        '''
+        resolver = cls.__new__(cls)
+        resolver.draw_ib = model.draw_ib
+        resolver.d3d11_game_type = model.d3d11_game_type
+        resolver.submesh_model_list = model.submesh_model_list
+        resolver.submesh_texturemarkinfolist_dict = model.submesh_texturemarkinfolist_dict
+        # Slot resolution initializes both job lists; Hash resolution appends
+        # to them. Keep this order even for a model with no Slot bindings.
+        resolver.resolve_texture_slot_bindings()
+        resolver.resolve_hash_texture_bindings()
+        model.object_texture_binding_resource_list = resolver.object_texture_binding_resource_list
+        model.object_texture_binding_file_list = resolver.object_texture_binding_file_list
+
     def resolve_texture_slot_bindings(self):
         '''Resolve Texture Bind node rows into ready-made INI lines.
 

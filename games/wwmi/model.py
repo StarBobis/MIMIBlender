@@ -31,6 +31,7 @@ from ...workspace.mmt_workspace import MMTWorkSpace
 from ...common.d3d11_gametype import D3D11GameType
 from ...model.blueprint_model import BluePrintModel
 from ...model.draw_call_model import DrawCallModel
+from ...model.drawib_model import DrawIBModel
 from ...workspace.submesh_json import SubmeshJson
 from ...workspace.texture_metadata_helper import TextureMetadataResolver
 
@@ -62,6 +63,10 @@ class DrawIBModelWWMI:
 
     submesh_model_list: list = field(init=False, default_factory=list, repr=False)
     submesh_texturemarkinfolist_dict: dict = field(init=False, default_factory=dict, repr=False)
+    # Explicit node resources and copy jobs are separate from automatic marks.
+    # WWMI does not inherit the standard DrawIB model's dataclass fields.
+    object_texture_binding_resource_list: list = field(init=False, default_factory=list, repr=False)
+    object_texture_binding_file_list: list = field(init=False, default_factory=list, repr=False)
 
     blend_remap_forward_buffer: numpy.ndarray | None = field(init=False, default=None, repr=False)
     blend_remap_reverse_buffer: numpy.ndarray | None = field(init=False, default=None, repr=False)
@@ -153,10 +158,20 @@ class DrawIBModelWWMI:
                 display_str=submesh_name,  # initially equals submesh_name, later overridden by apply_alias_dict
                 match_first_index=mfi_int,
                 d3d11_game_type=self.d3d11_game_type,
+                # Preserve the original objects, including their node bindings
+                # and switch conditions, for the shared texture export pass.
+                drawcall_model_list=[
+                    draw for draw in self.ordered_drawcall_model_list
+                    if draw.match_submesh_name == submesh_name
+                ],
             ))
 
         if self.submesh_model_list:
             self.submesh_texturemarkinfolist_dict = TextureMetadataResolver.load_submesh_texture_markup_info_from_all_submeshes(draw_ib_model=self)
+
+        # The standard DrawIB constructor resolves bindings, but WWMI never
+        # calls it. Resolve only after its Submesh views and marks are ready.
+        DrawIBModel.resolve_texture_bindings_for_model(self)
 
         ObjBufferHelper.check_and_verify_attributes(obj=self.merged_object.object, d3d11_game_type=self.d3d11_game_type)
 
