@@ -310,9 +310,16 @@ class SwordImportAllReversed(I18nOperator):
         ssmt_fmt format import:
         Walk all subfolders of the reverse output folder. Each subfolder is named
         after its DrawIB (e.g. 1fbe8217, 056da8f3) and may contain several Json
-        files (one per data type). Create one drawib_<DrawIB> collection per
-        subfolder and import every Json file of that subfolder into it, naming
-        the meshes with the classic Submesh scheme {DrawIB}-{IndexCount}-{FirstIndex}.
+        files (one per candidate data type, e.g. GPU_P12_N12_..._.json), because
+        the reverse pass cannot know which vertex layout is the original one.
+
+        For every subfolder one drawib_<DrawIB> parent collection is created;
+        inside it, each Json data type gets its own child collection named after
+        the Json file stem. Every candidate data type therefore lands in a
+        separate collection, so wrong candidates can be toggled or deleted
+        collection by collection instead of picking single objects out of one
+        big pile of identically named meshes.
+        Meshes keep the classic Submesh naming scheme {DrawIB}-{IndexCount}-{FirstIndex}.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
@@ -341,11 +348,25 @@ class SwordImportAllReversed(I18nOperator):
             if not json_files:
                 continue
 
-            # Create one collection per DrawIB subfolder, named after the folder
-            # (not after the Json data-type file name).
-            datatype_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + drawib_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
+            # Create one parent collection per DrawIB subfolder, named after the
+            # folder (not after the Json data-type file name).
+            drawib_collection = CollectionUtils.create_new_collection(collection_name="drawib_" + drawib_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
-            for json_filepath in json_files:
+            # Every Json file holds one candidate data type. Sort them so the
+            # outliner order stays deterministic, and give each candidate its
+            # own child collection named after the Json file stem (the stem is
+            # the data-type name, so the collection shows it directly).
+            for json_filepath in sorted(json_files):
+                datatype_name = os.path.splitext(os.path.basename(json_filepath))[0]
+
+                # Link under the DrawIB parent via the parent's resolved name;
+                # repeat imports may carry a Blender .001 suffix.
+                datatype_collection = CollectionUtils.create_new_collection(
+                    collection_name=datatype_name,
+                    color_tag=CollectionColor.White,
+                    link_to_parent_collection_name=drawib_collection.name,
+                )
+
                 try:
                     # Call the ssmt_fmt format import function; the DrawIB folder name
                     # is passed as the classic Submesh naming prefix so the imported
@@ -353,6 +374,13 @@ class SwordImportAllReversed(I18nOperator):
                     MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection, submesh_name_prefix=drawib_folder_name)
                     imported_count += 1
                 except Exception as e:
+                    # Roll back the failed candidate: drop any partially created
+                    # objects together with the now useless child collection, so
+                    # a broken data type never litters the outliner.
+                    for imported_obj in list(datatype_collection.objects):
+                        bpy.data.objects.remove(imported_obj, do_unlink=True)
+                    bpy.data.collections.remove(datatype_collection)
+
                     error_msg = tr("Import failed, skipped: {path} | Error: {error}").format(path=json_filepath, error=e)
                     print(error_msg)
                     self.report({'WARNING'}, error_msg)
@@ -361,6 +389,10 @@ class SwordImportAllReversed(I18nOperator):
         if imported_count == 0:
             self.report({"ERROR"}, tr("No Json files were imported from the ssmt_fmt reverse result"))
             return {'FINISHED'}
+
+        # Summarize the result so the user knows every candidate data type was
+        # imported into its own collection and can now compare them one by one.
+        self.report({'INFO'}, tr("Imported {count} data type(s); each one is in its own collection named after the data type, under the drawib_<DrawIB> collections.").format(count=imported_count))
 
         # Then point the image path to the current path
         reload_textures_from_folder(reverse_output_folder_path)
