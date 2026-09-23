@@ -9,6 +9,7 @@ from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
 from ..common.mmt_import_helper import MMTImportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
+from ..workspace.submesh_json import SubmeshJson
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
@@ -305,6 +306,45 @@ class SwordImportAllReversed(I18nOperator):
             return self._import_ssmt_fmt(context, reverse_output_folder_path)
         return self._import_ib_vb_fmt(context, reverse_output_folder_path)
 
+    @staticmethod
+    def _build_match_component_map(json_files: list) -> dict:
+        '''
+        Build the DrawIB-level Component numbering shared by every data type.
+
+        Every Json of one DrawIB folder describes the same index buffers with
+        a different candidate vertex layout, so the recorded match ranges
+        (IndexOffset, IndexCount) are identical across the files; unioning
+        them is only a safeguard. The ranges are sorted by their draw-range
+        size (IndexCount) ascending and numbered Component 0, 1, 2, ...
+        Returns a dict mapping (IndexOffset, IndexCount) -> component index.
+        '''
+        match_ranges = set()
+        for json_filepath in json_files:
+            try:
+                submesh_json = SubmeshJson(json_filepath)
+            except Exception as e:
+                # A Json that cannot even be parsed simply contributes no
+                # ranges; the import loop reports its own failure later.
+                print("Component map: failed to read " + json_filepath + ": " + str(e))
+                continue
+
+            # Prefer the per-IB match identity of newer reverse outputs; fall
+            # back to the Json top-level pair when entries do not record it.
+            entry_ranges = []
+            for index_buffer in submesh_json.IndexBufferList:
+                if index_buffer.IndexCount > 0:
+                    entry_ranges.append((index_buffer.IndexOffset, index_buffer.IndexCount))
+            if entry_ranges:
+                match_ranges.update(entry_ranges)
+            elif submesh_json.IndexCount > 0:
+                match_ranges.add((submesh_json.IndexOffset, submesh_json.IndexCount))
+
+        # Smallest draw range first: Component 0 is the tiniest part of the
+        # DrawIB, the last Component is the big main body. The offset is the
+        # tie-breaker so equal-sized ranges still get a deterministic order.
+        ordered_ranges = sorted(match_ranges, key=lambda match_range: (match_range[1], match_range[0]))
+        return {match_range: component_index for component_index, match_range in enumerate(ordered_ranges)}
+
     def _import_ssmt_fmt(self, context, reverse_output_folder_path):
         '''
         ssmt_fmt format import:
@@ -319,7 +359,10 @@ class SwordImportAllReversed(I18nOperator):
         lands in a separate collection, so wrong candidates can be toggled or
         deleted collection by collection instead of picking single objects out
         of one big pile of identically named meshes.
-        Meshes keep the classic Submesh naming scheme {DrawIB}-{IndexCount}-{FirstIndex}.
+        Meshes are named {DrawIB}-Component {N}.{Alias}: the Component ordinal
+        numbers the DrawIB's IB partitions sorted by draw-range size (the same
+        partition gets the same number in every data type), and segments
+        without an alias fall back to the classic numeric draw-range suffix.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
@@ -353,6 +396,11 @@ class SwordImportAllReversed(I18nOperator):
             # names only show up on the child collections below).
             drawib_collection = CollectionUtils.create_new_collection(collection_name=drawib_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
+            # Compute the DrawIB-level Component numbering once; every data
+            # type of this folder shares it, so "Component N" refers to the
+            # same IB partition in every child collection.
+            match_component_map = SwordImportAllReversed._build_match_component_map(json_files)
+
             # Every Json file holds one candidate data type. Sort them so the
             # outliner order stays deterministic, and give each candidate its
             # own child collection named after the Json file stem (the stem is
@@ -369,10 +417,11 @@ class SwordImportAllReversed(I18nOperator):
                 )
 
                 try:
-                    # Call the ssmt_fmt format import function; the DrawIB folder name
-                    # is passed as the classic Submesh naming prefix so the imported
-                    # objects are named {DrawIB}-{IndexCount}-{FirstIndex}.
-                    MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection, submesh_name_prefix=drawib_folder_name)
+                    # Call the ssmt_fmt format import function; the DrawIB folder
+                    # name is passed as the classic Submesh naming prefix and the
+                    # Component map, so the imported objects are named
+                    # {DrawIB}-Component {N}.{Alias}.
+                    MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection, submesh_name_prefix=drawib_folder_name, match_component_map=match_component_map)
                     imported_count += 1
                 except Exception as e:
                     # Roll back the failed candidate: drop any partially created

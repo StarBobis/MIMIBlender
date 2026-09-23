@@ -12,7 +12,7 @@ from ..utils.material_texture_utils import apply_image_texture_to_material, find
 
 class MMTImportHelper:
 	@staticmethod
-	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None, submesh_name_prefix:str = ""):
+	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None, submesh_name_prefix:str = "", match_component_map:dict | None = None):
 		submesh_json = SubmeshJson(json_file_path)
 
 		elements, vb_data, vb_vertex_count, shapekey_buffers = MMTImportHelper.parse_category_buffers(submesh_json)
@@ -27,13 +27,21 @@ class MMTImportHelper:
 		# switch to the classic Submesh naming scheme instead of the raw Json file name:
 		# - the Submesh itself is named {DrawIB}-{MatchIndexCount}-{MatchFirstIndex},
 		#   where the match values are the Json top-level IndexCount/IndexOffset
-		#   (the draw range this Submesh occupies in the original model);
-		# - each draw call segment appends its own .{IndexCount}-{FirstIndex} suffix,
-		#   so the object name always shows which Submesh it belongs to.
+		#   (the draw range this Submesh occupies in the original model); when a
+		#   match_component_map is provided, the numeric pair is replaced by the
+		#   shorter ordinal form {DrawIB}-Component {N};
+		# - each draw call segment appends its part alias when it has one and only
+		#   falls back to its own .{IndexCount}-{FirstIndex} suffix when no alias
+		#   exists, so the object name always shows which Submesh it belongs to.
 		use_classic_submesh_name = bool(str(submesh_name_prefix).strip())
 		match_submesh_name = ""
 		if use_classic_submesh_name:
-			match_submesh_name = str(submesh_name_prefix).strip() + "-" + str(submesh_json.IndexCount) + "-" + str(submesh_json.IndexOffset)
+			match_submesh_name = MMTImportHelper.build_match_submesh_name(
+				submesh_name_prefix=submesh_name_prefix,
+				match_index_count=submesh_json.IndexCount,
+				match_first_index=submesh_json.IndexOffset,
+				match_component_map=match_component_map,
+			)
 			mesh_name = match_submesh_name
 
 		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
@@ -59,6 +67,12 @@ class MMTImportHelper:
 
 			imported_obj_list = []
 			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
+				# Part alias from the INI comment above the drawindexed
+				# (e.g. "Skirk Body Knees (636)"); empty when the draw statement
+				# had no comment. Resolved first because the classic naming below
+				# decides from it whether the numeric draw-range suffix is needed.
+				segment_alias = str(segment_info.get("alias", "")).strip()
+
 				if use_classic_submesh_name:
 					segment_index_count = segment_info["index_count"]
 					segment_first_index = segment_info["index_offset"]
@@ -76,10 +90,11 @@ class MMTImportHelper:
 						if ib_entry.IndexCount > 0:
 							match_index_count = ib_entry.IndexCount
 							match_first_index = ib_entry.IndexOffset
-					segment_match_name = (
-						str(submesh_name_prefix).strip()
-						+ "-" + str(match_index_count)
-						+ "-" + str(match_first_index)
+					segment_match_name = MMTImportHelper.build_match_submesh_name(
+						submesh_name_prefix=submesh_name_prefix,
+						match_index_count=match_index_count,
+						match_first_index=match_first_index,
+						match_component_map=match_component_map,
 					)
 
 					if (
@@ -90,18 +105,23 @@ class MMTImportHelper:
 						# A single segment covering the whole Submesh IS the Submesh
 						# itself; the dotted suffix would carry no extra information.
 						segment_mesh_name = segment_match_name
+					elif segment_alias:
+						# The part alias already identifies the segment, so the
+						# numeric .{IndexCount}-{FirstIndex} suffix is omitted to
+						# keep the object name short and readable.
+						segment_mesh_name = segment_match_name
 					else:
-						# {DrawIB}-{MatchIndexCount}-{MatchFirstIndex}.{IndexCount}-{FirstIndex}
+						# Without an alias the draw range is the only thing telling
+						# sibling segments apart; keep the classic numeric suffix
+						# {MatchName}.{IndexCount}-{FirstIndex}.
 						segment_mesh_name = segment_match_name + "." + str(segment_index_count) + "-" + str(segment_first_index)
 				elif len(draw_call_segments) == 1:
 					segment_mesh_name = mesh_name
 				else:
 					segment_mesh_name = mesh_name + "-" + str(segment_index + 1).zfill(2)
 
-				# Append the part alias (the INI comment above the drawindexed,
-				# e.g. "Skirk Body Knees (636)") at the end of the object name,
+				# Append the part alias at the end of the object name,
 				# so the imported object directly shows which body part it is.
-				segment_alias = str(segment_info.get("alias", "")).strip()
 				if segment_alias:
 					segment_mesh_name = MMTImportHelper.append_alias_to_mesh_name(segment_mesh_name, segment_alias)
 
@@ -195,6 +215,25 @@ class MMTImportHelper:
 		if nanocat_texture_path:
 			MMTImportHelper.apply_nanocat_part_texture(imported_obj, nanocat_texture_path)
 		return imported_obj
+
+	@staticmethod
+	def build_match_submesh_name(submesh_name_prefix:str, match_index_count:int, match_first_index:int, match_component_map:dict | None = None):
+		'''
+		Build the Submesh match part of a classic mesh name.
+
+		Default form: {Prefix}-{MatchIndexCount}-{MatchFirstIndex}.
+		When the caller passes the folder-level match_component_map (the
+		DrawIB's IB partitions sorted by draw-range size ascending), the
+		numeric pair is replaced by its ordinal "Component N", which is
+		shorter and stays consistent across every data type of the same
+		DrawIB. A range missing from the map keeps the numeric fallback.
+		'''
+		prefix = str(submesh_name_prefix).strip()
+		if match_component_map:
+			component_index = match_component_map.get((int(match_first_index), int(match_index_count)))
+			if component_index is not None:
+				return prefix + "-Component " + str(component_index)
+		return prefix + "-" + str(match_index_count) + "-" + str(match_first_index)
 
 	@staticmethod
 	def append_alias_to_mesh_name(mesh_name:str, alias:str):
