@@ -311,14 +311,18 @@ class SwordImportAllReversed(I18nOperator):
         '''
         Build the DrawIB-level Component numbering shared by every data type.
 
-        Explicit source ComponentIndex values are authoritative. Older WWMI
-        JSON can also expose the source number in an alias such as
-        "Draw Component 3.3手套", so that alias is accepted as a compatibility
-        source when the explicit field is absent. Only outputs without either
-        source identity use the historical range-size ordering fallback.
+        Every Json of one DrawIB folder describes the same index buffers with
+        a different candidate vertex layout, so the recorded match ranges
+        (IndexOffset, IndexCount) are identical across the files; unioning
+        them is only a safeguard. The ranges are sorted by their draw-range
+        size (IndexCount) ascending and numbered Component 0, 1, 2, ...
+        Returns a dict mapping (IndexOffset, IndexCount) -> component index.
         '''
+        # Ranges from per-segment match identities (single-IB multi-component
+        # groups such as WWMI, where one IB entry can only hold one
+        # whole-buffer range) and from per-IB-entry identities (multi-IB
+        # groups such as GIMI). Per-segment identities win when present.
         segment_ranges = set()
-        explicit_component_ranges = {}
         entry_ranges_all = set()
         top_level_ranges = set()
         for json_filepath in json_files:
@@ -332,16 +336,7 @@ class SwordImportAllReversed(I18nOperator):
 
             for draw_call_segment in submesh_json.DrawCallSegmentList:
                 if draw_call_segment.MatchIndexCount > 0:
-                    match_range = (draw_call_segment.MatchFirstIndex, draw_call_segment.MatchIndexCount)
-                    segment_ranges.add(match_range)
-                    alias_component_index, _ = MMTImportHelper.parse_draw_component_alias(draw_call_segment.Alias)
-                    source_component_index = draw_call_segment.ComponentIndex
-                    if source_component_index < 0:
-                        source_component_index = alias_component_index
-                    if source_component_index is not None and source_component_index >= 0:
-                        previous_index = explicit_component_ranges.get(match_range)
-                        if previous_index is None or previous_index == source_component_index:
-                            explicit_component_ranges[match_range] = source_component_index
+                    segment_ranges.add((draw_call_segment.MatchFirstIndex, draw_call_segment.MatchIndexCount))
 
             for index_buffer in submesh_json.IndexBufferList:
                 if index_buffer.IndexCount > 0:
@@ -349,14 +344,8 @@ class SwordImportAllReversed(I18nOperator):
             if submesh_json.IndexCount > 0:
                 top_level_ranges.add((submesh_json.IndexOffset, submesh_json.IndexCount))
 
-        # A source ordinal must win over any derived ordering. Returning only
-        # explicit ranges also prevents the shared whole-IB fallback from being
-        # assigned a fake Component number.
-        if explicit_component_ranges:
-            return explicit_component_ranges
-
         if segment_ranges:
-            # Segments carry their own match identity: the IB entry only
+            # Segments carry their own component identity: the IB entry only
             # describes the shared buffer file, so it must not become a
             # "component" of its own.
             match_ranges = segment_ranges
@@ -365,8 +354,9 @@ class SwordImportAllReversed(I18nOperator):
         else:
             match_ranges = top_level_ranges
 
-        # Legacy fallback for products whose reverse output has no source
-        # Component ordinal. Keep the prior size-based rule for compatibility.
+        # Smallest draw range first: Component 0 is the tiniest part of the
+        # DrawIB, the last Component is the big main body. The offset is the
+        # tie-breaker so equal-sized ranges still get a deterministic order.
         ordered_ranges = sorted(match_ranges, key=lambda match_range: (match_range[1], match_range[0]))
         return {match_range: component_index for component_index, match_range in enumerate(ordered_ranges)}
 
@@ -384,11 +374,10 @@ class SwordImportAllReversed(I18nOperator):
         lands in a separate collection, so wrong candidates can be toggled or
         deleted collection by collection instead of picking single objects out
         of one big pile of identically named meshes.
-        Meshes are named {DrawIB}-Component {N}.{Alias}: an explicit source
-        Component ordinal is preserved when the reverse output provides one;
-        range-size ordering is used only for legacy outputs without a source
-        ordinal. Segments without an alias fall back to the classic numeric
-        draw-range suffix.
+        Meshes are named {DrawIB}-Component {N}.{Alias}: the Component ordinal
+        numbers the DrawIB's IB partitions sorted by draw-range size (the same
+        partition gets the same number in every data type), and segments
+        without an alias fall back to the classic numeric draw-range suffix.
         '''
         total_folder_name = os.path.basename(reverse_output_folder_path)
 

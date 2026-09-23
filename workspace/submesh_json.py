@@ -54,9 +54,6 @@ class SubmeshDrawCallSegment:
 	# values, and finally to the Json top-level IndexOffset/IndexCount.
 	MatchFirstIndex:int = 0
 	MatchIndexCount:int = 0
-	# Stable source component ordinal when the reverse tool exposes one.
-	# 0 is a valid component, so -1 means that no ordinal was recorded.
-	ComponentIndex:int = -1
 
 
 @dataclass
@@ -162,12 +159,6 @@ class SubmeshJson:
 				# Per-segment match identity; absent on older reverse outputs (defaults 0).
 				MatchFirstIndex=int(draw_call_segment_json.get("MatchFirstIndex", 0) or 0),
 				MatchIndexCount=int(draw_call_segment_json.get("MatchIndexCount", 0) or 0),
-				# Optional explicit component ordinal; -1 preserves old JSON behavior.
-				ComponentIndex=int(
-					draw_call_segment_json.get("ComponentIndex", -1)
-					if draw_call_segment_json.get("ComponentIndex", -1) is not None
-					else -1
-				),
 			)
 			self.DrawCallSegmentList.append(draw_call_segment)
 
