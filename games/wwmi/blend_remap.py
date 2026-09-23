@@ -35,8 +35,10 @@ def add_commandlist_update_merged_skeleton(ini_builder: M_IniBuilder, draw_ib_mo
 def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
     """Blend remap resources + command lists.
 
-    Only components flagged in draw_ib_model.blend_remap_used get their own
-    remapped blend/skeleton buffers; the others keep using the shared ones.
+    Only components flagged in draw_ib_model.blend_remap_used_by_index get
+    their own remapped blend/skeleton buffers; the others keep using the
+    shared ones. The flag is keyed by the real component index, because a
+    component without objects has no remap data and no name entry.
     """
     blend_remap_section = M_IniSection(M_SectionType.CommandList)
 
@@ -55,16 +57,18 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
         blend_remap_section.append("[ResourceExtraRemappedSkeletonRW]")
         blend_remap_section.new_line()
 
-        component_count = 0
-        for component_tmp_obj_name, use_remap in draw_ib_model.blend_remap_used.items():
-            if not use_remap:
-                component_count += 1
+        # Component indexes are the real ones, so the resource names match the
+        # [TextureOverrideComponentN] sections. A component without objects has
+        # no remap data and gets no resources at all.
+        use_remap_by_index = getattr(draw_ib_model, "blend_remap_used_by_index", None) or {}
+        component_count = len(getattr(draw_ib_model.wwmi_info, "components", []) or [])
+        for component_index in range(component_count):
+            if not use_remap_by_index.get(component_index, False):
                 continue
-            blend_remap_section.append("[ResourceRemappedBlendBufferComponent" + str(component_count) + "]")
-            blend_remap_section.append("[ResourceRemappedSkeletonComponent" + str(component_count) + "]")
-            blend_remap_section.append("[ResourceExtraRemappedSkeletonComponent" + str(component_count) + "]")
+            blend_remap_section.append("[ResourceRemappedBlendBufferComponent" + str(component_index) + "]")
+            blend_remap_section.append("[ResourceRemappedSkeletonComponent" + str(component_index) + "]")
+            blend_remap_section.append("[ResourceExtraRemappedSkeletonComponent" + str(component_index) + "]")
             blend_remap_section.new_line()
-            component_count += 1
 
         if draw_ib_model.blend_remap:
             blend_remap_section.append("[CommandListInitializeBlendRemaps]")
@@ -79,13 +83,13 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
             blend_remap_section.append("  cs-t34 = ref ResourceBlendRemapReverseBuffer")
             blend_remap_section.append("  cs-t35 = ref ResourceBlendRemapVertexVGBuffer")
 
+            # blend_remap_id stays a compact index over the remapped components
+            # only, because the remap buffers are packed in that order.
             blend_remap_id = 0
-            component_count = 0
-            for component_tmp_obj_name, use_remap in draw_ib_model.blend_remap_used.items():
-                if not use_remap:
-                    component_count += 1
+            for component_index in range(component_count):
+                if not use_remap_by_index.get(component_index, False):
                     continue
-                component_count_str = str(component_count)
+                component_count_str = str(component_index)
                 blend_remap_section.append("    $\\WWMIv1\\blend_remap_id = " + str(blend_remap_id))
                 blend_remap_section.append("    ResourceRemappedBlendBufferRW = copy ResourceBlendBufferNoStride")
                 blend_remap_section.append("    cs-u4 = ref ResourceRemappedBlendBufferRW")
@@ -94,7 +98,6 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
                 blend_remap_section.append("    ResourceRemappedBlendBufferComponent" + component_count_str + " = copy_desc ResourceBlendBuffer")
                 blend_remap_section.new_line()
                 blend_remap_id = blend_remap_id + 1
-                component_count += 1
 
             blend_remap_section.append("    $blend_remaps_initialized = 1")
             blend_remap_section.append("endif")
@@ -109,26 +112,23 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
             blend_remap_section.new_line()
 
             blend_remap_id = 0
-            component_count = 0
-            for component_tmp_obj_name, use_remap in draw_ib_model.blend_remap_used.items():
-                if not use_remap:
-                    component_count += 1
+            for component_index in range(component_count):
+                if not use_remap_by_index.get(component_index, False):
                     continue
 
                 blend_remap_section.append("$\\WWMIv1\\blend_remap_id = " + str(blend_remap_id))
-                vg_count = draw_ib_model.component_real_vg_count_dict[component_count]
+                vg_count = draw_ib_model.component_real_vg_count_dict[component_index]
                 blend_remap_section.append("$\\WWMIv1\\vg_count = " + str(vg_count))
                 blend_remap_section.append("cs-t38 = ResourceMergedSkeletonRemap")
                 blend_remap_section.append("cs-u5 = ResourceRemappedSkeletonRW")
                 blend_remap_section.append("run = CustomShader\\WWMIv1\\SkeletonRemapper")
-                blend_remap_section.append("ResourceRemappedSkeletonComponent" + str(component_count) + " = copy ResourceRemappedSkeletonRW")
+                blend_remap_section.append("ResourceRemappedSkeletonComponent" + str(component_index) + " = copy ResourceRemappedSkeletonRW")
                 blend_remap_section.append("cs-t38 = ResourceExtraMergedSkeletonRemap")
                 blend_remap_section.append("cs-u5 = ResourceExtraRemappedSkeletonRW")
                 blend_remap_section.append("run = CustomShader\\WWMIv1\\SkeletonRemapper")
-                blend_remap_section.append("ResourceExtraRemappedSkeletonComponent" + str(component_count) + " = copy ResourceExtraRemappedSkeletonRW")
+                blend_remap_section.append("ResourceExtraRemappedSkeletonComponent" + str(component_index) + " = copy ResourceExtraRemappedSkeletonRW")
                 blend_remap_section.new_line()
                 blend_remap_id = blend_remap_id + 1
-                component_count += 1
 
     ini_builder.append_section(blend_remap_section)
 

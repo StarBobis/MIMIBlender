@@ -59,6 +59,11 @@ class DrawIBModelWWMI:
     obj_buffer_model_wwmi: WWMIBufferBuildResult | None = field(init=False, default=None, repr=False)
     blend_remap_maps: dict[str, BlendRemapEntry] = field(init=False, default_factory=dict, repr=False)
     blend_remap_used: dict[str, bool] = field(init=False, default_factory=dict, repr=False)
+    # Same information keyed by the real component index. A component without
+    # any object in the blueprint produces no joined object, so the name keyed
+    # map above has no entry for it; every INI writer must use this map to stay
+    # aligned with wwmi_info.components.
+    blend_remap_used_by_index: dict[int, bool] = field(init=False, default_factory=dict, repr=False)
     component_real_vg_count_dict: dict[int, int] = field(init=False, default_factory=dict, repr=False)
 
     submesh_model_list: list = field(init=False, default_factory=list, repr=False)
@@ -347,12 +352,15 @@ class DrawIBModelWWMI:
         drawib_merged_object: list[bpy.types.Object] = []
         drawib_vertex_count: int = 0
         drawib_index_count: int = 0
-        component_obj_list: list[bpy.types.Object] = []
+        component_obj_list: list[tuple[int, bpy.types.Object]] = []
 
         for component_index, component in enumerate(components):
             component_merged_object = [temp_object.object for temp_object in component.objects]
 
             if len(component_merged_object) == 0:
+                # No object of the blueprint targets this Submesh. The
+                # component still exists in the game, so the INI keeps its
+                # section; only its draw lines are missing.
                 continue
 
             ObjUtils.join_objects(bpy.context, component_merged_object)
@@ -372,7 +380,7 @@ class DrawIBModelWWMI:
                 component_obj.select_set(False)
 
             component.remap_key_name = component_obj.name
-            component_obj_list.append(component_obj)
+            component_obj_list.append((component_index, component_obj))
             drawib_merged_object.append(component_obj)
 
             used_vg_indices = set()
@@ -426,15 +434,21 @@ class DrawIBModelWWMI:
         LOG.newline()
         return merged_object
 
-    def export_blendremap_forward_and_reverse(self, component_objects: list[bpy.types.Object]):
+    def export_blendremap_forward_and_reverse(self, component_objects: list[tuple[int, bpy.types.Object]]):
+        """Build the blend remap buffers of every component that has objects.
+
+        ``component_objects`` pairs each joined component object with its real
+        component index, so the remap flags can be looked up by index later.
+        """
         num_vgs = self.d3d11_game_type.get_blendindices_count_wwmi()
 
         blend_remap_forward: numpy.ndarray = numpy.empty(0, dtype=numpy.uint16)
         blend_remap_reverse: numpy.ndarray = numpy.empty(0, dtype=numpy.uint16)
         remap_maps: dict[str, BlendRemapEntry] = {}
         remap_used: dict[str, bool] = {}
+        remap_used_by_index: dict[int, bool] = {}
 
-        for component_obj in component_objects:
+        for component_index, component_obj in component_objects:
             used_vg_set: set[int] = set()
 
             for vertex in component_obj.data.vertices:
@@ -451,6 +465,7 @@ class DrawIBModelWWMI:
             if len(used_vg_set) == 0 or max_used < 256:
                 remap_maps[component_obj.name] = {"forward": [], "reverse": {}}
                 remap_used[component_obj.name] = False
+                remap_used_by_index[component_index] = False
                 continue
 
             self.blend_remap = True
@@ -469,9 +484,11 @@ class DrawIBModelWWMI:
             reverse_map: dict[int, int] = {int(value): int(index) for index, value in enumerate(forward_list)}
             remap_maps[component_obj.name] = {"forward": forward_list, "reverse": reverse_map}
             remap_used[component_obj.name] = True
+            remap_used_by_index[component_index] = True
 
         self.blend_remap_maps = remap_maps
         self.blend_remap_used = remap_used
+        self.blend_remap_used_by_index = remap_used_by_index
         self.blend_remap_forward_buffer = blend_remap_forward
         self.blend_remap_reverse_buffer = blend_remap_reverse
 

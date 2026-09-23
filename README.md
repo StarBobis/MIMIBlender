@@ -53,6 +53,11 @@ MIMIBlender 是 **MIMITools 的 Blender 插件端**：一个配合 MMT 与 3Dmig
 
 > 预设列表在代码中以 `LogicName` 为准；DOAV、APMI（蓝色星原）、NEMI 等为保留或暂未开放生成的槽位。
 
+- **WWMI（鸣潮）的 Submesh 覆盖规则**：一个 DrawIB 里的每个 Submesh 都会生成自己的 `[TextureOverrideComponentN]` 段，即使蓝图里没有任何物体指定它。这样组件编号、`match_first_index` / `match_index_count` 与顶点组范围始终和真实的 Component 对应，不会因为中间某个 Submesh 没被使用而整体错位。
+  - 没有物体指定的 Submesh：段照常生成（含 `$object_detected`、按状态的顶点组范围与骨骼合并），只写 `handling = skip` 而不写 `drawindexed`，所以开启 Mod 时这部分**不再渲染**。
+  - 有物体指定的 Submesh：照常写 `drawindexed`，行为不变。
+  - Blend Remap 的资源编号与 `vg_count` 同样按真实 Component 索引，和上面的段一一对应。
+
 ### 4. 模型处理面板（Model Processing）
 按 UV 松散块 / 共享与孤立顶点组 / DrawIndexed 值拆分模型；顶点组批量管理（重命名加前缀、删除空组、按数字前缀合并、补齐数字空缺、按名称排序、按位置映射重命名）；由顶点组生成基础骨骼；TANGENT 向量求和归一化重算、COLOR 算术平均归一化重算；完美镜像网格；删除松散点、清除自定义拆边法线、带形态键应用修改器、位置旋转归零等。
 

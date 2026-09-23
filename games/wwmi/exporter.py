@@ -239,13 +239,28 @@ class Exporter:
         ini_builder.append_section(texture_override_mark_bonedatacb_section)
 
     def add_texture_override_component(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
-        texture_override_component = M_IniSection(M_SectionType.TextureOverrideIB)
-        component_count = 0
+        """One [TextureOverrideComponentN] per Submesh of the DrawIB.
 
-        for component_tmp_obj_name, component_blend_remap_used in draw_ib_model.blend_remap_used.items():
-            component_name = "Component " + str(component_count + 1)
+        A Submesh without any object in the blueprint still gets its section:
+        the component metadata must stay aligned with the real component index,
+        and the game's own draw for that range has to be dealt with. Only the
+        drawindexed lines are omitted, so that Submesh is not rendered while
+        the mod is enabled.
+        """
+        texture_override_component = M_IniSection(M_SectionType.TextureOverrideIB)
+        blend_remap_used_by_index = getattr(draw_ib_model, "blend_remap_used_by_index", None) or {}
+        submesh_drawcall_groups = getattr(draw_ib_model, "submesh_drawcall_groups", []) or []
+
+        for component_count, component_object in enumerate(draw_ib_model.wwmi_info.components):
             component_count_str = str(component_count)
-            component_object = draw_ib_model.wwmi_info.components[component_count]
+            component_blend_remap_used = bool(blend_remap_used_by_index.get(component_count, False))
+
+            drawcall_model_list = (
+                submesh_drawcall_groups[component_count]
+                if component_count < len(submesh_drawcall_groups)
+                else []
+            )
+            drawindexed_str_list = M_IniHelper.get_drawindexed_str_list(drawcall_model_list)
 
             texture_override_component.append("[TextureOverrideComponent" + component_count_str + "]")
             texture_override_component.append("hash = " + draw_ib_model.wwmi_info.vb0_hash)
@@ -268,15 +283,14 @@ class Exporter:
                 texture_override_component.append("    run = CommandListMergeSkeleton")
                 texture_override_component.append("  endif")
                 texture_override_component.append("  if ResourceMergedSkeleton !== null")
+                # Skipping the original draw is what removes an unassigned
+                # Submesh from the scene; the mod has no geometry for it.
                 texture_override_component.append("    handling = skip")
-
-                drawindexed_str_list = M_IniHelper.get_drawindexed_str_list(draw_ib_model.submesh_drawcall_groups[component_count])
-
                 if len(drawindexed_str_list) != 0:
                     if component_blend_remap_used:
-                        texture_override_component.append("    ResourceBlendBufferOverride = ref ResourceRemappedBlendBufferComponent" + str(component_count))
-                        texture_override_component.append("    ResourceMergedSkeletonOverride = ref ResourceRemappedSkeletonComponent" + str(component_count))
-                        texture_override_component.append("    ResourceExtraMergedSkeletonOverride = ref ResourceExtraRemappedSkeletonComponent" + str(component_count))
+                        texture_override_component.append("    ResourceBlendBufferOverride = ref ResourceRemappedBlendBufferComponent" + component_count_str)
+                        texture_override_component.append("    ResourceMergedSkeletonOverride = ref ResourceRemappedSkeletonComponent" + component_count_str)
+                        texture_override_component.append("    ResourceExtraMergedSkeletonOverride = ref ResourceExtraRemappedSkeletonComponent" + component_count_str)
 
                     texture_override_component.append("    run = CommandListTriggerResourceOverrides")
                     texture_override_component.append("    run = CommandListOverrideSharedResources")
@@ -284,21 +298,32 @@ class Exporter:
                     for drawindexed_str in drawindexed_str_list:
                         texture_override_component.append(drawindexed_str)
                     texture_override_component.append("    run = CommandListCleanupSharedResources")
+                else:
+                    texture_override_component.append(
+                        "    ; Draw Component " + component_count_str + " (no object assigned to this Submesh)"
+                    )
                 texture_override_component.append("  endif")
             else:
-                drawindexed_str_list = M_IniHelper.get_drawindexed_str_list(draw_ib_model.submesh_drawcall_groups[component_count])
+                texture_override_component.append("  handling = skip")
                 if len(drawindexed_str_list) != 0:
-                    texture_override_component.append("  handling = skip")
+                    if component_blend_remap_used:
+                        texture_override_component.append("  ResourceBlendBufferOverride = ref ResourceRemappedBlendBufferComponent" + component_count_str)
+                        texture_override_component.append("  ResourceMergedSkeletonOverride = ref ResourceRemappedSkeletonComponent" + component_count_str)
+                        texture_override_component.append("  ResourceExtraMergedSkeletonOverride = ref ResourceExtraRemappedSkeletonComponent" + component_count_str)
+
                     texture_override_component.append("  run = CommandListTriggerResourceOverrides")
                     texture_override_component.append("  run = CommandListOverrideSharedResources")
                     texture_override_component.append("  ; Draw Component " + component_count_str)
                     for drawindexed_str in drawindexed_str_list:
                         texture_override_component.append(drawindexed_str)
                     texture_override_component.append("  run = CommandListCleanupSharedResources")
+                else:
+                    texture_override_component.append(
+                        "  ; Draw Component " + component_count_str + " (no object assigned to this Submesh)"
+                    )
 
             texture_override_component.append("endif")
             texture_override_component.new_line()
-            component_count = component_count + 1
 
         ini_builder.append_section(texture_override_component)
 
