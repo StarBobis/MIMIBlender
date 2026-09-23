@@ -459,7 +459,7 @@ TRANSLATIONS_ZH_CN = {
     "No importable subfolders found in the target folder": "目标文件夹中没有可导入的子文件夹",
     "Import failed, skipped: {path} | Error: {error}": "导入失败，已跳过：{path} | 错误：{error}",
     "No Json files were imported from the ssmt_fmt reverse result": "未能从 ssmt_fmt 逆向结果中导入任何 Json 文件",
-    "Imported {count} data type(s); each one is in its own collection named after the data type, under the drawib_<DrawIB> collections.": "已导入 {count} 个数据类型；每个数据类型都位于 drawib_<DrawIB> 集合下以自己数据类型命名的独立集合中。",
+    "Imported {count} data type(s); each one is in its own collection named after the data type, grouped under collections named after their DrawIB.": "已导入 {count} 个数据类型；每个数据类型都位于以 DrawIB 命名的集合下、以自己数据类型命名的独立集合中。",
     "Refresh Reversed Workspace List": "刷新逆向工作空间列表",
     "Refresh the subfolder list under the Reversed folder of the current MMT / MIMITools cache folder": "刷新当前 MMT / MIMITools 缓存文件夹 Reversed 下的子文件夹列表",
     "Reversed workspace list refreshed": "逆向工作空间列表已刷新",
