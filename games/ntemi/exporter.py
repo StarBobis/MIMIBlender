@@ -64,8 +64,6 @@ class Exporter:
         # Texture Bind node resources are explicit user intent: they apply
         # even when the automatic texture pipeline is disabled.
         sections.append_object_texture_binding_resources(lines, self.drawib_model_list)
-        for drawib_model in self.drawib_model_list:
-            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
 
         # Texture handling
         tex_ini_builder = M_IniBuilder()
@@ -95,6 +93,10 @@ class Exporter:
             ini_builder=tex_ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
+        # Copy explicit replacements last so marked filenames keep the
+        # external bytes instead of being restored by automatic Hash export.
+        for drawib_model in self.drawib_model_list:
+            M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
         for section in tex_ini_builder.ini_section_list:
             for sl in section.SectionLineList:
                 if sl:

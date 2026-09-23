@@ -493,12 +493,14 @@ class DrawIBModel:
             )
         return matched_markup.get_resource_name()
 
-    def _resolve_file_texture_resource(self, binding, node_label, owner_name, slug_token, used_resource_names, file_resource_by_source, source_path_override="") -> str:
-        '''FILE source: build a unique resource name and record the copy job.
+    def _resolve_file_texture_resource(self, binding, node_label, owner_name, slug_token, used_resource_names, file_resource_by_source, source_path_override="", target_filename_override="") -> str:
+        '''FILE source: build a resource and record its copy job.
 
         ``source_path_override`` lets the Hash Texture Bind MARK source feed
         a workspace-resolved mark file through the same validation, dedupe
-        and copy-job registration as a plain FILE row.
+        and copy-job registration as a plain FILE row. ``target_filename_override``
+        keeps a marked Hash texture's generated filename stable when an
+        external replacement is selected.
         '''
         source_path = str(source_path_override or "").strip() or str(binding.get("file_path", "") or "").strip()
         if not source_path:
@@ -511,6 +513,12 @@ class DrawIBModel:
                 "Slot Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
                 + "' for object '" + owner_name + "'; use one of " + ", ".join(OBJECT_TEXTURE_FILE_SUFFIXES) + "."
             )
+        if target_filename_override and file_suffix != os.path.splitext(target_filename_override)[1].lower():
+            raise ValueError(
+                "Hash Texture Bind node '" + node_label + "': external file '" + source_path
+                + "' cannot replace marked filename '" + target_filename_override
+                + "' because the file formats differ. Use a DDS source for a marked Hash texture."
+            )
         if not os.path.exists(source_path):
             raise ValueError(
                 "Slot Texture Bind node '" + node_label + "': texture file does not exist: " + source_path
@@ -518,6 +526,8 @@ class DrawIBModel:
             )
 
         source_key = source_path.casefold()
+        if target_filename_override:
+            source_key += "|target=" + str(target_filename_override).casefold()
         existing = file_resource_by_source.get(source_key)
         if existing is not None:
             # Same file picked by another object: reuse the same resource.
@@ -538,7 +548,7 @@ class DrawIBModel:
             counter += 1
         used_resource_names.add(resource_name)
 
-        target_filename = resource_name + file_suffix
+        target_filename = str(target_filename_override or "").strip() or (resource_name + file_suffix)
         file_resource_by_source[source_key] = resource_name
         self.object_texture_binding_file_list.append((resource_name, source_path, target_filename))
         self.object_texture_binding_resource_list.append((resource_name, target_filename))
@@ -556,7 +566,8 @@ class DrawIBModel:
 
         FILE sources (and MARK sources, resolved through the workspace
         extract folders) reuse the same copy jobs and resource sections as
-        the slot bindings, so the export pipeline needs no extra handling.
+        the slot bindings. When a Hash Source Mark is selected, the copy job
+        retains that mark's automatic ``<mark_hash>_<mark_name>.dds`` name.
         '''
         binding_owner_list = [
             (submesh_model, draw_model)
@@ -601,6 +612,17 @@ class DrawIBModel:
                 seen_hashes.add(texture_hash)
 
                 source_type = str(binding.get("source_type", "") or "")
+                target_filename_override = ""
+                if source_type in ("MARK", "FILE") and str(binding.get("mark_name", "") or "").strip():
+                    # A selected Hash Source Mark identifies the generated
+                    # filename that the user expects to see in Textures. Keep
+                    # that name even when the replacement bytes come from an
+                    # external file.
+                    matched_markup = self._find_hash_mark_markup(
+                        binding, markup_list, node_label, owner_name, submesh_model,
+                    )
+                    target_filename_override = self._get_hash_mark_filename(matched_markup)
+
                 if source_type == "MARK":
                     # Resolve the Hash-style mark's source file, then manage
                     # the copy and resource ourselves so the binding stays
@@ -611,11 +633,13 @@ class DrawIBModel:
                         binding, node_label, owner_name, "hash" + texture_hash[:8],
                         used_resource_names, file_resource_by_source,
                         source_path_override=source_path,
+                        target_filename_override=target_filename_override,
                     )
                 elif source_type == "FILE":
                     resource_name = self._resolve_file_texture_resource(
                         binding, node_label, owner_name, "hash" + texture_hash[:8],
                         used_resource_names, file_resource_by_source,
+                        target_filename_override=target_filename_override,
                     )
                 elif source_type == "RESOURCE":
                     resource_name = str(binding.get("resource_name", "") or "").strip()
@@ -639,28 +663,43 @@ class DrawIBModel:
 
             draw_model.resolved_hash_texture_binding_list = resolved_rows
 
-    def _resolve_hash_mark_source_path(self, binding, markup_list, node_label, owner_name, submesh_model) -> str:
-        '''MARK source of a hash binding: locate the mark's texture file.'''
+    def _find_hash_mark_markup(self, binding, markup_list, node_label, owner_name, submesh_model):
+        '''Find the selected Hash mark and validate its style.'''
         mark_name = str(binding.get("mark_name", "") or "").strip()
         if not mark_name:
             raise ValueError(
                 "Hash Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
             )
-        matched_markup = None
         for markup_info in markup_list:
-            if str(getattr(markup_info, "mark_name", "") or "").strip().lower() == mark_name.lower():
-                matched_markup = markup_info
-                break
-        if matched_markup is None:
-            raise ValueError(
-                "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
-                + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
-            )
-        if str(getattr(matched_markup, "mark_type", "") or "") != "Hash":
-            raise ValueError(
-                "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the " + str(getattr(matched_markup, "mark_type", "") or "")
-                + " style; the Hash Texture Bind node only accepts Hash-style marks (Slot / SharedSlot marks belong to the Slot Texture Bind node)."
-            )
+            if str(getattr(markup_info, "mark_name", "") or "").strip().lower() != mark_name.lower():
+                continue
+            if str(getattr(markup_info, "mark_type", "") or "") != "Hash":
+                raise ValueError(
+                    "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the " + str(getattr(markup_info, "mark_type", "") or "")
+                    + " style; the Hash Texture Bind node only accepts Hash-style marks (Slot / SharedSlot marks belong to the Slot Texture Bind node)."
+                )
+            return markup_info
+        raise ValueError(
+            "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
+            + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
+        )
+
+    @staticmethod
+    def _get_hash_mark_filename(markup_info) -> str:
+        '''Return the automatic Hash-style filename for one marked texture.'''
+        get_filename = getattr(markup_info, "get_hash_style_filename", None)
+        if callable(get_filename):
+            return str(get_filename() or "").strip()
+        mark_hash = str(getattr(markup_info, "mark_hash", "") or "").strip()
+        mark_name = str(getattr(markup_info, "mark_name", "") or "").strip()
+        return mark_hash + "_" + mark_name + ".dds" if mark_hash and mark_name else ""
+
+    def _resolve_hash_mark_source_path(self, binding, markup_list, node_label, owner_name, submesh_model) -> str:
+        '''MARK source of a hash binding: locate the mark's texture file.'''
+        matched_markup = self._find_hash_mark_markup(
+            binding, markup_list, node_label, owner_name, submesh_model,
+        )
+        mark_name = str(binding.get("mark_name", "") or "").strip()
         # Imported here on purpose: m_ini_helper imports DrawIBModel for its
         # type hints, so a module-level import would create a cycle. At call
         # time every module is fully loaded, making this safe.

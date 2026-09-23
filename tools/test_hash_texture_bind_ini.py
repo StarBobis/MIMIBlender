@@ -266,7 +266,9 @@ def test_resolve_hash_bindings(modules, source_dir):
     ]
     plain_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_B", submesh_name="94517393-0")
     plain_call.hash_texture_binding_list = [
-        make_binding("FILE", HASH_BLUE, file_path=red_file),
+        # An External File with a Hash Source Mark keeps the automatic marked
+        # filename instead of inventing a ResourceTex filename.
+        make_binding("FILE", HASH_BLUE, file_path=red_file, mark_name="HairMark"),
     ]
 
     submesh_list = [FakeSubmeshModel("94517393-0", [bound_call, plain_call])]
@@ -300,10 +302,22 @@ def test_resolve_hash_bindings(modules, source_dir):
     plain_rows = plain_call.resolved_hash_texture_binding_list
     assert len(plain_rows) == 1 and plain_rows[0]["condition_str"] == "", plain_rows
 
-    # FILE/MARK copy jobs landed in the shared job lists (deduped by source
-    # path: red.dds was picked twice -> one resource per unique usage set).
-    assert len(drawib_model.object_texture_binding_file_list) == 2, drawib_model.object_texture_binding_file_list
-    assert len(drawib_model.object_texture_binding_resource_list) == 2, drawib_model.object_texture_binding_resource_list
+    # FILE/MARK copy jobs landed in the shared job lists. The marked FILE
+    # row gets the automatic marked filename, so it is a separate target even
+    # though it uses the same source bytes as the plain FILE row.
+    assert len(drawib_model.object_texture_binding_file_list) == 3, drawib_model.object_texture_binding_file_list
+    assert len(drawib_model.object_texture_binding_resource_list) == 3, drawib_model.object_texture_binding_resource_list
+    assert any(job[2] == "0123abcd_HairMark.dds" for job in drawib_model.object_texture_binding_file_list), drawib_model.object_texture_binding_file_list
+
+    # The generated Mod copy uses the marked filename, not the generated
+    # ResourceTex name, while taking its bytes from the external source.
+    config_mod = sys.modules[TEST_PKG + ".common.global_config"]
+    config_mod.GlobalConfig._texture_root = source_dir
+    ini_helper_mod.M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
+    marked_target = os.path.join(source_dir, "94517393", "0123abcd_HairMark.dds")
+    assert os.path.exists(marked_target), marked_target
+    with open(marked_target, "rb") as file:
+        assert file.read() == b"red"
 
     print("test_resolve_hash_bindings OK")
 
