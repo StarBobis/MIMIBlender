@@ -318,7 +318,13 @@ class SwordImportAllReversed(I18nOperator):
         size (IndexCount) ascending and numbered Component 0, 1, 2, ...
         Returns a dict mapping (IndexOffset, IndexCount) -> component index.
         '''
-        match_ranges = set()
+        # Ranges from per-segment match identities (single-IB multi-component
+        # groups such as WWMI, where one IB entry can only hold one
+        # whole-buffer range) and from per-IB-entry identities (multi-IB
+        # groups such as GIMI). Per-segment identities win when present.
+        segment_ranges = set()
+        entry_ranges_all = set()
+        top_level_ranges = set()
         for json_filepath in json_files:
             try:
                 submesh_json = SubmeshJson(json_filepath)
@@ -328,16 +334,25 @@ class SwordImportAllReversed(I18nOperator):
                 print("Component map: failed to read " + json_filepath + ": " + str(e))
                 continue
 
-            # Prefer the per-IB match identity of newer reverse outputs; fall
-            # back to the Json top-level pair when entries do not record it.
-            entry_ranges = []
+            for draw_call_segment in submesh_json.DrawCallSegmentList:
+                if draw_call_segment.MatchIndexCount > 0:
+                    segment_ranges.add((draw_call_segment.MatchFirstIndex, draw_call_segment.MatchIndexCount))
+
             for index_buffer in submesh_json.IndexBufferList:
                 if index_buffer.IndexCount > 0:
-                    entry_ranges.append((index_buffer.IndexOffset, index_buffer.IndexCount))
-            if entry_ranges:
-                match_ranges.update(entry_ranges)
-            elif submesh_json.IndexCount > 0:
-                match_ranges.add((submesh_json.IndexOffset, submesh_json.IndexCount))
+                    entry_ranges_all.add((index_buffer.IndexOffset, index_buffer.IndexCount))
+            if submesh_json.IndexCount > 0:
+                top_level_ranges.add((submesh_json.IndexOffset, submesh_json.IndexCount))
+
+        if segment_ranges:
+            # Segments carry their own component identity: the IB entry only
+            # describes the shared buffer file, so it must not become a
+            # "component" of its own.
+            match_ranges = segment_ranges
+        elif entry_ranges_all:
+            match_ranges = entry_ranges_all
+        else:
+            match_ranges = top_level_ranges
 
         # Smallest draw range first: Component 0 is the tiniest part of the
         # DrawIB, the last Component is the big main body. The offset is the

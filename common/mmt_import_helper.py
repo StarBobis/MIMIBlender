@@ -78,18 +78,28 @@ class MMTImportHelper:
 					segment_first_index = segment_info["index_offset"]
 
 					# The match identity of a segment is the draw range of the IB
-					# partition it belongs to. Newer reverse outputs record
-					# IndexOffset/IndexCount per IndexBufferList entry; older ones
-					# only have the Json top-level pair, used as the fallback
-					# (also for the DrawCallIndexList fallback whose ib_index is -1).
+					# partition it belongs to. Resolution order:
+					# 1. the segment's own MatchIndexCount/MatchFirstIndex, written
+					#    by newer reverse outputs for single-IB multi-component
+					#    groups (e.g. WWMI), where the IB entry can only hold one
+					#    whole-buffer range;
+					# 2. IndexOffset/IndexCount of the segment's IndexBufferList
+					#    entry (newer multi-IB reverse outputs);
+					# 3. the Json top-level pair (older outputs, also for the
+					#    DrawCallIndexList fallback whose ib_index is -1).
 					match_index_count = submesh_json.IndexCount
 					match_first_index = submesh_json.IndexOffset
-					ib_entry_index = segment_info["ib_index"]
-					if 0 <= ib_entry_index < len(submesh_json.IndexBufferList):
-						ib_entry = submesh_json.IndexBufferList[ib_entry_index]
-						if ib_entry.IndexCount > 0:
-							match_index_count = ib_entry.IndexCount
-							match_first_index = ib_entry.IndexOffset
+					segment_match_index_count = int(segment_info.get("match_index_count", 0) or 0)
+					if segment_match_index_count > 0:
+						match_index_count = segment_match_index_count
+						match_first_index = int(segment_info.get("match_first_index", 0) or 0)
+					else:
+						ib_entry_index = segment_info["ib_index"]
+						if 0 <= ib_entry_index < len(submesh_json.IndexBufferList):
+							ib_entry = submesh_json.IndexBufferList[ib_entry_index]
+							if ib_entry.IndexCount > 0:
+								match_index_count = ib_entry.IndexCount
+								match_first_index = ib_entry.IndexOffset
 					segment_match_name = MMTImportHelper.build_match_submesh_name(
 						submesh_name_prefix=submesh_name_prefix,
 						match_index_count=match_index_count,
@@ -301,6 +311,11 @@ class MMTImportHelper:
 						"index_count": draw_call_segment.IndexCount,
 						# Part alias from the INI comment above the drawindexed.
 						"alias": draw_call_segment.Alias,
+						# Per-segment match identity (0 = not recorded): single-IB
+						# multi-component groups (e.g. WWMI) carry it so the
+						# segment can be attributed to the right Component.
+						"match_first_index": draw_call_segment.MatchFirstIndex,
+						"match_index_count": draw_call_segment.MatchIndexCount,
 					},
 				))
 		elif len(submesh_json.DrawCallIndexList) > 0:
@@ -318,7 +333,7 @@ class MMTImportHelper:
 					for index_count in index_count_list:
 						raw_segments.append((
 							ib_data_full[index_offset:index_offset + index_count],
-							{"ib_index": -1, "index_offset": index_offset, "index_count": index_count, "alias": ""},
+							{"ib_index": -1, "index_offset": index_offset, "index_count": index_count, "alias": "", "match_first_index": 0, "match_index_count": 0},
 						))
 						index_offset += index_count
 				else:

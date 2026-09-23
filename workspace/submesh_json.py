@@ -46,6 +46,14 @@ class SubmeshDrawCallSegment:
 	# (e.g. "; Skirk Body Knees (636)"), written by the reverse tool; empty
 	# when the draw statement had no comment.
 	Alias:str = ""
+	# Per-segment match identity: the match_first_index / match_index_count
+	# declared by the INI section this draw call belongs to. Newer reverse
+	# outputs write them for single-IB multi-component groups (e.g. WWMI),
+	# where the IndexBufferList entry can only record one whole-buffer range.
+	# 0 = not recorded; callers then fall back to the IndexBufferList entry
+	# values, and finally to the Json top-level IndexOffset/IndexCount.
+	MatchFirstIndex:int = 0
+	MatchIndexCount:int = 0
 
 
 @dataclass
@@ -148,6 +156,9 @@ class SubmeshJson:
 				DrawStartIndex=int(draw_call_segment_json.get("DrawStartIndex", 0)),
 				# Part alias written by the reverse tool from the INI comment.
 				Alias=str(draw_call_segment_json.get("Alias", "")).strip(),
+				# Per-segment match identity; absent on older reverse outputs (defaults 0).
+				MatchFirstIndex=int(draw_call_segment_json.get("MatchFirstIndex", 0) or 0),
+				MatchIndexCount=int(draw_call_segment_json.get("MatchIndexCount", 0) or 0),
 			)
 			self.DrawCallSegmentList.append(draw_call_segment)
 
