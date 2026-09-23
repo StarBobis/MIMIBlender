@@ -204,7 +204,7 @@ _RNA_EXCLUDE = {
 
 
 def _copy_collection_items(source, target):
-    """Copy RNA collections recursively, including disabled rows and settings."""
+    """Copy RNA collections recursively, including every row's settings."""
     # ID-property deepcopy does not copy Blender PropertyGroup collections.
     # Rebuild each collection explicitly so grouping cannot discard user data.
     # Native read-only collections (such as node warnings) are not settings.
