@@ -619,6 +619,15 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         if hash_text and _TEXTURE_HASH_PATTERN.match(hash_text) is None:
             layout.label(text=tr("Texture hash looks wrong; expected 8 hexadecimal characters (a 32-bit texture hash)"), icon='ERROR')
 
+        # This node is a conditional pass-through. A dangling output means
+        # the exporter cannot reach it from Generate Mod, so make the silent
+        # no-op visible and point users to the socket-less global node.
+        if not self.outputs or not self.outputs[0].is_linked:
+            layout.label(
+                text=tr("Hash Texture Bind output is not connected; use Global Hash Texture Bind for an unconditional replacement"),
+                icon='ERROR',
+            )
+
         active_count = len([row_item for row_item in self.texture_hash_items if row_item.enabled])
         layout.label(text=tr("{count} hash binding(s)").format(count=active_count), icon='TEXTURE_DATA')
 

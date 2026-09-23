@@ -592,6 +592,7 @@ TRANSLATIONS_ZH_CN = {
     # ---- Hash Texture Bind nodes (conditional and global hash-style overrides) ----
     "Hash Texture Bind": "Hash贴图绑定",
     "Global Hash Texture Bind": "全局Hash贴图绑定",
+    "Hash Texture Bind output is not connected; use Global Hash Texture Bind for an unconditional replacement": "Hash贴图绑定的输出未连接；如需无条件替换，请使用全局Hash贴图绑定",
     "Hash Source Mark": "Hash来源标记",
     "Choose Hash Texture File": "选择Hash贴图文件",
     "Clear Hash Texture File": "清除Hash贴图文件",
