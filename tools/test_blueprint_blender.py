@@ -40,6 +40,34 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn("node_tree", node.bl_rna.properties)
         self.assertIn("group_name", bpy.ops.mimi.make_group.get_rna_type().properties)
 
+    def test_global_hash_node_collection(self):
+        # Global hash rows must work without sockets or an object traversal.
+        node = self.tree.nodes.new("MIMINode_Hash_Texture_Global")
+        self.assertEqual(len(node.inputs), 0)
+        self.assertEqual(len(node.outputs), 0)
+        item = node.texture_hash_items.add()
+        item.texture_hash = "0123abcd"
+        item.source_type = 'FILE'
+        source_path = Path(tempfile.gettempdir()) / "mimi_global_hash_test.dds"
+        source_path.write_bytes(b"test dds")
+        item.file_path = str(source_path)
+
+        result = bpy.ops.mimi.texhashbind_select_file(
+            node_name=node.name,
+            tree_name=self.tree.name,
+            item_index=0,
+            filepath=str(source_path),
+        )
+        self.assertIn('FINISHED', result)
+
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+        source_path.unlink(missing_ok=True)
+        rows = BluePrintModel._collect_global_hash_texture_bindings(self.tree)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["texture_hash"], "0123abcd")
+        self.assertEqual(rows[0]["source_type"], "FILE")
+        self.assertEqual(rows[0]["file_path"], bpy.path.abspath(str(source_path)))
+
     def test_socket_draw_labels(self):
         # Socket circles are drawn by Blender, independently of this callback.
         # Record labels for linked and unlinked input/output sockets alike.

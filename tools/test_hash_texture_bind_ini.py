@@ -15,7 +15,9 @@ directly. The test checks that:
 3. contradictory bindings (same condition, different resources, or mixed
    unconditional + conditional) raise ValueError;
 4. the automatic hash pipeline skip hands managed hashes over to the
-   conditional sections.
+   conditional sections;
+5. unconnected global hash rows copy an external file and emit an
+   unconditional global override, refreshing the copy on re-export.
 """
 
 import importlib.util
@@ -396,6 +398,83 @@ def make_resolved_drawib(draw_ib, rows_by_call):
     return types.SimpleNamespace(submesh_model_list=[submesh])
 
 
+def test_global_hash_override(modules, texture_root):
+    """Unconnected global rows copy files and emit unconditional overrides."""
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
+    ini_builder_mod = modules[TEST_PKG + ".common.m_ini_builder"]
+    config_mod = sys.modules[TEST_PKG + ".common.global_config"]
+    config_mod.GlobalConfig._texture_root = texture_root
+
+    source_file = os.path.join(texture_root, "global_source.png")
+    with open(source_file, "wb") as file:
+        file.write(b"global bytes v1")
+
+    global_rows = [{
+        "enabled": True,
+        "texture_hash": HASH_BLUE,
+        "source_type": "FILE",
+        "file_path": source_file,
+        "resource_name": "",
+        "node_label": "GlobalTest",
+    }]
+    ini_builder = ini_builder_mod.M_IniBuilder()
+    ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
+        ini_builder=ini_builder,
+        global_hash_texture_binding_list=global_rows,
+    )
+    ini_path = os.path.join(texture_root, "global_hash.ini")
+    ini_builder.save_to_file(ini_path)
+    with open(ini_path, "r", encoding="utf-8") as file:
+        ini_text = file.read()
+
+    assert "[ResourceHashGlobal_" + HASH_BLUE + "]" in ini_text, ini_text
+    assert "[TextureOverride_Texture_" + HASH_BLUE + "_Global]" in ini_text, ini_text
+    assert "this = ResourceHashGlobal_" + HASH_BLUE in ini_text, ini_text
+
+    target_path = os.path.join(texture_root, "global", HASH_BLUE + "_global.png")
+    assert os.path.exists(target_path), target_path
+    with open(target_path, "rb") as file:
+        assert file.read() == b"global bytes v1"
+
+    # An explicit node selection refreshes an existing generated copy.
+    with open(source_file, "wb") as file:
+        file.write(b"global bytes v2")
+    ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
+        ini_builder=ini_builder_mod.M_IniBuilder(),
+        global_hash_texture_binding_list=global_rows,
+    )
+    with open(target_path, "rb") as file:
+        assert file.read() == b"global bytes v2"
+
+    managed = ini_helper_mod.M_IniHelper._collect_hash_binding_managed_hashes(
+        {}, global_hash_texture_binding_list=global_rows
+    )
+    assert managed == {HASH_BLUE}, managed
+
+    # A global default must serialize before a conditional refinement for the
+    # same hash, so a false condition returns to the global replacement.
+    ordered_builder = ini_builder_mod.M_IniBuilder()
+    ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
+        ini_builder=ordered_builder,
+        global_hash_texture_binding_list=global_rows,
+    )
+    ini_helper_mod.M_IniHelper.generate_hash_style_object_texture_ini(
+        ini_builder=ordered_builder,
+        drawib_drawibmodel_dict={
+            "94517393": make_resolved_drawib("94517393", [
+                ("$swapkey0 == 0", [(HASH_BLUE, "ResourceConditional")]),
+            ]),
+        },
+    )
+    ordered_path = os.path.join(texture_root, "global_hash_order.ini")
+    ordered_builder.save_to_file(ordered_path)
+    with open(ordered_path, "r", encoding="utf-8") as file:
+        ordered_text = file.read()
+    assert ordered_text.index("[TextureOverride_Texture_" + HASH_BLUE + "_Global]") < ordered_text.index("[TextureOverride_Texture_" + HASH_BLUE + "_Switch]"), ordered_text
+
+    print("test_global_hash_override OK")
+
+
 def test_section_generation(modules, texture_root):
     """One section per hash; if/endif per condition; plain this= otherwise."""
     # Red/blue hair: one hash, two switch states.
@@ -501,6 +580,7 @@ def main():
         os.makedirs(source_dir, exist_ok=True)
         test_resolve_hash_bindings(modules, source_dir)
         test_resolve_hash_validation(modules, source_dir)
+        test_global_hash_override(modules, temp_dir)
         test_section_generation(modules, temp_dir)
         test_managed_hash_skip(modules)
 

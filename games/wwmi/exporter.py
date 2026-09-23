@@ -413,7 +413,16 @@ class Exporter:
             M_IniHelper.add_branch_key_sections(ini_builder=config_ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
 
             print("[TRACE] generate_unreal_vs_config_ini: DrawIB=" + draw_ib + " - start generating Hash texture INI...")
-            M_IniHelper.generate_hash_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
+            global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
+            M_IniHelper.generate_hash_style_global_texture_ini(
+                ini_builder=config_ini_builder,
+                global_hash_texture_binding_list=global_hash_rows,
+            )
+            M_IniHelper.generate_hash_style_texture_ini(
+                ini_builder=config_ini_builder,
+                drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
+                global_hash_texture_binding_list=global_hash_rows,
+            )
             M_IniHelper.generate_shared_slot_style_texture_ini(ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
             # Texture Bind node FILE resources are explicit user intent and
             # must exist even when the automatic texture pipeline is off.

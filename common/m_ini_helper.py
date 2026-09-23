@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 
 from .m_ini_builder import *
@@ -14,6 +15,12 @@ from .mimi_global_properties import MIMIGlobalProperties
 from ..workspace.mmt_workspace import MMTWorkSpace
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.texture_metadata_helper import TextureMetadataResolver, TextureMarkUpInfo
+
+# These are the only direct image formats accepted by the resource writers.
+_GLOBAL_HASH_FILE_SUFFIXES = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga")
+_GLOBAL_HASH_PATTERN = re.compile(r"^[0-9a-f]{8}$")
+_GLOBAL_RESOURCE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 class M_IniHelper:
     @staticmethod
@@ -240,16 +247,148 @@ class M_IniHelper:
         return drawindexed_str_list
 
     @staticmethod
-    def _collect_hash_binding_managed_hashes(drawib_drawibmodel_dict: dict) -> set:
-        '''Every texture hash explicitly bound by a Hash Texture Bind node.'''
+    def _collect_hash_binding_managed_hashes(
+        drawib_drawibmodel_dict: dict,
+        global_hash_texture_binding_list: list | None = None,
+    ) -> set:
+        '''Every active hash explicitly bound by either hash node variant.'''
         managed_hash_set = set()
         for draw_ib_model in drawib_drawibmodel_dict.values():
             for submesh_model in getattr(draw_ib_model, "submesh_model_list", []):
                 for draw_model in getattr(submesh_model, "drawcall_model_list", []):
                     for row in getattr(draw_model, "resolved_hash_texture_binding_list", None) or []:
                         managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
+
+        # Global rows are not attached to a DrawIB, so they need an explicit
+        # second collection pass before the automatic hash pipeline runs.
+        for row in global_hash_texture_binding_list or []:
+            if not row.get("enabled", True):
+                continue
+            managed_hash_set.add(str(row.get("texture_hash", "") or "").strip().lower())
+
         managed_hash_set.discard("")
         return managed_hash_set
+
+    @classmethod
+    def generate_hash_style_global_texture_ini(
+        cls,
+        ini_builder: M_IniBuilder,
+        global_hash_texture_binding_list: list | None,
+    ):
+        '''Emit unconditional replacements from unconnected global hash nodes.'''
+        # Resolve and validate every row before copying anything. This keeps a
+        # broken row from leaving a half-written global texture set behind.
+        resolved_rows = []
+        seen_hashes = set()
+        for binding in global_hash_texture_binding_list or []:
+            if not binding.get("enabled", True):
+                continue
+
+            node_label = str(binding.get("node_label", "") or "Global Hash Texture Bind")
+            texture_hash = str(binding.get("texture_hash", "") or "").strip().lower()
+            if _GLOBAL_HASH_PATTERN.fullmatch(texture_hash) is None:
+                raise ValueError(
+                    "Global Hash Texture Bind node '" + node_label
+                    + "': invalid texture hash '" + str(binding.get("texture_hash", ""))
+                    + "'; expected 8 hexadecimal characters."
+                )
+            if texture_hash in seen_hashes:
+                raise ValueError(
+                    "Global Hash Texture Bind node '" + node_label
+                    + "': texture hash '" + texture_hash
+                    + "' is specified more than once; keep one global replacement per hash."
+                )
+            seen_hashes.add(texture_hash)
+
+            source_type = str(binding.get("source_type", "") or "")
+            if source_type == "FILE":
+                source_path = str(binding.get("file_path", "") or "").strip()
+                if not source_path:
+                    raise ValueError(
+                        "Global Hash Texture Bind node '" + node_label
+                        + "': texture file path is empty for hash '" + texture_hash + "'."
+                    )
+                file_suffix = os.path.splitext(source_path)[1].lower()
+                if file_suffix not in _GLOBAL_HASH_FILE_SUFFIXES:
+                    raise ValueError(
+                        "Global Hash Texture Bind node '" + node_label
+                        + "': unsupported texture file '" + source_path
+                        + "'; use one of " + ", ".join(_GLOBAL_HASH_FILE_SUFFIXES) + "."
+                    )
+                if not os.path.isfile(source_path):
+                    raise ValueError(
+                        "Global Hash Texture Bind node '" + node_label
+                        + "': texture file does not exist: " + source_path + "."
+                    )
+
+                # Stable hash-based names make the generated texture easy to
+                # find and prevent two source basenames from colliding.
+                resource_name = "ResourceHashGlobal_" + texture_hash
+                target_filename = texture_hash + "_global" + file_suffix
+                resolved_rows.append({
+                    "texture_hash": texture_hash,
+                    "resource_name": resource_name,
+                    "target_filename": target_filename,
+                    "source_path": source_path,
+                })
+            elif source_type == "RESOURCE":
+                resource_name = str(binding.get("resource_name", "") or "").strip()
+                if _GLOBAL_RESOURCE_PATTERN.fullmatch(resource_name) is None:
+                    raise ValueError(
+                        "Global Hash Texture Bind node '" + node_label
+                        + "': invalid resource name '" + resource_name + "'."
+                    )
+                resolved_rows.append({
+                    "texture_hash": texture_hash,
+                    "resource_name": resource_name,
+                    "target_filename": "",
+                    "source_path": "",
+                })
+            else:
+                raise ValueError(
+                    "Global Hash Texture Bind node '" + node_label
+                    + "': source type '" + source_type
+                    + "' is not supported; use External File or Existing Resource."
+                )
+
+        if not resolved_rows:
+            return
+
+        # Copy explicit global files on every export. A changed source must
+        # replace the previous generated copy instead of leaving stale bytes.
+        output_folder = GlobalConfig.path_generatemod_texture_folder(draw_ib="global")
+        os.makedirs(output_folder, exist_ok=True)
+        for row in resolved_rows:
+            source_path = row["source_path"]
+            if not source_path:
+                continue
+            target_path = os.path.join(output_folder, row["target_filename"])
+            source_key = os.path.normcase(os.path.abspath(source_path))
+            target_key = os.path.normcase(os.path.abspath(target_path))
+            if source_key == target_key:
+                continue
+            shutil.copy2(source_path, target_path)
+
+        # Keep resource declarations before all hash overrides. The separate
+        # section types also preserve the intended order when a global default
+        # and a conditional object row target the same hash.
+        resource_section = M_IniSection(M_SectionType.ResourceTexture)
+        override_section = M_IniSection(M_SectionType.TextureOverrideTexture)
+        for row in resolved_rows:
+            resource_name = row["resource_name"]
+            target_filename = row["target_filename"]
+            if target_filename:
+                resource_section.append("[" + resource_name + "]")
+                resource_section.append("filename = " + GlobalConfig.ini_texture_filename(target_filename))
+                resource_section.new_line()
+            override_section.append("[TextureOverride_Texture_" + row["texture_hash"] + "_Global]")
+            override_section.append("hash = " + row["texture_hash"])
+            override_section.append("match_priority = 0")
+            override_section.append("this = " + resource_name)
+            override_section.new_line()
+
+        ini_builder.append_section(resource_section)
+        ini_builder.append_section(override_section)
 
     @classmethod
     def generate_hash_style_object_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
@@ -327,7 +466,12 @@ class M_IniHelper:
             ini_builder.append_section(switch_section)
 
     @classmethod
-    def generate_hash_style_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict[str, DrawIBModel]):
+    def generate_hash_style_texture_ini(
+        cls,
+        ini_builder: M_IniBuilder,
+        drawib_drawibmodel_dict: dict[str, DrawIBModel],
+        global_hash_texture_binding_list: list | None = None,
+    ):
         """
         Hash style textures: generate texture config sections (Resource_Texture + TextureOverride) and copy the texture files.
         Overall flow: iterate over DrawIB -> iterate over SubMesh -> process each texture.
@@ -345,10 +489,12 @@ class M_IniHelper:
         # ═══════════════════════════════════════════════════
         repeat_hash_list: list[str] = []
 
-        # Hashes managed by Hash Texture Bind nodes are explicit user intent:
-        # the automatic unconditional override hands over to the conditional
-        # sections from generate_hash_style_object_texture_ini.
-        managed_hash_set = cls._collect_hash_binding_managed_hashes(drawib_drawibmodel_dict)
+        # Hashes managed by either explicit hash node variant are user intent:
+        # the automatic unconditional override hands over to the node sections.
+        managed_hash_set = cls._collect_hash_binding_managed_hashes(
+            drawib_drawibmodel_dict,
+            global_hash_texture_binding_list=global_hash_texture_binding_list,
+        )
 
         for draw_ib, draw_ib_model in drawib_drawibmodel_dict.items():
             submesh_list = getattr(draw_ib_model, "submesh_model_list", [])
@@ -377,16 +523,19 @@ class M_IniHelper:
                     if texture_markup_info.mark_type != "Hash":
                         continue
 
-                    # Dedupe check: each Hash is processed only once
-                    if texture_markup_info.mark_hash in repeat_hash_list:
+                    # Dedupe and managed-hash comparisons use one case so a
+                    # metadata file with uppercase hex still matches a global
+                    # or conditional node row.
+                    mark_hash = str(texture_markup_info.mark_hash or "").strip().lower()
+                    if mark_hash in repeat_hash_list:
                         continue
-                    repeat_hash_list.append(texture_markup_info.mark_hash)
+                    repeat_hash_list.append(mark_hash)
 
                     # Hashes bound by Hash Texture Bind nodes keep their
                     # resource management but skip the automatic override;
-                    # the conditional this= sections take over.
-                    if texture_markup_info.mark_hash in managed_hash_set:
-                        print("M_IniHelper: hash " + texture_markup_info.mark_hash + " is managed by Hash Texture Bind nodes; skipping the automatic Hash override.")
+                    # the explicit node sections take over.
+                    if mark_hash in managed_hash_set:
+                        print("M_IniHelper: hash " + mark_hash + " is managed by Hash Texture Bind nodes; skipping the automatic Hash override.")
                         continue
 
                     # Find the source texture file path
@@ -698,10 +847,13 @@ class M_IniHelper:
 
     @classmethod
     def move_object_texture_binding_files(cls, draw_ib_model: DrawIBModel):
-        '''Copy the Texture Bind FILE source textures into the mod Texture folder.
+        '''Copy explicit Texture Bind files into the generated Texture folder.
 
-        Skips targets that already exist (same dedupe behaviour as
-        move_slot_style_textures), so calling this more than once is safe.
+        A changed source must refresh the generated copy. The old skip-only
+        behavior made a newly selected external file look as if it vanished
+        because the previous export's bytes were kept under the same name.
+        Repeated calls remain safe because an identical source/target path is
+        skipped before copying.
         '''
         file_list = list(getattr(draw_ib_model, "object_texture_binding_file_list", None) or [])
         if not file_list:
@@ -714,18 +866,24 @@ class M_IniHelper:
         skipped_count = 0
         for resource_name, source_path, target_filename in file_list:
             target_path = os.path.join(texture_output_folder, target_filename)
-            if os.path.exists(target_path):
-                skipped_count += 1
-                continue
             if not os.path.exists(source_path):
                 print("M_IniHelper: Texture Bind source file missing, skip copy: " + source_path)
+                continue
+
+            # Avoid a SameFileError when a source already lives in the output
+            # folder, but overwrite an existing target when it came from a
+            # different source selected in the node.
+            source_key = os.path.normcase(os.path.abspath(source_path))
+            target_key = os.path.normcase(os.path.abspath(target_path))
+            if source_key == target_key:
+                skipped_count += 1
                 continue
             shutil.copy2(source_path, target_path)
             copied_count += 1
 
         print(
             "M_IniHelper: Texture Bind texture copy done, DrawIB: " + draw_ib_model.draw_ib
-            + ", copied: " + str(copied_count) + ", skipped (target exists): " + str(skipped_count)
+            + ", copied: " + str(copied_count) + ", skipped (source already is target): " + str(skipped_count)
         )
 
     @staticmethod

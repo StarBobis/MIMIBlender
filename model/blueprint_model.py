@@ -18,7 +18,10 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
 from ..blueprint.blueprint_node_object_list import MIMINode_Object_List
 from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind, normalize_mark_name_enum_value
-from ..blueprint.blueprint_node_hash_texture import MIMINode_Hash_Texture_Bind
+from ..blueprint.blueprint_node_hash_texture import (
+    MIMINode_Hash_Texture_Bind,
+    MIMINode_Hash_Texture_Global,
+)
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -41,7 +44,11 @@ class BluePrintModel:
         self.keyname_mkey_dict:dict[str,M_Key] = {} 
 
         # Global obj_model list; each obj_model stores the active condition of its obj.
-        self.ordered_draw_obj_data_model_list:list[DrawCallModel] = [] 
+        self.ordered_draw_obj_data_model_list:list[DrawCallModel] = []
+
+        # Unconnected global hash nodes are collected separately from the
+        # object traversal, then every exporter can emit their replacements.
+        self.global_hash_texture_binding_list:list[dict] = []
 
         # Temporary objects created by UniComponent splitting; must be cleaned up after export
         self._unico_temp_objects: list[bpy.types.Object] = []
@@ -51,6 +58,11 @@ class BluePrintModel:
         tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not tree:
             raise ValueError("No blueprint tree found; please open the correct blueprint editor")
+
+        # Global hash nodes are intentionally independent of the output graph.
+        # Collect them before traversing connected object nodes so an export
+        # with only conditional objects still sees every global replacement.
+        self.global_hash_texture_binding_list = self._collect_global_hash_texture_bindings(tree)
 
         # Nodes sharing an explicit alias share one INI variable.  Its period
         # is the LCM of the participating nodes' branch counts.
@@ -551,6 +563,50 @@ class BluePrintModel:
             obj_model.work_key_list = copy.deepcopy(chain_key_list)
 
             self.ordered_draw_obj_data_model_list.append(obj_model)
+
+    @staticmethod
+    def _collect_global_hash_texture_bindings(root_tree):
+        '''Collect unconnected global hash rows from this tree and its groups.'''
+        bindings = []
+        visited_tree_ids = set()
+
+        def visit_tree(tree):
+            if tree is None:
+                return
+            tree_id = id(tree)
+            if tree_id in visited_tree_ids:
+                return
+            visited_tree_ids.add(tree_id)
+
+            for node in getattr(tree, "nodes", []):
+                if getattr(node, "bl_idname", "") == MIMINode_Hash_Texture_Global.bl_idname:
+                    # Muted nodes behave like every other muted blueprint node.
+                    if not getattr(node, "mute", False):
+                        node_label = str(getattr(node, "label", "") or getattr(node, "name", "") or "Global Hash Texture Bind")
+                        for item in getattr(node, "texture_hash_items", []):
+                            file_path = str(getattr(item, "file_path", "") or "").strip()
+                            if file_path:
+                                try:
+                                    file_path = bpy.path.abspath(file_path)
+                                except Exception:
+                                    pass
+                            bindings.append({
+                                "enabled": bool(getattr(item, "enabled", True)),
+                                "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
+                                "source_type": str(getattr(item, "source_type", "") or ""),
+                                "file_path": file_path,
+                                "resource_name": str(getattr(item, "resource_name", "") or ""),
+                                "node_label": node_label,
+                            })
+
+                # A group may contain an unconnected global node. It is still
+                # part of the current blueprint and must not be hidden by the
+                # regular object-link traversal.
+                if getattr(node, "bl_idname", "") == GROUP_NODE_IDNAME:
+                    visit_tree(getattr(node, "node_tree", None))
+
+        visit_tree(root_tree)
+        return bindings
 
     @staticmethod
     def _collect_texture_bindings(bind_node):

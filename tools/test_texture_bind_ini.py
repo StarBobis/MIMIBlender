@@ -455,9 +455,13 @@ def test_resource_sections_and_copy(modules, texture_root):
     assert os.path.exists(copied_path), copied_path
     with open(copied_path, "rb") as file:
         assert file.read() == b"fake dds bytes"
+    # A changed source replaces the previous generated copy instead of
+    # leaving stale bytes under the same resource filename.
+    with open(source_file, "wb") as file:
+        file.write(b"updated dds bytes")
     ini_helper_mod.M_IniHelper.move_object_texture_binding_files(draw_ib_model=drawib_model)
     with open(copied_path, "rb") as file:
-        assert file.read() == b"fake dds bytes"
+        assert file.read() == b"updated dds bytes"
 
     print("test_resource_sections_and_copy OK")
 

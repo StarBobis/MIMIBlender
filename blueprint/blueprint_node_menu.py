@@ -780,6 +780,9 @@ class MIMIMT_TextureAssignMenu(bpy.types.Menu):
         # Hash Texture Bind turns each passing object into conditional this=
         # blocks inside the global hash-style TextureOverride sections.
         layout.operator("node.add_node", text=tr("Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
+        # Global Hash Texture Bind has no sockets because its replacements apply
+        # wherever the game binds the selected hash.
+        layout.operator("node.add_node", text=tr("Global Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Global"
 
 
 class MIMIMT_DynamicModMenu(bpy.types.Menu):

@@ -69,12 +69,18 @@ class Exporter:
 
         # Texture handling
         tex_ini_builder = M_IniBuilder()
+        global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
+        M_IniHelper.generate_hash_style_global_texture_ini(
+            ini_builder=tex_ini_builder,
+            global_hash_texture_binding_list=global_hash_rows,
+        )
         if not MIMIGlobalProperties.forbid_auto_texture_ini():
             sections.append_texture_resources(lines, self.drawib_model_list)
             # Also generate hash-style texture overrides (standard for all game types)
             M_IniHelper.generate_hash_style_texture_ini(
                 ini_builder=tex_ini_builder,
                 drawib_drawibmodel_dict=drawib_drawibmodel_dict,
+                global_hash_texture_binding_list=global_hash_rows,
             )
             M_IniHelper.generate_shared_slot_style_texture_ini(
                 ini_builder=tex_ini_builder,
