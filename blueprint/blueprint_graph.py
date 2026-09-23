@@ -38,10 +38,11 @@ def iter_object_sources(root):
                     index = sockets.index(output)
                     if index:
                         rows = rows[index - 1:index]
-                # Disabled rows retain their wires but contribute no objects.
+                # Every row of an Object List contributes its object; the
+                # node has no per-row enable switch, only whole rows that
+                # the user added or deleted.
                 for row in rows:
-                    if row.enabled:
-                        yield row
+                    yield row
                 return
             if kind == 'SSMTBlueprintGroupNode':
                 tree = node.node_tree

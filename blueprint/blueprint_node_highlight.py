@@ -95,9 +95,7 @@ def _matches_object_list_item(node, selected_objects) -> bool:
         return False
     selected_names = {obj.name for obj in selected_objects}
     for item in items:
-        # Disabled rows do not contribute geometry or selection highlights.
-        if not item.enabled:
-            continue
+        # Every row references an object, so any match highlights the node.
         reference = getattr(item, "object_ref", None)
         object_name = reference.name if reference is not None else str(getattr(item, "object_name", "") or "").strip()
         if object_name and object_name in selected_names:

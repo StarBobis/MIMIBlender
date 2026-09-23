@@ -450,8 +450,9 @@ class BluePrintModel:
         elif unknown_node.bl_idname == MIMINode_Object_List.bl_idname:
             # Fan-out source: the link's from_socket decides what is emitted.
             # A per-item socket carries exactly that object; the leading
-            # "All" socket (or a visit without socket info) emits every
-            # enabled item in list order.
+            # "All" socket (or a visit without socket info) emits every item
+            # in list order. The list has no per-item enable flag, so an
+            # entry the user wants gone is expected to be deleted instead.
             node_label = str(getattr(unknown_node, "label", "") or getattr(unknown_node, "name", "") or "Object List")
             output_sockets = list(unknown_node.outputs)
             selected_items = list(unknown_node.object_items)
@@ -468,8 +469,6 @@ class BluePrintModel:
 
             emitted_names = []
             for item in selected_items:
-                if not item.enabled:
-                    continue
                 # Export may run before the rename-sync timer has ticked.
                 # Read the stable pointer first without writing during traversal.
                 object_ref = getattr(item, "object_ref", None)
@@ -486,13 +485,15 @@ class BluePrintModel:
                 )
 
             # Duplicate objects within one expansion would silently emit
-            # duplicate drawindexed calls; fail loudly instead.
+            # duplicate drawindexed calls; fail loudly instead. Deleting one
+            # of the duplicate rows is the only fix, because no row can be
+            # switched off any more.
             normalized_names = [name.lower() for name in emitted_names]
             if len(set(normalized_names)) != len(normalized_names):
                 duplicated = sorted({name for name in normalized_names if normalized_names.count(name) > 1})
                 raise ValueError(
                     "Object List node '" + node_label + "' contains the same object more than once: "
-                    + ", ".join(duplicated) + "; remove the duplicates or disable the extra entries."
+                    + ", ".join(duplicated) + "; remove the duplicate entries."
                 )
 
         elif unknown_node.bl_idname == MIMINode_Object_Info.bl_idname:

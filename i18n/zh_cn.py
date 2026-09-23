@@ -632,7 +632,6 @@ TRANSLATIONS_ZH_CN = {
     "{count} object(s)": "{count} 个物体",
     "Show Details": "显示详情",
     "Expand the object list; collapse to keep the blueprint compact": "展开物体列表；折叠以保持蓝图紧凑",
-    "Disabled entries are skipped at export time": "禁用的条目在导出时跳过",
     "Optional Submesh override, same semantics as the Object Info node": "可选的Submesh覆盖，语义与物体信息节点相同",
     "Blender object of this entry; parse falls back to object name resolution when the Submesh is empty": "该条目对应的Blender物体；Submesh留空时解析回退到按物体名解析",
     "Object": "物体",

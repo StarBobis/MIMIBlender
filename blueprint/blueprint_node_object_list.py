@@ -9,9 +9,12 @@ collapsible body:
 - Every list item gets its own MIMISocketObject output socket, so any
   object can be wired individually (e.g. one branch per frame of a
   Switch Key / Time Switch).
-- A leading "All" output socket emits every enabled item in list order,
-  so the whole set can feed one downstream chain (texture bind, plain
-  output, ...) with a single wire.
+- A leading "All" output socket emits every item in list order, so the
+  whole set can feed one downstream chain (texture bind, plain output,
+  ...) with a single wire.
+- Every item always takes part in the export. An object the user does
+  not want in the mod is simply deleted from the list; there is no
+  per-item on/off switch, so the list cannot silently lose entries.
 - The node body collapses to a one-line "{n} objects" summary, keeping
   the graph readable when the details do not matter.
 
@@ -19,9 +22,9 @@ Parse-side contract (see BluePrintModel):
 - The parser threads the link's from_socket down the traversal, so the
   Object List branch knows which output socket a chain left from.
 - Leaving from a per-item socket emits exactly that object; leaving from
-  "All" (or visiting without socket info) emits every enabled item in
-  list order.  Duplicate objects inside one expansion are an error,
-  because they would silently duplicate drawindexed calls.
+  "All" (or visiting without socket info) emits every item in list
+  order.  Duplicate objects inside one expansion are an error, because
+  they would silently duplicate drawindexed calls.
 '''
 import bpy
 from bpy.types import PropertyGroup
@@ -101,7 +104,6 @@ def _append_object_list_item(node, object_name):
     '''Add one item plus its mirrored output socket; returns the new item.'''
     item = node.object_items.add()
     item.object_name = object_name
-    item.enabled = True
     _object_list_item_refresh_display(item)
     node.outputs.new('MIMISocketObject', item.name)
     node.object_index = len(node.object_items) - 1
@@ -136,14 +138,14 @@ def _lookup_object_list_node(context, tree_name, node_name):
 
 
 class MIMIObjectListItem(PropertyGroup):
-    '''One object entry of an Object List node.'''
-    name: bpy.props.StringProperty(name=tr("Object"), default="") # type: ignore
+    '''One object entry of an Object List node.
 
-    enabled: bpy.props.BoolProperty(
-        name=tr("Enabled"),
-        description=tr("Disabled entries are skipped at export time"),
-        default=True,
-    ) # type: ignore
+    An entry has no on/off switch on purpose: every listed object is part
+    of the export, and removing an unwanted object is done by deleting its
+    row (which also removes the matching output socket). That keeps the
+    node honest, because what the list shows is exactly what gets baked.
+    '''
+    name: bpy.props.StringProperty(name=tr("Object"), default="") # type: ignore
 
     # The hidden pointer preserves identity when an object is renamed.
     # The existing name remains the public/export format for older files.
@@ -379,8 +381,8 @@ class MIMINode_Object_List(MIMINodeBase):
             icon='TRIA_DOWN' if self.show_details else 'TRIA_RIGHT',
             toggle=True,
         )
-        enabled_count = len([row_item for row_item in self.object_items if row_item.enabled])
-        header_row.label(text=tr("{count} object(s)").format(count=enabled_count), icon='OBJECT_DATAMODE')
+        # Every row counts: the list has no disabled entries any more.
+        header_row.label(text=tr("{count} object(s)").format(count=len(self.object_items)), icon='OBJECT_DATAMODE')
 
         if not self.show_details:
             return
@@ -420,7 +422,6 @@ class MIMINode_Object_List(MIMINodeBase):
         item = self.object_items[index]
 
         box = layout.box()
-        box.prop(item, "enabled")
         box.prop_search(item, "object_name", bpy.data, "objects", text="", icon='OBJECT_DATA')
         if tree is not None:
             box.prop_search(item, "submesh_name", tree, "ssmt_submesh_items", text=tr("Submesh"), icon='OUTLINER_COLLECTION')

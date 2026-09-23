@@ -227,11 +227,11 @@ class BlueprintTests(unittest.TestCase):
         node = self.tree.nodes.new("MIMINode_Object_List")
         lists._append_object_list_item(node, "body")
         lists._append_object_list_item(node, "hair")
-        node.object_items[1].enabled = False
+        node.object_items[1].submesh_name = "hair_submesh"
         child = bpy.data.node_groups.new("child", self.tree.bl_idname)
         clone = groups._clone_node(node, child)
         self.assertEqual([item.object_name for item in clone.object_items], ["body", "hair"])
-        self.assertFalse(clone.object_items[1].enabled)
+        self.assertEqual(clone.object_items[1].submesh_name, "hair_submesh")
         self.assertEqual([socket.name for socket in clone.outputs], ["All", "body", "hair"])
 
     def test_group_roundtrip(self):
@@ -531,7 +531,7 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual([row.object_name for row in iter_object_sources(instances[1])], ['shared_mesh'])
 
     def test_texture_settings_survive_group_clone(self):
-        # PropertyGroup rows, enum selections and disabled flags are user data.
+        # PropertyGroup rows, enum selections and row flags are user data.
         # Copy them without needing external workspace marks or image files.
         source = self.tree.nodes.new('MIMINode_Texture_Bind')
         item = source.texture_slot_items.add()
