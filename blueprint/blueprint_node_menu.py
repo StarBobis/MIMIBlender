@@ -1,4 +1,6 @@
 
+import json
+
 import bpy
 
 from ..common.global_config import GlobalConfig
@@ -26,80 +28,254 @@ def _new_batch_input(node):
     return node.inputs.new('MIMISocketObject', f'{prefix} {len(node.inputs) + start}')
 
 
+def _get_selected_mesh_objects(context):
+    """Return selected mesh objects from both View3D and Outliner contexts."""
+    selected_objects = []
+    seen_names = set()
+
+    # View3D exposes the normal selection through selected_objects.  Reading it
+    # first keeps the usual selection order for the existing viewport action.
+    candidates = list(getattr(context, "selected_objects", []) or [])
+
+    # Outliner context menus expose selected datablocks through selected_ids.
+    # They are not guaranteed to be mirrored into context.selected_objects.
+    candidates.extend(list(getattr(context, "selected_ids", []) or []))
+
+    for candidate in candidates:
+        if getattr(candidate, "type", "") != 'MESH':
+            continue
+        object_name = str(getattr(candidate, "name", "") or "")
+        if not object_name or object_name in seen_names:
+            continue
+        seen_names.add(object_name)
+        selected_objects.append(candidate)
+
+    return selected_objects
+
+
+def _get_blueprint_tree(context):
+    """Resolve the blueprint tree without depending on the current editor area."""
+    # The helper remembers the last tree used by a node editor or export action.
+    node_tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
+    if node_tree is not None:
+        return node_tree
+
+    # Keep a direct context fallback for old files whose tree has no registered
+    # users yet, while still rejecting ordinary Blender node groups.
+    space_data = getattr(context, "space_data", None)
+    if space_data and getattr(space_data, "type", None) == 'NODE_EDITOR':
+        node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
+        if getattr(node_tree, "bl_idname", "") == 'MIMIBlueprintTreeType':
+            return node_tree
+
+    # A menu can be opened from the Outliner, so search the other visible areas
+    # when no runtime tree has been recorded yet.
+    window_manager = getattr(context, "window_manager", None)
+    for window in getattr(window_manager, "windows", []) if window_manager else []:
+        for area in getattr(window.screen, "areas", []):
+            if area.type != 'NODE_EDITOR':
+                continue
+            for space in getattr(area, "spaces", []):
+                if space.type != 'NODE_EDITOR':
+                    continue
+                node_tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
+                if getattr(node_tree, "bl_idname", "") == 'MIMIBlueprintTreeType':
+                    return node_tree
+
+    # Finally use the configured workspace blueprint, matching the legacy
+    # behavior of the original Create Group operator.
+    GlobalConfig.read_from_main_json()
+    workspace_name = str(GlobalConfig.get_workspace_name() or "SSMT_Mod_Logic")
+    node_tree = bpy.data.node_groups.get(workspace_name)
+    if getattr(node_tree, "bl_idname", "") == 'MIMIBlueprintTreeType':
+        return node_tree
+    return None
+
+
+def _get_group_creation_location(node_tree):
+    """Place a new list/group pair to the right of existing blueprint nodes."""
+    nodes = list(getattr(node_tree, "nodes", []) or [])
+    if not nodes:
+        return 0.0, 0.0
+
+    # Use the rightmost node edge so repeated additions do not cover an older
+    # graph.  The topmost Y coordinate keeps each new pair easy to locate.
+    right_edge = max(float(node.location.x) + float(node.width) for node in nodes)
+    top_edge = max(float(node.location.y) for node in nodes)
+    return right_edge + 200.0, top_edge
+
+
+def _create_group_from_objects(node_tree, selected_objects, target_submesh=""):
+    """Create one Object List and one Group node for selected objects."""
+    from .blueprint_node_object_list import _append_object_list_item
+
+    base_x, base_y = _get_group_creation_location(node_tree)
+    for node in node_tree.nodes:
+        node.select = False
+
+    # The list owns the object rows; the Group remains a compact reusable
+    # pass-through node that can later receive more inputs.
+    list_node = node_tree.nodes.new(type='MIMINode_Object_List')
+    list_node.location = (base_x, base_y)
+    group_node = node_tree.nodes.new(type='MIMINode_Object_Group')
+    group_node.location = (base_x + 400.0, base_y)
+
+    for obj in selected_objects:
+        item = _append_object_list_item(list_node, obj.name)
+        if target_submesh:
+            item.submesh_name = target_submesh
+
+    # The aggregate All output intentionally feeds the Group, so every selected
+    # object remains part of the created group without one wire per object.
+    if group_node.inputs and list_node.outputs:
+        node_tree.links.new(list_node.outputs[0], group_node.inputs[-1])
+        group_node.update()
+
+    list_node.select = True
+    group_node.select = True
+    # Remember the tree for the next action launched from the Outliner or view.
+    BlueprintExportHelper.set_runtime_blueprint_tree(node_tree)
+    try:
+        node_tree.nodes.active = group_node
+    except Exception:
+        # Active-node assignment is cosmetic and differs between Blender builds.
+        pass
+    return list_node, group_node
+
+
 class MMT_OT_CreateGroupFromSelection(I18nOperator):
-    '''Create nodes from selected objects and group them under a new Group node'''
+    '''Create a blueprint group from the selected mesh objects.'''
     bl_idname = "mimi.create_group_from_selection"
-    bl_label = "Create Group from Selected Objects"
+    bl_label = "Create Blueprint Group from Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        selected_objects = context.selected_objects
+        selected_objects = _get_selected_mesh_objects(context)
         if not selected_objects:
-            self.report({'WARNING'}, tr("No objects selected"))
+            self.report({'WARNING'}, tr("No mesh objects selected"))
             return {'CANCELLED'}
 
-        # Get the current active blueprint tree
-        node_tree = None
-        
-        # 1. Try to get the blueprint tree from the current context
-        space_data = getattr(context, "space_data", None)
-        if space_data and space_data.type == 'NODE_EDITOR':
-            node_tree = getattr(space_data, "edit_tree", None) or getattr(space_data, "node_tree", None)
-        
-        # 2. If not in a node editor, search for an open node editor window
-        if not node_tree:
-            for window in context.window_manager.windows:
-                for area in window.screen.areas:
-                    if area.type == 'NODE_EDITOR':
-                        for space in area.spaces:
-                            if space.type == 'NODE_EDITOR':
-                                tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
-                                if tree and tree.bl_idname == 'MIMIBlueprintTreeType':
-                                    node_tree = tree
-                                    break
-                        if node_tree:
-                            break
-                if node_tree:
-                    break
-        
-        # 3. If still not found, fall back to the default workspace blueprint
-        if not node_tree:
-            GlobalConfig.read_from_main_json()
-            workspace_name = f"{GlobalConfig.get_workspace_name()}" if GlobalConfig.get_workspace_name() else "SSMT_Mod_Logic"
-            node_tree = bpy.data.node_groups.get(workspace_name)
-        
-        if not node_tree or node_tree.bl_idname != 'MIMIBlueprintTreeType':
+        node_tree = _get_blueprint_tree(context)
+        if node_tree is None:
             self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
-        # Compute the node position offset to prevent overlap
-        base_x = 0
-        base_y = 0
-        if node_tree.nodes:
-             pass
+        _create_group_from_objects(node_tree, selected_objects)
+        self.report(
+            {'INFO'},
+            tr("Created blueprint group with {count} object(s)").format(count=len(selected_objects)),
+        )
+        return {'FINISHED'}
 
-        # Deselect all nodes
-        for node in node_tree.nodes:
-            node.select = False
 
-        # Create the Group node
-        group_node = node_tree.nodes.new(type='MIMINode_Object_Group')
-        group_node.location = (base_x + 400, base_y)
-        group_node.select = True
+class MMT_OT_CreateGroupFromSelectionWithSubmesh(I18nOperator):
+    '''Choose a Submesh and create a blueprint group from selected objects.'''
+    bl_idname = "mimi.create_group_from_selection_with_submesh"
+    bl_label = "Create Blueprint Group from Selected Objects and Assign Submesh"
+    bl_options = {'REGISTER', 'UNDO'}
 
-        # Collect every selected object into one collapsible Object List node
-        # instead of a column of Object Info nodes, then feed the whole set
-        # into the Group through the aggregate All socket.
-        from .blueprint_node_object_list import _append_object_list_item
-        list_node = node_tree.nodes.new(type='MIMINode_Object_List')
-        list_node.location = (base_x, base_y)
-        list_node.select = True
-        for obj in selected_objects:
-            _append_object_list_item(list_node, obj.name)
-        if len(group_node.inputs) > 0:
-            node_tree.links.new(list_node.outputs[0], group_node.inputs[-1])
-            group_node.update()
+    def invoke(self, context, event):
+        selected_objects = _get_selected_mesh_objects(context)
+        if not selected_objects:
+            self.report({'WARNING'}, tr("No mesh objects selected"))
+            return {'CANCELLED'}
 
+        node_tree = _get_blueprint_tree(context)
+        if node_tree is None:
+            self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
+            return {'CANCELLED'}
+
+        # Reuse the existing blueprint Submesh source.  If a tree has not been
+        # refreshed yet, refresh it automatically so this action stays one-click
+        # friendly when started from the Outliner.
+        submesh_names = BlueprintExportHelper.get_tree_submesh_names(tree=node_tree)
+        if not submesh_names:
+            try:
+                submesh_names = BlueprintExportHelper.refresh_tree_submesh_list(tree=node_tree)
+            except Exception as error:
+                self.report({'WARNING'}, tr("Failed to refresh the blueprint Submesh list: {error}").format(error=error))
+                return {'CANCELLED'}
+        if not submesh_names:
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
+            return {'CANCELLED'}
+
+        # Store the selection before opening the popup.  Outliner popup contexts
+        # do not always expose the original selected_ids collection.
+        object_names_json = json.dumps(
+            [obj.name for obj in selected_objects],
+            ensure_ascii=False,
+        )
+        tree_name = node_tree.name
+        BlueprintExportHelper.set_runtime_blueprint_tree(node_tree)
+
+        def draw_submesh_popup(menu, popup_context):
+            layout = menu.layout
+            for submesh_name in submesh_names:
+                operator = layout.operator(
+                    "mimi.apply_created_group_submesh",
+                    text=submesh_name,
+                    icon='OUTLINER_COLLECTION',
+                )
+                operator.tree_name = tree_name
+                operator.object_names_json = object_names_json
+                operator.target_submesh = submesh_name
+
+        context.window_manager.popup_menu(
+            draw_submesh_popup,
+            title=tr("Target Submesh"),
+            icon='OUTLINER_COLLECTION',
+        )
+        return {'FINISHED'}
+
+    def execute(self, context):
+        return self.invoke(context, None)
+
+
+class MMT_OT_ApplyCreatedGroupSubmesh(I18nOperator):
+    '''Create the deferred group after a Submesh is chosen from the popup.'''
+    bl_idname = "mimi.apply_created_group_submesh"
+    bl_label = "Create Blueprint Group with Submesh"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    tree_name: bpy.props.StringProperty(name=tr("Blueprint"), default="") # type: ignore
+    object_names_json: bpy.props.StringProperty(name=tr("Objects"), default="[]") # type: ignore
+    target_submesh: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
+
+    def execute(self, context):
+        target_submesh = str(self.target_submesh or "").strip()
+        if not target_submesh:
+            self.report({'WARNING'}, tr("Please select a valid Submesh."))
+            return {'CANCELLED'}
+
+        node_tree = bpy.data.node_groups.get(self.tree_name)
+        if getattr(node_tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+            self.report({'WARNING'}, tr("The target blueprint no longer exists"))
+            return {'CANCELLED'}
+
+        try:
+            object_names = json.loads(self.object_names_json or "[]")
+        except (TypeError, ValueError):
+            object_names = []
+        if not isinstance(object_names, list):
+            object_names = []
+
+        selected_objects = []
+        for object_name in object_names:
+            obj = bpy.data.objects.get(str(object_name))
+            if obj is not None and getattr(obj, "type", "") == 'MESH':
+                selected_objects.append(obj)
+        if not selected_objects:
+            self.report({'WARNING'}, tr("The selected objects are no longer available"))
+            return {'CANCELLED'}
+
+        _create_group_from_objects(node_tree, selected_objects, target_submesh=target_submesh)
+        self.report(
+            {'INFO'},
+            tr("Created blueprint group with {count} object(s) and assigned Submesh: {submesh}").format(
+                count=len(selected_objects),
+                submesh=target_submesh,
+            ),
+        )
         return {'FINISHED'}
 
 
@@ -326,6 +502,10 @@ class MMT_OT_ApplySelectedObjectNodeSubmesh(I18nOperator):
 
 
 def draw_objects_context_menu_add(self, context):
+    # Do not add an object action when the context menu belongs to a collection,
+    # scene, or another Outliner data-block with no selected mesh object.
+    if not _get_selected_mesh_objects(context):
+        return
     layout = self.layout
     layout.separator()
     layout.menu(MIMIMT_ObjectContextMenuSub.bl_idname, text=tr("MMT Blueprint Graph"), icon='NODETREE')
@@ -339,7 +519,18 @@ class MIMIMT_ObjectContextMenuSub(bpy.types.Menu):
     
     def draw(self, context):
         layout = self.layout
-        layout.operator("mimi.create_group_from_selection", text=tr("Create Group from Selected Objects"), icon='GROUP')
+        # Both actions are available from every object-selection menu.  The
+        # second action opens the same Submesh picker used by blueprint nodes.
+        layout.operator(
+            "mimi.create_group_from_selection",
+            text=tr("Create Blueprint Group from Selected Objects"),
+            icon='GROUP',
+        )
+        layout.operator(
+            "mimi.create_group_from_selection_with_submesh",
+            text=tr("Create Blueprint Group from Selected Objects and Assign Submesh"),
+            icon='OUTLINER_COLLECTION',
+        )
         layout.operator("mimi.create_internal_switch", text=tr("Create Internal Switch"), icon='ARROW_LEFTRIGHT')
 
 
@@ -851,6 +1042,8 @@ def draw_node_context_menu(self, context):
 
 def register():
     bpy.utils.register_class(MMT_OT_CreateGroupFromSelection)
+    bpy.utils.register_class(MMT_OT_CreateGroupFromSelectionWithSubmesh)
+    bpy.utils.register_class(MMT_OT_ApplyCreatedGroupSubmesh)
     bpy.utils.register_class(MMT_OT_CreateInternalSwitch)
     bpy.utils.register_class(MMT_OT_RefreshBlueprintSubmeshList)
     bpy.utils.register_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
@@ -861,8 +1054,12 @@ def register():
     bpy.utils.register_class(MIMIMT_TextureAssignMenu)
     bpy.utils.register_class(MIMIMT_DynamicModMenu)
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
-    # Add to the 3D viewport object context menu
+    # Add to the 3D viewport object context menu.
     bpy.types.VIEW3D_MT_object_context_menu.append(draw_objects_context_menu_add)
+    # Blender's Outliner has a separate context menu; using the same submenu
+    # keeps object selection behavior identical in both places.
+    if hasattr(bpy.types, "OUTLINER_MT_context_menu"):
+        bpy.types.OUTLINER_MT_context_menu.append(draw_objects_context_menu_add)
     # Add to the node editor context menu
     bpy.types.NODE_MT_context_menu.append(draw_node_context_menu)
     wm = bpy.context.window_manager
@@ -892,6 +1089,8 @@ def unregister():
     bpy.types.NODE_MT_context_menu.remove(draw_node_context_menu)
     bpy.types.NODE_MT_add.remove(draw_node_add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
+    if hasattr(bpy.types, "OUTLINER_MT_context_menu"):
+        bpy.types.OUTLINER_MT_context_menu.remove(draw_objects_context_menu_add)
 
     bpy.utils.unregister_class(MIMIMT_ObjectContextMenuSub)
     bpy.utils.unregister_class(MIMIMT_TextureAssignMenu)
@@ -902,4 +1101,6 @@ def unregister():
     bpy.utils.unregister_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
     bpy.utils.unregister_class(MMT_OT_RefreshBlueprintSubmeshList)
     bpy.utils.unregister_class(MMT_OT_CreateInternalSwitch)
+    bpy.utils.unregister_class(MMT_OT_ApplyCreatedGroupSubmesh)
+    bpy.utils.unregister_class(MMT_OT_CreateGroupFromSelectionWithSubmesh)
     bpy.utils.unregister_class(MMT_OT_CreateGroupFromSelection)
