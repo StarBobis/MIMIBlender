@@ -38,6 +38,7 @@ def _get_selected_mesh_objects(context):
     context_type = getattr(area, "type", "") or getattr(space_data, "type", "")
     view_selected = list(getattr(context, "selected_objects", []) or [])
     outliner_selected = list(getattr(context, "selected_ids", []) or [])
+    outliner_active_id = getattr(context, "id", None)
 
     # Outliner selection is authoritative in its own context.  Mixing it with
     # the View3D selection could silently add unrelated objects from another
@@ -45,8 +46,9 @@ def _get_selected_mesh_objects(context):
     if context_type == 'OUTLINER':
         # An empty Outliner selection must stay empty; falling back to a
         # View3D selection here would act on objects the user did not choose in
-        # the menu's area.
-        candidates = outliner_selected
+        # the menu's area. Blender may expose only the clicked datablock as
+        # context.id, so use it when selected_ids is unavailable.
+        candidates = outliner_selected or ([outliner_active_id] if outliner_active_id else [])
     elif view_selected:
         # View3D exposes the normal selection through selected_objects, so keep
         # its order for the existing viewport action.
@@ -1070,10 +1072,11 @@ def register():
     bpy.types.NODE_MT_add.prepend(draw_node_add_menu)
     # Add to the 3D viewport object context menu.
     bpy.types.VIEW3D_MT_object_context_menu.append(draw_objects_context_menu_add)
-    # Blender's Outliner has a separate context menu; using the same submenu
-    # keeps object selection behavior identical in both places.
-    if hasattr(bpy.types, "OUTLINER_MT_context_menu"):
-        bpy.types.OUTLINER_MT_context_menu.append(draw_objects_context_menu_add)
+    # Object rows use OUTLINER_MT_object rather than the generic Outliner
+    # background menu. Appending to the generic menu would not affect the
+    # object menu shown when the user right-clicks a model row.
+    if hasattr(bpy.types, "OUTLINER_MT_object"):
+        bpy.types.OUTLINER_MT_object.append(draw_objects_context_menu_add)
     # Add to the node editor context menu
     bpy.types.NODE_MT_context_menu.append(draw_node_context_menu)
     wm = bpy.context.window_manager
@@ -1103,8 +1106,8 @@ def unregister():
     bpy.types.NODE_MT_context_menu.remove(draw_node_context_menu)
     bpy.types.NODE_MT_add.remove(draw_node_add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.remove(draw_objects_context_menu_add)
-    if hasattr(bpy.types, "OUTLINER_MT_context_menu"):
-        bpy.types.OUTLINER_MT_context_menu.remove(draw_objects_context_menu_add)
+    if hasattr(bpy.types, "OUTLINER_MT_object"):
+        bpy.types.OUTLINER_MT_object.remove(draw_objects_context_menu_add)
 
     bpy.utils.unregister_class(MIMIMT_ObjectContextMenuSub)
     bpy.utils.unregister_class(MIMIMT_TextureAssignMenu)
