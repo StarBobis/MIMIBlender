@@ -33,13 +33,27 @@ def _get_selected_mesh_objects(context):
     selected_objects = []
     seen_names = set()
 
-    # View3D exposes the normal selection through selected_objects.  Reading it
-    # first keeps the usual selection order for the existing viewport action.
-    candidates = list(getattr(context, "selected_objects", []) or [])
+    area = getattr(context, "area", None)
+    space_data = getattr(context, "space_data", None)
+    context_type = getattr(area, "type", "") or getattr(space_data, "type", "")
+    view_selected = list(getattr(context, "selected_objects", []) or [])
+    outliner_selected = list(getattr(context, "selected_ids", []) or [])
 
-    # Outliner context menus expose selected datablocks through selected_ids.
-    # They are not guaranteed to be mirrored into context.selected_objects.
-    candidates.extend(list(getattr(context, "selected_ids", []) or []))
+    # Outliner selection is authoritative in its own context.  Mixing it with
+    # the View3D selection could silently add unrelated objects from another
+    # area when the user right-clicks an Outliner row.
+    if context_type == 'OUTLINER':
+        # An empty Outliner selection must stay empty; falling back to a
+        # View3D selection here would act on objects the user did not choose in
+        # the menu's area.
+        candidates = outliner_selected
+    elif view_selected:
+        # View3D exposes the normal selection through selected_objects, so keep
+        # its order for the existing viewport action.
+        candidates = view_selected
+    else:
+        # This fallback also makes the helper usable in focused non-UI tests.
+        candidates = outliner_selected
 
     for candidate in candidates:
         if getattr(candidate, "type", "") != 'MESH':
