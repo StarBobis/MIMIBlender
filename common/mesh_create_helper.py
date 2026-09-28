@@ -630,8 +630,14 @@ class MeshCreateHelper:
         for sk_id in range(127):
             first_entry = int(offsets[sk_id])
             last_entry = int(offsets[sk_id + 1])
-            if first_entry >= last_entry:
+            if first_entry >= total_entries:
+                # Same stop rule as WWMI-Tools shapekey_builder: only stop when
+                # the offset reaches the end of all recorded entries.
                 break
+            if first_entry >= last_entry:
+                # Empty slots in the middle (repeated offset values) must not
+                # stop the scan, later slots can still hold data.
+                continue
 
             entries = numpy.arange(first_entry, last_entry, dtype=numpy.int64)
             valid_mask = entries < len(vertex_id_buffer)
