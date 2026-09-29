@@ -1,5 +1,6 @@
 
 import json
+import time
 
 import bpy
 
@@ -8,6 +9,7 @@ from ..common.global_config import LogicName
 from ..i18n.i18n import I18nOperator, tr, translatable
 
 from .blueprint_export_helper import BlueprintExportHelper
+from .blueprint_node_obj import ObjectPersistentIdManager
 
 
 def _new_batch_input(node):
@@ -212,7 +214,7 @@ class MMT_OT_CreateGroupFromSelectionWithSubmesh(I18nOperator):
                 self.report({'WARNING'}, tr("Failed to refresh the blueprint Submesh list: {error}").format(error=error))
                 return {'CANCELLED'}
         if not submesh_names:
-            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please run Refresh Blueprint first."))
             return {'CANCELLED'}
 
         # Store the selection before opening the popup.  Outliner popup contexts
@@ -405,19 +407,34 @@ class MMT_OT_CreateInternalSwitch(I18nOperator):
         return {'FINISHED'}
 
 
-class MMT_OT_RefreshBlueprintSubmeshList(I18nOperator):
-    bl_idname = "mimi.refresh_blueprint_submesh_list"
-    bl_label = "Refresh Submesh List"
+class MMT_OT_RefreshBlueprint(I18nOperator):
+    '''Refresh the whole blueprint: rebuild the Submesh list from the workspace
+    and re-resolve the object reference of every object node'''
+    bl_idname = "mimi.refresh_blueprint"
+    bl_label = "Refresh Blueprint"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
+        start_time = time.perf_counter()
+
         node_tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not node_tree:
             self.report({'WARNING'}, tr("No valid blueprint tree found. Please open the blueprint editor first."))
             return {'CANCELLED'}
 
+        # Part 1: rebuild the Submesh dropdown source list of the current
+        # blueprint (nested group trees included) from the workspace model.
         submesh_names = BlueprintExportHelper.refresh_tree_submesh_list(tree=node_tree)
-        self.report({'INFO'}, tr("Refreshed the current blueprint submesh list with {count} entries").format(count=len(submesh_names)))
+
+        # Part 2: re-resolve object references (UUID -> current object name)
+        # on every object node across all blueprints.
+        refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(include_all_blueprints=True, source="manual")
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        if refresh_summary["missing_count"] > 0:
+            self.report({'WARNING'}, tr("Refreshed blueprint: {submesh_count} submeshes, {updated_count} object nodes updated, but {missing_count} nodes have no matching object, took {elapsed_ms:.3f} ms").format(submesh_count=len(submesh_names), updated_count=refresh_summary["updated_count"], missing_count=refresh_summary["missing_count"], elapsed_ms=elapsed_ms))
+        else:
+            self.report({'INFO'}, tr("Refreshed blueprint: {submesh_count} submeshes, {updated_count} object nodes updated, took {elapsed_ms:.3f} ms").format(submesh_count=len(submesh_names), updated_count=refresh_summary["updated_count"], elapsed_ms=elapsed_ms))
         return {'FINISHED'}
 
 
@@ -443,7 +460,7 @@ class MMT_OT_BatchSetSelectedObjectNodeSubmesh(I18nOperator):
         BlueprintExportHelper.set_runtime_blueprint_tree(node_tree)
         submesh_names = BlueprintExportHelper.get_tree_submesh_names(tree=node_tree)
         if not submesh_names:
-            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please run Refresh Blueprint first."))
             return {'CANCELLED'}
 
         def draw_submesh_popup(menu, popup_context):
@@ -1050,10 +1067,10 @@ def draw_node_context_menu(self, context):
     layout.operator("mimi.make_group", text=tr("Make Group"), icon='NODETREE')
     layout.operator("mimi.align_nodes", text=tr("Align Nodes in Grid"), icon='GRID')
     layout.operator("mimi.batch_connect_nodes", text=tr("Batch Connect Nodes"), icon='LINKED')
-    layout.operator("mimi.refresh_blueprint_submesh_list", text=tr("Refresh Submesh List"), icon='FILE_REFRESH')
+    # One merged refresh entry: rebuilds the Submesh list and re-resolves all
+    # object node references in a single click.
+    layout.operator("mimi.refresh_blueprint", text=tr("Refresh Blueprint"), icon='FILE_REFRESH')
     layout.operator("mimi.batch_set_selected_object_node_submesh", text=tr("Batch Set Selected Nodes to Submesh"), icon='OUTLINER_COLLECTION')
-    layout.separator()
-    layout.operator("mimi.refresh_node_object_ids", text=tr("Refresh Object Node Info"), icon='FILE_REFRESH')
 
 
 def register():
@@ -1061,7 +1078,7 @@ def register():
     bpy.utils.register_class(MMT_OT_CreateGroupFromSelectionWithSubmesh)
     bpy.utils.register_class(MMT_OT_ApplyCreatedGroupSubmesh)
     bpy.utils.register_class(MMT_OT_CreateInternalSwitch)
-    bpy.utils.register_class(MMT_OT_RefreshBlueprintSubmeshList)
+    bpy.utils.register_class(MMT_OT_RefreshBlueprint)
     bpy.utils.register_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
     bpy.utils.register_class(MMT_OT_ApplySelectedObjectNodeSubmesh)
     bpy.utils.register_class(MMT_OT_AlignNodes)
@@ -1116,7 +1133,7 @@ def unregister():
     bpy.utils.unregister_class(MMT_OT_AlignNodes)
     bpy.utils.unregister_class(MMT_OT_ApplySelectedObjectNodeSubmesh)
     bpy.utils.unregister_class(MMT_OT_BatchSetSelectedObjectNodeSubmesh)
-    bpy.utils.unregister_class(MMT_OT_RefreshBlueprintSubmeshList)
+    bpy.utils.unregister_class(MMT_OT_RefreshBlueprint)
     bpy.utils.unregister_class(MMT_OT_CreateInternalSwitch)
     bpy.utils.unregister_class(MMT_OT_ApplyCreatedGroupSubmesh)
     bpy.utils.unregister_class(MMT_OT_CreateGroupFromSelectionWithSubmesh)

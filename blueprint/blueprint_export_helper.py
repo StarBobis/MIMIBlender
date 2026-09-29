@@ -273,6 +273,30 @@ class BlueprintExportHelper:
         return normalized_names
 
     @staticmethod
+    def _collect_nested_group_trees(tree):
+        """Collect every group tree nested inside the given blueprint tree.
+
+        Group nodes reference their inner tree through the node_tree pointer.
+        A visited set guards against shared group trees, so each tree is
+        returned only once even when several group nodes instance it.
+        """
+        collected_trees = []
+        visited_trees = {tree}
+        stack = [tree]
+        while stack:
+            current_tree = stack.pop()
+            for node in current_tree.nodes:
+                child_tree = getattr(node, "node_tree", None)
+                if child_tree is None or child_tree in visited_trees:
+                    continue
+                if getattr(child_tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+                    continue
+                visited_trees.add(child_tree)
+                collected_trees.append(child_tree)
+                stack.append(child_tree)
+        return collected_trees
+
+    @staticmethod
     def refresh_tree_submesh_list(tree=None, context=None):
         current_tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not BlueprintExportHelper._is_valid_blueprint_tree(current_tree):
@@ -282,7 +306,16 @@ class BlueprintExportHelper:
         ws_model = WorkSpaceModel()
         all_display_names = ws_model.get_all_display_names()
 
-        return BlueprintExportHelper.set_tree_submesh_names(all_display_names, tree=current_tree)
+        normalized_names = BlueprintExportHelper.set_tree_submesh_names(all_display_names, tree=current_tree)
+        # Group trees hold their own copy of the Submesh list (copied at group
+        # creation time), so push the fresh list into every nested group tree
+        # to keep their dropdowns in sync with the parent blueprint.
+        for group_tree in BlueprintExportHelper._collect_nested_group_trees(current_tree):
+            BlueprintExportHelper.set_tree_submesh_names(normalized_names, tree=group_tree)
+        # set_tree_submesh_names marks each touched tree as the runtime tree;
+        # restore the real current tree so later lookups stay correct.
+        BlueprintExportHelper.set_runtime_blueprint_tree(current_tree)
+        return normalized_names
 
     @staticmethod
     def find_node_in_all_blueprints(node_name):

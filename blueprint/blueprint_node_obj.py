@@ -84,7 +84,7 @@ class ObjectPersistentIdManager:
         Refresh a single Object Info node.
         Writes are only performed at safe moments:
         1. After an object is picked.
-        2. When the user manually runs "Refresh Object Node Info".
+        2. When the user manually runs "Refresh Blueprint".
         3. Before generating a Mod.
         4. After a node click, via a deferred timer, not directly in draw.
         """
@@ -139,25 +139,6 @@ class ObjectPersistentIdManager:
         summary = {"checked_count": checked_count, "updated_count": updated_count, "missing_count": missing_count, "elapsed_ms": elapsed_ms, "source": source}
         print(f"[ObjectInfoRefresh:{source}] checked={checked_count}, updated={updated_count}, missing={missing_count}, elapsed={elapsed_ms:.3f} ms")
         return summary
-
-
-class MMT_OT_RefreshNodeObjectIDs(I18nOperator):
-    '''Refresh the object reference info of every object node in blueprints'''
-    bl_idname = "mimi.refresh_node_object_ids"
-    bl_label = "Refresh Object Node Info"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(include_all_blueprints=True, source="manual")
-
-        if refresh_summary["missing_count"] > 0:
-            self.report({'WARNING'}, tr("Refreshed {updated_count} object nodes, but {missing_count} nodes have no matching object, took {elapsed_ms:.3f} ms").format(updated_count=refresh_summary['updated_count'], missing_count=refresh_summary['missing_count'], elapsed_ms=refresh_summary['elapsed_ms']))
-        elif refresh_summary["updated_count"] > 0:
-            self.report({'INFO'}, tr("Refreshed {updated_count} object nodes, took {elapsed_ms:.3f} ms").format(updated_count=refresh_summary['updated_count'], elapsed_ms=refresh_summary['elapsed_ms']))
-        else:
-            self.report({'INFO'}, tr("All object nodes are already up to date, took {elapsed_ms:.3f} ms").format(elapsed_ms=refresh_summary['elapsed_ms']))
-        
-        return {'FINISHED'}
 
 
 class MMT_OT_SelectNodeObject(I18nOperator):
@@ -796,7 +777,6 @@ class MMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
 
 classes = (
     MMT_OT_SelectGenerateModFolder,
-    MMT_OT_RefreshNodeObjectIDs,
     MMT_OT_SelectNodeObject,
     MMT_OT_StartPickObject,
     MMT_OT_PickObjectModal,

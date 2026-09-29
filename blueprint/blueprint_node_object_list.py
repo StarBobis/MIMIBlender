@@ -247,7 +247,7 @@ class MMT_OT_ObjectListBatchSetSubmesh(I18nOperator):
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
         submesh_names = BlueprintExportHelper.get_tree_submesh_names(tree=tree)
         if not submesh_names:
-            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please refresh the Submesh list first."))
+            self.report({'WARNING'}, tr("No Submesh list is available in the current blueprint. Please run Refresh Blueprint first."))
             return {'CANCELLED'}
 
         # The popup needs the target node identity baked into every entry,
