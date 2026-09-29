@@ -52,7 +52,7 @@ bl_info = {
     "name": "MIMIBlender",
     "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
-    "version": (1, 0, 32),
+    "version": (1, 0, 33),
     "location": "View3D",
     "category": "Generic"
 }
