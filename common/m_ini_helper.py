@@ -1362,7 +1362,10 @@ class M_IniHelper:
                 # Append the remark line
                 comment = getattr(m_key, 'comment', '')
                 if comment:
-                    key_section.append("; " + comment)
+                    # Prefix every line so pasted remarks cannot become INI commands.
+                    # Keep the leading block readable by external UI builders.
+                    for comment_line in comment.splitlines():
+                        key_section.append("; " + comment_line)
                 
                 key_section.append("key = " + m_key.initialize_vk_str)
                 key_section.append("type = cycle")
@@ -1453,7 +1456,10 @@ class M_IniHelper:
                 # Append the remark line
                 comment = getattr(mkey, 'comment', '')
                 if comment:
-                    key_section.append("; " + comment)
+                    # Prefix every line so pasted remarks cannot become INI commands.
+                    # Keep the leading block readable by external UI builders.
+                    for comment_line in comment.splitlines():
+                        key_section.append("; " + comment_line)
                 
                 # key_section.append("condition = $active" + str(key_number) + " == 1")
 

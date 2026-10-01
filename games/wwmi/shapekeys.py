@@ -281,7 +281,10 @@ def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBM
         key_section.append("[Key_ShapeKey_" + shapekey_name + "_" + draw_ib + "]")
         comment = getattr(m_key, 'comment', '')
         if comment:
-            key_section.append("; " + comment)
+            # Keep every remark line inert and readable by external UI builders.
+            # Pasted multiline text must never become executable INI settings.
+            for comment_line in comment.splitlines():
+                key_section.append("; " + comment_line)
         key_section.append("key = " + m_key.initialize_vk_str)
         key_section.append("type = cycle")
         key_section.append(m_key.key_name + " = 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1")

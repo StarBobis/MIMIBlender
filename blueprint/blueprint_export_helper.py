@@ -382,6 +382,9 @@ class BlueprintExportHelper:
             m_key.key_name = "$shapekey" + str(key_index)
             m_key.initialize_value = 0
             m_key.initialize_vk_str = item.key.strip()
+            # Carry author remarks to the shared INI writer for external UI tools.
+            # Older saved lists without the property still export unchanged.
+            m_key.comment = getattr(item, "comment", "")
             shapekey_name_mkey_dict[item.shapekey_name.strip()] = m_key
             key_index += 1
 

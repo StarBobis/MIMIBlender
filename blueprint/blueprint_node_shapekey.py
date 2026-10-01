@@ -8,6 +8,13 @@ class MIMIShapeKeyListItem(bpy.types.PropertyGroup):
     enabled: bpy.props.BoolProperty(name="", default=False) # type: ignore
     shapekey_name: bpy.props.StringProperty(name=tr("Shape Key Name"), default="") # type: ignore
     key: bpy.props.StringProperty(name=tr("Key"), default="") # type: ignore
+    # Store author-facing metadata independently of the shape resource name.
+    # Empty defaults preserve shape-key lists saved by older plugin versions.
+    comment: bpy.props.StringProperty(
+        name=tr("Comment"),
+        description=tr("Comment text; written into the config table as comments"),
+        default="",
+    ) # type: ignore
 
 
 # Refresh shape key list
@@ -49,7 +56,8 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
             return {'CANCELLED'}
 
         previous_items = {
-            item.shapekey_name: (item.enabled, item.key)
+            # Refresh must retain remarks together with the hotkey settings.
+            item.shapekey_name: (item.enabled, item.key, getattr(item, "comment", ""))
             for item in output_node.shapekey_items
             if item.shapekey_name
         }
@@ -71,7 +79,7 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
                 item = output_node.shapekey_items.add()
                 item.shapekey_name = sk_name
                 if sk_name in previous_items:
-                    item.enabled, item.key = previous_items[sk_name]
+                    item.enabled, item.key, item.comment = previous_items[sk_name]
 
         self.report({'INFO'}, tr("Refreshed {count} shape keys").format(count=len(output_node.shapekey_items)))
         return {'FINISHED'}
@@ -97,6 +105,8 @@ def draw_shapekey_settings(node, layout):
         row.prop(item, "key", text="", placeholder=tr("VK key value (optional)"))
         op = row.operator("wm.url_open", text="", icon='HELP')
         op.url = "https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes"
+        # Give each shape hotkey its own remark without crowding the key row.
+        box.prop(item, "comment", text=tr("Comment"))
 
 
 classes = (

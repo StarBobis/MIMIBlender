@@ -148,7 +148,10 @@ def add_ini_sections(ini_builder, models):
         elif key.initialize_vk_str:
             hotkeys.append("[Key_ShapeKey_" + name + "]")
             if getattr(key, "comment", ""):
-                hotkeys.append("; " + key.comment)
+                # Keep every remark line inert for external UI metadata readers.
+                # Multiline pasted text must not become executable INI settings.
+                for comment_line in key.comment.splitlines():
+                    hotkeys.append("; " + comment_line)
             hotkeys.append("key = " + key.initialize_vk_str)
             hotkeys.append("type = cycle")
             hotkeys.append(key.key_name + " = 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1")

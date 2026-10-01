@@ -396,6 +396,14 @@ class BluePrintModel:
                     # time node must not silently inherit its clock driver.
                     if existing_key.key_type != "key":
                         raise ValueError("A Switch Key node and a dynamic mod timeline node cannot share alias " + m_key.key_name)
+                    # A shared hotkey may describe several independent parts.
+                    # Retain every distinct remark instead of dropping later nodes.
+                    # Split lines keeps repeated visits from duplicating metadata.
+                    comments = existing_key.comment.splitlines()
+                    for comment in m_key.comment.splitlines():
+                        if comment not in comments:
+                            comments.append(comment)
+                    existing_key.comment = "\n".join(comments)
                     m_key = existing_key
 
                 # Update the global key index
