@@ -17,6 +17,20 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # ---- MMD cleanup panel and safety messages ----
+    "MMD Model Processing": "MMD模型处理",
+    # Keep the button short enough for the narrow sidebar.
+    "Delete Redundant Parts": "删除冗余部件",
+    # Explain that physics is removed but the model skeleton is retained.
+    "Remove this MMD model's joints, rigidbodies and root empty; keep meshes and armature": "删除此 MMD 模型的 joints、rigidbodies 及最外层空物体，保留网格和骨架",
+    # Invalid selections must not change any scene objects.
+    "Select the main MMD mesh in Object Mode": "请在物体模式下选中 MMD 主模型网格",
+    "Select the main mesh of an imported MMD model": "请选中导入的 MMD 模型的主网格",
+    # Unexpected or linked hierarchies cancel before any deletion occurs.
+    "Unexpected model inside an MMD physics group; cleanup cancelled": "MMD 物理分组内存在其他模型或骨架，已取消清理",
+    "MMD cleanup requires editable local objects": "MMD 清理需要可编辑的本地物体",
+    # Include physics descendants in the reported object count.
+    "Removed {count} MMD redundant objects; meshes and armature preserved": "已删除 {count} 个 MMD 冗余物体，网格和骨架已保留",
     # ---- Optional animation playback switches ----
     "Animation Toggle Key": "动画开关键",
     "Start Enabled": "默认开启",

@@ -24,6 +24,8 @@ from .sword import ui_panel_sword
 from .ui import ui_func_import_mmt
 from .ui import ui_panel_fast_texture
 from .ui import ui_panel_updater
+# MMD cleanup is independent of the optional mmd_tools importer.
+from .ui import ui_panel_mmd
 
 from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_object_list
@@ -124,6 +126,8 @@ def _register_steps():
 
     # Texture combiner tool (texcomb)
     yield texcomb.register
+    # The new panel follows Texture Combiner in the sidebar.
+    yield ui_panel_mmd.register
 
     # 4. Blueprint data migration: blueprints that were saved before a node was
     # renamed still carry the old title, so refresh them once the node classes
@@ -144,6 +148,8 @@ def unregister():
 
     steps = [
         gimi_body_outline.unregister,
+        # Remove MMD controls before the earlier texture-combiner module.
+        ui_panel_mmd.unregister,
         texcomb.unregister,
         blueprint_node_highlight.unregister,
         blueprint_file_drop.unregister,
