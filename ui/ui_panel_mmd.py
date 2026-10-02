@@ -162,6 +162,92 @@ class MIMI_OT_remove_mmd_redundant_parts(I18nOperator):
         return {'FINISHED'}
 
 
+# These are importer helper groups, not bone weights. Locking is irrelevant:
+# ordinary bone groups may also be locked and must always be retained.
+_INVALID_VERTEX_GROUPS = ('mmd_edge_scale', 'mmd_vertex_order')
+
+
+def _poll_editable_mesh(cls, context):
+    # Mesh cleanup remains available after the MMD root has been deleted.
+    # Operate only on the active selected object, never all selected models.
+    mesh = context.active_object
+    if context.mode != 'OBJECT' or mesh is None or mesh.type != 'MESH' or not mesh.select_get():
+        cls.poll_message_set(tr('Select a mesh in Object Mode'))
+        return False
+    # Both the object and its mesh data must permit destructive local edits.
+    # No implicit library override is created by these simple cleanup tools.
+    if not mesh.is_editable or not mesh.data.is_editable:
+        cls.poll_message_set(tr('Mesh cleanup requires editable local objects and mesh data'))
+        return False
+    return True
+
+
+def _make_mesh_single_user(mesh):
+    # Shape keys and vertex weight indices live on shared mesh data.
+    # Copy only when necessary to avoid modifying other linked duplicates.
+    # Object-level armature links, transforms and vertex-group names survive.
+    if mesh.data.users > 1:
+        mesh.data = mesh.data.copy()
+
+
+class MIMI_OT_remove_mmd_shape_keys(I18nOperator):
+    # Use Blender's native all-key removal, including Basis and locked keys.
+    # UNDO exposes one reversible step in the user's live Blender session.
+    bl_idname = 'mimi.remove_mmd_shape_keys'
+    bl_label = 'Delete All Shape Keys'
+    bl_description = 'Delete all shape keys, including Basis, from the active mesh only'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        # Absence of an MMD root is intentional, not an invalid selection.
+        return _poll_editable_mesh(cls, context)
+
+    def execute(self, context):
+        # Count before deletion; the Key datablock becomes invalid afterward.
+        mesh = context.active_object
+        keys = mesh.data.shape_keys
+        count = len(keys.key_blocks) if keys else 0
+        if count:
+            # Single-user copying also duplicates attached shape-key data.
+            # The other object's keys and current deformation stay untouched.
+            _make_mesh_single_user(mesh)
+            mesh.shape_key_clear()
+        # Zero-key meshes are harmless no-ops without a needless data copy.
+        self.report({'INFO'}, tr('Removed {count} shape keys').format(count=count))
+        return {'FINISHED'}
+
+
+class MIMI_OT_remove_mmd_invalid_vertex_groups(I18nOperator):
+    # Match the two exact fixed names; do not delete all locked/empty groups.
+    # This intentionally excludes names such as mmd_edge_scale_backup.
+    bl_idname = 'mimi.remove_mmd_invalid_vertex_groups'
+    bl_label = 'Delete Invalid Vertex Groups'
+    bl_description = 'Delete only mmd_edge_scale and mmd_vertex_order from the active mesh; keep other groups'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        # The same selection/editability guards apply to both mesh actions.
+        return _poll_editable_mesh(cls, context)
+
+    def execute(self, context):
+        # Gather names before removal because group indices change on deletion.
+        mesh = context.active_object
+        names = [name for name in _INVALID_VERTEX_GROUPS if mesh.vertex_groups.get(name) is not None]
+        if names:
+            # Removing a group remaps vertex weight indices on the mesh data.
+            # Isolate shared data first so another object's bone weights survive.
+            _make_mesh_single_user(mesh)
+            for name in names:
+                group = mesh.vertex_groups.get(name)
+                mesh.vertex_groups.remove(group)
+        # Group locking does not prevent the explicit data-API removal.
+        # No matching names means no mutation and an informative zero count.
+        self.report({'INFO'}, tr('Removed {count} MMD helper vertex groups').format(count=len(names)))
+        return {'FINISHED'}
+
+
 @translatable
 class MIMI_PT_mmd_model(bpy.types.Panel):
     # Explicit order places this panel after Texture Combiner (10) and before
@@ -180,10 +266,25 @@ class MIMI_PT_mmd_model(bpy.types.Panel):
             MIMI_OT_remove_mmd_redundant_parts.bl_idname,
             text=tr('Delete Redundant Parts'), icon='TRASH',
         )
+        # Keep separate actions so users may retain expressions or MMD helpers.
+        self.layout.operator(
+            MIMI_OT_remove_mmd_shape_keys.bl_idname,
+            text=tr('Delete All Shape Keys'), icon='TRASH',
+        )
+        # This button targets the two named importer groups, not bone groups.
+        self.layout.operator(
+            MIMI_OT_remove_mmd_invalid_vertex_groups.bl_idname,
+            text=tr('Delete Invalid Vertex Groups'), icon='TRASH',
+        )
 
 
-# Register the operator before the panel that draws its button.
-_CLASSES = (MIMI_OT_remove_mmd_redundant_parts, MIMI_PT_mmd_model)
+# Register every operator before the panel that draws their buttons.
+_CLASSES = (
+    MIMI_OT_remove_mmd_redundant_parts,
+    MIMI_OT_remove_mmd_shape_keys,
+    MIMI_OT_remove_mmd_invalid_vertex_groups,
+    MIMI_PT_mmd_model,
+)
 
 
 def register():

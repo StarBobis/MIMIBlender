@@ -17,6 +17,18 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # ---- Independent active-mesh cleanup actions ----
+    "Delete All Shape Keys": "删除所有形态键",
+    "Delete Invalid Vertex Groups": "删除无效顶点组",
+    # Explain destructive scope and preserve fixed technical group names.
+    "Delete all shape keys, including Basis, from the active mesh only": "仅删除当前选中网格的所有形态键，包括 Basis",
+    "Delete only mmd_edge_scale and mmd_vertex_order from the active mesh; keep other groups": "仅删除当前选中网格的 mmd_edge_scale 和 mmd_vertex_order，保留其他顶点组",
+    # Generic mesh actions still work after the MMD root is removed.
+    "Select a mesh in Object Mode": "请在物体模式下选中网格",
+    "Mesh cleanup requires editable local objects and mesh data": "网格清理需要可编辑的本地物体及网格数据",
+    # Counts include Basis for shape keys and only matching helper groups.
+    "Removed {count} shape keys": "已删除 {count} 个形态键",
+    "Removed {count} MMD helper vertex groups": "已删除 {count} 个 MMD 辅助顶点组",
     # ---- MMD cleanup panel and safety messages ----
     "MMD Model Processing": "MMD模型处理",
     # Keep the button short enough for the narrow sidebar.

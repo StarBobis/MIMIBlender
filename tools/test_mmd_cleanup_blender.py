@@ -176,6 +176,92 @@ class CleanupTests(unittest.TestCase):
         self.assertFalse(panel.MIMI_OT_remove_mmd_redundant_parts.poll(bpy.context))
         bpy.ops.object.mode_set(mode='OBJECT')
 
+    def test_shape_keys_and_shared_data(self):
+        """All-key removal must isolate the selected object's mesh data.
+
+        The linked duplicate retains Basis, the locked expression and its value.
+        The cleaned object returns to its base coordinates rather than baking
+        the currently evaluated expression into the original mesh geometry.
+        Repeating cleanup does not allocate another copy of an already-clean
+        mesh. Multiple selection never expands the active-object scope.
+        """
+        # Use real vertices to exercise keys, including a locked expression.
+        mesh = new_object('expressions', 'MESH')
+        mesh.data.from_pydata([(0, 0, 0), (1, 0, 0)], [], [])
+        mesh.shape_key_add(name='Basis')
+        expression = mesh.shape_key_add(name='smile')
+        expression.data[0].co.z = 2
+        expression.value = 0.5
+        expression.lock_shape = True
+        other = bpy.data.objects.new('shared_expressions', mesh.data)
+        bpy.context.scene.collection.objects.link(other)
+        original_data = other.data
+        self.activate(mesh)
+        other.select_set(True)
+        # The operation must isolate data before clearing all keys.
+        self.assertEqual(bpy.ops.mimi.remove_mmd_shape_keys(), {'FINISHED'})
+        self.assertIsNone(mesh.data.shape_keys)
+        self.assertEqual(other.data, original_data)
+        self.assertEqual(len(other.data.shape_keys.key_blocks), 2)
+        self.assertEqual(mesh.data.vertices[0].co.z, 0)
+        # Repeating a no-op must not produce another unnecessary mesh copy.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_shape_keys(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+
+    def test_exact_helper_groups_and_weights(self):
+        """Only fixed importer helper names qualify for vertex-group deletion.
+
+        Locked real bone groups must retain both their names and their weights.
+        A similar backup name deliberately fails the exact-name comparison.
+        Interleaving names verifies that index remapping keeps remaining weights
+        attached to their original bones. The other object's shared data stays
+        intact, and neither object's attached expression keys are removed.
+        """
+        # Interleave helper groups with real locked bone-weight groups.
+        mesh = new_object('weighted', 'MESH')
+        mesh.data.from_pydata([(0, 0, 0)], [], [])
+        for name in ['bone_a', 'mmd_edge_scale', 'bone_b', 'mmd_vertex_order', 'mmd_edge_scale_backup']:
+            group = mesh.vertex_groups.new(name=name)
+            group.lock_weight = True
+            group.add([0], 0.6, 'REPLACE')
+        mesh.shape_key_add(name='Basis')
+        mesh.shape_key_add(name='keep_expression')
+        # Copy the object but share its mesh to check weight-index isolation.
+        other = mesh.copy()
+        bpy.context.scene.collection.objects.link(other)
+        self.activate(mesh)
+        other.select_set(True)
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_vertex_groups(), {'FINISHED'})
+        self.assertEqual(list(mesh.vertex_groups.keys()), ['bone_a', 'bone_b', 'mmd_edge_scale_backup'])
+        self.assertEqual(len(other.vertex_groups), 5)
+        for obj in [mesh, other]:
+            # Bone group indices shift on the cleaned mesh, weights must not.
+            self.assertAlmostEqual(obj.vertex_groups['bone_b'].weight(0), 0.6)
+            self.assertTrue(obj.vertex_groups['bone_b'].lock_weight)
+            self.assertEqual(len(obj.data.shape_keys.key_blocks), 2)
+        # Missing helpers are a safe no-op without extra data copying.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_vertex_groups(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+
+    def test_mesh_action_selection_guards(self):
+        # These independent buttons should work after deleting the MMD root.
+        root, arm, mesh, groups = model('already_cleaned')
+        self.activate(mesh)
+        panel.remove_redundant_parts(bpy.context, mesh)
+        operators = [panel.MIMI_OT_remove_mmd_shape_keys, panel.MIMI_OT_remove_mmd_invalid_vertex_groups]
+        for operator in operators:
+            self.assertTrue(operator.poll(bpy.context))
+        # Edit mode and an active non-mesh must disable both actions.
+        bpy.ops.object.mode_set(mode='EDIT')
+        for operator in operators:
+            self.assertFalse(operator.poll(bpy.context))
+        bpy.ops.object.mode_set(mode='OBJECT')
+        self.activate(arm)
+        for operator in operators:
+            self.assertFalse(operator.poll(bpy.context))
+
     def test_panel_and_translation(self):
         # Check panel placement and captions without opening a GUI window.
         self.assertEqual(panel.MIMI_PT_mmd_model.bl_order, 11)
@@ -183,6 +269,13 @@ class CleanupTests(unittest.TestCase):
         i18n.apply_language('zh')
         self.assertEqual(panel.MIMI_PT_mmd_model.bl_label, 'MMD模型处理')
         self.assertEqual(i18n.tr('Delete Redundant Parts'), '删除冗余部件')
+        self.assertEqual(i18n.tr('Delete All Shape Keys'), '删除所有形态键')
+        self.assertEqual(i18n.tr('Delete Invalid Vertex Groups'), '删除无效顶点组')
+        # Record actual drawn buttons without a live sidebar area.
+        buttons = []
+        layout = types.SimpleNamespace(operator=lambda name, **kwargs: buttons.append(name))
+        panel.MIMI_PT_mmd_model.draw(types.SimpleNamespace(layout=layout), bpy.context)
+        self.assertEqual(buttons, [cls.bl_idname for cls in panel._CLASSES[:-1]])
         i18n.apply_language('en')
 
 
