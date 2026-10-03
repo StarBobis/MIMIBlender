@@ -159,7 +159,9 @@ def test_toggle_aliases_and_shape_config():
     assert lines.count("[KeyMimiAnimation_shared]") == 1
     for binding, enabled in (("F7", False), ("CTRL F6", True), ("", False)):
         position.toggle_key, position.start_enabled = binding, enabled
-        rejects(lambda: model._parse_time_switch_node(position, [], True), "same animation toggle")
+        # Match the shared-alias validation's current combined contract.
+        # It rejects mismatched playback, toggle bindings and initial state.
+        rejects(lambda: model._parse_time_switch_node(position, [], True), "same playback mode, animation toggle key and start state")
     # Single-frame draw nodes keep a configured switch; blank-key legacy
     # nodes are still allowed to use their old pass-through optimization.
     single = new_blueprint()

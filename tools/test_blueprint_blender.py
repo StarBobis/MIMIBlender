@@ -179,6 +179,9 @@ class BlueprintTests(unittest.TestCase):
             stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'get_ordered_submesh_name_list_by_drawib', return_value=[submesh_name]))
             stack.enter_context(patch.object(wwmi, 'SubmeshJson', return_value=SimpleNamespace(JsonDict={})))
             stack.enter_context(patch.object(wwmi.D3D11GameType, 'from_submesh_json_dict', return_value=game_type))
+            # This texture-only fixture has no mesh or bone metadata.
+            # Offline bone conversion is covered by its dedicated mesh suite.
+            stack.enter_context(patch.object(wwmi.MIMIGlobalProperties, 'import_merged_vgmap', return_value='MERGED'))
             stack.enter_context(patch.object(wwmi.WWMIInfoHelper, 'build_from_json_list', return_value=SimpleNamespace()))
             stack.enter_context(patch.object(wwmi.DrawIBModelWWMI, 'build_merged_object', return_value=SimpleNamespace(object=merged, components=[])))
             stack.enter_context(patch.object(wwmi.TextureMetadataResolver, 'load_submesh_texture_markup_info_from_all_submeshes', return_value={submesh_name: marks}))
