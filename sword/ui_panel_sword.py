@@ -11,12 +11,197 @@ from ..common.mmt_import_helper import MMTImportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
 from ..workspace.submesh_json import SubmeshJson
 
+# Folder check shared with the Mod Reverse panel: it tells the user whether the
+# selected folder can be imported before the import runs.
+from .reverse_source_probe import (
+    IB_VB_FMT,
+    STATUS_MISSING,
+    STATUS_NO_BUFFER,
+    STATUS_NO_DATA,
+    STATUS_NO_PATH,
+    STATUS_OK,
+    STATUS_TOO_DEEP,
+    STATUS_TOO_SHALLOW,
+    STATUS_UNREADABLE,
+    normalize_folder_path,
+    probe_reverse_folder,
+)
+
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
 
 # Store the preview image collection
 preview_collections = {}
 sword_reversed_workspace_items_cache = []
+
+# Cached result of the last reverse folder check. The panel is redrawn on every
+# mouse move, so the folder is checked once per selected path, not per redraw.
+_sword_reverse_probe_cache = {"folder_path": None, "probe": None}
+
+# Cached folder resolution for the panel. Resolving the folder reads the MMT
+# global configuration files, which the panel must not do on every redraw.
+_sword_reverse_source_cache = {"key": None, "folder_path": "", "error_message": ""}
+
+
+def clear_sword_reverse_probe_cache():
+    """Forget the cached folder check (the selected folder may have changed)."""
+    _sword_reverse_probe_cache["folder_path"] = None
+    _sword_reverse_probe_cache["probe"] = None
+    _sword_reverse_source_cache["key"] = None
+    _sword_reverse_source_cache["folder_path"] = ""
+    _sword_reverse_source_cache["error_message"] = ""
+
+
+def _on_sword_reverse_source_changed(self, context):
+    """Property update callback: the folder selection changed, so re-check it."""
+    clear_sword_reverse_probe_cache()
+
+
+def resolve_sword_reverse_source_folder(scene):
+    """Return the (folder_path, error_message) of the current import mode.
+
+    The Mod Reverse panel and the import operator both use this function, so the
+    hint always describes the very folder the import will read.
+
+    error_message is already translated and is empty when a folder was
+    resolved. A path that cannot be resolved is handed back unchanged so the
+    panel can still show it.
+    """
+    source_mode = scene.mimi_sword_reverse_source_mode
+
+    if source_mode == "SPECIFIC":
+        selected_workspace_name = str(scene.mimi_sword_specific_reversed_workspace_name or "").strip()
+        if not selected_workspace_name:
+            return "", tr("No specific workspace selected, please select a subfolder under Reversed first")
+        # MIMITools reverse panel reads MMT toolchain only, never the legacy SSMT cache folder.
+        reversed_root = GlobalConfig.path_mimitools_reversed_root()
+        if not reversed_root:
+            return "", tr("MMT Reversed folder not found, please run the one-click reverse in MMT first")
+        return os.path.join(reversed_root, selected_workspace_name), ""
+
+    if source_mode == "CUSTOM":
+        custom_folder_path = normalize_folder_path(scene.mimi_sword_custom_reverse_output_folder_path)
+        if not custom_folder_path:
+            return "", tr("Custom folder is empty, please select a folder first")
+        return custom_folder_path, ""
+
+    latest_folder_path = normalize_folder_path(
+        GlobalConfig.path_mimitools_reverse_output_folder() or GlobalConfig.path_reverse_output_folder()
+    )
+    if not latest_folder_path:
+        return "", tr("No latest reverse output folder was recorded, please run the one-click reverse in MMT first")
+    return latest_folder_path, ""
+
+
+def get_sword_reverse_probe(folder_path, force=False):
+    """Return the folder check result, reading the folder only when needed.
+
+    force=True re-checks the folder even when the cached result belongs to the
+    same path; the panel uses the cache, the import operator always re-checks.
+    """
+    cache = _sword_reverse_probe_cache
+    if not force and cache["folder_path"] == folder_path and cache["probe"] is not None:
+        return cache["probe"]
+
+    probe = probe_reverse_folder(folder_path)
+    if probe["status"] == STATUS_OK and probe["json_count"] > 0 and probe["fmt_count"] > 0:
+        # The folder carries both formats. Import the one MMT recorded, because
+        # that is the format the current toolchain wrote.
+        recorded_format = GlobalConfig.reverse_output_format()
+        probe["format"] = IB_VB_FMT if recorded_format == IB_VB_FMT else "ssmt_fmt"
+
+    cache["folder_path"] = folder_path
+    cache["probe"] = probe
+    return probe
+
+
+def _sword_reverse_source_selection_key(scene):
+    """Return the values that decide which folder the panel checks."""
+    return (
+        str(scene.mimi_sword_reverse_source_mode or ""),
+        str(scene.mimi_sword_specific_reversed_workspace_name or ""),
+        str(scene.mimi_sword_custom_reverse_output_folder_path or ""),
+    )
+
+
+def get_sword_reverse_source(scene):
+    """Resolve the folder to check, reading the MMT config only when needed.
+
+    The panel is redrawn very often, and resolving the folder reads the MMT
+    global configuration files, so the result is cached until the user changes
+    the import mode, the workspace or the custom folder.
+    """
+    cache = _sword_reverse_source_cache
+    selection_key = _sword_reverse_source_selection_key(scene)
+    if cache["key"] == selection_key:
+        return cache["folder_path"], cache["error_message"]
+
+    folder_path, error_message = resolve_sword_reverse_source_folder(scene)
+    cache["key"] = selection_key
+    cache["folder_path"] = folder_path
+    cache["error_message"] = error_message
+    return folder_path, error_message
+
+
+def sword_reverse_probe_message(probe, source_mode=""):
+    """Turn one folder check result into a short, translated reason.
+
+    Every branch calls tr() with a literal string: the i18n checker collects
+    translation keys from literals only, so no message may come from a table.
+    """
+    status = probe["status"]
+    if status == STATUS_NO_PATH:
+        return tr("Please select the reverse output folder first")
+    if status == STATUS_MISSING:
+        if source_mode == "LAST":
+            return tr("The folder recorded for the latest reverse result does not exist, please run the reverse again")
+        return tr("The folder does not exist, please check the path")
+    if status == STATUS_UNREADABLE:
+        return tr("The folder cannot be read, please check the folder permission")
+    if status == STATUS_TOO_DEEP:
+        return tr("The selected folder is a DrawIB folder itself, please select its parent folder")
+    if status == STATUS_TOO_SHALLOW:
+        return tr("The selected folder holds reverse workspaces, please select one of its subfolders")
+    if status == STATUS_NO_BUFFER:
+        return tr("The DrawIB folders hold data files but no .buf / .ib buffer file, so nothing can be imported")
+    if status == STATUS_NO_DATA:
+        return tr("No .json (ssmt_fmt) or .fmt (ib_vb_fmt) reverse data was found in its subfolders")
+    return tr("The folder can be imported")
+
+
+def remove_objects_created_since(collection, objects_before):
+    """Delete every object a collection gained since it was last measured.
+
+    Used to roll back a half-imported data type: a failing import must not leave
+    half-built meshes behind in the outliner.
+    """
+    for imported_obj in list(collection.objects):
+        if imported_obj not in objects_before:
+            bpy.data.objects.remove(imported_obj, do_unlink=True)
+
+
+def remove_collection_tree(collection):
+    """Remove a collection together with every child collection.
+
+    Called when an import produced nothing: the empty reverse collection used to
+    stay in the outliner and looked like a successful but empty import.
+    """
+    for child_collection in list(collection.children):
+        remove_collection_tree(child_collection)
+    bpy.data.collections.remove(collection)
+
+
+def prune_empty_collections(collection):
+    """Remove child collections that hold no object and no child collection.
+
+    A parent collection is meant to stay empty (the meshes live in the leaf
+    collections), so only truly empty leaves are removed, for example a DrawIB
+    collection whose every data type failed to import.
+    """
+    for child_collection in list(collection.children):
+        prune_empty_collections(child_collection)
+        if len(child_collection.objects) == 0 and len(child_collection.children) == 0:
+            bpy.data.collections.remove(child_collection)
 
 
 def _get_sword_reversed_workspace_items(self, context):
@@ -264,47 +449,29 @@ class SwordImportAllReversed(I18nOperator):
     bl_description = "Import all models generated by the last one-click reverse pass into Blender, then you can manually filter and delete incorrect data types for a smoother workflow. Supports both the ib_vb_fmt and ssmt_fmt reverse output formats."
     bl_options = {'REGISTER', 'UNDO'}
 
-    def _resolve_reverse_output_folder_path(self, context):
-        # Reversed paths come from MMT settings only, no legacy SSMT config needed.
-        source_mode = context.scene.mimi_sword_reverse_source_mode
-        if source_mode == "SPECIFIC":
-            selected_workspace_name = context.scene.mimi_sword_specific_reversed_workspace_name
-            if not selected_workspace_name:
-                self.report({"ERROR"}, tr("No specific workspace selected, please select a subfolder under Reversed first"))
-                return ""
-            # MIMITools reverse panel reads MMT toolchain only, never the legacy SSMT cache folder.
-            reversed_root = GlobalConfig.path_mimitools_reversed_root()
-            if not reversed_root:
-                self.report({"ERROR"}, tr("MMT Reversed folder not found, please run the one-click reverse in MMT first"))
-                return ""
-            return os.path.join(reversed_root, selected_workspace_name)
-
-        if source_mode == "CUSTOM":
-            custom_folder_path = str(context.scene.mimi_sword_custom_reverse_output_folder_path).strip()
-            if not custom_folder_path:
-                self.report({"ERROR"}, tr("Custom folder is empty, please select a folder first"))
-                return ""
-            return custom_folder_path
-
-        return GlobalConfig.path_mimitools_reverse_output_folder() or GlobalConfig.path_reverse_output_folder()
-
     def execute(self, context):
-        reverse_output_folder_path = self._resolve_reverse_output_folder_path(context)
-        if not reverse_output_folder_path:
+        # Resolve the folder exactly like the Mod Reverse panel does, so the
+        # on-screen hint and the import always talk about the same folder.
+        reverse_output_folder_path, error_message = resolve_sword_reverse_source_folder(context.scene)
+        if error_message:
+            self.report({"ERROR"}, error_message)
             return {'FINISHED'}
 
-        if not os.path.exists(reverse_output_folder_path) or not os.path.isdir(reverse_output_folder_path):
-            self.report({"ERROR"}, tr("The folder recorded for the latest reverse result does not exist, please run the reverse again"))
+        # Check the folder BEFORE creating any collection. An importable check
+        # result is also what decides the format, so a hand-picked folder of the
+        # other format is imported correctly instead of silently importing
+        # nothing (that used to leave an empty collection behind).
+        folder_probe = get_sword_reverse_probe(reverse_output_folder_path, force=True)
+        if folder_probe["status"] != STATUS_OK:
+            self.report(
+                {"ERROR"},
+                sword_reverse_probe_message(folder_probe, context.scene.mimi_sword_reverse_source_mode),
+            )
             return {'FINISHED'}
-        print("Test import")
 
-        # After a successful MMT reverse, the ReverseOutputFormat key is written (symmetric to ReverseOutputFolder)
-        # ib_vb_fmt goes through the old .fmt parsing import, ssmt_fmt goes through the MMT Json import
-        # If the key cannot be found, it is treated as the ib_vb_fmt format
-        reverse_output_format = GlobalConfig.reverse_output_format()
-        if reverse_output_format == "ssmt_fmt":
-            return self._import_ssmt_fmt(context, reverse_output_folder_path)
-        return self._import_ib_vb_fmt(context, reverse_output_folder_path)
+        if folder_probe["format"] == IB_VB_FMT:
+            return self._import_ib_vb_fmt(context, folder_probe)
+        return self._import_ssmt_fmt(context, folder_probe)
 
     @staticmethod
     def _build_match_component_map(json_files: list) -> dict:
@@ -375,7 +542,7 @@ class SwordImportAllReversed(I18nOperator):
         ordered_ranges = sorted(match_ranges, key=lambda match_range: (match_range[1], match_range[0]))
         return {match_range: component_index for component_index, match_range in enumerate(ordered_ranges)}
 
-    def _import_ssmt_fmt(self, context, reverse_output_folder_path):
+    def _import_ssmt_fmt(self, context, folder_probe):
         '''
         ssmt_fmt format import:
         Walk all subfolders of the reverse output folder. Each subfolder is named
@@ -393,7 +560,11 @@ class SwordImportAllReversed(I18nOperator):
         preserves the source Component table, including empty entries; older
         JSON falls back to range-size ordering. Segments without an alias fall
         back to the classic numeric draw-range suffix.
+
+        folder_probe is the checked folder result of the Mod Reverse panel; it
+        carries the normalized path already, so the import never re-guesses it.
         '''
+        reverse_output_folder_path = folder_probe["folder_path"]
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
@@ -402,20 +573,33 @@ class SwordImportAllReversed(I18nOperator):
         # Get all subfolders
         subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
         if not subfolder_path_list:
+            # Nothing to import: remove the just created collection again, so an
+            # empty reverse collection never stays in the outliner.
+            remove_collection_tree(reverse_collection)
             self.report({"ERROR"}, tr("No importable subfolders found in the target folder"))
             return {'FINISHED'}
 
-        imported_count = 0
+        imported_data_type_count = 0
         for subfolder_path in subfolder_path_list:
 
             # The subfolder name is the DrawIB this group of meshes belongs to
             drawib_folder_name = os.path.basename(subfolder_path)
 
             # Get all .json files first; skip subfolders without any Json file
-            # so we never create empty drawib collections.
+            # so we never create empty drawib collections. The extension check
+            # ignores case, exactly like the folder check of the panel does.
             json_files = []
-            for file in os.listdir(subfolder_path):
-                if file.endswith('.json'):
+            try:
+                folder_file_names = os.listdir(subfolder_path)
+            except OSError as list_error:
+                # An unreadable DrawIB folder must not abort the whole import.
+                list_error_msg = tr("Folder cannot be read, skipped: {path} | Error: {error}").format(path=subfolder_path, error=list_error)
+                print(list_error_msg)
+                self.report({'WARNING'}, list_error_msg)
+                continue
+
+            for file in folder_file_names:
+                if file.lower().endswith('.json'):
                     json_files.append(os.path.join(subfolder_path, file))
 
             if not json_files:
@@ -446,19 +630,21 @@ class SwordImportAllReversed(I18nOperator):
                     link_to_parent_collection_name=drawib_collection.name,
                 )
 
+                # The collection is brand new, so every object inside it belongs
+                # to this data type; counting them tells whether the data type
+                # produced a usable mesh.
+                objects_before = set(datatype_collection.objects)
                 try:
                     # Call the ssmt_fmt format import function; the DrawIB folder
                     # name is passed as the classic Submesh naming prefix and the
                     # Component map, so the imported objects are named
                     # {DrawIB}-Component {N}.{Alias}.
                     MMTImportHelper.create_mesh_from_json(json_file_path=json_filepath, import_collection=datatype_collection, submesh_name_prefix=drawib_folder_name, match_component_map=match_component_map)
-                    imported_count += 1
                 except Exception as e:
                     # Roll back the failed candidate: drop any partially created
                     # objects together with the now useless child collection, so
                     # a broken data type never litters the outliner.
-                    for imported_obj in list(datatype_collection.objects):
-                        bpy.data.objects.remove(imported_obj, do_unlink=True)
+                    remove_objects_created_since(datatype_collection, objects_before)
                     bpy.data.collections.remove(datatype_collection)
 
                     error_msg = tr("Import failed, skipped: {path} | Error: {error}").format(path=json_filepath, error=e)
@@ -466,20 +652,48 @@ class SwordImportAllReversed(I18nOperator):
                     self.report({'WARNING'}, error_msg)
                     continue
 
-        if imported_count == 0:
+                if len(datatype_collection.objects) <= 0:
+                    # The data type imported without an error but built nothing:
+                    # drop its collection instead of leaving an empty one.
+                    bpy.data.collections.remove(datatype_collection)
+                    empty_msg = tr("No mesh was created for this data type, skipped: {path}").format(path=json_filepath)
+                    print(empty_msg)
+                    self.report({'WARNING'}, empty_msg)
+                    continue
+
+                imported_data_type_count += 1
+
+        if imported_data_type_count == 0:
+            # Every data type failed. Remove the empty collection tree that the
+            # import created, otherwise the outliner keeps an empty "reverse
+            # result" collection and the user cannot tell what went wrong.
+            remove_collection_tree(reverse_collection)
             self.report({"ERROR"}, tr("No Json files were imported from the ssmt_fmt reverse result"))
             return {'FINISHED'}
 
+        # A DrawIB whose every data type failed only has empty children left.
+        prune_empty_collections(reverse_collection)
+
         # Summarize the result so the user knows every candidate data type was
         # imported into its own collection and can now compare them one by one.
-        self.report({'INFO'}, tr("Imported {count} data type(s); each one is in its own collection named after the data type, grouped under collections named after their DrawIB.").format(count=imported_count))
+        self.report({'INFO'}, tr("Imported {count} data type(s); each one is in its own collection named after the data type, grouped under collections named after their DrawIB.").format(count=imported_data_type_count))
 
         # Then point the image path to the current path
         reload_textures_from_folder(reverse_output_folder_path)
 
         return {'FINISHED'}
 
-    def _import_ib_vb_fmt(self, context, reverse_output_folder_path):
+    def _import_ib_vb_fmt(self, context, folder_probe):
+        '''
+        Legacy ib_vb_fmt import: every subfolder of the reverse output folder is
+        one data type folder holding <prefix>.fmt plus its .ib / .vb buffers.
+
+        The import works on the checked folder result of the Mod Reverse panel
+        (folder_probe), so the path and the format were already verified before
+        the first collection is created: a folder that cannot be imported no
+        longer leaves an empty collection behind.
+        '''
+        reverse_output_folder_path = folder_probe["folder_path"]
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
@@ -488,47 +702,123 @@ class SwordImportAllReversed(I18nOperator):
         # Get all subfolders
         subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
         if not subfolder_path_list:
+            # Nothing to import: remove the just created collection again, so an
+            # empty reverse collection never stays in the outliner.
+            remove_collection_tree(reverse_collection)
             self.report({"ERROR"}, tr("No importable subfolders found in the target folder"))
             return {'FINISHED'}
 
+        imported_object_count = 0
         for subfolder_path in subfolder_path_list:
-            
+
             datatype_folder_name = os.path.basename(subfolder_path)
+
+            # Get all .fmt files. The extension check ignores case, exactly like
+            # the folder check of the panel does.
+            fmt_files = []
+            try:
+                folder_file_names = os.listdir(subfolder_path)
+            except OSError as list_error:
+                # An unreadable data type folder must not abort the whole import.
+                list_error_msg = tr("Folder cannot be read, skipped: {path} | Error: {error}").format(path=subfolder_path, error=list_error)
+                print(list_error_msg)
+                self.report({'WARNING'}, list_error_msg)
+                continue
+
+            for file in folder_file_names:
+                if file.lower().endswith('.fmt'):
+                    fmt_files.append(os.path.join(subfolder_path, file))
+
+            if not fmt_files:
+                # A subfolder without .fmt files is not a data type folder (a
+                # Textures folder, a leftover folder, ...). It used to become an
+                # empty collection; now it is skipped completely.
+                continue
 
             datatype_collection = CollectionUtils.create_new_collection(collection_name=datatype_folder_name,color_tag=CollectionColor.White, link_to_parent_collection_name=reverse_collection.name)
 
-            # Get all .fmt files
-            fmt_files = []
-            for file in os.listdir(subfolder_path):
-                if file.endswith('.fmt'):
-                    fmt_files.append(os.path.join(subfolder_path, file))
-
+            datatype_object_count = 0
             for fmt_filepath in fmt_files:
                 # Get the file name including the extension
                 filename_with_extension = os.path.basename(fmt_filepath)
                 # Remove the extension
                 filename_without_extension = os.path.splitext(filename_with_extension)[0]
+                # One .fmt may create several objects (per draw-indexed slice);
+                # remember what was already there to roll this file back alone.
+                objects_before = set(datatype_collection.objects)
                 try:
                     # Call the import function
                     mbf = MigotoBinaryFile(fmt_path=fmt_filepath, mesh_name=filename_without_extension)
                     MeshImportHelper.create_mesh_obj_from_mbf(mbf=mbf, import_collection=datatype_collection)
                 except Exception as e:
+                    # Drop whatever this half-finished file created, so a broken
+                    # data type never litters the outliner.
+                    remove_objects_created_since(datatype_collection, objects_before)
+
                     error_msg = tr("Import failed, skipped: {path} | Error: {error}").format(path=fmt_filepath, error=e)
                     print(error_msg)
                     self.report({'WARNING'}, error_msg)
                     continue
 
-                
+                datatype_object_count += len(datatype_collection.objects) - len(objects_before)
+
                 # Nico: note that after reversing Wuthering Waves Mod models, normals may be incorrect.
                 # This should not be handled automatically; the user should handle it manually,
                 # since some models have the issue and others do not.
                 # Forcing a fix may make the normals incorrect.
 
+            if datatype_object_count <= 0:
+                # No file of this data type produced a mesh: drop the empty
+                # collection instead of leaving it in the outliner.
+                bpy.data.collections.remove(datatype_collection)
+                continue
 
+            imported_object_count += datatype_object_count
+
+        if imported_object_count == 0:
+            # Every .fmt file failed. Remove the empty collection tree that the
+            # import created, otherwise the outliner keeps an empty "reverse
+            # result" collection and the user cannot tell what went wrong.
+            remove_collection_tree(reverse_collection)
+            self.report({"ERROR"}, tr("No fmt files were imported from the ib_vb_fmt reverse result"))
+            return {'FINISHED'}
+
+        prune_empty_collections(reverse_collection)
+
+        self.report({'INFO'}, tr("Imported {count} mesh object(s) from the ib_vb_fmt reverse result.").format(count=imported_object_count))
 
         # Then point the image path to the current path
         reload_textures_from_folder(reverse_output_folder_path)
 
+        return {'FINISHED'}
+
+
+class SWORD4CheckReverseSource(I18nOperator):
+    bl_idname = "mimi.sword_check_reverse_source"
+    bl_label = "Check Reverse Folder"
+    bl_description = "Check again whether the folder selected in the Mod Reverse panel can be imported"
+
+    def execute(self, context):
+        # Check the folder again from disk: the folder content can change while
+        # the selected path stays the same (for example after a new reverse).
+        clear_sword_reverse_probe_cache()
+        folder_path, error_message = resolve_sword_reverse_source_folder(context.scene)
+        if error_message:
+            self.report({'ERROR'}, error_message)
+            return {'FINISHED'}
+
+        folder_probe = get_sword_reverse_probe(folder_path, force=True)
+        if folder_probe["status"] != STATUS_OK:
+            self.report(
+                {'ERROR'},
+                sword_reverse_probe_message(folder_probe, context.scene.mimi_sword_reverse_source_mode),
+            )
+            return {'FINISHED'}
+
+        self.report({'INFO'}, tr("This folder can be imported normally: {groups} DrawIB folder(s), {types} data type(s)").format(
+            groups=folder_probe["group_count"],
+            types=folder_probe["data_type_count"],
+        ))
         return {'FINISHED'}
 
 
@@ -545,6 +835,61 @@ class SWORD4RefreshReversedWorkspaceList(I18nOperator):
 
         self.report({'INFO'}, tr("Reversed workspace list refreshed"))
         return {'FINISHED'}
+
+
+def draw_sword_reverse_source_status(layout, context):
+    """Draw the "this folder can / cannot be imported" hint.
+
+    The hint follows the current import mode: it checks the folder MMT recorded,
+    the selected workspace, or the folder the user picked by hand. The result is
+    cached per folder path, so drawing the panel stays cheap.
+    """
+    scene = context.scene
+    folder_path, error_message = get_sword_reverse_source(scene)
+    folder_probe = get_sword_reverse_probe(folder_path)
+
+    source_box = layout.box()
+
+    # Header: the plain yes / no answer plus a button to check again, because
+    # the folder content can change while the selected path stays the same.
+    header_row = source_box.row(align=True)
+    if folder_probe["status"] == STATUS_OK:
+        header_row.label(text=tr("This folder can be imported normally"), icon='CHECKMARK')
+    else:
+        header_row.label(text=tr("This folder cannot be imported normally"), icon='ERROR')
+    header_row.operator(SWORD4CheckReverseSource.bl_idname, text="", icon='FILE_REFRESH')
+
+    if error_message:
+        # The folder could not even be resolved (no workspace selected, empty
+        # custom path, ...): that message explains more than the folder check.
+        source_box.label(text=error_message)
+        return
+
+    if folder_probe["status"] == STATUS_OK:
+        source_box.label(text=tr("{groups} DrawIB folder(s), {types} data type(s)").format(
+            groups=folder_probe["group_count"],
+            types=folder_probe["data_type_count"],
+        ))
+        if folder_probe["incomplete_groups"]:
+            # These groups would import nothing; saying so avoids the surprise.
+            source_box.label(
+                text=tr("{count} DrawIB folder(s) hold no buffer file and cannot be imported").format(
+                    count=len(folder_probe["incomplete_groups"]),
+                ),
+                icon='ERROR',
+            )
+        return
+
+    source_box.label(text=sword_reverse_probe_message(folder_probe, scene.mimi_sword_reverse_source_mode))
+    if folder_probe["status"] == STATUS_TOO_SHALLOW and folder_probe["suggested_folders"]:
+        # Naming the workspaces is the fastest way out of this mistake.
+        source_box.label(text=tr("Its subfolders do hold reverse results, for example:"))
+        for folder_name in folder_probe["suggested_folders"]:
+            source_box.label(text="    " + folder_name)
+        if folder_probe["suggested_total"] > len(folder_probe["suggested_folders"]):
+            source_box.label(text=tr("... and {count} more").format(
+                count=folder_probe["suggested_total"] - len(folder_probe["suggested_folders"]),
+            ))
 
 
 # Panel UI layout
@@ -568,6 +913,11 @@ class MIMISword_ImageMaterialPanel(Panel):
             reversed_workspace_row.operator(SWORD4RefreshReversedWorkspaceList.bl_idname, text="", icon='FILE_REFRESH')
         elif scene.mimi_sword_reverse_source_mode == "CUSTOM":
             layout.prop(scene, "mimi_sword_custom_reverse_output_folder_path", text=tr("Custom Folder"))
+
+        # Tell the user whether the selected folder can be imported at all, so a
+        # wrong pick (wrong level, empty folder, buffers not copied) shows up
+        # before the import runs instead of ending in an empty collection.
+        draw_sword_reverse_source_status(layout, context)
 
         # One-click import of the reverse result button
         layout.operator("mimi.import_all_reverse", text=tr("Import All Reversed Models"), icon='IMPORT')
@@ -651,6 +1001,7 @@ def register():
     bpy.utils.register_class(Sword_ImportTexture_WM_OT_SelectImageFolder)
     bpy.utils.register_class(SwordImportAllReversed)
     bpy.utils.register_class(SWORD4RefreshReversedWorkspaceList)
+    bpy.utils.register_class(SWORD4CheckReverseSource)
     bpy.utils.register_class(MIMISword_SplitModel_Panel)
 
     bpy.types.Scene.mimi_sword_image_list = CollectionProperty(type=MIMISword_ImportTexture_ImageListItem)
@@ -659,6 +1010,8 @@ def register():
         name=tr("Import Mode"),
         description=tr("Controls the folder source used when importing reverse results in one click"),
         items=_get_sword_reverse_source_mode_items,
+        # Any change of the folder source invalidates the cached folder check.
+        update=_on_sword_reverse_source_changed,
         # Dynamic items only allow integer (0-based) defaults; the first item
         # ("LAST") is the intended default, so the argument is omitted.
     )
@@ -666,12 +1019,16 @@ def register():
         name=tr("Specified Workspace"),
         description=tr("Subfolders under Reversed in the current MMT / MIMITools cache folder"),
         items=_get_sword_reversed_workspace_items,
+        update=_on_sword_reverse_source_changed,
     )
     bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path = StringProperty(
         name=tr("Custom Folder"),
         description=tr("Manually specify the folder used for the one-click import of reverse results"),
         default="",
         subtype='DIR_PATH',
+        # Fires right after the user picks a folder, so the yes / no hint under
+        # the field follows the new selection immediately.
+        update=_on_sword_reverse_source_changed,
     )
 
 def unregister():
@@ -698,6 +1055,8 @@ def unregister():
     bpy.utils.unregister_class(Sword_ImportTexture_WM_OT_ApplyImageToMaterial)
     bpy.utils.unregister_class(MIMISword_ImageMaterialPanel)
     bpy.utils.unregister_class(SWORD4RefreshReversedWorkspaceList)
+    bpy.utils.unregister_class(SWORD4CheckReverseSource)
     bpy.utils.unregister_class(MIMISWORD_UL_FastImportTextureList)
     bpy.utils.unregister_class(MIMISword_ImportTexture_ImageListItem)
+    clear_sword_reverse_probe_cache()
                 
