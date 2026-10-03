@@ -462,6 +462,205 @@ class BlueprintTests(unittest.TestCase):
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.meshes.remove(mesh)
 
+    def _shape_object(self, name, shape_name):
+        # Register cleanup immediately so failed assertions cannot leak meshes.
+        # These objects exist only in the isolated factory-startup process.
+        mesh = bpy.data.meshes.new(name + '_mesh')
+        obj = bpy.data.objects.new(name, mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        self.addCleanup(bpy.data.meshes.remove, mesh)
+        self.addCleanup(bpy.data.objects.remove, obj, do_unlink=True)
+        obj.shape_key_add(name='Basis')
+        obj.shape_key_add(name=shape_name)
+        return obj
+
+    def _refresh_shapes(self, output):
+        # Explicit target names reproduce the actual button, not active selection.
+        return bpy.ops.mimi.refresh_shapekey_list(tree_name=self.tree.name, node_name=output.name)
+
+    def test_shape_refresh_switch_and_intermediates(self):
+        # Exercise every switch state through the screenshot's composition chain.
+        # Also include reroute and texture nodes, which must remain transparent.
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        final = self.tree.nodes.new('MIMINode_Object_Group')
+        switch = self.tree.nodes.new('MIMINode_SwitchKey')
+        self.tree.links.new(final.outputs[0], output.inputs[0])
+        self.tree.links.new(switch.outputs[0], final.inputs[0])
+        for index, name in enumerate(('Smile', 'Blink', 'Smile')):
+            obj = self._shape_object('state_' + str(index), name)
+            source = self.tree.nodes.new('MIMINode_Object_Info')
+            source.object_name = obj.name
+            branch = self.tree.nodes.new('MIMINode_Object_Group')
+            texture = self.tree.nodes.new('MIMINode_Texture_Bind')
+            reroute = self.tree.nodes.new('NodeReroute')
+            if index:
+                switch.inputs.new('MIMISocketObject', 'Status ' + str(index))
+            self.tree.links.new(source.outputs[0], branch.inputs[0])
+            self.tree.links.new(branch.outputs[0], texture.inputs[0])
+            self.tree.links.new(texture.outputs[0], reroute.inputs[0])
+            self.tree.links.new(reroute.outputs[0], switch.inputs[index])
+        # A repeated shape name represents one shared hotkey, not a missing row.
+        # Retain the user's enabled flag, key and remark across refreshes.
+        saved = output.shapekey_items.add()
+        saved.shapekey_name, saved.key, saved.comment = 'Smile', 'F6', 'face'
+        saved.enabled = True
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Smile', 'Blink'])
+        self.assertEqual(output.shapekey_items[0].key, 'F6')
+        self.assertEqual(output.shapekey_items[0].comment, 'face')
+        self.assertTrue(output.shapekey_items[0].enabled)
+
+    def test_shape_refresh_nested_group_input(self):
+        # Resolve a caller's object through two Group Input instance contexts.
+        # Switch states inside the nested group must not lose the caller wire.
+        inner = bpy.data.node_groups.new('shape_inner', self.tree.bl_idname)
+        outer = bpy.data.node_groups.new('shape_outer', self.tree.bl_idname)
+        for tree in (inner, outer):
+            tree.interface.new_socket(name='in', in_out='INPUT', socket_type='MIMISocketObject')
+            tree.interface.new_socket(name='out', in_out='OUTPUT', socket_type='MIMISocketObject')
+        inner_in, inner_out = groups._make_group_input_output(inner)
+        switch = inner.nodes.new('MIMINode_SwitchKey')
+        inner.links.new(inner_in.outputs[0], switch.inputs[0])
+        inner.links.new(switch.outputs[0], inner_out.inputs[0])
+        outer_in, outer_out = groups._make_group_input_output(outer)
+        nested = outer.nodes.new(groups.GROUP_NODE_IDNAME)
+        nested.node_tree = inner
+        outer.links.new(outer_in.outputs[0], nested.inputs[0])
+        outer.links.new(nested.outputs[0], outer_out.inputs[0])
+        instance = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        instance.node_tree = outer
+        obj = self._shape_object('nested_shape', 'Nested')
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = obj.name
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(source.outputs[0], instance.inputs[0])
+        self.tree.links.new(instance.outputs[0], output.inputs[0])
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Nested'])
+
+    def test_shape_refresh_list_port_and_renamed_reference(self):
+        # A per-row output must read only that row, even after object renaming.
+        # A new object taking the old name must not hijack the pointer reference.
+        first = self._shape_object('shape_first', 'First')
+        second = self._shape_object('shape_second', 'Second')
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, first.name)
+        lists._append_object_list_item(source, second.name)
+        old_name = second.name
+        second.name = 'shape_renamed'
+        self._shape_object(old_name, 'Wrong')
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(source.outputs[2], output.inputs[0])
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Second'])
+
+    def test_shape_refresh_custom_group_output_ports(self):
+        # A group's unconnected output is deliberately outside this Mod's scope.
+        # Verify switching the connected output refreshes the exact object subset.
+        child = bpy.data.node_groups.new('shape_ports', self.tree.bl_idname)
+        child_out = child.nodes.new('NodeGroupOutput')
+        for index, shape in enumerate(('Body', 'Hair')):
+            obj = self._shape_object('port_' + str(index), shape)
+            source = child.nodes.new('MIMINode_Object_Info')
+            source.object_name = obj.name
+            child.interface.new_socket(name=shape, in_out='OUTPUT', socket_type='MIMISocketObject')
+            child.links.new(source.outputs[0], child_out.inputs[index])
+        instance = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+        instance.node_tree = child
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(instance.outputs[1], output.inputs[0])
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Hair'])
+
+    def test_shape_refresh_muting_and_missing_objects(self):
+        # Missing object nodes contribute nothing, but cannot hide valid siblings.
+        # Shape-key mute is not node mute: refresh still lists muted shape keys.
+        obj = self._shape_object('visible_shape', 'Visible')
+        obj.data.shape_keys.key_blocks['Visible'].mute = True
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = obj.name
+        missing = self.tree.nodes.new('MIMINode_Object_Info')
+        missing.object_name = 'nonexistent_shape_object'
+        group = self.tree.nodes.new('MIMINode_Object_Group')
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(source.outputs[0], group.inputs[0])
+        self.tree.links.new(missing.outputs[0], group.inputs[1])
+        self.tree.links.new(group.outputs[0], output.inputs[0])
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Visible'])
+        # The export parser also treats muted blueprint nodes as disabled paths.
+        # Restoring the middle node must immediately restore the scanned list.
+        group.mute = True
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual(len(output.shapekey_items), 0)
+        group.mute = False
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Visible'])
+
+    def test_shape_refresh_object_uuid_after_rename(self):
+        # Unlike Object List pointers, Object Info follows the persistent UUID.
+        # Reusing the old object's name must not redirect shape-key detection.
+        obj = self._shape_object('uuid_shape', 'Original')
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = obj.name
+        old_name = obj.name
+        obj.name = 'uuid_shape_renamed'
+        self._shape_object(old_name, 'Replacement')
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(source.outputs[0], output.inputs[0])
+        self.assertEqual(self._refresh_shapes(output), {'FINISHED'})
+        self.assertEqual([item.shapekey_name for item in output.shapekey_items], ['Original'])
+
+    def test_shape_refresh_cycle_keeps_settings(self):
+        # A real wire cycle previously disappeared silently from the refresh.
+        # Even a valid sibling must not turn an invalid scan into partial success.
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        first = self.tree.nodes.new('MIMINode_Object_Group')
+        second = self.tree.nodes.new('MIMINode_Object_Group')
+        self.tree.links.new(first.outputs[0], second.inputs[0])
+        self.tree.links.new(second.outputs[0], first.inputs[0])
+        self.tree.links.new(second.outputs[0], output.inputs[0])
+        saved = output.shapekey_items.add()
+        saved.shapekey_name, saved.key = 'Saved', 'F9'
+        self.assertEqual(self._refresh_shapes(output), {'CANCELLED'})
+        self.assertEqual(output.shapekey_items[0].shapekey_name, 'Saved')
+        self.assertEqual(output.shapekey_items[0].key, 'F9')
+
+    def test_shape_refresh_orphan_port_keeps_settings(self):
+        # Object-list port/row mismatches are also errors in the export parser.
+        # Refresh must report the mismatch rather than erase all saved hotkeys.
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        lists._append_object_list_item(source, 'missing')
+        orphan = source.outputs.new('MIMISocketObject', 'orphan')
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        self.tree.links.new(orphan, output.inputs[0])
+        output.shapekey_items.add().shapekey_name = 'Saved'
+        self.assertEqual(self._refresh_shapes(output), {'CANCELLED'})
+        self.assertEqual(output.shapekey_items[0].shapekey_name, 'Saved')
+
+    def test_shape_refresh_failure_keeps_settings(self):
+        # A broken upstream traversal must not erase the previously saved list.
+        # Simulate a late error, after one valid object has already been scanned.
+        from MIMIBlender.blueprint import blueprint_graph
+        obj = self._shape_object('partial_shape', 'Partial')
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = obj.name
+        output = self.tree.nodes.new('MIMINode_Result_Output')
+        saved = output.shapekey_items.add()
+        saved.shapekey_name, saved.key, saved.comment = 'Saved', 'F8', 'keep'
+        saved.enabled = True
+        def broken_sources(root, strict=False):
+            # Yield first to expose partially overwritten collections as well.
+            yield source
+            raise ValueError('injected traversal failure')
+        with patch.object(blueprint_graph, 'iter_object_sources', broken_sources):
+            self.assertEqual(self._refresh_shapes(output), {'CANCELLED'})
+        self.assertEqual(len(output.shapekey_items), 1)
+        self.assertEqual(output.shapekey_items[0].shapekey_name, 'Saved')
+        self.assertEqual(output.shapekey_items[0].key, 'F8')
+        self.assertEqual(output.shapekey_items[0].comment, 'keep')
+        self.assertTrue(output.shapekey_items[0].enabled)
+
     def test_group_output_batch_connect(self):
         # A pass-through group can connect to the input-only Generate Mod node.
         area = bpy.context.screen.areas[0]

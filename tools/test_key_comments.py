@@ -88,7 +88,7 @@ source_object = types.SimpleNamespace(type="MESH", data=types.SimpleNamespace(
 ))
 source_node = types.SimpleNamespace(bl_idname="MIMINode_Object_Info")
 graph_stub = types.ModuleType(support.TEST_PKG + ".blueprint.blueprint_graph")
-graph_stub.iter_object_sources = lambda node: [source_node]
+graph_stub.iter_object_sources = lambda node, strict=False: [source_node]
 sys.modules[graph_stub.__name__] = graph_stub
 object_stub = types.ModuleType(support.TEST_PKG + ".blueprint.blueprint_node_obj")
 object_stub.ObjectPersistentIdManager = types.SimpleNamespace(resolve_node_target=lambda node: source_object)

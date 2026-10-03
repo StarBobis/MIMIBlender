@@ -5,8 +5,8 @@ all switch states, but still respects object-list and custom-group output ports.
 """
 
 
-def iter_object_sources(root):
-    """Yield Object Info nodes or enabled Object List rows in wire order."""
+def iter_object_sources(root, strict=False):
+    """Yield object sources in wire order; strict refresh rejects invalid paths."""
     # Use an active path rather than a global visited set. Shared nodes may
     # legitimately appear through distinct group instances or output ports.
     # The caller can deduplicate objects if its UI displays a set of meshes.
@@ -20,8 +20,10 @@ def iter_object_sources(root):
         key = (node.as_pointer(), output.as_pointer() if output else 0,
                tuple(instance.as_pointer() for instance in instances))
         if key in active:
-            # A preview must remain responsive even for an invalid graph.
-            # The exporter reports cycles as errors instead of skipping them.
+            # Previews can skip cycles, but refresh must not commit partial data.
+            # Strict callers retain their previous list when a graph is invalid.
+            if strict:
+                raise ValueError("Blueprint contains a cycle at node: " + node.name)
             return
         active.add(key)
         try:
@@ -37,6 +39,10 @@ def iter_object_sources(root):
                         return
                     index = sockets.index(output)
                     if index:
+                        # Stale extra ports have no object row; never imply success.
+                        # Lenient previews remain compatible with incomplete graphs.
+                        if strict and index > len(rows):
+                            raise ValueError("Object List output has no matching item: " + node.name)
                         rows = rows[index - 1:index]
                 # Every row of an Object List contributes its object; the
                 # node has no per-row enable switch, only whole rows that
@@ -46,8 +52,13 @@ def iter_object_sources(root):
                 return
             if kind == 'SSMTBlueprintGroupNode':
                 tree = node.node_tree
-                if tree is None or any(instance.node_tree == tree for instance in instances):
-                    # Ignore corrupt recursive group references in preview.
+                if tree is None:
+                    return
+                if any(instance.node_tree == tree for instance in instances):
+                    # Ignore recursive references only for noncommitting previews.
+                    # A refresh must not replace saved settings with a partial set.
+                    if strict:
+                        raise ValueError("Blueprint contains a recursive group cycle: " + node.name)
                     return
                 # Only the connected group output belongs to this path.
                 index = list(node.outputs).index(output) if output is not None else None

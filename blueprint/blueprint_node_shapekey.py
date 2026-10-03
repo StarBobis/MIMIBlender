@@ -62,24 +62,38 @@ class MMT_OT_RefreshShapeKeyList(I18nOperator):
             if item.shapekey_name
         }
         seen = set()
-        output_node.shapekey_items.clear()
-        # Only sources connected to this output belong to its shape-key list.
-        # Object Lists and nested groups are equally valid source containers.
+        shape_names = []
+        # Scan into temporary memory before changing the user's saved settings.
+        # A stale group socket or invalid Blender reference can fail mid-scan.
+        # Such failures must not leave a misleading, partially refreshed list.
         from .blueprint_graph import iter_object_sources
         from .blueprint_node_obj import ObjectPersistentIdManager
-        for node in iter_object_sources(output_node):
-            if getattr(node, 'bl_idname', '') == 'MIMINode_Object_Info':
-                obj = ObjectPersistentIdManager.resolve_node_target(node)
-            else:
-                obj = getattr(node, 'object_ref', None) or bpy.data.objects.get(node.object_name)
-            for sk_name in self._get_shapekeys_from_object(obj):
-                if sk_name in seen:
-                    continue
-                seen.add(sk_name)
-                item = output_node.shapekey_items.add()
-                item.shapekey_name = sk_name
-                if sk_name in previous_items:
-                    item.enabled, item.key, item.comment = previous_items[sk_name]
+        try:
+            # Only sources connected to this output belong to its shape-key list.
+            # Object Lists and nested groups are equally valid source containers.
+            for node in iter_object_sources(output_node, strict=True):
+                if getattr(node, 'bl_idname', '') == 'MIMINode_Object_Info':
+                    obj = ObjectPersistentIdManager.resolve_node_target(node)
+                else:
+                    obj = getattr(node, 'object_ref', None) or bpy.data.objects.get(node.object_name)
+                for sk_name in self._get_shapekeys_from_object(obj):
+                    if sk_name not in seen:
+                        seen.add(sk_name)
+                        shape_names.append(sk_name)
+        except Exception as error:
+            # Keep all previous enabled flags, hotkeys and remarks untouched.
+            # Warning severity lets Blender return CANCELLED without raising.
+            self.report({'WARNING'}, tr("Refresh failed") + ": " + str(error))
+            return {'CANCELLED'}
+
+        # Commit only after every upstream source has been scanned successfully.
+        # Ordered names preserve wire order and the existing shared-name policy.
+        output_node.shapekey_items.clear()
+        for sk_name in shape_names:
+            item = output_node.shapekey_items.add()
+            item.shapekey_name = sk_name
+            if sk_name in previous_items:
+                item.enabled, item.key, item.comment = previous_items[sk_name]
 
         self.report({'INFO'}, tr("Refreshed {count} shape keys").format(count=len(output_node.shapekey_items)))
         return {'FINISHED'}
