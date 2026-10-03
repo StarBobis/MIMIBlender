@@ -382,7 +382,8 @@ class ReverseImportTests(unittest.TestCase):
         result = self.run_import(root)
         self.assertEqual(result['object_names'], [])
         self.assertEqual(result['collection_names'], [])
-        self.assertIn('No Json files were imported', result['message'])
+        # Referenced-file preflight rejects this before collection creation.
+        self.assertIn('No usable reverse descriptors', result['message'])
 
     # ------------------------------------------------------------- panel hint
     def test_panel_hint_reports_both_verdicts(self):
@@ -414,7 +415,7 @@ class ReverseImportTests(unittest.TestCase):
             json.dump({'IndexBufferList': [], 'CategoryBufferList': []}, handle)
         hint = self.draw_hint(mixed_root)
         self.assertEqual(hint.labels[0], 'This folder can be imported normally')
-        self.assertIn('no buffer file', ' '.join(hint.labels))
+        self.assertIn('invalid descriptors', ' '.join(hint.labels))
 
     def test_panel_hint_is_translated(self):
         # The verdict must exist in Simplified Chinese as well.
@@ -456,6 +457,110 @@ class ReverseImportTests(unittest.TestCase):
         self.assertIs(panel.get_sword_reverse_probe(root), first)
         panel.clear_sword_reverse_probe_cache()
         self.assertEqual(panel.get_sword_reverse_probe(root)['status'], probe.STATUS_MISSING)
+
+    def test_invalid_json_and_missing_single_buffer_are_rejected(self):
+        # A random sibling IB must not make malformed JSON importable.
+        root = self.folder('invalid_reference')
+        group = build_importable_group(os.path.join(root, 'a1b2c3d4'))
+        os.remove(os.path.join(group, 'a1b2c3d4-Texcoord.buf'))
+        self.assertEqual(probe.probe_reverse_folder(root)['status'], probe.STATUS_NO_BUFFER)
+        with open(os.path.join(group, 'GoodType.json'), 'w') as handle:
+            handle.write('{broken')
+        self.assertEqual(probe.probe_reverse_folder(root)['status'], probe.STATUS_NO_BUFFER)
+
+    def test_all_directories_are_checked(self):
+        # Valid data after 200 empty folders was silently omitted by the cap.
+        root = self.folder('large_root')
+        for index in range(205):
+            os.makedirs(os.path.join(root, 'empty_%03d' % index))
+        build_importable_group(os.path.join(root, 'zz_valid'))
+        result = probe.probe_reverse_folder(root)
+        self.assertEqual(result['status'], probe.STATUS_OK)
+        self.assertEqual(result['group_count'], 1)
+
+    def test_mixed_formats_ignore_stale_config(self):
+        # Invalid FMT and a stale format marker must not hide a valid JSON type.
+        root = self.folder('mixed_format')
+        group = build_importable_group(os.path.join(root, 'a1b2c3d4'))
+        with open(os.path.join(group, 'Bad.fmt'), 'w') as handle:
+            handle.write('prefix: missing')
+        original = global_config.GlobalConfig.reverse_output_format
+        global_config.GlobalConfig.reverse_output_format = staticmethod(lambda: probe.IB_VB_FMT)
+        try:
+            result = self.run_import(root)
+        finally:
+            global_config.GlobalConfig.reverse_output_format = original
+        self.assertTrue(result['object_names'], result['message'])
+
+    def test_language_cache_and_blender_relative_paths(self):
+        # Cached error strings must follow language changes without reselecting.
+        self.scene.mimi_sword_custom_reverse_output_folder_path = ''
+        panel.clear_sword_reverse_probe_cache()
+        self.assertIn('Custom folder', panel.get_sword_reverse_source(self.scene)[1])
+        i18n.apply_language('zh')
+        try:
+            self.assertIn('自定义', panel.get_sword_reverse_source(self.scene)[1])
+        finally:
+            i18n.apply_language('en')
+        # Blender owns // resolution; normpath must not reinterpret it as UNC.
+        self.scene.mimi_sword_custom_reverse_output_folder_path = '//review_relative'
+        path, _error = panel.resolve_sword_reverse_source_folder(self.scene)
+        self.assertEqual(path, os.path.normpath(bpy.path.abspath('//review_relative')))
+
+    def test_failed_import_removes_unlinked_objects(self):
+        # Mesh creation can throw before linking an object to its collection.
+        # Collection-only rollback left such orphan objects in bpy.data.objects.
+        root = self.folder('unlinked_failure')
+        build_importable_group(os.path.join(root, 'a1b2c3d4'))
+        original = panel.MMTImportHelper.create_mesh_from_json
+        def fail_before_link(**kwargs):
+            bpy.data.objects.new('review_orphan', None)
+            raise RuntimeError('synthetic pre-link failure')
+        panel.MMTImportHelper.create_mesh_from_json = staticmethod(fail_before_link)
+        try:
+            result = self.run_import(root)
+        finally:
+            panel.MMTImportHelper.create_mesh_from_json = original
+        self.assertEqual(result['object_names'], [])
+        self.assertEqual(result['collection_names'], [])
+
+    def test_legacy_import_and_rollback(self):
+        # Exercise real FMT parsing, not only marker detection.
+        root = self.folder('legacy_real')
+        group = os.path.join(root, 'Body')
+        os.makedirs(group)
+        vertices = [position + texcoord for position, texcoord in
+                    zip(_QUAD_POSITIONS, _QUAD_TEXCOORDS)]
+        _write_bytes(os.path.join(group, 'Body.vb'), struct.pack('<20f',
+                     *[value for vertex in vertices for value in vertex]))
+        _write_bytes(os.path.join(group, 'Body.ib'), struct.pack('<6H', *_QUAD_INDICES))
+        fmt = """stride: 20
+format: R16_UINT
+topology: trianglelist
+prefix: Body
+logic_name: GIMI
+gametypename: Position-Texcoord
+element[0]:
+SemanticName: POSITION
+SemanticIndex: 0
+Format: R32G32B32_FLOAT
+AlignedByteOffset: 0
+element[1]:
+SemanticName: TEXCOORD
+SemanticIndex: 0
+Format: R32G32_FLOAT
+AlignedByteOffset: 12
+"""
+        with open(os.path.join(group, 'Body.fmt'), 'w') as handle:
+            handle.write(fmt)
+        result = self.run_import(root)
+        self.assertTrue(result['object_names'], result['message'])
+        self.assertEqual(result['empty_leaf_names'], [])
+        # Once buffers disappear, refusal must leave no collections behind.
+        os.remove(os.path.join(group, 'Body.vb'))
+        result = self.run_import(root)
+        self.assertEqual(result['object_names'], [])
+        self.assertEqual(result['collection_names'], [])
 
 
 def main():

@@ -8,7 +8,7 @@ import bpy.utils.previews
 from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
 from ..common.mmt_import_helper import MMTImportHelper
-from ..i18n.i18n import I18nOperator, tr, translatable
+from ..i18n.i18n import I18nOperator, tr, translatable, get_language
 from ..workspace.submesh_json import SubmeshJson
 
 # Folder check shared with the Mod Reverse panel: it tells the user whether the
@@ -80,7 +80,11 @@ def resolve_sword_reverse_source_folder(scene):
         return os.path.join(reversed_root, selected_workspace_name), ""
 
     if source_mode == "CUSTOM":
-        custom_folder_path = normalize_folder_path(scene.mimi_sword_custom_reverse_output_folder_path)
+        # Resolve Blender's // paths relative to the blend file before normpath
+        # can turn them into an unrelated UNC or process-relative path.
+        raw_path = str(scene.mimi_sword_custom_reverse_output_folder_path or '').strip()
+        raw_path = raw_path.strip('"').strip("'").strip()
+        custom_folder_path = normalize_folder_path(bpy.path.abspath(raw_path)) if raw_path else ""
         if not custom_folder_path:
             return "", tr("Custom folder is empty, please select a folder first")
         return custom_folder_path, ""
@@ -104,12 +108,6 @@ def get_sword_reverse_probe(folder_path, force=False):
         return cache["probe"]
 
     probe = probe_reverse_folder(folder_path)
-    if probe["status"] == STATUS_OK and probe["json_count"] > 0 and probe["fmt_count"] > 0:
-        # The folder carries both formats. Import the one MMT recorded, because
-        # that is the format the current toolchain wrote.
-        recorded_format = GlobalConfig.reverse_output_format()
-        probe["format"] = IB_VB_FMT if recorded_format == IB_VB_FMT else "ssmt_fmt"
-
     cache["folder_path"] = folder_path
     cache["probe"] = probe
     return probe
@@ -121,6 +119,8 @@ def _sword_reverse_source_selection_key(scene):
         str(scene.mimi_sword_reverse_source_mode or ""),
         str(scene.mimi_sword_specific_reversed_workspace_name or ""),
         str(scene.mimi_sword_custom_reverse_output_folder_path or ""),
+        bpy.data.filepath,
+        get_language(),
     )
 
 
@@ -163,7 +163,7 @@ def sword_reverse_probe_message(probe, source_mode=""):
     if status == STATUS_TOO_SHALLOW:
         return tr("The selected folder holds reverse workspaces, please select one of its subfolders")
     if status == STATUS_NO_BUFFER:
-        return tr("The DrawIB folders hold data files but no .buf / .ib buffer file, so nothing can be imported")
+        return tr("No usable reverse descriptors with complete, nonempty referenced buffers were found")
     if status == STATUS_NO_DATA:
         return tr("No .json (ssmt_fmt) or .fmt (ib_vb_fmt) reverse data was found in its subfolders")
     return tr("The folder can be imported")
@@ -175,7 +175,7 @@ def remove_objects_created_since(collection, objects_before):
     Used to roll back a half-imported data type: a failing import must not leave
     half-built meshes behind in the outliner.
     """
-    for imported_obj in list(collection.objects):
+    for imported_obj in list(bpy.data.objects):
         if imported_obj not in objects_before:
             bpy.data.objects.remove(imported_obj, do_unlink=True)
 
@@ -567,11 +567,17 @@ class SwordImportAllReversed(I18nOperator):
         reverse_output_folder_path = folder_probe["folder_path"]
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
+        # Recheck root readability before creating scene data: the directory
+        # may disappear between preflight and import (removable/network disks).
+        try:
+            with os.scandir(reverse_output_folder_path) as entries:
+                subfolder_path_list = [entry.path for entry in entries if entry.is_dir()]
+        except OSError as error:
+            self.report({'ERROR'}, tr("Folder cannot be read, skipped: {path} | Error: {error}").format(
+                path=reverse_output_folder_path, error=error))
+            return {'CANCELLED'}
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
-        bpy.context.scene.collection.children.link(reverse_collection)
-
-        # Get all subfolders
-        subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
+        context.scene.collection.children.link(reverse_collection)
         if not subfolder_path_list:
             # Nothing to import: remove the just created collection again, so an
             # empty reverse collection never stays in the outliner.
@@ -633,7 +639,7 @@ class SwordImportAllReversed(I18nOperator):
                 # The collection is brand new, so every object inside it belongs
                 # to this data type; counting them tells whether the data type
                 # produced a usable mesh.
-                objects_before = set(datatype_collection.objects)
+                objects_before = set(bpy.data.objects)
                 try:
                     # Call the ssmt_fmt format import function; the DrawIB folder
                     # name is passed as the classic Submesh naming prefix and the
@@ -696,11 +702,17 @@ class SwordImportAllReversed(I18nOperator):
         reverse_output_folder_path = folder_probe["folder_path"]
         total_folder_name = os.path.basename(reverse_output_folder_path)
 
+        # Recheck root readability before creating scene data: the directory
+        # may disappear between preflight and import (removable/network disks).
+        try:
+            with os.scandir(reverse_output_folder_path) as entries:
+                subfolder_path_list = [entry.path for entry in entries if entry.is_dir()]
+        except OSError as error:
+            self.report({'ERROR'}, tr("Folder cannot be read, skipped: {path} | Error: {error}").format(
+                path=reverse_output_folder_path, error=error))
+            return {'CANCELLED'}
         reverse_collection = CollectionUtils.create_new_collection(collection_name=total_folder_name,color_tag=CollectionColor.Red)
-        bpy.context.scene.collection.children.link(reverse_collection)
-
-        # Get all subfolders
-        subfolder_path_list = [f.path for f in os.scandir(reverse_output_folder_path) if f.is_dir()]
+        context.scene.collection.children.link(reverse_collection)
         if not subfolder_path_list:
             # Nothing to import: remove the just created collection again, so an
             # empty reverse collection never stays in the outliner.
@@ -745,7 +757,7 @@ class SwordImportAllReversed(I18nOperator):
                 filename_without_extension = os.path.splitext(filename_with_extension)[0]
                 # One .fmt may create several objects (per draw-indexed slice);
                 # remember what was already there to roll this file back alone.
-                objects_before = set(datatype_collection.objects)
+                objects_before = set(bpy.data.objects)
                 try:
                     # Call the import function
                     mbf = MigotoBinaryFile(fmt_path=fmt_filepath, mesh_name=filename_without_extension)
@@ -760,7 +772,7 @@ class SwordImportAllReversed(I18nOperator):
                     self.report({'WARNING'}, error_msg)
                     continue
 
-                datatype_object_count += len(datatype_collection.objects) - len(objects_before)
+                datatype_object_count = len(datatype_collection.objects)
 
                 # Nico: note that after reversing Wuthering Waves Mod models, normals may be incorrect.
                 # This should not be handled automatically; the user should handle it manually,
@@ -873,7 +885,7 @@ def draw_sword_reverse_source_status(layout, context):
         if folder_probe["incomplete_groups"]:
             # These groups would import nothing; saying so avoids the surprise.
             source_box.label(
-                text=tr("{count} DrawIB folder(s) hold no buffer file and cannot be imported").format(
+                text=tr("{count} DrawIB folder(s) contain invalid descriptors or missing buffers").format(
                     count=len(folder_probe["incomplete_groups"]),
                 ),
                 icon='ERROR',
@@ -1026,6 +1038,8 @@ def register():
         description=tr("Manually specify the folder used for the one-click import of reverse results"),
         default="",
         subtype='DIR_PATH',
+        # Permit Blender-relative file browser paths; resolve them at import.
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
         # Fires right after the user picks a folder, so the yes / no hint under
         # the field follows the new selection immediately.
         update=_on_sword_reverse_source_changed,
