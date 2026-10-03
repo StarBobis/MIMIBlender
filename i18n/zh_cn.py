@@ -1124,4 +1124,6 @@ TRANSLATIONS_ZH_CN = {
     "Sources: ": "来源物体数：",
     "Vertices: ": "顶点数：",
     "Merged sculpt session data is corrupt.": "合并雕刻会话数据已损坏。",
+    "Use single-user meshes; one session per source.": "网格须为单用户；每个来源仅参与一个会话。",
+    "Keep source UID stamps; do not change vertex count.": "保留来源 UID 标记；不要改变顶点数。",
 }

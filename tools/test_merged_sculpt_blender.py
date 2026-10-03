@@ -377,6 +377,127 @@ class MergedSculptTests(unittest.TestCase):
         self.assertNotIn(merged_name, bpy.data.objects)
 
     # ------------------------------------------------------------------
+    # Review regressions: reject ambiguous ownership before any write.
+    # These scenarios are legal Blender workflows, not payload tampering.
+    # ------------------------------------------------------------------
+    def test_shared_mesh_rejected_before_create(self):
+        a = make_cube("shared_a")
+        b = a.copy()
+        bpy.context.scene.collection.objects.link(b)
+        before = read_cos(a.data.vertices)
+        select_only([a, b])
+        with self.assertRaisesRegex(ValueError, "shared mesh"):
+            MergedSculptUtils.create_merged_object(bpy.context)
+        numpy.testing.assert_array_equal(read_cos(a.data.vertices), before)
+        self.assertNotIn(PROP_SOURCE_UID, a)
+        self.assertNotIn(PROP_SOURCE_UID, b)
+
+    def test_shared_mesh_added_after_merge_aborts(self):
+        cubes = [make_cube("later_a"), make_cube("later_b")]
+        merged = self.create_merged(cubes)
+        before = [read_cos(c.data.vertices) for c in cubes]
+        # An unselected linked duplicate must never receive sculpt changes.
+        instance = cubes[1].copy()
+        bpy.context.scene.collection.objects.link(instance)
+        # Remove the inherited UID to isolate shared-data detection from the
+        # separate duplicate-identity guard already covered by another test.
+        del instance[PROP_SOURCE_UID]
+        self.sculpt_merged(merged, (0, 0, 2))
+        with self.assertRaisesRegex(ValueError, "shared mesh"):
+            MergedSculptUtils.apply_merged_sculpt(bpy.context)
+        for cube, old in zip(cubes, before):
+            numpy.testing.assert_array_equal(read_cos(cube.data.vertices), old)
+        self.assertTrue(MergedSculptUtils.validate_merged_sculpt(bpy.context))
+
+    def test_reference_keys_can_be_renamed(self):
+        for deltas in (False, True):
+            cubes = self._make_shape_key_cubes()
+            merged = self.create_merged(cubes)
+            # Rename both the target and a source reference key independently.
+            merged.data.shape_keys.reference_key.name = "Merged Rest"
+            cubes[1].data.shape_keys.reference_key.name = "Source Rest"
+            before = [read_cos(c.data.shape_keys.reference_key.data) for c in cubes]
+            offset_cos(merged.data.shape_keys.reference_key.data, (0, 0, 1))
+            MergedSculptUtils.apply_merged_sculpt(bpy.context, deltas)
+            for cube, old in zip(cubes, before):
+                numpy.testing.assert_allclose(
+                    read_cos(cube.data.shape_keys.reference_key.data), old + (0, 0, 1))
+
+    def test_overlapping_session_rejected(self):
+        a, b, c = [make_cube(n) for n in ("common", "first", "second")]
+        merged = self.create_merged([a, b])
+        stamp = a[PROP_SOURCE_UID]
+        select_only([a, c])
+        with self.assertRaisesRegex(ValueError, "already belongs"):
+            MergedSculptUtils.create_merged_object(bpy.context)
+        self.assertEqual(stamp, a[PROP_SOURCE_UID])
+        self.assertNotIn(PROP_SOURCE_UID, c)
+        # The original session remains rename-safe after the rejected create.
+        a.name = "renamed_common"
+        select_only([merged])
+        self.assertEqual([], MergedSculptUtils.validate_merged_sculpt(bpy.context))
+
+    def test_reused_name_does_not_resolve_deleted_source(self):
+        a, b = make_cube("survivor"), make_cube("deleted")
+        merged = self.create_merged([a, b])
+        bpy.data.objects.remove(b, do_unlink=True)
+        replacement = make_cube("deleted")
+        before = read_cos(replacement.data.vertices)
+        self.sculpt_merged(merged, (0, 0, 3))
+        with self.assertRaisesRegex(ValueError, "Missing source"):
+            MergedSculptUtils.apply_merged_sculpt(bpy.context)
+        numpy.testing.assert_array_equal(read_cos(replacement.data.vertices), before)
+
+    def test_cross_scene_lookup_rejected(self):
+        self.create_merged([make_cube("scene_a"), make_cube("scene_b")])
+        original = bpy.context.scene
+        empty = bpy.data.scenes.new("empty_scene")
+        bpy.context.window.scene = empty
+        try:
+            with self.assertRaisesRegex(ValueError, "No merged sculpt"):
+                MergedSculptUtils._find_merged_object(bpy.context)
+        finally:
+            bpy.context.window.scene = original
+            bpy.data.scenes.remove(empty)
+
+    def test_discard_clears_duplicate_exact_stamps_only(self):
+        a, b = make_cube("cleanup_a"), make_cube("cleanup_b")
+        self.create_merged([a, b])
+        duplicate = a.copy()
+        bpy.context.scene.collection.objects.link(duplicate)
+        other = make_cube("another_session")
+        other[PROP_SOURCE_UID] = "other:uid"
+        MergedSculptUtils.discard_merged_sculpt(bpy.context)
+        for obj in (a, b, duplicate):
+            self.assertNotIn(PROP_SOURCE_UID, obj)
+        self.assertEqual("other:uid", other[PROP_SOURCE_UID])
+
+    def test_unexpected_write_failure_rolls_back(self):
+        from unittest.mock import patch
+        cubes = [make_cube("rollback_a"), make_cube("rollback_b")]
+        merged = self.create_merged(cubes)
+        before = [read_cos(c.data.vertices) for c in cubes]
+        self.sculpt_merged(merged, (0, 0, 1))
+        original = MergedSculptUtils._write_flat_positions
+        calls = [0]
+
+        def fail_second_write(target, positions):
+            # Simulate a partly completed second write; rollback must restore
+            # both that target and the previously completed first target.
+            calls[0] += 1
+            original(target, positions)
+            if calls[0] == 2:
+                raise RuntimeError("injected Blender write failure")
+
+        with patch.object(MergedSculptUtils, "_write_flat_positions", side_effect=fail_second_write):
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                MergedSculptUtils.apply_merged_sculpt(bpy.context)
+        for cube, old in zip(cubes, before):
+            numpy.testing.assert_array_equal(read_cos(cube.data.vertices), old)
+            self.assertIn(PROP_SOURCE_UID, cube)
+        self.assertIn(PROP_SOURCES, merged)
+
+    # ------------------------------------------------------------------
     # UI wiring (the addon is registered by the __main__ block)
     # ------------------------------------------------------------------
     def test_ui_classes_registered(self):

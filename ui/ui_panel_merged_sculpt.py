@@ -93,7 +93,9 @@ class MIMI_OT_merged_sculpt_apply(I18nOperator):
         try:
             count = MergedSculptUtils.apply_merged_sculpt(
                 context, apply_deltas_to_shapekeys=apply_deltas)
-        except ValueError as error:
+        except (ValueError, RuntimeError) as error:
+            # The core restores source coordinates on an unexpected write
+            # failure; report the error while leaving the session available.
             self.report({'ERROR'}, tr("Merged sculpt failed: ") + str(error))
             return {'CANCELLED'}
         self.report(
@@ -184,6 +186,9 @@ class MIMIPanelMergedSculpt(bpy.types.Panel):
         # Create row: always visible; the poll greys it out until the
         # selection holds at least two mesh objects.
         layout.operator("mimi.merged_sculpt_create", icon='SCULPTMODE_HLT')
+        # Show the safety constraints before the user starts a session.
+        layout.label(text=tr("Use single-user meshes; one session per source."))
+        layout.label(text=tr("Keep source UID stamps; do not change vertex count."))
 
         # Status block: locate the current merged object (if any) and show
         # its session summary. Reading custom properties in draw() is fine;

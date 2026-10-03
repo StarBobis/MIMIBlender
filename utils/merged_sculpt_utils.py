@@ -61,6 +61,14 @@ class MergedSculptUtils:
         if len(sources) < 2:
             raise ValueError("Select at least 2 mesh objects to merge.")
 
+        # Reject ambiguous ownership before creating copies or changing any
+        # source stamps. Shared meshes would also edit unselected instances.
+        for obj in sources:
+            if PROP_SOURCE_UID in obj or PROP_SOURCES in obj:
+                raise ValueError(
+                    "Object '%s' already belongs to a merged sculpt session." % obj.name)
+            cls._check_source_data(obj)
+
         session = uuid.uuid4().hex
 
         # The join bakes every copy into the local space of copies[0], so
@@ -159,6 +167,7 @@ class MergedSculptUtils:
                 "Duplicated source objects (same session UID): "
                 + ", ".join(conflicts))
         for obj, record in resolved:
+            cls._check_source_data(obj)
             if len(obj.data.vertices) != record["vertex_count"]:
                 raise ValueError(
                     "Vertex count of '%s' changed (%d -> %d)."
@@ -176,19 +185,46 @@ class MergedSculptUtils:
         # otherwise the undeformed mesh coordinates (modifier-immune).
         merged_positions = cls._read_merged_positions(merged_obj)
 
-        # Slice the merged array by the recorded counts and write each chunk
-        # back in the owning source's local space.
+        # Prepare every write and backup before touching any source. A
+        # malformed matrix or incompatible target must not cause half-apply.
+        writes = []
         offset = 0
         for obj, record in resolved:
             count = record["vertex_count"]
             chunk = merged_positions[offset:offset + count]
-            inv_rel = numpy.asarray(record["inv_rel_matrix"], dtype=numpy.float64)
-            local_positions = cls._transform_positions(chunk, inv_rel)
-            cls._write_source_positions(
-                obj, local_positions, apply_deltas_to_shapekeys)
+            local_positions = cls._transform_positions(chunk, record["inv_rel_matrix"])
+            if not numpy.isfinite(local_positions).all():
+                raise ValueError("Sculpt positions contain non-finite values.")
+            keys = obj.data.shape_keys
+            if keys is None:
+                targets = [obj.data.vertices]
+                delta = None
+            else:
+                basis = keys.reference_key
+                delta = local_positions - cls._read_flat_positions(basis.data, count)
+                targets = ([key.data for key in keys.key_blocks]
+                           if apply_deltas_to_shapekeys else [basis.data])
+            for target in targets:
+                before = cls._read_flat_positions(target, count)
+                after = before + delta if keys is not None and apply_deltas_to_shapekeys else local_positions
+                writes.append((obj.data, target, before, after))
             offset += count
 
-        cls._cleanup_stamps(resolved)
+        # Keep the session intact if an unexpected Blender write fails.
+        # Include the current target in rollback in case it was partly written.
+        attempted = []
+        try:
+            for mesh, target, before, after in writes:
+                attempted.append((mesh, target, before))
+                cls._write_flat_positions(target, after)
+                mesh.update()
+        except Exception:
+            for mesh, target, before in reversed(attempted):
+                cls._write_flat_positions(target, before)
+                mesh.update()
+            raise
+
+        cls._cleanup_stamps(resolved, payload["session"])
         cls._remove_merged_object(merged_obj)
         return len(resolved)
 
@@ -201,8 +237,12 @@ class MergedSculptUtils:
         the session stamps from its source objects."""
         merged_obj = cls._find_merged_object(context)
         payload = json.loads(merged_obj[PROP_SOURCES])
-        resolved, _, _ = cls._resolve_sources(payload)
-        cls._cleanup_stamps(resolved)
+        # Clear all exact stamps, including duplicated sources which cannot
+        # be resolved for apply. Never remove another session's stamp.
+        expected = {payload["session"] + ":" + r["uid"] for r in payload["sources"]}
+        for obj in bpy.data.objects:
+            if obj.get(PROP_SOURCE_UID) in expected:
+                del obj[PROP_SOURCE_UID]
         cls._remove_merged_object(merged_obj)
 
     @classmethod
@@ -220,6 +260,11 @@ class MergedSculptUtils:
             issues.append("duplicated source object: " + name)
 
         for obj, record in resolved:
+            try:
+                cls._check_source_data(obj)
+            except ValueError as error:
+                issues.append(str(error))
+                continue
             if len(obj.data.vertices) != record["vertex_count"]:
                 issues.append(
                     "vertex count changed: %s (%d -> %d)"
@@ -245,12 +290,12 @@ class MergedSculptUtils:
         """Locate the merged sculpt object to operate on: the active object,
         then the selection, then the scene (which must hold exactly one)."""
         active = context.view_layer.objects.active
-        if active is not None and PROP_SOURCES in active:
+        if active is not None and active.name in context.scene.objects and PROP_SOURCES in active:
             return active
         for obj in context.selected_objects:
-            if PROP_SOURCES in obj:
+            if obj.name in context.scene.objects and PROP_SOURCES in obj:
                 return obj
-        candidates = [obj for obj in bpy.data.objects if PROP_SOURCES in obj]
+        candidates = [obj for obj in context.scene.objects if PROP_SOURCES in obj]
         if len(candidates) == 1:
             return candidates[0]
         if not candidates:
@@ -260,8 +305,8 @@ class MergedSculptUtils:
 
     @classmethod
     def _resolve_sources(cls, payload):
-        """Map every recorded source to a live object. UID stamps win over
-        names so renames are harmless; the recorded name is only a fallback.
+        """Resolve sources only by exact session UID, never by object name.
+        Names are diagnostic labels; renames do not affect identity.
         Returns (resolved_pairs, missing_names, conflict_names)."""
         session = payload["session"]
 
@@ -282,8 +327,8 @@ class MergedSculptUtils:
                 conflicts.append(record["name"])
                 continue
             obj = matches[0] if matches else None
-            if obj is None:
-                obj = bpy.data.objects.get(record["name"])
+            # A reused name is not proof of identity. Missing stamps require
+            # explicit recovery, never an automatic write into another object.
             if obj is None:
                 missing.append(record["name"])
                 continue
@@ -291,10 +336,10 @@ class MergedSculptUtils:
         return resolved, missing, conflicts
 
     @classmethod
-    def _cleanup_stamps(cls, resolved):
-        """Remove session stamps after a successful apply or a discard."""
-        for obj, _record in resolved:
-            if PROP_SOURCE_UID in obj:
+    def _cleanup_stamps(cls, resolved, session):
+        """Remove only stamps owned by the session being completed."""
+        for obj, record in resolved:
+            if obj.get(PROP_SOURCE_UID) == session + ":" + record["uid"]:
                 del obj[PROP_SOURCE_UID]
 
     @classmethod
@@ -317,36 +362,10 @@ class MergedSculptUtils:
         flat = numpy.empty(vertex_count * 3, dtype=numpy.float32)
         shape_keys = merged_obj.data.shape_keys
         if shape_keys is not None:
-            shape_keys.key_blocks['Basis'].data.foreach_get('co', flat)
+            shape_keys.reference_key.data.foreach_get('co', flat)
         else:
             merged_obj.data.vertices.foreach_get('undeformed_co', flat)
         return flat.reshape(vertex_count, 3).astype(numpy.float64)
-
-    @classmethod
-    def _write_source_positions(cls, obj, local_positions,
-                                apply_deltas_to_shapekeys):
-        """Write positions (already in the source's local space) into one
-        source object, optionally propagating the sculpt delta to every
-        shape key of that source."""
-        shape_keys = obj.data.shape_keys
-        if shape_keys is None:
-            cls._write_flat_positions(obj.data.vertices, local_positions)
-            obj.data.update()
-            return
-
-        basis = shape_keys.key_blocks['Basis']
-        if not apply_deltas_to_shapekeys:
-            cls._write_flat_positions(basis.data, local_positions)
-            return
-
-        # Delta = sculpted Basis minus the source's current Basis. Adding it
-        # to every key keeps the keys consistent, exactly like WWMI does.
-        old_basis = cls._read_flat_positions(basis.data, len(obj.data.vertices))
-        delta = local_positions - old_basis
-        for key_block in shape_keys.key_blocks:
-            old_co = cls._read_flat_positions(
-                key_block.data, len(obj.data.vertices))
-            cls._write_flat_positions(key_block.data, old_co + delta)
 
     @classmethod
     def _read_flat_positions(cls, point_data, vertex_count):
@@ -392,10 +411,28 @@ class MergedSculptUtils:
             key_block.value = 0.0
         # Sculpt strokes write into the active key; make sure it is Basis.
         for index, key_block in enumerate(shape_keys.key_blocks):
-            if key_block.name == 'Basis':
+            if key_block == shape_keys.reference_key:
                 merged_obj.active_shape_key_index = index
                 break
         return warnings
+
+    @classmethod
+    def _check_source_data(cls, obj):
+        """Reject data that cannot be written independently and safely.
+
+        Linked duplicates may include unselected objects. Reject instead of
+        silently making meshes single-user and changing the user's setup.
+        Edit mode owns a separate mesh buffer, so it is also not writable.
+        """
+        if obj.type != 'MESH':
+            raise ValueError("Source '%s' is no longer a mesh object." % obj.name)
+        mesh = obj.data
+        if mesh.users > 1:
+            raise ValueError("Object '%s' uses a shared mesh; make it single-user first." % obj.name)
+        if not obj.is_editable or not mesh.is_editable or mesh.is_editmode:
+            raise ValueError("Object '%s' must have editable mesh data in Object mode." % obj.name)
+        if mesh.shape_keys is not None and not mesh.shape_keys.is_editable:
+            raise ValueError("Shape keys of '%s' are not editable." % obj.name)
 
     @classmethod
     def _shape_key_names(cls, obj):
