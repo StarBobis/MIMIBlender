@@ -54,9 +54,12 @@ def _get_workspace_source_mode_items(self, context):
 def _get_import_merged_vgmap_items(self, context):
     # Dynamic items callback so the dropdown entries follow the UI language.
     return [
-        ('MERGED', tr('Merged'), tr('Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export')),
-        ('PER_COMPONENT', tr('PerComponent'), tr('Imports vertex groups independently per component')),
-        ('UNICOMPONENT', tr('UniComponent'), tr('Merged import; on export, automatically splits by Submesh and restores local vertex groups')),
+        # Explicit values preserve saved scenes when the new default comes first.
+        # MergedComponent edits global groups but exports local buffer indices.
+        ('MERGED_COMPONENT', tr('MergedComponent'), tr('Merged import; export local bone indices without splitting objects; all weighted bones must exist in the target component'), 0, 3),
+        ('MERGED', tr('Merged'), tr('Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export'), 0, 0),
+        ('PER_COMPONENT', tr('PerComponent'), tr('Imports vertex groups independently per component'), 0, 1),
+        ('UNICOMPONENT', tr('UniComponent'), tr('Merged import; on export, automatically splits by Submesh and restores local vertex groups'), 0, 2),
     ]
 
 
@@ -203,10 +206,11 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
 
     import_merged_vgmap: bpy.props.EnumProperty(
         name=tr("Vertex Group Mode"),
-        description=tr("Merged: import the merged unified vertex groups (used by Unreal's merged vertex group technique). Wuthering Waves Mods generally choose this to reduce the complexity of making Mods\nPerComponent: import independent vertex groups per component\nUniComponent: merged import; automatically split back into component-level vertex groups on export"),
+        description=tr("MergedComponent: merged editing with local buffer export and no object splitting\nMerged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups\nUniComponent: merged editing with automatic object splitting"),
         items=_get_import_merged_vgmap_items,
-        # Dynamic items only allow integer (0-based) defaults; the first item
-        # ("MERGED") is the intended default, so the argument is omitted.
+        # Dynamic enum defaults use the explicit numeric value, not item order.
+        # Value 3 selects the new mode while old saved values keep their meaning.
+        default=3,
     ) # type: ignore
 
     ignore_muted_shape_keys: bpy.props.BoolProperty(
@@ -333,7 +337,7 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def import_merged_vgmap(cls) -> str:
-        """Returns 'MERGED' / 'PER_COMPONENT' / 'UNICOMPONENT'"""
+        """Return the saved editing/export mode, including MERGED_COMPONENT."""
         return cls._instance().import_merged_vgmap
 
     @classmethod
@@ -342,8 +346,8 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def is_merged_mode(cls) -> bool:
-        """Both MERGED and UNICOMPONENT use VGMap merging on import"""
-        return cls._instance().import_merged_vgmap in ('MERGED', 'UNICOMPONENT')
+        """Global editing modes use VGMap merging only during import."""
+        return cls._instance().import_merged_vgmap in ('MERGED', 'UNICOMPONENT', 'MERGED_COMPONENT')
 
     @classmethod
     def ignore_muted_shape_keys(cls):

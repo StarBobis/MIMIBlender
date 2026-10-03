@@ -34,6 +34,7 @@ from ...model.draw_call_model import DrawCallModel
 from ...model.drawib_model import DrawIBModel
 from ...workspace.submesh_json import SubmeshJson
 from ...workspace.texture_metadata_helper import TextureMetadataResolver
+from .merged_component import localize_blendindices
 
 
 class BlendRemapEntry(TypedDict):
@@ -185,7 +186,19 @@ class DrawIBModelWWMI:
             obj=self.merged_object.object,
         )
 
-        if self.blend_remap:
+        # Localize only the export arrays; the source keeps global group names.
+        # This must run before packing into the game's narrow integer layout.
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
+            try:
+                element_context.final_elementname_data_dict.update(localize_blendindices(
+                    element_context, self.merged_object.components, self.wwmi_info.components, self.draw_ib,
+                ))
+            except ValueError:
+                # Mapping failures must leave only the user's original objects.
+                # The merged export object is a disposable copy, never a source.
+                bpy.data.objects.remove(self.merged_object.object, do_unlink=True)
+                raise
+        elif self.blend_remap:
             self.replace_remapped_blendindices(element_context)
 
         element_context.element_vertex_ndarray = ObjBufferHelper.convert_to_element_vertex_ndarray(
@@ -268,6 +281,19 @@ class DrawIBModelWWMI:
 
         workspace_collection = bpy.context.collection
         processed_obj_name_list: list[str] = []
+        # One source object cannot use two different local palettes in this
+        # object-bound export path. Reject that ambiguity rather than reusing
+        # the first component's index range under the second component's draw.
+        local_object_components: dict[str, int] = {}
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
+            for component_id, drawcalls in enumerate(self.submesh_drawcall_groups):
+                for drawcall in drawcalls:
+                    previous_component = local_object_components.setdefault(drawcall.obj_name, component_id)
+                    if previous_component != component_id:
+                        raise ValueError(
+                            "MergedComponent: object '" + drawcall.obj_name + "' is assigned to multiple components; "
+                            "assign the complete object to one compatible Submesh."
+                        )
 
         for component_id, component_drawcall_model_list in enumerate(self.submesh_drawcall_groups):
             for drawcall_model in component_drawcall_model_list:
@@ -324,7 +350,11 @@ class DrawIBModelWWMI:
                 ObjUtils.triangulate_object(bpy.context, temp_obj)
 
                 vertex_groups = ObjUtils.get_vertex_groups(temp_obj)
-                if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+                # MergedComponent validates exported global identities later.
+                # Never discard a weighted group merely for its internal index.
+                if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
+                    ignore_list = [group for group in vertex_groups if "ignore" in group.name.lower()]
+                elif MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
                     total_vg_count = sum(ec.vg_count for ec in self.wwmi_info.components)
                     ignore_list = [
                         vertex_group
@@ -393,7 +423,10 @@ class DrawIBModelWWMI:
             drawib_vertex_count += component.vertex_count
             drawib_index_count += component.index_count
 
-        self.export_blendremap_forward_and_reverse(component_obj_list)
+        # Offline local indices need no runtime remap tables, even for global
+        # names above 511. Keep the legacy builder for other existing modes.
+        if MIMIGlobalProperties.import_merged_vgmap() != 'MERGED_COMPONENT':
+            self.export_blendremap_forward_and_reverse(component_obj_list)
 
         if drawib_merged_object:
             bpy.ops.object.select_all(action='DESELECT')

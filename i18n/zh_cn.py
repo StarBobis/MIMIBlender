@@ -17,6 +17,11 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # Global editing and local export are deliberately described separately.
+    "MergedComponent": "MergedComponent",
+    "Merged import; export local bone indices without splitting objects; all weighted bones must exist in the target component": "Merged 合并导入；导出时转为局部骨骼索引，不拆分物体；所有加权骨骼必须存在于目标组件中",
+    # Keep legacy mode names and stored values available for existing scenes.
+    "MergedComponent: merged editing with local buffer export and no object splitting\nMerged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups\nUniComponent: merged editing with automatic object splitting": "MergedComponent：全局顶点组制作，局部索引导出，不拆分物体\nMerged：运行时合并骨架，支持跨组件权重\nPerComponent：独立局部顶点组\nUniComponent：合并制作，导出时自动拆分物体",
     # ---- Independent active-mesh cleanup actions ----
     "Delete All Shape Keys": "删除所有形态键",
     "Delete Invalid Vertex Groups": "删除无效顶点组",
