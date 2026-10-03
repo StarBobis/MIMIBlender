@@ -17,8 +17,12 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # NOTE: the WWMI vertex group mode names "MergedComponent", "Merged",
+    # "PerComponent" and "UniComponent" are fixed technical mode names that
+    # must stay in English in every UI language. Do NOT add dictionary entries
+    # for them here; their dropdown labels in mimi_global_properties.py
+    # intentionally skip tr() so translation could never apply anyway.
     # Global editing and local export are deliberately described separately.
-    "MergedComponent": "MergedComponent",
     "Merged import; export local bone indices without splitting objects; all weighted bones must exist in the target component": "Merged 合并导入；导出时转为局部骨骼索引，不拆分物体；所有加权骨骼必须存在于目标组件中",
     # Keep legacy mode names and stored values available for existing scenes.
     "MergedComponent: merged editing with local buffer export and no object splitting\nMerged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups\nUniComponent: merged editing with automatic object splitting": "MergedComponent：全局顶点组制作，局部索引导出，不拆分物体\nMerged：运行时合并骨架，支持跨组件权重\nPerComponent：独立局部顶点组\nUniComponent：合并制作，导出时自动拆分物体",
@@ -118,7 +122,7 @@ TRANSLATIONS_ZH_CN = {
     "Key": "按键",
     "Label": "标签",
     "Material": "材质",
-    "Merged": "合并",
+    # "Merged" must stay untranslated: see the NOTE at the top of this dict.
     "Mode": "模式",
     "Mute (Disable)": "静默（禁用）",
     "Name": "名称",
@@ -127,7 +131,7 @@ TRANSLATIONS_ZH_CN = {
     "Object": "物体",
     "Output": "输出",
     "Output Format": "输出格式",
-    "PerComponent": "按组件",
+    # "PerComponent" must stay untranslated: see the NOTE at the top of this dict.
     "Pick Object": "拾取物体",
     "Power of 2": "2 的幂",
     "Preview:": "预览：",
@@ -138,7 +142,7 @@ TRANSLATIONS_ZH_CN = {
     "Square": "正方形",
     "Strict Custom": "严格自定义",
     "Submesh": "子网格",
-    "UniComponent": "统一组件",
+    # "UniComponent" must stay untranslated: see the NOTE at the top of this dict.
     "Ungroup": "取消分组",
     "Visibility": "可见性",
     "Warning": "警告",
