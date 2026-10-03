@@ -20,6 +20,8 @@ from .games.gimi import outline as gimi_body_outline
 # UI panels
 from .ui import ui_panel_basic
 from .ui import ui_panel_model
+# Merged Sculpt panel sits directly below the Model Processing panel.
+from .ui import ui_panel_merged_sculpt
 from .sword import ui_panel_sword
 from .ui import ui_func_import_mmt
 from .ui import ui_panel_fast_texture
@@ -96,6 +98,9 @@ def _register_steps():
     yield blueprint_node_group.register
     yield ui_panel_basic.register
     yield ui_panel_model.register
+    # Panel order inside the MIMITools category follows registration order,
+    # so the Merged Sculpt panel appears directly below Model Processing.
+    yield ui_panel_merged_sculpt.register
     yield ui_panel_sword.register
     yield ui_func_import_mmt.register
     yield ui_panel_fast_texture.register
@@ -170,6 +175,8 @@ def unregister():
         ui_panel_fast_texture.unregister,
         ui_func_import_mmt.unregister,
         ui_panel_sword.unregister,
+        # Reverse position of its register step (right after ui_panel_model).
+        ui_panel_merged_sculpt.unregister,
         ui_panel_model.unregister,
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
