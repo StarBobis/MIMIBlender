@@ -58,8 +58,8 @@ bl_info = {
     "name": "MIMIBlender",
     "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
-    # Publish the WWMI consolidated INI output detection fix.
-    "version": (1, 0, 44),
+    # Publish legacy WWMI workspace shape-key buffer compatibility.
+    "version": (1, 0, 45),
     "location": "View3D",
     "category": "Generic"
 }
