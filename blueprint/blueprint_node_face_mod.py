@@ -1,0 +1,278 @@
+"""Blueprint node that exports a GIMI face morph mod from MMT workspace data."""
+from __future__ import annotations
+
+import os
+
+import bpy
+import numpy
+from bpy_extras.io_utils import ImportHelper
+
+from ..common.global_config import GlobalConfig, LogicName
+from ..i18n.i18n import I18nOperator, tr, translatable
+from ..utils.gimi_face_mod import FACE_VERTEX_STRIDE, FaceModPart, build_key_bytes, gimi_face_local_to_game_positions, parse_face_index_hashes, slice_face_base_buffer, write_face_mod
+from ..workspace.mmt_workspace import MMTWorkSpace
+from ..workspace.submesh_json import SubmeshJson
+from .blueprint_export_helper import BlueprintExportHelper
+from .blueprint_node_base import MIMINodeBase
+from .blueprint_node_obj import ObjectPersistentIdManager
+
+
+class FaceModExportError(ValueError):
+    pass
+
+
+def _collect_object_nodes(node, visited=None, *, is_root=True):
+    """Resolve Object Info nodes upstream of a face-export node in socket order."""
+    visited = visited if visited is not None else set()
+    if node is None or node in visited:
+        return []
+    visited.add(node)
+
+    if getattr(node, "bl_idname", "") == "MIMINode_Object_Info":
+        return [node]
+
+    # Output nodes are composition boundaries.  Their object graph must not
+    # silently become a part of this face export as well.
+    if not is_root and getattr(node, "bl_idname", "") in {
+        "MIMINode_Result_Output", "MIMINode_Face_Mod_Export",
+    }:
+        return []
+
+    result = []
+    for source_node in BlueprintExportHelper.get_connected_nodes(node):
+        result.extend(_collect_object_nodes(source_node, visited, is_root=False))
+    return result
+
+
+def _get_face_position_buffer(submesh_json: SubmeshJson):
+    for category_buffer in submesh_json.CategoryBufferList:
+        if category_buffer.Type != "Normal" or category_buffer.Stride != FACE_VERTEX_STRIDE:
+            continue
+        elements = category_buffer.D3D11ElementList
+        semantics = [element.SemanticName for element in elements]
+        formats = [element.Format for element in elements]
+        if semantics == ["POSITION", "NORMAL", "TANGENT"] and formats == [
+            "R32G32B32_FLOAT",
+            "R32G32B32_FLOAT",
+            "R32G32B32A32_FLOAT",
+        ]:
+            return category_buffer
+    raise FaceModExportError(
+        tr("The extracted data is not the 40-byte POSITION/NORMAL/TANGENT vb0 layout required for GIMI faces.")
+    )
+
+
+def _read_mesh_positions(obj) -> numpy.ndarray:
+    if getattr(obj, "type", "") != "MESH":
+        raise FaceModExportError(tr("Object '{name}' is not a mesh object.").format(name=obj.name))
+    if getattr(obj, "mode", "") == "EDIT":
+        obj.update_from_editmode()
+
+    # Face mods intentionally ignore object-level transforms.  Only mesh-local
+    # edits participate in the position delta written to key.buf.
+    positions = numpy.empty(len(obj.data.vertices) * 3, dtype=numpy.float32)
+    obj.data.vertices.foreach_get("co", positions)
+    return gimi_face_local_to_game_positions(positions.reshape(-1, 3))
+
+
+def _get_workspace_face_index_hashes(submesh_json: SubmeshJson, source_path: str) -> tuple[str, ...]:
+    """Resolve Face IB identity exclusively from workspace metadata/path."""
+    metadata = submesh_json.JsonDict
+    for key in ("FaceIndexBufferHash", "IndexBufferHash", "IBHash", "DrawIB"):
+        value = metadata.get(key)
+        hashes = parse_face_index_hashes(value if isinstance(value, (str, list, tuple)) else None)
+        if hashes:
+            return hashes
+
+    # MMT's canonical SubMesh folder is ``{DrawIB}-{indexCount}-{firstIndex}``.
+    # It is workspace-derived metadata, not a game-specific fallback constant.
+    submesh_folder = os.path.basename(os.path.dirname(os.path.dirname(source_path)))
+    return parse_face_index_hashes(submesh_folder.split("-", 1)[0])
+
+
+def _build_face_part(object_node) -> FaceModPart:
+    obj = ObjectPersistentIdManager.resolve_node_target(object_node, allow_name_fallback=True)
+    if obj is None:
+        raise FaceModExportError(tr("Object node '{name}' has no usable Blender object.").format(name=object_node.name))
+
+    # MMT will eventually provide face-model classification metadata.  Use
+    # it here to validate or automatically select compatible face submeshes.
+    submesh_name = object_node._get_effective_parse_name()
+    if not submesh_name:
+        raise FaceModExportError(tr("Object '{name}' has no associated Submesh.").format(name=obj.name))
+
+    source_path = MMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
+    submesh_json = SubmeshJson(source_path)
+    index_hashes = _get_workspace_face_index_hashes(submesh_json, source_path)
+    if not index_hashes:
+        raise FaceModExportError(tr("Submesh '{name}' lacks a workspace-provided Face IndexBuffer hash.").format(name=submesh_name))
+    position_buffer = _get_face_position_buffer(submesh_json)
+    if not os.path.isfile(position_buffer.FilePath):
+        raise FaceModExportError(tr("Original position buffer not found: {path}").format(path=position_buffer.FilePath))
+
+    base_bytes = slice_face_base_buffer(
+        position_buffer.FilePath,
+        vertex_offset=submesh_json.VertexOffset,
+        vertex_count=submesh_json.VertexCount,
+    )
+    key_bytes = build_key_bytes(_read_mesh_positions(obj))
+    if len(base_bytes) != len(key_bytes):
+        raise FaceModExportError(
+            tr("Object '{name}' vertex count has changed (originally {before}, "
+               "now {after}). Face Mods can only export edits that do not change topology.").format(
+                name=obj.name,
+                before=len(base_bytes) // FACE_VERTEX_STRIDE,
+                after=len(key_bytes) // FACE_VERTEX_STRIDE,
+            )
+        )
+
+    return FaceModPart(
+        name=str(getattr(object_node, "submesh_name", "") or obj.name),
+        base_bytes=base_bytes,
+        key_bytes=key_bytes,
+        index_hashes=index_hashes,
+    )
+
+
+def export_face_mod_from_node(node) -> tuple[str, int]:
+    if GlobalConfig.logic_name != LogicName.GIMI:
+        raise FaceModExportError(tr("Exporting a Face Mod is only supported in a GIMI / Genshin Impact workspace."))
+
+    object_nodes = _collect_object_nodes(node)
+    if not object_nodes:
+        raise FaceModExportError(tr("Connect at least one \"Object Info\" node to the \"Export Face Mod\" node."))
+
+    parts = []
+    seen_submeshes = set()
+    for object_node in object_nodes:
+        submesh_name = object_node._get_effective_parse_name()
+        if submesh_name in seen_submeshes:
+            continue
+        seen_submeshes.add(submesh_name)
+        parts.append(_build_face_part(object_node))
+
+    output_folder = str(getattr(node, "output_folder", "") or "").strip()
+    if not getattr(node, "use_specific_output_folder", False) or not output_folder:
+        output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
+    write_face_mod(output_folder, parts, diffuse_hash=node.diffuse_hash)
+    # ``write_face_mod`` returns the directory; report the actual Face.ini
+    # path so callers can locate the generated configuration file.
+    return os.path.join(output_folder, "Face.ini"), len(parts)
+
+
+@translatable
+class MIMINode_Face_Mod_Export(MIMINodeBase):
+    bl_idname = "MIMINode_Face_Mod_Export"
+    bl_label = "Export Face Mod"
+    bl_icon = "MOD_MASK"
+
+    output_folder: bpy.props.StringProperty(
+        name=tr("Output Folder"),
+        description=tr("When empty, outputs to the Face folder under the regular Mod directory"),
+        default="",
+        subtype="DIR_PATH",
+    )  # type: ignore
+    use_specific_output_folder: bpy.props.BoolProperty(
+        name=tr("Output to a Specific Folder"),
+        description=tr("When enabled, the Face Mod is exported to the folder specified on this node; when disabled, it is exported to the Face subfolder of the default Mod directory"),
+        default=False,
+    )  # type: ignore
+    diffuse_hash: bpy.props.StringProperty(
+        name=tr("Diffuse Hash"),
+        description=tr("Optional. Only acts as a character scope restriction; it does not modify the diffuse texture"),
+        default="",
+    )  # type: ignore
+    open_folder: bpy.props.BoolProperty(name=tr("Open Folder After Export"), default=True)  # type: ignore
+
+    def init(self, context):
+        self.inputs.new("MIMISocketObject", "Face Group 1")
+        self.width = 360
+        self.use_custom_color = True
+        self.color = (0.58, 0.32, 0.12)
+
+    def update(self):
+        if self.inputs and self.inputs[-1].is_linked:
+            self.inputs.new("MIMISocketObject", f"Face Group {len(self.inputs) + 1}")
+        if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
+            self.inputs.remove(self.inputs[-1])
+
+    def draw_buttons(self, context, layout):
+        row = layout.row(align=True)
+        operator = row.operator("mimi.export_face_mod", text=tr("Export Face Mod"), icon="EXPORT")
+        operator.node_name = self.name
+        operator.tree_name = self.id_data.name if self.id_data else ""
+
+        layout.prop(self, "diffuse_hash", text=tr("Diffuse Hash"))
+        layout.prop(self, "use_specific_output_folder", text=tr("Output to a Specific Folder"))
+        if self.use_specific_output_folder:
+            folder_row = layout.row(align=True)
+            folder_row.prop(self, "output_folder", text=tr("Output"))
+            folder_operator = folder_row.operator("mimi.select_face_mod_export_folder", text="", icon="FILE_FOLDER")
+            folder_operator.node_name = self.name
+            folder_operator.tree_name = self.id_data.name if self.id_data else ""
+        layout.prop(self, "open_folder", text=tr("Open Folder After Export"))
+
+
+class MMT_OT_ExportFaceMod(I18nOperator):
+    bl_idname = "mimi.export_face_mod"
+    bl_label = "Export Face Mod"
+    bl_description = "Generates a position-delta Face Mod from the GIMI face vb0 in an MMT workspace"
+    bl_options = {"REGISTER"}
+
+    node_name: bpy.props.StringProperty()  # type: ignore
+    tree_name: bpy.props.StringProperty()  # type: ignore
+
+    def execute(self, context):
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else BlueprintExportHelper.get_current_blueprint_tree(context=context)
+        node = tree.nodes.get(self.node_name) if tree and self.node_name else None
+        if node is None or getattr(node, "bl_idname", "") != MIMINode_Face_Mod_Export.bl_idname:
+            self.report({"ERROR"}, tr("Face Mod export node not found."))
+            return {"CANCELLED"}
+
+        # Keep this node's button on the same Output export path as the
+        # regular Generate Mod node.  Import locally to avoid a module cycle.
+        from ..ui.ui_func_export import generate_mod_from_output_node
+        return generate_mod_from_output_node(tree, context, node, self.report)
+
+
+class MMT_OT_SelectFaceModExportFolder(I18nOperator, ImportHelper):
+    bl_idname = "mimi.select_face_mod_export_folder"
+    bl_label = "Select Face Mod Output Folder"
+    bl_options = {"INTERNAL"}
+
+    directory: bpy.props.StringProperty(subtype="DIR_PATH")  # type: ignore
+    node_name: bpy.props.StringProperty()  # type: ignore
+    tree_name: bpy.props.StringProperty()  # type: ignore
+
+    def invoke(self, context, event):
+        tree = bpy.data.node_groups.get(self.tree_name)
+        node = tree.nodes.get(self.node_name) if tree else None
+        if node and node.output_folder:
+            self.directory = node.output_folder
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        tree = bpy.data.node_groups.get(self.tree_name)
+        node = tree.nodes.get(self.node_name) if tree else None
+        if node is None:
+            return {"CANCELLED"}
+        node.output_folder = self.directory
+        return {"FINISHED"}
+
+
+_CLASSES = (
+    MIMINode_Face_Mod_Export,
+    MMT_OT_ExportFaceMod,
+    MMT_OT_SelectFaceModExportFolder,
+)
+
+
+def register():
+    for cls in _CLASSES:
+        bpy.utils.register_class(cls)
+
+
+def unregister():
+    for cls in reversed(_CLASSES):
+        bpy.utils.unregister_class(cls)

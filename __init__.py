@@ -1,0 +1,201 @@
+'''
+MIMIBlender - Blender add-on for MIMITools (3Dmigoto modding).
+'''
+
+
+# UI language support must register first so every other module picks up the
+# saved language while its classes are being registered.
+from .i18n import i18n
+
+from .common import mimi_global_properties
+
+# Auto-update feature (GitHub release checker). Imported before the updater
+# panel module, because the panel imports this module itself.
+from . import addon_updater_ops
+
+# Game-specific feature modules (kept inside their game packages).
+from .games.gimi import outline as gimi_body_outline
+
+
+# UI panels
+from .ui import ui_panel_basic
+from .ui import ui_panel_model
+# Merged Sculpt panel sits directly below the Model Processing panel.
+from .ui import ui_panel_merged_sculpt
+from .sword import ui_panel_sword
+from .ui import ui_func_import_mmt
+from .ui import ui_panel_fast_texture
+from .ui import ui_panel_updater
+# MMD cleanup is independent of the optional mmd_tools importer.
+from .ui import ui_panel_mmd
+
+from .blueprint import blueprint_node_obj
+from .blueprint import blueprint_node_object_list
+from .blueprint import blueprint_node_texture
+from .blueprint import blueprint_node_hash_texture
+# Socketless Slot defaults register independently of connected texture nodes.
+from .blueprint import blueprint_node_global_slot
+from .blueprint import blueprint_node_base
+from .blueprint import blueprint_node_menu
+from .blueprint import blueprint_node_shapekey
+from .blueprint import blueprint_node_time_switch
+from .blueprint import blueprint_node_time_pos_switch
+from .blueprint import blueprint_node_time_shapekey
+from .blueprint import blueprint_time_bake
+from .games.naraka import nodes as blueprint_node_naraka
+
+from .blueprint import blueprint_node_face_mod
+from .blueprint import blueprint_node_group
+from .blueprint import blueprint_file_drop
+from .blueprint import blueprint_node_highlight
+
+from .ui import ui_func_export
+
+# Texture combiner tool (texcomb) - material merge feature integrated from another add-on
+from . import texcomb
+
+bl_info = {
+    "name": "MIMIBlender",
+    "description": "The Blender add-on for MIMITools",
+    "blender": (5, 2, 0),
+    # Publish the WWMI consolidated INI output detection fix.
+    "version": (1, 0, 44),
+    "location": "View3D",
+    "category": "Generic"
+}
+
+
+def register():
+    # Fault-tolerant registration per module: in the past a single node class
+    # failing to register broke the whole register chain and made all the
+    # sidebar panels disappear. This guarantees that one failing module does
+    # not affect the others; failures are printed to the console for debugging.
+    for step in _register_steps():
+        try:
+            step()
+        except Exception:
+            import traceback
+            print(f"[MIMIBlender] register step failed: {getattr(step, '__module__', step)}")
+            traceback.print_exc()
+
+
+def _register_steps():
+    # 0. i18n (language preference must exist before any class registers)
+    yield i18n.register
+
+    # 1. Configs
+    yield mimi_global_properties.register
+    yield gimi_body_outline.register
+
+    # 2. Addon Updater (engine configuration + sidebar panel).
+    # Registers after i18n so the updater preferences already exist, and
+    # after apply_language has run so the updater classes freeze their RNA
+    # labels in the saved language.
+    def _register_updater():
+        addon_updater_ops.register(bl_info)
+        ui_panel_updater.register()
+    yield _register_updater
+
+    # 3. UI Panels & Logic
+    yield blueprint_node_base.register
+    yield blueprint_node_group.register
+    yield ui_panel_basic.register
+    yield ui_panel_model.register
+    # Panel order inside the MIMITools category follows registration order,
+    # so the Merged Sculpt panel appears directly below Model Processing.
+    yield ui_panel_merged_sculpt.register
+    yield ui_panel_sword.register
+    yield ui_func_import_mmt.register
+    yield ui_panel_fast_texture.register
+
+    # Blueprint system
+    # The ShapeKey PropertyGroup must be registered before the Generate Mod node that references it.
+    yield blueprint_node_shapekey.register
+    yield blueprint_node_obj.register
+    # Object List keeps many objects in one collapsible fan-out node.
+    yield blueprint_node_object_list.register
+    # Texture Bind node and its PropertyGroup register right after the base object nodes.
+    yield blueprint_node_texture.register
+    yield blueprint_node_hash_texture.register
+    yield blueprint_node_global_slot.register
+    # Time Switch node and its animation baker register right after the base object nodes.
+    yield blueprint_node_time_switch.register
+    # Time Position Switch and Time Shape Key build on the same timeline machinery.
+    yield blueprint_node_time_pos_switch.register
+    yield blueprint_node_time_shapekey.register
+    yield blueprint_time_bake.register
+    # Naraka-only nodes register right after the base object nodes.
+    yield blueprint_node_naraka.register
+    yield ui_func_export.register
+    yield blueprint_node_menu.register
+
+    yield blueprint_node_face_mod.register
+    yield blueprint_file_drop.register
+    yield blueprint_node_highlight.register
+
+    # Texture combiner tool (texcomb)
+    yield texcomb.register
+    # The new panel follows Texture Combiner in the sidebar.
+    yield ui_panel_mmd.register
+
+    # 4. Blueprint data migration: blueprints that were saved before a node was
+    # renamed still carry the old title, so refresh them once the node classes
+    # are registered. Files opened later are handled by the load_post handler.
+    yield blueprint_node_base.migrate_legacy_node_titles
+
+
+def unregister():
+    # Unregister in the reverse order of register to avoid type dependency issues.
+    # Step-by-step fault tolerance: a previous session may have left a half-registered
+    # state (for example a class that never registered successfully). Unregistering it
+    # directly would raise RuntimeError and break all later unregister steps, causing
+    # "already registered" failures and missing panels on the next enable.
+    def _unregister_updater():
+        # The panel class goes away before the updater operators it draws.
+        ui_panel_updater.unregister()
+        addon_updater_ops.unregister()
+
+    steps = [
+        gimi_body_outline.unregister,
+        # Remove MMD controls before the earlier texture-combiner module.
+        ui_panel_mmd.unregister,
+        texcomb.unregister,
+        blueprint_node_highlight.unregister,
+        blueprint_file_drop.unregister,
+        blueprint_node_face_mod.unregister,
+        blueprint_node_group.unregister,
+        blueprint_node_menu.unregister,
+        ui_func_export.unregister,
+        blueprint_node_naraka.unregister,
+        blueprint_time_bake.unregister,
+        blueprint_node_time_shapekey.unregister,
+        blueprint_node_time_pos_switch.unregister,
+        blueprint_node_time_switch.unregister,
+        blueprint_node_obj.unregister,
+        blueprint_node_object_list.unregister,
+        blueprint_node_texture.unregister,
+        blueprint_node_global_slot.unregister,
+        blueprint_node_hash_texture.unregister,
+        blueprint_node_shapekey.unregister,
+        ui_panel_fast_texture.unregister,
+        ui_func_import_mmt.unregister,
+        ui_panel_sword.unregister,
+        # Reverse position of its register step (right after ui_panel_model).
+        ui_panel_merged_sculpt.unregister,
+        ui_panel_model.unregister,
+        ui_panel_basic.unregister,
+        blueprint_node_base.unregister,
+        _unregister_updater,
+        mimi_global_properties.unregister,
+        # i18n unregisters last so the language preference outlives every UI class.
+        i18n.unregister,
+    ]
+    for step in steps:
+        try:
+            step()
+        except Exception:
+            import traceback
+            print(f"[MIMIBlender] unregister step failed: {getattr(step, '__module__', step)}")
+            traceback.print_exc()
+
+

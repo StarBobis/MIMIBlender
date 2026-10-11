@@ -1,0 +1,95 @@
+"""Read-only upstream object traversal for blueprint previews and UI lookups.
+
+Export keeps its own condition-aware traversal. This helper deliberately visits
+all switch states, but still respects object-list and custom-group output ports.
+"""
+
+
+def iter_object_sources(root, strict=False):
+    """Yield object sources in wire order; strict refresh rejects invalid paths."""
+    # Use an active path rather than a global visited set. Shared nodes may
+    # legitimately appear through distinct group instances or output ports.
+    # The caller can deduplicate objects if its UI displays a set of meshes.
+    active = set()
+
+    def visit(node, output=None, instances=()):
+        if node is None or getattr(node, "mute", False):
+            return
+        # Shared child datablocks can appear in several sequential instances.
+        # Instance context distinguishes that valid reuse from a wire cycle.
+        key = (node.as_pointer(), output.as_pointer() if output else 0,
+               tuple(instance.as_pointer() for instance in instances))
+        if key in active:
+            # Previews can skip cycles, but refresh must not commit partial data.
+            # Strict callers retain their previous list when a graph is invalid.
+            if strict:
+                raise ValueError("Blueprint contains a cycle at node: " + node.name)
+            return
+        active.add(key)
+        try:
+            kind = node.bl_idname
+            if kind == 'MIMINode_Object_Info':
+                yield node
+                return
+            if kind == 'MIMINode_Object_List':
+                rows = list(node.object_items)
+                if output is not None:
+                    sockets = list(node.outputs)
+                    if output not in sockets:
+                        return
+                    index = sockets.index(output)
+                    if index:
+                        # Stale extra ports have no object row; never imply success.
+                        # Lenient previews remain compatible with incomplete graphs.
+                        if strict and index > len(rows):
+                            raise ValueError("Object List output has no matching item: " + node.name)
+                        rows = rows[index - 1:index]
+                # Every row of an Object List contributes its object; the
+                # node has no per-row enable switch, only whole rows that
+                # the user added or deleted.
+                for row in rows:
+                    yield row
+                return
+            if kind == 'SSMTBlueprintGroupNode':
+                tree = node.node_tree
+                if tree is None:
+                    return
+                if any(instance.node_tree == tree for instance in instances):
+                    # Ignore recursive references only for noncommitting previews.
+                    # A refresh must not replace saved settings with a partial set.
+                    if strict:
+                        raise ValueError("Blueprint contains a recursive group cycle: " + node.name)
+                    return
+                # Only the connected group output belongs to this path.
+                index = list(node.outputs).index(output) if output is not None else None
+                from .blueprint_node_group import get_group_output_node
+                child = get_group_output_node(tree)
+                if child is not None:
+                    sockets = list(child.inputs)
+                    if index is not None:
+                        sockets = sockets[index:index + 1]
+                    yield from links(sockets, instances + (node,))
+                return
+            if kind == 'NodeGroupInput':
+                if not instances or output is None:
+                    return
+                index = list(node.outputs).index(output)
+                parent = instances[-1]
+                # Cross back to the parent instance context for nested groups.
+                yield from links(list(parent.inputs)[index:index + 1], instances[:-1])
+                return
+            # Output nodes are composition boundaries, except the preview root.
+            if node != root and kind in {'MIMINode_Result_Output', 'MIMINode_Face_Mod_Export'}:
+                return
+            yield from links(node.inputs, instances)
+        finally:
+            active.remove(key)
+
+    def links(sockets, instances):
+        # Plain groups, switch states, reroutes and texture binds all pass
+        # upstream data through their input links for preview purposes.
+        for socket in sockets:
+            for link in socket.links:
+                yield from visit(link.from_node, link.from_socket, instances)
+
+    yield from visit(root)

@@ -1,0 +1,590 @@
+'''
+Base nodes used to build the MMT blueprint architecture.
+Each node type lives in its own py file
+so the code is easy to read and understand.
+'''
+import bpy
+from bpy.types import NodeTree, Node, NodeSocket, PropertyGroup
+
+from ..common.global_config import GlobalConfig
+from ..i18n.i18n import I18nOperator, tr, translatable
+from ..i18n.zh_cn import TRANSLATIONS_ZH_CN
+
+
+
+# Custom Socket Types
+class MIMISubmeshListItem(PropertyGroup):
+    name: bpy.props.StringProperty(name=tr("Submesh"), default="") # type: ignore
+
+
+@translatable
+class MIMISocketObject(NodeSocket):
+    '''Custom Socket for Object Data'''
+    bl_idname = 'MIMISocketObject'
+    bl_label = 'Object Socket'
+
+    def draw_color(self, context, node):
+        return (0.0, 0.8, 0.8, 1.0) # Cyan/Teal
+
+    def draw(self, context, layout, node, text):
+        # Blender draws the socket circle outside this callback. The Python
+        # NodeSocket base has no draw() method, so super().draw() raises on
+        # every repaint and leaves all socket labels blank.
+        # Keep linked sockets labelled too: Object List outputs rely on their
+        # names to distinguish individual objects from the aggregate output.
+        caption = text or self.name
+        if node.bl_idname in {'MIMINode_Hash_Texture_Bind', 'MIMINode_Hash_Texture_Global'}:
+            # Translate visible socket captions without rewriting socket IDs
+            # or breaking links in blueprints saved in another language.
+            for source in ("Object", "Output"):
+                if caption in _historical_titles(source):
+                    caption = tr(source)
+                    break
+        layout.label(text=caption)
+
+# 1. Define the custom node tree type
+
+
+@translatable
+class MIMIBlueprintTree(NodeTree):
+    '''MMT Mod Logic Blueprint'''
+    bl_idname = 'MIMIBlueprintTreeType'
+    bl_label = 'MMT Blueprint'
+    bl_icon = 'NODETREE'
+
+    def interface_update(self, context):
+        # Custom group nodes are not native Geometry/Shader group nodes.
+        # Mirror interface edits into every instance without rebuilding wires.
+        from .blueprint_node_group import GROUP_NODE_IDNAME, sync_group_node_sockets
+        for tree in bpy.data.node_groups:
+            if getattr(tree, "bl_idname", "") != self.bl_idname:
+                continue
+            for node in tree.nodes:
+                if node.bl_idname == GROUP_NODE_IDNAME and node.node_tree == self:
+                    sync_group_node_sockets(node)
+
+
+# 2. Define the base nodes
+
+def _historical_titles(title):
+    """Return every spelling an earlier version could have written as a title.
+
+    A node title is instance data, so an existing blueprint keeps the title
+    that was set when the node was created, written in the language that was
+    active at that moment. The English source text and every translation of it
+    therefore both have to be recognised.
+    """
+    # The argument already holds the spelling of the active language, because
+    # the caller passes the result of tr().
+    spellings = {title}
+    # The dictionary maps English source text to its translation; checking both
+    # directions also collects the spelling of the other language.
+    for source_text, translated_text in TRANSLATIONS_ZH_CN.items():
+        if source_text == title or translated_text == title:
+            spellings.add(source_text)
+            spellings.add(translated_text)
+    return tuple(sorted(spellings))
+
+
+# Default titles that earlier versions wrote into freshly created nodes. The
+# strings stay in the translation dictionary on purpose: a node created before
+# a rename must be recognised no matter which language was active back then.
+_LEGACY_TITLES_BY_IDNAME = {
+    'MIMINode_TimeSwitch': _historical_titles(tr("Time Switch")),
+    'MIMINode_TimePosSwitch': _historical_titles(tr("Time Position Switch")),
+    'MIMINode_TimeShapeKey': _historical_titles(tr("Time Shape Key")),
+    # Renamed to "Slot Texture Bind"; the plain English "Texture Bind" was
+    # the default title for a few days and is added explicitly because the
+    # dictionary pairing below only knows the current label.
+    'MIMINode_Texture_Bind': _historical_titles(tr("Slot Texture Bind")) + ("Texture Bind",),
+    # Hash titles used to stay in the creation language even after switching
+    # addon languages. Recognize both defaults without changing custom labels.
+    'MIMINode_Hash_Texture_Bind': _historical_titles("Hash Texture Bind"),
+    'MIMINode_Hash_Texture_Global': _historical_titles("Global Hash Texture Bind"),
+}
+
+
+@bpy.app.handlers.persistent
+def migrate_legacy_node_titles(scene=None):
+    """Replace node titles that still hold the default name of an older version.
+
+    A node title is stored inside the blend file, so renaming a node type never
+    changes the nodes of a blueprint that was saved before the rename. Only an
+    exact match with a historical default title is replaced, which means a
+    title the user typed by hand is never overwritten.
+
+    The optional argument is the scene that Blender hands to a load_post
+    handler. The function returns the number of updated nodes, so the caller
+    and the tests can tell whether the migration did any work.
+
+    The persistent marker is required: Blender throws away the handlers of a
+    running script when another blend file is loaded, and this handler has to
+    survive exactly that load to migrate the file that was just opened.
+    """
+    updated_count = 0
+    # Blender restricts bpy.data while an add-on is being registered, so this
+    # call has to give up quietly and let the load_post handler do the work.
+    if not hasattr(bpy.data, "node_groups"):
+        return updated_count
+    # Only the MMT blueprint tree can contain these nodes.
+    for tree in bpy.data.node_groups:
+        if getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+            continue
+        for node in tree.nodes:
+            legacy_titles = _LEGACY_TITLES_BY_IDNAME.get(getattr(node, "bl_idname", ""))
+            if not legacy_titles:
+                continue
+            current_title = str(getattr(node, "label", "") or "")
+            if current_title not in legacy_titles:
+                continue
+            # bl_label of the registered class already holds the active
+            # language, because @translatable keeps it up to date.
+            node.label = tr(type(node).bl_label)
+            # The new title is longer than the old one, so the node has to grow
+            # as well; every node type listed above provides these two methods.
+            old_width = node.width
+            node.update_node_width(node.width_texts())
+            node.width = max(old_width, node.width)
+            updated_count += 1
+    return updated_count
+
+
+class MIMINodeBase(Node):
+    @classmethod
+    def poll(cls, ntree):
+        return ntree.bl_idname == 'MIMIBlueprintTreeType'
+
+    def default_title(self):
+        """Return the default title of this node in the active language.
+
+        bl_label is the single source of truth for the node name, and the
+        @translatable decorator keeps it in the language the user selected.
+        """
+        return tr(type(self).bl_label)
+
+    def calculate_text_width(self, text, padding=40):
+        """Estimate the width required to display the text."""
+        if not text:
+            return 200
+        
+        # Chinese characters are roughly twice as wide as English characters
+        char_count = 0
+        for char in text:
+            if '\u4e00' <= char <= '\u9fff':
+                char_count += 2
+            else:
+                char_count += 1
+        
+        # Each character takes about 12 px of width (the Blender node UI font is fairly wide)
+        width = char_count * 12 + padding
+        
+        # Enforce a minimum width of 200
+        return max(200, width)
+    
+    def update_node_width(self, texts):
+        """Update the node width based on the given texts."""
+        if not texts:
+            return
+        
+        max_width = 200
+        for text in texts:
+            width = self.calculate_text_width(text)
+            if width > max_width:
+                max_width = width
+        
+        # Reserve extra width for the dropdown (right arrow and margins, about 50 px)
+        self.width = max_width + 50
+    
+
+class THEHERTA3_OT_OpenPersistentBlueprint(I18nOperator):
+    bl_idname = "mimi.open_persistent_blueprint"
+    bl_label = "Open Blueprint"
+    bl_description = "Open a standalone blueprint window for configuring Mod logic"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    blueprint_name: bpy.props.StringProperty(
+        name=tr("Blueprint Name"),
+        default="",
+        options={'SKIP_SAVE'},
+    ) # type: ignore
+    
+    def execute(self, context):
+        # 1. Get or create the blueprint tree
+        GlobalConfig.read_from_main_json()
+        requested_tree_name = str(self.blueprint_name or "").strip()
+        tree_name = requested_tree_name or GlobalConfig.get_workspace_name()
+        
+        # Look for an existing NodeGroup with the same name
+        tree = bpy.data.node_groups.get(tree_name)
+        if tree and getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+            tree = None
+
+        if not tree and requested_tree_name:
+            from .blueprint_export_helper import BlueprintExportHelper
+            tree = BlueprintExportHelper.get_selected_blueprint_tree(requested_tree_name, context=context)
+
+        if not tree:
+            # Create a new NodeTree; the type must be our custom bl_idname
+            tree = bpy.data.node_groups.new(name=tree_name, type='MIMIBlueprintTreeType')
+            tree.use_fake_user = True
+
+        from .blueprint_export_helper import BlueprintExportHelper
+        BlueprintExportHelper.set_runtime_blueprint_tree(tree)
+
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties and getattr(mimi_global_properties, "selected_blueprint_name", "") != tree.name:
+            mimi_global_properties.selected_blueprint_name = tree.name
+        
+        # 1.5 Check for an already-open window editing this tree; reuse it instead of closing and reopening.
+        target_window = None
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'NODE_EDITOR':
+                    for space in area.spaces:
+                        if space.type == 'NODE_EDITOR' and space.node_tree == tree:
+                            target_window = window
+                            break
+                if target_window: break
+            if target_window: break
+
+        if target_window:
+            return {'FINISHED'}
+
+        # 2. Open a separate main window so ordinary child windows do not stay on top of the Blender main UI.
+        old_windows = set(context.window_manager.windows)
+
+        try:
+            bpy.ops.wm.window_new_main()
+        except (AttributeError, RuntimeError):
+            bpy.ops.wm.window_new()
+        
+        new_windows = set(context.window_manager.windows)
+        created_window = (new_windows - old_windows).pop() if (new_windows - old_windows) else None
+        
+        if created_window:
+            screen = created_window.screen
+            
+            target_area = max(screen.areas, key=lambda a: a.width * a.height)
+            
+            if target_area:
+                target_area.ui_type = 'MIMIBlueprintTreeType' # Seems ineffective; the node editor needs the tree type set
+                target_area.type = 'NODE_EDITOR'
+                
+                # Configure space properties
+                for space in target_area.spaces:
+                    if space.type == 'NODE_EDITOR':
+                        space.tree_type = 'MIMIBlueprintTreeType' # Key: switch to the custom tree type
+                        space.node_tree = tree # Set the data block to edit
+                        space.pin = True # Pin
+                        
+                        # Try to adjust the view (optional)
+                        
+        return {'FINISHED'}
+
+
+class THEHERTA3_OT_DeletePersistentBlueprint(I18nOperator):
+    bl_idname = "mimi.delete_persistent_blueprint"
+    bl_label = "Delete Blueprint"
+    bl_description = "Delete the currently selected blueprint"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    blueprint_name: bpy.props.StringProperty(
+        name=tr("Blueprint Name"),
+        default="",
+        options={'SKIP_SAVE'},
+    ) # type: ignore
+
+    def _get_target_tree(self, context):
+        from .blueprint_export_helper import BlueprintExportHelper
+
+        requested_tree_name = str(self.blueprint_name or "").strip()
+        if requested_tree_name == "__NONE__":
+            return None
+
+        return BlueprintExportHelper.get_selected_blueprint_tree(requested_tree_name, context=context)
+
+    def invoke(self, context, event):
+        target_tree = self._get_target_tree(context)
+        if not target_tree:
+            self.report({'WARNING'}, tr("There is no blueprint to delete!"))
+            return {'CANCELLED'}
+
+        self.blueprint_name = target_tree.name
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=tr("Delete the currently selected blueprint?"), icon='TRASH')
+        layout.label(text=self.blueprint_name)
+        layout.label(text=tr("This cannot be undone; please confirm this is not a mistake."), icon='ERROR')
+
+    def execute(self, context):
+        from .blueprint_export_helper import BlueprintExportHelper
+
+        target_tree = self._get_target_tree(context)
+        if not target_tree:
+            self.report({'WARNING'}, tr("There is no blueprint to delete!"))
+            return {'CANCELLED'}
+
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type != 'NODE_EDITOR':
+                    continue
+                for space in area.spaces:
+                    if space.type != 'NODE_EDITOR':
+                        continue
+                    if getattr(space, "node_tree", None) == target_tree:
+                        space.node_tree = None
+
+        if BlueprintExportHelper.runtime_blueprint_tree_name == target_tree.name:
+            BlueprintExportHelper.runtime_blueprint_tree_name = ""
+
+        deleted_blueprint_name = target_tree.name
+        bpy.data.node_groups.remove(target_tree)
+
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        preferred_blueprint_name = BlueprintExportHelper.get_preferred_blueprint_name(context=context)
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = preferred_blueprint_name or "__NONE__"
+
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+
+        self.report({'INFO'}, tr("Deleted blueprint: ") + deleted_blueprint_name)
+        return {'FINISHED'}
+
+
+class THEHERTA3_OT_RenamePersistentBlueprint(I18nOperator):
+    bl_idname = "mimi.rename_persistent_blueprint"
+    bl_label = "Rename Blueprint"
+    bl_description = "Rename the currently selected blueprint"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    blueprint_name: bpy.props.StringProperty(
+        name=tr("Blueprint Name"),
+        default="",
+        options={'SKIP_SAVE'},
+    ) # type: ignore
+
+    new_blueprint_name: bpy.props.StringProperty(
+        name=tr("New Blueprint Name"),
+        default="",
+    ) # type: ignore
+
+    def _get_target_tree(self, context):
+        from .blueprint_export_helper import BlueprintExportHelper
+
+        requested_tree_name = str(self.blueprint_name or "").strip()
+        if requested_tree_name == "__NONE__":
+            return None
+
+        return BlueprintExportHelper.get_selected_blueprint_tree(requested_tree_name, context=context)
+
+    def invoke(self, context, event):
+        target_tree = self._get_target_tree(context)
+        if not target_tree:
+            self.report({'WARNING'}, tr("There is no blueprint to rename!"))
+            return {'CANCELLED'}
+
+        self.blueprint_name = target_tree.name
+        self.new_blueprint_name = target_tree.name
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=tr("Enter the new blueprint name"), icon='GREASEPENCIL')
+        layout.prop(self, "new_blueprint_name", text=tr("Name"))
+
+    def execute(self, context):
+        from .blueprint_export_helper import BlueprintExportHelper
+
+        target_tree = self._get_target_tree(context)
+        if not target_tree:
+            self.report({'WARNING'}, tr("There is no blueprint to rename!"))
+            return {'CANCELLED'}
+
+        new_name = str(self.new_blueprint_name or "").strip()
+        if not new_name:
+            self.report({'ERROR'}, tr("Blueprint name cannot be empty!"))
+            return {'CANCELLED'}
+
+        if new_name == "__NONE__":
+            self.report({'ERROR'}, tr("Blueprint name cannot use the reserved value __NONE__!"))
+            return {'CANCELLED'}
+
+        if new_name == target_tree.name:
+            self.report({'INFO'}, tr("Blueprint name is unchanged"))
+            return {'CANCELLED'}
+
+        existing_tree = bpy.data.node_groups.get(new_name)
+        if existing_tree and existing_tree != target_tree:
+            self.report({'ERROR'}, tr("A blueprint with that name already exists; please use a different name!"))
+            return {'CANCELLED'}
+
+        old_name = target_tree.name
+        target_tree.name = new_name
+
+        if BlueprintExportHelper.runtime_blueprint_tree_name == old_name:
+            BlueprintExportHelper.runtime_blueprint_tree_name = target_tree.name
+
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        if mimi_global_properties:
+            mimi_global_properties.selected_blueprint_name = target_tree.name
+
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+
+        self.report({'INFO'}, tr("Renamed blueprint to: ") + target_tree.name)
+        return {'FINISHED'}
+    
+@translatable
+class MIMIPT_FrameProperties(bpy.types.Panel):
+    '''Frame properties panel: with a Frame node selected, adjust its color, transparency, label, etc. from the sidebar'''
+    bl_idname = "MIMI_PT_frame_properties"
+    bl_label = "Frame Properties"
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = "MMT"
+
+    @classmethod
+    def poll(cls, context):
+        # Show only inside an MMT blueprint tree
+        space = context.space_data
+        if space.type != 'NODE_EDITOR':
+            return False
+        tree = getattr(space, "edit_tree", None) or getattr(space, "node_tree", None)
+        if not tree or getattr(tree, "bl_idname", "") != 'MIMIBlueprintTreeType':
+            return False
+        # Check whether a Frame node is selected
+        if not context.selected_nodes:
+            return False
+        for node in context.selected_nodes:
+            if node.bl_idname == 'NodeFrame':
+                return True
+        return False
+
+    def draw(self, context):
+        layout = self.layout
+        # Collect all selected Frame nodes
+        frames = [n for n in context.selected_nodes if n.bl_idname == 'NodeFrame']
+        if not frames:
+            return
+
+        # Use the first frame's properties as the source; with multiple frames selected, apply them uniformly
+        frame = frames[0]
+
+        # === Label ===
+        box = layout.box()
+        box.label(text=tr("Label"), icon='FONT_DATA')
+        col = box.column(align=True)
+        col.prop(frame, "label", text=tr("Name"))
+        col.prop(frame, "label_size", text=tr("Font Size"))
+
+        # === Appearance ===
+        box = layout.box()
+        box.label(text=tr("Appearance"), icon='MATERIAL')
+        col = box.column(align=True)
+        col.prop(frame, "use_custom_color", text=tr("Custom Color"))
+        if frame.use_custom_color:
+            col.prop(frame, "color", text="")
+        col.prop(frame, "shrink", text=tr("Auto Shrink"))
+
+        # === Size ===
+        box = layout.box()
+        box.label(text=tr("Size"), icon='MESH_PLANE')
+        col = box.column(align=True)
+        col.prop(frame, "width", text=tr("Width"))
+        col.prop(frame, "height", text=tr("Height"))
+
+        # === Extended text ===
+        box = layout.box()
+        box.label(text=tr("Description Text"), icon='TEXT')
+        col = box.column()
+        col.prop(frame, "text", text="")
+
+        # === Visibility ===
+        box = layout.box()
+        box.label(text=tr("Visibility"), icon='HIDE_OFF')
+        col = box.column(align=True)
+        col.prop(frame, "hide", text=tr("Hide"))
+        col.prop(frame, "mute", text=tr("Mute (Disable)"))
+
+        # === Apply-to-all button for multi-selection ===
+        if len(frames) > 1:
+            layout.separator()
+            layout.label(text=tr("Selected {count} Frames").format(count=len(frames)), icon='INFO')
+            layout.label(text=tr("After editing the properties above, click the button to apply to all"), icon='LOOP_BACK')
+            op = layout.operator("mimi.apply_frame_properties_to_all", text=tr("Apply to All Selected Frames"), icon='CHECKMARK')
+            op.source_frame_name = frame.name
+            op.tree_name = frame.id_data.name if frame.id_data else ""
+
+
+class MMT_OT_ApplyFramePropertiesToAll(I18nOperator):
+    '''Copy all properties of the first selected Frame to the other selected Frames'''
+    bl_idname = "mimi.apply_frame_properties_to_all"
+    bl_label = "Apply to All Selected Frames"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    source_frame_name: bpy.props.StringProperty()  # type: ignore
+    tree_name: bpy.props.StringProperty()          # type: ignore
+
+    def execute(self, context):
+        tree = bpy.data.node_groups.get(self.tree_name)
+        if not tree:
+            return {'CANCELLED'}
+
+        source = tree.nodes.get(self.source_frame_name)
+        if not source or source.bl_idname != 'NodeFrame':
+            return {'CANCELLED'}
+
+        frames = [n for n in context.selected_nodes if n.bl_idname == 'NodeFrame' and n != source]
+        props = [
+            'label', 'label_size', 'use_custom_color', 'color',
+            'shrink', 'width', 'height', 'text', 'hide', 'mute'
+        ]
+        for frame in frames:
+            for prop in props:
+                setattr(frame, prop, getattr(source, prop))
+
+        self.report({'INFO'}, tr("Applied properties of {name} to {count} Frames").format(name=source.label or source.name, count=len(frames)))
+        return {'FINISHED'}
+
+
+def register():
+    bpy.utils.register_class(MIMISubmeshListItem)
+    bpy.utils.register_class(MIMIBlueprintTree)
+    bpy.utils.register_class(MIMISocketObject)
+    bpy.utils.register_class(THEHERTA3_OT_OpenPersistentBlueprint)
+    bpy.utils.register_class(THEHERTA3_OT_DeletePersistentBlueprint)
+    bpy.utils.register_class(THEHERTA3_OT_RenamePersistentBlueprint)
+    bpy.utils.register_class(MIMIPT_FrameProperties)
+    bpy.utils.register_class(MMT_OT_ApplyFramePropertiesToAll)
+    MIMIBlueprintTree.ssmt_submesh_items = bpy.props.CollectionProperty(type=MIMISubmeshListItem) # type: ignore[attr-defined]
+    from .blueprint_export_helper import BlueprintExportHelper
+    BlueprintExportHelper.register_workspace_tree_sync_timer()
+    # Opening any blend file migrates the node titles of blueprints that were
+    # saved before a node was renamed.
+    if migrate_legacy_node_titles not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(migrate_legacy_node_titles)
+
+
+def unregister():
+    from .blueprint_export_helper import BlueprintExportHelper
+    BlueprintExportHelper.unregister_workspace_tree_sync_timer()
+    # Blender removes handlers of a reloaded add-on on its own, but a manual
+    # unregister must not leave a stale handler behind.
+    try:
+        bpy.app.handlers.load_post.remove(migrate_legacy_node_titles)
+    except ValueError:
+        pass
+    del MIMIBlueprintTree.ssmt_submesh_items
+    bpy.utils.unregister_class(MMT_OT_ApplyFramePropertiesToAll)
+    bpy.utils.unregister_class(MIMIPT_FrameProperties)
+    bpy.utils.unregister_class(THEHERTA3_OT_RenamePersistentBlueprint)
+    bpy.utils.unregister_class(THEHERTA3_OT_DeletePersistentBlueprint)
+    bpy.utils.unregister_class(MIMISocketObject)
+    bpy.utils.unregister_class(THEHERTA3_OT_OpenPersistentBlueprint)
+    bpy.utils.unregister_class(MIMIBlueprintTree)
+    bpy.utils.unregister_class(MIMISubmeshListItem)

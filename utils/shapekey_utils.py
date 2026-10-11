@@ -1,0 +1,537 @@
+
+import bpy
+import time
+import numpy
+import re
+import math
+from mathutils import Vector
+
+from .timer_utils import TimerUtils
+from typing import List, Tuple, Dict, Optional
+
+class ShapeKeyUtils:
+    # Github: https://github.com/przemir/ApplyModifierForObjectWithShapeKeys
+
+    @classmethod
+    def apply_modifiers_for_object_with_shape_keys_optimized(cls, context, selected_modifiers, disable_armatures=False):
+        """
+        Optimized version: uses numpy to process shape key data directly
+        avoids duplicating the object and re-applying modifiers for every shape key
+        
+        Note: this optimized version only works with modifiers that do not change vertex positions
+        if a modifier changes vertex positions (such as Armature, Curve, Lattice, etc.),
+        it falls back to the original algorithm
+        
+        Algorithm:
+        1. Check the modifier types to decide whether to use the optimized path
+        2. Use numpy to extract the vertex coordinates of all shape keys
+        3. Delete all shape keys
+        4. Apply the modifiers to the base shape
+        5. Recreate the shape keys directly with numpy
+        """
+        if len(selected_modifiers) == 0:
+            return (True, None)
+        
+        obj = context.object
+        
+        modifiers_that_transform_vertices = {'ARMATURE', 'CURVE', 'LATTICE', 'SHRINKWRAP', 'SIMPLE_DEFORM', 'BEND', 'HOOK'}
+        has_transform_modifiers = False
+        for modifier in obj.modifiers:
+            if modifier.name in selected_modifiers and modifier.type in modifiers_that_transform_vertices and modifier.show_viewport:
+                has_transform_modifiers = True
+                break
+        
+        if has_transform_modifiers:
+            print(f"[ShapeKeyOptimized] Modifiers that transform vertices detected, falling back to the original algorithm")
+            return cls.apply_modifiers_for_object_with_shape_keys(context, selected_modifiers, disable_armatures)
+        
+        start_time = time.time()
+        
+        contains_mirror_with_merge = False
+        for modifier in obj.modifiers:
+            if modifier.name in selected_modifiers:
+                if modifier.type == 'MIRROR' and modifier.use_mirror_merge == True:
+                    contains_mirror_with_merge = True
+        
+        disabled_armature_modifiers = []
+        if disable_armatures:
+            for modifier in obj.modifiers:
+                if modifier.name not in selected_modifiers and modifier.type == 'ARMATURE' and modifier.show_viewport == True:
+                    disabled_armature_modifiers.append(modifier)
+                    modifier.show_viewport = False
+        
+        if not obj.data.shape_keys:
+            for modifier_name in selected_modifiers:
+                mod = obj.modifiers.get(modifier_name)
+                if mod and mod.show_viewport:
+                    bpy.ops.object.modifier_apply(modifier=modifier_name)
+            return (True, None)
+        
+        shapes_count = len(obj.data.shape_keys.key_blocks)
+        
+        if shapes_count == 0:
+            for modifier_name in selected_modifiers:
+                mod = obj.modifiers.get(modifier_name)
+                if mod and mod.show_viewport:
+                    bpy.ops.object.modifier_apply(modifier=modifier_name)
+            return (True, None)
+        
+        print(f"[ShapeKeyOptimized] Start processing {shapes_count} shape keys")
+        
+        properties_list = []
+        properties = ["interpolation", "mute", "name", "relative_key", "slider_max", "slider_min", "value", "vertex_group"]
+        
+        for i in range(shapes_count):
+            key_b = obj.data.shape_keys.key_blocks[i]
+            props = {p: None for p in properties}
+            props["name"] = key_b.name
+            props["mute"] = key_b.mute
+            props["interpolation"] = key_b.interpolation
+            props["relative_key"] = key_b.relative_key.name
+            props["slider_max"] = key_b.slider_max
+            props["slider_min"] = key_b.slider_min
+            props["value"] = key_b.value
+            props["vertex_group"] = key_b.vertex_group
+            properties_list.append(props)
+        
+        original_vert_count = len(obj.data.vertices)
+        
+        shape_key_coords = []
+        for i in range(shapes_count):
+            key_b = obj.data.shape_keys.key_blocks[i]
+            coords = numpy.empty((original_vert_count, 3), dtype=numpy.float32)
+            key_b.data.foreach_get('co', coords.ravel())
+            shape_key_coords.append(coords)
+        
+        print(f"[ShapeKeyOptimized] Extracted coordinate data for {shapes_count} shape keys")
+        
+        bpy.ops.object.shape_key_remove(all=True)
+        
+        for modifier_name in selected_modifiers:
+            bpy.ops.object.modifier_apply(modifier=modifier_name)
+        
+        new_vert_count = len(obj.data.vertices)
+        
+        if original_vert_count != new_vert_count:
+            error_hint = ""
+            if contains_mirror_with_merge:
+                error_hint = "\nHint: The mirror modifier has the 'Merge' option enabled, which may cause problems."
+            error_info = (f"Vertex count changed: {original_vert_count} -> {new_vert_count}!\n"
+                         f"Shape keys require the vertex count to stay unchanged after applying the modifiers.{error_hint}")
+            
+            for modifier in disabled_armature_modifiers:
+                modifier.show_viewport = True
+            return (False, error_info)
+        
+        bpy.ops.object.shape_key_add(from_mix=False)
+        
+        for i in range(1, shapes_count):
+            key_b = obj.shape_key_add(name=properties_list[i]["name"], from_mix=False)
+            key_b.data.foreach_set('co', shape_key_coords[i].ravel())
+        
+        print(f"[ShapeKeyOptimized] Recreated {shapes_count - 1} shape keys")
+        
+        for i in range(shapes_count):
+            key_b = obj.data.shape_keys.key_blocks[i]
+            key_b.name = properties_list[i]["name"]
+            key_b.interpolation = properties_list[i]["interpolation"]
+            key_b.mute = properties_list[i]["mute"]
+            key_b.slider_max = properties_list[i]["slider_max"]
+            key_b.slider_min = properties_list[i]["slider_min"]
+            key_b.value = properties_list[i]["value"]
+            key_b.vertex_group = properties_list[i]["vertex_group"]
+            
+            rel_key = properties_list[i]["relative_key"]
+            for j in range(shapes_count):
+                key_brel = obj.data.shape_keys.key_blocks[j]
+                if rel_key == key_brel.name:
+                    key_b.relative_key = key_brel
+                    break
+        
+        for modifier in disabled_armature_modifiers:
+            modifier.show_viewport = True
+        
+        elapsed = time.time() - start_time
+        print(f"[ShapeKeyOptimized] Done, elapsed time: {elapsed:.2f}s")
+        
+        return (True, None)
+
+    @staticmethod
+    def apply_modifiers_for_object_with_shape_keys(context, selectedModifiers, disable_armatures):
+        # The MIT License (MIT)
+        #
+        # Copyright (c) 2015 Przemysław Bągard
+        #
+        # Permission is hereby granted, free of charge, to any person obtaining a copy
+        # of this software and associated documentation files (the "Software"), to deal
+        # in the Software without restriction, including without limitation the rights
+        # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+        # copies of the Software, and to permit persons to whom the Software is
+        # furnished to do so, subject to the following conditions:
+        #
+        # The above copyright notice and this permission notice shall be included in
+        # all copies or substantial portions of the Software.
+        #
+        # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+        # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+        # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+        # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+        # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+        # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+        # THE SOFTWARE.
+
+        # Date: 01 February 2015
+        # Blender script
+        # Description: Apply modifier and remove from the stack for object with shape keys
+        # (Pushing 'Apply' button in 'Object modifiers' tab result in an error 'Modifier cannot be applied to a mesh with shape keys').
+
+        # Algorithm (old):
+        # - Duplicate active object as many times as the number of shape keys
+        # - For each copy remove all shape keys except one
+        # - Removing last shape does not change geometry data of object
+        # - Apply modifier for each copy
+        # - Join objects as shapes and restore shape keys names
+        # - Delete all duplicated object except one
+        # - Delete old object
+        # Original object should be preserved (to keep object name and other data associated with object/mesh). 
+
+        # Algorithm (new):
+        # Don't make list of copies, handle it one shape at time.
+        # In this algorithm there shouldn't be more than 3 copy of object at time, so it should be more memory-friendly.
+        #
+        # - Copy object which will hold shape keys
+        # - For original object (which will be also result object), remove all shape keys, then apply modifiers. Add "base" shape key
+        # - For each shape key except base copy temporary object from copy. Then for temporaryObject:
+        #     - remove all shape keys except one (done by removing all shape keys, then transfering the right one from copyObject)
+        #     - apply modifiers
+        #     - merge with originalObject
+        #     - delete temporaryObject
+        # - Delete copyObject.
+        
+        if len(selectedModifiers) == 0:
+            return
+
+        list_properties = []
+        properties = ["interpolation", "mute", "name", "relative_key", "slider_max", "slider_min", "value", "vertex_group"]
+        shapesCount = 0
+        vertCount = -1
+        startTime = time.time()
+        
+        # Inspect modifiers for hints used in error message if needed.
+        contains_mirror_with_merge = False
+        for modifier in context.object.modifiers:
+            if modifier.name in selectedModifiers:
+                if modifier.type == 'MIRROR' and modifier.use_mirror_merge == True:
+                    contains_mirror_with_merge = True
+
+        # Disable armature modifiers.
+        disabled_armature_modifiers = []
+        if disable_armatures:
+            for modifier in context.object.modifiers:
+                if modifier.name not in selectedModifiers and modifier.type == 'ARMATURE' and modifier.show_viewport == True:
+                    disabled_armature_modifiers.append(modifier)
+                    modifier.show_viewport = False
+        
+        # Calculate shape keys count.
+        if context.object.data.shape_keys:
+            shapesCount = len(context.object.data.shape_keys.key_blocks)
+        
+        # If there are no shape keys, just apply modifiers.
+        if(shapesCount == 0):
+            for modifierName in selectedModifiers:
+                bpy.ops.object.modifier_apply(modifier=modifierName)
+            return (True, None)
+        
+        # We want to preserve original object, so all shapes will be joined to it.
+        originalObject = context.view_layer.objects.active
+        bpy.ops.object.select_all(action='DESELECT')
+        originalObject.select_set(True)
+        
+        # Copy object which will holds all shape keys.
+        bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'}, TRANSFORM_OT_translate={"value":(0, 0, 0), "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(False, False, False), "mirror":True, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_target":'CLOSEST', "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "release_confirm":False, "use_accurate":False})
+        copyObject = context.view_layer.objects.active
+        copyObject.select_set(False)
+        
+        # Return selection to originalObject.
+        context.view_layer.objects.active = originalObject
+        originalObject.select_set(True)
+        
+        # Save key shape properties
+        for i in range(0, shapesCount):
+            key_b = originalObject.data.shape_keys.key_blocks[i]
+            print (originalObject.data.shape_keys.key_blocks[i].name, key_b.name)
+            properties_object = {p:None for p in properties}
+            properties_object["name"] = key_b.name
+            properties_object["mute"] = key_b.mute
+            properties_object["interpolation"] = key_b.interpolation
+            properties_object["relative_key"] = key_b.relative_key.name
+            properties_object["slider_max"] = key_b.slider_max
+            properties_object["slider_min"] = key_b.slider_min
+            properties_object["value"] = key_b.value
+            properties_object["vertex_group"] = key_b.vertex_group
+            list_properties.append(properties_object)
+
+        # Handle base shape in "originalObject"
+        print("applyModifierForObjectWithShapeKeys: Applying base shape key")
+        bpy.ops.object.shape_key_remove(all=True)
+        for modifierName in selectedModifiers:
+            bpy.ops.object.modifier_apply(modifier=modifierName)
+        vertCount = len(originalObject.data.vertices)
+        bpy.ops.object.shape_key_add(from_mix=False)
+        originalObject.select_set(False)
+        
+        # Handle other shape-keys: copy object, get right shape-key, apply modifiers and merge with originalObject.
+        # We handle one object at time here.
+        for i in range(1, shapesCount):
+            currTime = time.time()
+            elapsedTime = currTime - startTime
+
+            print("applyModifierForObjectWithShapeKeys: Applying shape key %d/%d ('%s', %0.2f seconds since start)" % (i+1, shapesCount, list_properties[i]["name"], elapsedTime))
+            context.view_layer.objects.active = copyObject
+            copyObject.select_set(True)
+            
+            # Copy temp object.
+            bpy.ops.object.duplicate_move(OBJECT_OT_duplicate={"linked":False, "mode":'TRANSLATION'}, TRANSFORM_OT_translate={"value":(0, 0, 0), "orient_type":'GLOBAL', "orient_matrix":((1, 0, 0), (0, 1, 0), (0, 0, 1)), "orient_matrix_type":'GLOBAL', "constraint_axis":(False, False, False), "mirror":True, "use_proportional_edit":False, "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, "snap":False, "snap_target":'CLOSEST', "snap_point":(0, 0, 0), "snap_align":False, "snap_normal":(0, 0, 0), "gpencil_strokes":False, "cursor_transform":False, "texture_space":False, "remove_on_cancel":False, "release_confirm":False, "use_accurate":False})
+            tmpObject = context.view_layer.objects.active
+            bpy.ops.object.shape_key_remove(all=True)
+            copyObject.select_set(True)
+            copyObject.active_shape_key_index = i
+            
+            # Get right shape-key.
+            bpy.ops.object.shape_key_transfer()
+            context.object.active_shape_key_index = 0
+            bpy.ops.object.shape_key_remove()
+            bpy.ops.object.shape_key_remove(all=True)
+            
+            # Time to apply modifiers.
+            for modifierName in selectedModifiers:
+                bpy.ops.object.modifier_apply(modifier=modifierName)
+            
+            # Verify number of vertices.
+            if vertCount != len(tmpObject.data.vertices):
+            
+                errorInfoHint = ""
+                if contains_mirror_with_merge == True:
+                    errorInfoHint = "There is mirror modifier with 'Merge' property enabled. This may cause a problem."
+                if errorInfoHint:
+                    errorInfoHint = "\n\nHint: " + errorInfoHint
+                errorInfo = ("Shape keys ended up with different number of vertices!\n"
+                            "All shape keys needs to have the same number of vertices after modifier is applied.\n"
+                            "Otherwise joining such shape keys will fail!%s" % errorInfoHint)
+                return (False, errorInfo)
+        
+            # Join with originalObject
+            copyObject.select_set(False)
+            context.view_layer.objects.active = originalObject
+            originalObject.select_set(True)
+            bpy.ops.object.join_shapes()
+            originalObject.select_set(False)
+            context.view_layer.objects.active = tmpObject
+            
+            # Remove tmpObject
+            tmpMesh = tmpObject.data
+            bpy.ops.object.delete(use_global=False)
+            bpy.data.meshes.remove(tmpMesh)
+        
+        # Restore shape key properties like name, mute etc.
+        context.view_layer.objects.active = originalObject
+        for i in range(0, shapesCount):
+            key_b = context.view_layer.objects.active.data.shape_keys.key_blocks[i]
+            # name needs to be restored before relative_key
+            key_b.name = list_properties[i]["name"]
+            
+        for i in range(0, shapesCount):
+            key_b = context.view_layer.objects.active.data.shape_keys.key_blocks[i]
+            key_b.interpolation = list_properties[i]["interpolation"]
+            key_b.mute = list_properties[i]["mute"]
+            key_b.slider_max = list_properties[i]["slider_max"]
+            key_b.slider_min = list_properties[i]["slider_min"]
+            key_b.value = list_properties[i]["value"]
+            key_b.vertex_group = list_properties[i]["vertex_group"]
+            rel_key = list_properties[i]["relative_key"]
+        
+            for j in range(0, shapesCount):
+                key_brel = context.view_layer.objects.active.data.shape_keys.key_blocks[j]
+                if rel_key == key_brel.name:
+                    key_b.relative_key = key_brel
+                    break
+        
+        # Remove copyObject.
+        originalObject.select_set(False)
+        context.view_layer.objects.active = copyObject
+        copyObject.select_set(True)
+        tmpMesh = copyObject.data
+        bpy.ops.object.delete(use_global=False)
+        bpy.data.meshes.remove(tmpMesh)
+        
+        # Select originalObject.
+        context.view_layer.objects.active = originalObject
+        context.view_layer.objects.active.select_set(True)
+        
+        if disable_armatures:
+            for modifier in disabled_armature_modifiers:
+                modifier.show_viewport = True
+        
+        return (True, None)
+
+
+    @classmethod
+    def extract_shapekey_data(cls,merged_obj,index_vertex_id_dict):
+        '''
+        Build WWMI native shape key buffers.
+
+        WWMI stores shape keys in batches of 127 keys. Each batch has 128
+        uint offsets: a leading 0, one offset after every key, and the final
+        value acts as the sentinel used by ShapeKeyLoader.
+        '''
+        shapekey_cache = cls.get_shapekey_cache(merged_obj,index_vertex_id_dict)
+        if not shapekey_cache:
+            return [], [], []
+
+        shapekey_offsets = []
+        shapekey_vertex_ids = []
+        shapekey_vertex_offsets = []
+
+        # Original runtime dispatches may contain fewer than 127 key slots.
+        # The model transfers those boundaries to its disposable merged object.
+        # Legacy outputs have no boundaries and retain fixed 127-key packing.
+        max_shapekey_id = max(shapekey_cache.keys())
+        batch_counts = list(merged_obj.get("wwmi_shapekey_batch_counts", []))
+        if not batch_counts:
+            batch_counts = [127] * max(1, math.ceil((max_shapekey_id + 1) / 127))
+        if any(count < 0 or count > 127 for count in batch_counts):
+            raise ValueError("Invalid WWMI original shape key batch sizes.")
+        if max_shapekey_id >= sum(batch_counts):
+            raise ValueError("WWMI shape key ID exceeds the original runtime batch capacity.")
+
+        # Always emit 128 offsets per runtime batch, including trailing blanks.
+        # Blank slots consume no sparse entries but preserve runtime block size.
+        # The next batch's global ID advances by the actual original key count.
+        shapekey_id_offset = 0
+        for key_count in batch_counts:
+            shapekey_verts_count = 0
+            shapekey_offsets.append(0)
+
+            for slot in range(127):
+                group_id = shapekey_id_offset + slot
+                shapekey = shapekey_cache.get(group_id, None) if slot < key_count else None
+                if shapekey is not None and len(shapekey) != 0:
+                    for draw_index, vertex_offsets in shapekey.items():
+                        shapekey_vertex_ids.append(draw_index)
+                        shapekey_vertex_offsets.extend(vertex_offsets + [0, 0, 0])
+                        shapekey_verts_count += 1
+
+                shapekey_offsets.append(shapekey_verts_count)
+
+            shapekey_id_offset += key_count
+
+        return shapekey_offsets,shapekey_vertex_ids,shapekey_vertex_offsets
+    
+
+
+    @staticmethod
+    def get_shapekey_cache(merged_obj, index_vertex_id_dict):
+        obj = merged_obj
+        mesh = obj.data
+        mesh_shapekeys = mesh.shape_keys
+        
+        if mesh_shapekeys is None:
+            print(f"obj: {obj.name} does not contain shape keys, skipping")
+            TimerUtils.End("shapekey_cache")
+            return None, None, None
+
+        # Build the reverse mapping from vertex index to global index_id
+        vertex_to_indices = {}
+        for index_id, vertex_id in index_vertex_id_dict.items():
+            if vertex_id not in vertex_to_indices:
+                vertex_to_indices[vertex_id] = []
+            vertex_to_indices[vertex_id].append(index_id)
+
+        # Get the base coordinates
+        base_data = mesh_shapekeys.key_blocks['Basis'].data
+        base_coords = numpy.empty((len(mesh.vertices), 3), dtype=numpy.float32)
+        base_data.foreach_get('co', base_coords.ravel())
+
+        shapekey_cache = {}
+        shapekey_pattern = re.compile(r'.*(?:deform|custom)[_ -]*(\d+).*')
+
+        # Process each shape key
+        for shapekey in mesh_shapekeys.key_blocks:
+            # Skip the basis shape key
+            if shapekey.name == 'Basis':
+                continue
+            
+            # print(shapekey.name)
+
+            # Extract the shape key ID
+            match = shapekey_pattern.findall(shapekey.name.lower())
+            if not match:
+                print(f"Shape key name: {shapekey.name} does not follow the naming convention, skipping")
+                continue
+                
+            shapekey_idx = int(match[0])
+            # print("process: " + str(shapekey_idx))
+
+            # Get the shape key coordinate data
+            sk_coords = numpy.empty((len(mesh.vertices), 3), dtype=numpy.float32)
+            shapekey.data.foreach_get('co', sk_coords.ravel())
+            
+            # Compute the offsets (vectorized operation)
+            offsets = sk_coords - base_coords
+            
+            # Compute vector lengths and filter out tiny offsets
+            lengths = numpy.linalg.norm(offsets, axis=1)
+            valid_mask = lengths >= 1e-9
+            valid_vertex_ids = numpy.where(valid_mask)[0]
+            
+            if not valid_vertex_ids.size:
+                # This case is generally not triggered
+                # print("valid_vertex_ids.size not, continue!")
+                continue
+                
+            # Initialize the cache for this shape key
+            if shapekey_idx not in shapekey_cache:
+                shapekey_cache[shapekey_idx] = {}
+                
+            # Process the valid vertices
+            for v_idx in valid_vertex_ids:
+                offset_list = offsets[v_idx].tolist()
+                # Get the associated global index_id
+                if v_idx in vertex_to_indices:
+                    for index_id in vertex_to_indices[v_idx]:
+                        shapekey_cache[shapekey_idx][index_id] = offset_list
+
+        return shapekey_cache
+    
+    @staticmethod
+    def reset_shapekey_values(obj, configured_shapekey_names=None, current_shapekey_name=None):
+        '''
+        Reset the configured shape keys that are not the current one to zero; unconfigured shape keys keep their original values
+        configured_shapekey_names: list of all shape key names configured in the blueprint nodes
+        current_shapekey_name: name of the shape key currently being processed
+        '''
+
+        if obj.data.shape_keys:
+            if configured_shapekey_names is None:
+                configured_shapekey_names = set()
+            else:
+                configured_shapekey_names = set(configured_shapekey_names)
+            
+            for key_block in obj.data.shape_keys.key_blocks:
+                # Only process the shape keys that are in the configured list
+                if key_block.name in configured_shapekey_names:
+                    # If it is not the shape key currently being processed, reset it to zero
+                    if key_block.name != current_shapekey_name:
+                        key_block.value = 0.0
+
+    @staticmethod
+    def reset_all_shapekey_values(obj):
+        if not obj or getattr(obj, "type", None) != 'MESH':
+            return
+
+        shape_keys = getattr(getattr(obj, "data", None), "shape_keys", None)
+        if not shape_keys:
+            return
+
+        for key_block in shape_keys.key_blocks:
+            key_block.value = 0.0

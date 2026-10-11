@@ -1,0 +1,388 @@
+"""Headless integration checks for the MMD cleanup sidebar feature.
+
+Run: blender -b --factory-startup --python-exit-code 1 -P this_file
+Tests create synthetic imports only, never open or modify a user scene.
+
+Coverage notes:
+- Physics groups contain hidden mesh descendants, as real MMD imports do.
+- Duplicate group names exercise Blender's numeric naming suffixes.
+- Character names have no special meaning to the cleanup algorithm.
+- A second selected model stays intact when the first model is cleaned.
+- Retained helpers and clothing exercise non-skeleton child preservation.
+- Root translation, rotation and scale exercise world-matrix preservation.
+- An external parent exercises reconnecting rather than simple unparenting.
+- Armature modifiers and shape keys remain bound to their original data.
+- Root metadata permits cleanup after the physics groups are already gone.
+- Renamed physics containers exercise metadata-based group identification.
+- Main-mesh selection is required; root and physics selections are rejected.
+- A nested skeleton proves validation happens before destructive mutation.
+- Edit Mode is rejected without forcing the user into a different mode.
+- Registration can be reversed and repeated in the same Blender process.
+- Sidebar placement and Chinese captions are checked without stealing focus.
+- No optional MMD importer is needed to execute these regression checks.
+
+Test fixture ownership:
+- All fixtures live in the process's fresh default scene.
+- Removing default objects cannot affect the user's live Blender session.
+- Mesh fixtures need no rendered topology to verify parenting semantics.
+- Shape keys exercise preservation of attached mesh data blocks.
+- Armature objects exercise the hierarchy even without creating pose bones.
+- Hidden children reproduce objects users cannot easily select manually.
+- Every object is linked to the default collection for valid selection.
+- Object references are retained instead of assuming requested names survive.
+- The first cleanup test invokes the registered Blender operator itself.
+- Direct helper tests expose validation failures as Python exceptions.
+- Matrix comparisons are made after the cleanup updates the view layer.
+- Numeric tolerance allows normal floating-point decomposition differences.
+- The external parent is itself included in the transform comparisons.
+- The second model's root, skeleton, mesh and containers are all checked.
+- Failed cleanup compares complete object sets, not only object counts.
+- Language changes are restored to English within their isolated test.
+- Repeated registration is checked before running the functional suite.
+- The runner raises on failure so --python-exit-code reports a failing job.
+- A final JSON result line provides a compact automated-test summary.
+- Temporary test classes are unregistered even after failed assertions.
+- No saved blend file or installation preferences are written by the tests.
+"""
+import importlib
+import json
+from pathlib import Path
+import sys
+import types
+import unittest
+
+import bpy
+
+# Import only this feature and i18n, avoiding unrelated add-on startup work.
+ROOT = Path(__file__).resolve().parents[1]
+package = types.ModuleType('MIMIBlender')
+package.__path__ = [str(ROOT)]
+sys.modules['MIMIBlender'] = package
+panel = importlib.import_module('MIMIBlender.ui.ui_panel_mmd')
+i18n = importlib.import_module('MIMIBlender.i18n.i18n')
+
+
+def new_object(name, kind='EMPTY', parent=None):
+    # Keep Blender's returned reference when duplicate names gain suffixes.
+    data = None
+    if kind == 'MESH':
+        data = bpy.data.meshes.new(name)
+    elif kind == 'ARMATURE':
+        data = bpy.data.armatures.new(name)
+    obj = bpy.data.objects.new(name, data)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.parent = parent
+    return obj
+
+
+def model(name, metadata=False, physics=True, outer=None):
+    # Mirror the screenshot: root -> skeleton -> main mesh, with physics
+    # containers beside the skeleton. A second model gains numeric suffixes.
+    root = new_object(name, parent=outer)
+    arm = new_object(name + '_arm', 'ARMATURE', root)
+    mesh = new_object(name + '_mesh', 'MESH', arm)
+    groups = []
+    if metadata:
+        root['mmd_type'] = 'ROOT'
+    if physics:
+        for name, tag in [('joints', 'JOINT_GRP'), ('rigidbodies', 'RIGID_GRP')]:
+            group = new_object(name, parent=root)
+            if metadata:
+                group.name = 'renamed_' + name
+                group['mmd_type'] = tag
+            # Hidden descendants must be deleted even when not selectable.
+            item = new_object(name + '_item', 'MESH', group)
+            item.hide_set(True)
+            groups.append(group)
+    return root, arm, mesh, groups
+
+
+class CleanupTests(unittest.TestCase):
+    def setUp(self):
+        # This scene is factory-startup data owned by the test process.
+        bpy.data.batch_remove(ids=list(bpy.data.objects))
+
+    def activate(self, mesh):
+        # Multiple selected objects must not broaden the deletion scope.
+        mesh.select_set(True)
+        bpy.context.view_layer.objects.active = mesh
+
+    def test_isolation_and_transforms(self):
+        # Give the root a surviving external parent with nontrivial transforms.
+        outer = new_object('external')
+        outer.location = (2, -1, 3)
+        root, arm, mesh, groups = model('character', outer=outer)
+        other = model('second')
+        root.location = (5, 2, -3)
+        root.rotation_euler = (0.2, -0.4, 0.7)
+        root.scale = (1.5, 1.5, 1.5)
+        arm.location = (0.3, 0.2, 0.1)
+        # Keep a second mesh and an unrelated helper in the retained branch.
+        sibling = new_object('clothing', 'MESH', arm)
+        helper = new_object('helper', parent=root)
+        modifier = mesh.modifiers.new('skeleton', 'ARMATURE')
+        modifier.object = arm
+        mesh.shape_key_add(name='Basis')
+        mesh.shape_key_add(name='expression')
+        self.activate(mesh)
+        other[2].select_set(True)
+        bpy.context.view_layer.update()
+        kept = [outer, arm, mesh, sibling, helper] + list(other[:3]) + other[3]
+        matrices = {obj: obj.matrix_world.copy() for obj in kept}
+        removed_names = [root.name] + [obj.name for group in groups for obj in [group, *group.children]]
+        # Run the real registered operator, not a mocked deletion function.
+        self.assertEqual(bpy.ops.mimi.remove_mmd_redundant_parts(), {'FINISHED'})
+        for name in removed_names:
+            self.assertNotIn(name, bpy.data.objects)
+        for obj, matrix in matrices.items():
+            delta = max(abs(obj.matrix_world[row][col] - matrix[row][col]) for row in range(4) for col in range(4))
+            self.assertLess(delta, 1e-5, obj.name)
+        # Skeleton binding, selection, shape keys and external parent survive.
+        self.assertEqual(arm.parent, outer)
+        self.assertEqual(helper.parent, outer)
+        self.assertEqual(mesh.parent, arm)
+        self.assertEqual(modifier.object, arm)
+        self.assertEqual(len(mesh.data.shape_keys.key_blocks), 2)
+        self.assertEqual(bpy.context.active_object, mesh)
+        self.assertFalse(panel.MIMI_OT_remove_mmd_redundant_parts.poll(bpy.context))
+
+    def test_metadata_and_missing_groups(self):
+        # Metadata permits renamed containers and roots with no physics left.
+        for physics in [True, False]:
+            root, arm, mesh, groups = model('metadata', metadata=True, physics=physics)
+            self.activate(mesh)
+            self.assertEqual(panel.find_mmd_root(mesh), root)
+            self.assertEqual(panel.remove_redundant_parts(bpy.context, mesh), 5 if physics else 1)
+            self.assertIsNone(arm.parent)
+
+    def test_invalid_selection_and_nested_model(self):
+        # Ordinary objects and physics descendants must never enable cleanup.
+        ordinary = new_object('ordinary', 'MESH', new_object('ordinary_root'))
+        self.assertIsNone(panel.find_mmd_root(ordinary))
+        root, arm, mesh, groups = model('valid')
+        self.assertIsNone(panel.find_mmd_root(groups[0].children[0]))
+        self.activate(root)
+        self.assertFalse(panel.MIMI_OT_remove_mmd_redundant_parts.poll(bpy.context))
+        self.activate(mesh)
+        # A suspicious skeleton inside physics cancels before changing anything.
+        new_object('unexpected_arm', 'ARMATURE', groups[0])
+        before = set(bpy.data.objects)
+        with self.assertRaises(ValueError):
+            panel.remove_redundant_parts(bpy.context, mesh)
+        self.assertEqual(before, set(bpy.data.objects))
+        self.assertEqual(arm.parent, root)
+        # Edit mode is rejected even when the main-model hierarchy is valid.
+        bpy.ops.object.mode_set(mode='EDIT')
+        self.assertFalse(panel.MIMI_OT_remove_mmd_redundant_parts.poll(bpy.context))
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    def test_shape_keys_and_shared_data(self):
+        """All-key removal must isolate the selected object's mesh data.
+
+        The linked duplicate retains Basis, the locked expression and its value.
+        The cleaned object returns to its base coordinates rather than baking
+        the currently evaluated expression into the original mesh geometry.
+        Repeating cleanup does not allocate another copy of an already-clean
+        mesh. Multiple selection never expands the active-object scope.
+        """
+        # Use real vertices to exercise keys, including a locked expression.
+        mesh = new_object('expressions', 'MESH')
+        mesh.data.from_pydata([(0, 0, 0), (1, 0, 0)], [], [])
+        mesh.shape_key_add(name='Basis')
+        expression = mesh.shape_key_add(name='smile')
+        expression.data[0].co.z = 2
+        expression.value = 0.5
+        expression.lock_shape = True
+        other = bpy.data.objects.new('shared_expressions', mesh.data)
+        bpy.context.scene.collection.objects.link(other)
+        original_data = other.data
+        self.activate(mesh)
+        other.select_set(True)
+        # The operation must isolate data before clearing all keys.
+        self.assertEqual(bpy.ops.mimi.remove_mmd_shape_keys(), {'FINISHED'})
+        self.assertIsNone(mesh.data.shape_keys)
+        self.assertEqual(other.data, original_data)
+        self.assertEqual(len(other.data.shape_keys.key_blocks), 2)
+        self.assertEqual(mesh.data.vertices[0].co.z, 0)
+        # Repeating a no-op must not produce another unnecessary mesh copy.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_shape_keys(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+
+    def test_exact_helper_groups_and_weights(self):
+        """Only fixed importer helper names qualify for vertex-group deletion.
+
+        Locked real bone groups must retain both their names and their weights.
+        A similar backup name deliberately fails the exact-name comparison.
+        Interleaving names verifies that index remapping keeps remaining weights
+        attached to their original bones. The other object's shared data stays
+        intact, and neither object's attached expression keys are removed.
+        """
+        # Interleave helper groups with real locked bone-weight groups.
+        mesh = new_object('weighted', 'MESH')
+        mesh.data.from_pydata([(0, 0, 0)], [], [])
+        for name in ['bone_a', 'mmd_edge_scale', 'bone_b', 'mmd_vertex_order', 'mmd_edge_scale_backup']:
+            group = mesh.vertex_groups.new(name=name)
+            group.lock_weight = True
+            group.add([0], 0.6, 'REPLACE')
+        mesh.shape_key_add(name='Basis')
+        mesh.shape_key_add(name='keep_expression')
+        # Copy the object but share its mesh to check weight-index isolation.
+        other = mesh.copy()
+        bpy.context.scene.collection.objects.link(other)
+        self.activate(mesh)
+        other.select_set(True)
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_vertex_groups(), {'FINISHED'})
+        self.assertEqual(list(mesh.vertex_groups.keys()), ['bone_a', 'bone_b', 'mmd_edge_scale_backup'])
+        self.assertEqual(len(other.vertex_groups), 5)
+        for obj in [mesh, other]:
+            # Bone group indices shift on the cleaned mesh, weights must not.
+            self.assertAlmostEqual(obj.vertex_groups['bone_b'].weight(0), 0.6)
+            self.assertTrue(obj.vertex_groups['bone_b'].lock_weight)
+            self.assertEqual(len(obj.data.shape_keys.key_blocks), 2)
+        # Missing helpers are a safe no-op without extra data copying.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_vertex_groups(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+
+    def test_mesh_action_selection_guards(self):
+        # These independent buttons should work after deleting the MMD root.
+        root, arm, mesh, groups = model('already_cleaned')
+        self.activate(mesh)
+        panel.remove_redundant_parts(bpy.context, mesh)
+        operators = [
+            panel.MIMI_OT_remove_mmd_shape_keys,
+            panel.MIMI_OT_remove_mmd_invalid_vertex_groups,
+            panel.MIMI_OT_remove_mmd_unused_materials,
+            panel.MIMI_OT_remove_mmd_invalid_shape_keys,
+        ]
+        for operator in operators:
+            self.assertTrue(operator.poll(bpy.context))
+        # Edit mode and an active non-mesh must disable both actions.
+        bpy.ops.object.mode_set(mode='EDIT')
+        for operator in operators:
+            self.assertFalse(operator.poll(bpy.context))
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        self.activate(arm)
+        for operator in operators:
+            self.assertFalse(operator.poll(bpy.context))
+
+    def test_unused_materials_and_remap(self):
+        """Unused slot removal must remap polygon material indices.
+
+        Deleting the middle slot shifts the last slot down; faces must keep
+        pointing at their original material. An unselected linked duplicate
+        retains the original shared datablock. A selected mesh whose slots
+        are all used stays untouched without a needless data copy.
+        """
+        mesh = new_object('slotted', 'MESH')
+        mesh.data.from_pydata(
+            [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (2, 0, 0), (2, 1, 0)],
+            [],
+            [(0, 1, 2, 3), (1, 4, 5, 2)],
+        )
+        materials = [bpy.data.materials.new(name) for name in ['mat_a', 'mat_b', 'mat_c']]
+        for material in materials:
+            mesh.data.materials.append(material)
+        # Slot 1 (mat_b) is unused; both faces use slots 0 and 2 only.
+        mesh.data.polygons[0].material_index = 0
+        mesh.data.polygons[1].material_index = 2
+        # An unselected duplicate shares the mesh and must not be changed.
+        other = bpy.data.objects.new('shared_slots', mesh.data)
+        bpy.context.scene.collection.objects.link(other)
+        original_data = other.data
+        # A fully used second mesh exercises the no-copy fast path.
+        clean = new_object('clean_slots', 'MESH')
+        clean.data.from_pydata([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [], [(0, 1, 2)])
+        clean.data.materials.append(materials[0])
+        clean.data.polygons[0].material_index = 0
+        clean_data = clean.data
+        self.activate(mesh)
+        clean.select_set(True)
+        self.assertEqual(bpy.ops.mimi.remove_mmd_unused_materials(), {'FINISHED'})
+        # The cleaned mesh lost only mat_b; mat_c's faces remapped 2 -> 1.
+        self.assertEqual(list(mesh.data.materials), [materials[0], materials[2]])
+        self.assertEqual([p.material_index for p in mesh.data.polygons], [0, 1])
+        # Isolation: the duplicate keeps all three slots on the old datablock.
+        self.assertEqual(other.data, original_data)
+        self.assertEqual(len(other.data.materials), 3)
+        # The fully used mesh kept its datablock and its single slot.
+        self.assertEqual(clean.data, clean_data)
+        self.assertEqual(list(clean.data.materials), [materials[0]])
+        # A second run is a harmless no-op without another data copy.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_unused_materials(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+
+    def test_invalid_shape_keys(self):
+        """Only keys that no longer move any remaining vertex are removed.
+
+        Basis and every key with a visible offset stay in place. A flat copy
+        of Basis counts as invalid even when the user locked it. Isolation
+        keeps an unselected linked duplicate on the original datablock.
+        """
+        mesh = new_object('keyed', 'MESH')
+        mesh.data.from_pydata([(0, 0, 0), (1, 0, 0)], [], [])
+        mesh.shape_key_add(name='Basis')
+        # New keys copy the previously added key's data, so the flat keys
+        # must be created before the moved one to stay identical to Basis.
+        mesh.shape_key_add(name='flat')
+        locked_flat = mesh.shape_key_add(name='locked_flat')
+        locked_flat.lock_shape = True
+        moved = mesh.shape_key_add(name='moved')
+        moved.data[0].co.z = 1
+        other = bpy.data.objects.new('shared_keys', mesh.data)
+        bpy.context.scene.collection.objects.link(other)
+        original_data = other.data
+        self.activate(mesh)
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_shape_keys(), {'FINISHED'})
+        # Only the two flat keys were removed; Basis and moved survive.
+        self.assertEqual(list(mesh.data.shape_keys.key_blocks.keys()), ['Basis', 'moved'])
+        # The unselected duplicate keeps every original key untouched.
+        self.assertEqual(other.data, original_data)
+        self.assertEqual(len(other.data.shape_keys.key_blocks), 4)
+        # A second run is a harmless no-op without another data copy.
+        after = mesh.data
+        self.assertEqual(bpy.ops.mimi.remove_mmd_invalid_shape_keys(), {'FINISHED'})
+        self.assertEqual(mesh.data, after)
+        self.assertEqual(len(mesh.data.shape_keys.key_blocks), 2)
+
+    def test_panel_and_translation(self):
+        # Check panel placement and captions without opening a GUI window.
+        self.assertEqual(panel.MIMI_PT_mmd_model.bl_order, 11)
+        self.assertEqual(panel.MIMI_PT_mmd_model.bl_category, 'MIMITools')
+        i18n.apply_language('zh')
+        self.assertEqual(panel.MIMI_PT_mmd_model.bl_label, 'MMD模型处理')
+        self.assertEqual(i18n.tr('Delete Redundant Parts'), '删除冗余部件')
+        self.assertEqual(i18n.tr('Delete Unused Materials'), '删除无效材质')
+        self.assertEqual(i18n.tr('Delete All Shape Keys'), '删除所有形态键')
+        self.assertEqual(i18n.tr('Delete Invalid Shape Keys'), '移除无效形态键')
+        self.assertEqual(i18n.tr('Delete Invalid Vertex Groups'), '删除无效顶点组')
+        # Record actual drawn buttons without a live sidebar area.
+        buttons = []
+        layout = types.SimpleNamespace(operator=lambda name, **kwargs: buttons.append(name))
+        panel.MIMI_PT_mmd_model.draw(types.SimpleNamespace(layout=layout), bpy.context)
+        self.assertEqual(buttons, [cls.bl_idname for cls in panel._CLASSES[:-1]])
+        i18n.apply_language('en')
+
+
+def main():
+    # Exercise register/unregister/re-register so add-on reload remains safe.
+    print('Blender version:', bpy.app.version_string)
+    panel.register()
+    panel.unregister()
+    panel.register()
+    try:
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(CleanupTests)
+        result = unittest.TextTestRunner(verbosity=2).run(suite)
+        print('RESULT ' + json.dumps({'tests': result.testsRun, 'success': result.wasSuccessful()}))
+        if not result.wasSuccessful():
+            raise RuntimeError('MMD cleanup integration checks failed')
+    finally:
+        # Remove test-only classes even when a check fails.
+        panel.unregister()
+
+
+if __name__ == '__main__':
+    main()

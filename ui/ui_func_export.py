@@ -1,0 +1,206 @@
+import os
+
+import bpy
+
+from ..utils.timer_utils import TimerUtils
+from ..utils.command_utils import CommandUtils
+
+from ..common.global_config import GlobalConfig
+from ..common.global_config import LogicName
+
+from ..games import get_exporter_class
+
+from ..model.blueprint_model import BluePrintModel
+from ..blueprint.blueprint_export_helper import BlueprintExportHelper
+from ..blueprint.blueprint_node_obj import ObjectPersistentIdManager
+from ..blueprint.blueprint_node_face_mod import (
+    FaceModExportError,
+    export_face_mod_from_node,
+)
+from ..i18n.i18n import I18nOperator, tr
+
+
+def _is_mod_generation_blocked(report_callback):
+    # Keep the exporters registered; this restriction only stops generation.
+    # Match exact presets so ZZMIDX12 and other supported games stay available.
+    blocked_presets = {LogicName.GIMI, LogicName.SRMI, LogicName.HIMI, LogicName.ZZMI}
+    if GlobalConfig.logic_name not in blocked_presets:
+        return False
+    # Report before blueprint parsing, object updates, or output file creation.
+    report_callback({'ERROR'}, tr("The current game preset does not yet support generating Mods"))
+    return True
+
+
+def _export_blueprint_model(blueprint_model):
+    """Dispatch one parsed output layer to the selected game exporter."""
+    exporter_class = get_exporter_class(GlobalConfig.logic_name)
+    if exporter_class is None:
+        raise ValueError(tr("The current game preset does not yet support generating Mods"))
+    exporter_class(blueprint_model=blueprint_model).export()
+
+
+_OUTPUT_NODE_IDS = {"MIMINode_Result_Output", "MIMINode_Face_Mod_Export"}
+
+
+def _export_regular_output(tree, context, output_node, config_name):
+    output_folder = GlobalConfig.path_generate_mod_folder()
+    stem = os.path.splitext(config_name)[0]
+    GlobalConfig.generated_mod_name_override = stem
+    BlueprintExportHelper.runtime_output_node = output_node
+    blueprint_model = None
+    try:
+        blueprint_model = BluePrintModel(tree=tree, context=context, output_node=output_node)
+        _export_blueprint_model(blueprint_model)
+    finally:
+        if blueprint_model is not None:
+            _cleanup_unico_temp_objects(blueprint_model)
+        BlueprintExportHelper.runtime_output_node = None
+        GlobalConfig.generated_mod_name_override = ""
+
+    # WWMI now writes one consolidated INI with the same name as other presets.
+    # Old per-DrawIB INIs must not hide a missing current workspace output.
+    generated = [os.path.join(output_folder, stem + ".ini")]
+    generated = [path for path in generated if os.path.isfile(path)]
+    if not generated:
+        raise ValueError(tr("Output node '{name}' did not generate an INI file").format(name=output_node.name))
+    return generated
+
+
+def generate_mod_from_output_node(tree, context, output_node, report_callback):
+    # Direct node exports must stop before any generation state is changed.
+    if _is_mod_generation_blocked(report_callback):
+        return {'CANCELLED'}
+    if getattr(output_node, "bl_idname", "") not in _OUTPUT_NODE_IDS:
+        report_callback({'ERROR'}, tr("Please select a valid Output node"))
+        return {'CANCELLED'}
+
+    TimerUtils.Start("GenerateMod Mod")
+    GlobalConfig.initialize_key_count()
+    BlueprintExportHelper.runtime_output_node = None
+    BlueprintExportHelper.set_runtime_blueprint_tree(tree)
+    refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(tree=tree, source="export")
+    if refresh_summary["missing_count"] > 0:
+        report_callback({'WARNING'}, tr("Before export, {count} object nodes found no matching object").format(count=refresh_summary['missing_count']))
+
+    try:
+        if getattr(output_node, "bl_idname", "") == "MIMINode_Face_Mod_Export":
+            # Face Mod nodes write their own Face.ini and do not use the
+            # regular workspace-named INI path.
+            export_face_mod_from_node(output_node)
+        else:
+            # The generated root INI is always named after the workspace.
+            config_name = f"{GlobalConfig.get_workspace_name()}.ini"
+            _export_regular_output(tree, context, output_node, config_name)
+    except (FaceModExportError, OSError, ValueError) as error:
+        BlueprintExportHelper.runtime_output_node = None
+        GlobalConfig.generated_mod_name_override = ""
+        TimerUtils.End("GenerateMod Mod")
+        report_callback({'ERROR'}, str(error))
+        return {'CANCELLED'}
+
+    TimerUtils.End("GenerateMod Mod")
+    report_callback({'INFO'}, tr("Generate Mod Success!"))
+    CommandUtils.OpenGeneratedModFolder()
+    return {'FINISHED'}
+
+
+def generate_mod_from_tree(tree, context, report_callback):
+    # Shared shortcuts use the same preset restriction as direct node exports.
+    if _is_mod_generation_blocked(report_callback):
+        return {'CANCELLED'}
+    if not tree:
+        report_callback({'ERROR'}, tr("No valid blueprint found"))
+        return {'CANCELLED'}
+    output_nodes = [
+        node for node in tree.nodes
+        if getattr(node, "bl_idname", "") in _OUTPUT_NODE_IDS
+    ]
+    if not output_nodes:
+        report_callback({'ERROR'}, tr("The current blueprint is missing a Generate Mod output node"))
+        return {'CANCELLED'}
+
+    # The toolbar shortcut has no node identity.  With several independent
+    # targets users must click the intended node so a root INI is never
+    # accidentally overwritten.
+    if len(output_nodes) != 1:
+        report_callback({'ERROR'}, tr("Multiple independent Outputs exist; click \"Generate Mod\" on the Output node you want to export"))
+        return {'CANCELLED'}
+    return generate_mod_from_output_node(tree, context, output_nodes[0], report_callback)
+
+
+def _cleanup_unico_temp_objects(blueprint_model: BluePrintModel):
+    """Clean up temporary objects created by UniComponent splitting"""
+    temp_objects = getattr(blueprint_model, '_unico_temp_objects', None)
+    if not temp_objects:
+        return
+    for temp_obj in temp_objects:
+        try:
+            if temp_obj and temp_obj.name in bpy.data.objects:
+                bpy.data.objects.remove(temp_obj, do_unlink=True)
+        except Exception as e:
+            print(f"[UniComponent] Error cleaning up temporary objects: {e}")
+    print(f"[UniComponent] Cleaned up {len(temp_objects)} temporary split objects")
+
+
+class MMTGenerateModBlueprint(I18nOperator):
+    bl_idname = "mimi.generate_mod_blueprint"
+    bl_label = "Generate Mod"
+    bl_description = "Generate the Mod files from the blueprint architecture for the current workspace"
+    bl_options = {'REGISTER','UNDO'}
+
+    node_name: bpy.props.StringProperty()  # type: ignore
+    tree_name: bpy.props.StringProperty()  # type: ignore
+
+    def execute(self, context):
+        # Reject the click before resolving or touching the current blueprint.
+        if _is_mod_generation_blocked(self.report):
+            return {'CANCELLED'}
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
+        tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
+        if not tree:
+            self.report({'ERROR'}, tr("No current blueprint found; click \"Generate Mod\" in the blueprint editor"))
+            return {'CANCELLED'}
+        if self.node_name:
+            output_node = tree.nodes.get(self.node_name)
+            if output_node is None:
+                self.report({'ERROR'}, tr("Output node not found"))
+                return {'CANCELLED'}
+            return generate_mod_from_output_node(tree, context, output_node, self.report)
+        return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
+
+
+class MMTGenerateSelectedBlueprintMod(I18nOperator):
+    bl_idname = "mimi.generate_selected_blueprint_mod"
+    bl_label = "Generate Mod"
+    bl_description = "Quickly generate the Mod files from the currently selected blueprint"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        # Reject quick generation before selection or blueprint state changes.
+        if _is_mod_generation_blocked(self.report):
+            return {'CANCELLED'}
+        mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
+        selected_name = getattr(mimi_global_properties, "selected_blueprint_name", "") if mimi_global_properties else ""
+
+        tree = BlueprintExportHelper.get_selected_blueprint_tree(
+            selected_name=selected_name,
+            context=context,
+        )
+        if not tree:
+            self.report({'ERROR'}, tr("Please select a valid blueprint"))
+            return {'CANCELLED'}
+
+        if mimi_global_properties and mimi_global_properties.selected_blueprint_name != tree.name:
+            mimi_global_properties.selected_blueprint_name = tree.name
+
+        return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
+    
+def register():
+    bpy.utils.register_class(MMTGenerateModBlueprint)
+    bpy.utils.register_class(MMTGenerateSelectedBlueprintMod)
+
+
+def unregister():
+    bpy.utils.unregister_class(MMTGenerateSelectedBlueprintMod)
+    bpy.utils.unregister_class(MMTGenerateModBlueprint)
+

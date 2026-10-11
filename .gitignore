@@ -1,0 +1,16 @@
+__pycache__
+texcomb/libs/
+Logs/
+
+# Runtime staging/backup folder created by the addon updater engine.
+*_updater/
+
+test/
+references/
+.venv/
+tmp/
+tests/
+# texcomb core unit tests are source code and must be tracked.
+!texcomb/tests/
+TheHerta4.zip
+MIMIBlender.zip

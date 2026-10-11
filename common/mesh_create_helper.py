@@ -1,0 +1,841 @@
+import bpy
+import itertools
+import math
+import numpy
+import os
+
+from bpy_extras.io_utils import unpack_list, axis_conversion
+
+from ..utils.format_utils import Fatal, FormatUtils
+from ..utils.mesh_utils import MeshUtils
+from ..utils.mesh_mirror_utils import MeshMirrorUtils
+from ..utils.obj_utils import ObjUtils
+from ..workspace.texture_metadata_helper import TextureMetadataResolver
+from ..utils.timer_utils import TimerUtils
+from ..utils.vertexgroup_utils import VertexGroupUtils
+
+from .global_config import GlobalConfig
+from .mimi_global_properties import MIMIGlobalProperties
+from .global_config import LogicName
+from ..games.gimi.material import GIMIHighFidelityMaterial
+from ..games.gimi.outline import GIMIBodyOutline, OutlineError
+from .d3d11_element import D3D11Element
+from .raw_vertex_attributes import (
+    RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX,
+    RAW_NORMAL_W_ATTRIBUTE_PREFIX,
+    RAW_TANGENT_ATTRIBUTE_PREFIX,
+    store_raw_bytes,
+)
+
+
+class MeshCreateHelper:
+
+    @staticmethod
+    def decompress_quantized_position(data, fmt, local_bounding_box_min, local_bounding_box_max, vertex_compression_params):
+        '''
+        Restore real local-space coordinates from quantized UNORM positions.
+
+        YYSLS stores POSITION as UNORM values in [0,1] and lets the vertex
+        shader decompress them with a local bounding box:
+            position = LocalBoundingBoxMin + quantized * (Max - Min) * scale
+        Without the bounding box the raw [0,1] data is useless (the mesh looks
+        crushed), so warn loudly and keep the raw data instead.
+
+        This is YYSLS-specific behavior; other presets never carry bounding
+        box parameters and must keep their legacy raw import untouched.
+        The caller is responsible for checking the preset before calling, so
+        no preset flag needs to be passed in here.
+        '''
+        if not (FormatUtils.unorm16_pattern.match(fmt) or FormatUtils.unorm8_pattern.match(fmt)):
+            return data
+
+        if local_bounding_box_min is None or local_bounding_box_max is None \
+                or len(local_bounding_box_min) < 3 or len(local_bounding_box_max) < 3:
+            print("WARNING: quantized POSITION (" + fmt + ") but SubmeshJson has no "
+                  "LocalBoundingBoxMin/Max; imported mesh keeps raw [0,1] coordinates. "
+                  "Please re-extract this model with a newer MMT version.")
+            return data
+
+        # VertexCompressionParams[0] acts as an extra range scale (1.0 in all
+        # frames observed so far); tolerate its absence.
+        scale = 1.0
+        if vertex_compression_params is not None and len(vertex_compression_params) >= 1:
+            try:
+                scale = float(vertex_compression_params[0])
+            except (TypeError, ValueError):
+                scale = 1.0
+            if scale == 0.0:
+                scale = 1.0
+
+        bbox_min = numpy.array(local_bounding_box_min[:3], dtype=numpy.float32)
+        bbox_max = numpy.array(local_bounding_box_max[:3], dtype=numpy.float32)
+        extent = (bbox_max - bbox_min) * scale
+
+        # Copy before writing so the caller's vb_data stays untouched.
+        data = numpy.asarray(data, dtype=numpy.float32).copy()
+        for axis in range(3):
+            data[:, axis] = bbox_min[axis] + data[:, axis] * extent[axis]
+        return data
+
+    @staticmethod
+    def create_mesh_object(
+        mesh_name:str,
+        source_path:str,
+        logic_name:str,
+        gametypename:str,
+        elements:list[D3D11Element],
+        vb_data:dict,
+        ib_data,
+        vb_vertex_count:int,
+        ib_count:int,
+        ib_polygon_count:int,
+        local_bounding_box_min:list | None = None,
+        local_bounding_box_max:list | None = None,
+        vertex_compression_params:list | None = None,
+        import_collection:bpy.types.Collection | None = None,
+        wwmi_shapekey_buffers:dict | None = None,
+        shapekey_position_data:dict | None = None,
+        wwmi_vertex_offset:int = 0,
+        wwmi_vertex_count:int = -1,
+        wwmi_vg_map:dict | None = None,
+        wwmi_vg_offset:int = 0,
+    ):
+        TimerUtils.Start("Import 3Dmigoto Raw")
+        print("Importing model: " + mesh_name)
+
+        if vb_vertex_count == 0:
+            raise Fatal("VB vertex count is zero, skip import.")
+        if ib_count == 0:
+            raise Fatal("IB count is zero, skip import.")
+
+        if import_collection is None:
+            import_collection = bpy.context.scene.collection
+
+        mesh = bpy.data.meshes.new(mesh_name)
+        obj = bpy.data.objects.new(mesh.name, mesh)
+
+        MeshCreateHelper.set_import_coordinate(obj=obj)
+        MeshCreateHelper.set_import_attributes(obj=obj, gametypename=gametypename)
+        MeshCreateHelper.initialize_mesh(
+            mesh=mesh,
+            ib_data=ib_data,
+            ib_count=ib_count,
+            ib_polygon_count=ib_polygon_count,
+            logic_name=logic_name,
+            vb_vertex_count=vb_vertex_count,
+        )
+
+        blend_indices = {}
+        blend_weights = {}
+        texcoords = {}
+        shapekeys = {}
+        use_normals = False
+        normals = []
+
+        for element in elements:
+            data = vb_data[element.ElementName]
+            TimerUtils.Start(f"Process Element: {element.ElementName}")
+            print("Current Element: " + element.ElementName)
+            print("Shape before data conversion: " + str(data.shape))
+
+            # Only presets on the raw-byte round-trip channel (GIMI and SRMI)
+            # preserve these raw vertex payload bytes.
+            # Blender has no native representation for these game-specific
+            # components, but every other game preset must keep the legacy
+            # import behavior unchanged (no extra mesh attributes created).
+            if LogicName.uses_raw_vertex_attributes(logic_name):
+                if element.SemanticName == "TANGENT":
+                    store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
+                elif data.ndim > 1 and data.shape[1] >= 4:
+                    component_width = element.ByteWidth // data.shape[1]
+                    if element.SemanticName.startswith("NORMAL"):
+                        store_raw_bytes(mesh, RAW_NORMAL_W_ATTRIBUTE_PREFIX, data[:, 3:4], component_width)
+                    elif element.SemanticName.startswith("COLOR"):
+                        store_raw_bytes(mesh, RAW_COLOR_ALPHA_ATTRIBUTE_PREFIX + ":" + element.ElementName, data[:, 3:4], component_width)
+
+            # Layout-aware YYSLS extraction describes interior byte gaps as
+            # RAWDATA. Keep them out of color management and vertex groups;
+            # point attributes carry the exact bytes through topology edits.
+            if logic_name == LogicName.YYSLS and element.SemanticName == "RAWDATA":
+                store_raw_bytes(mesh, "3DMigoto:YYSLS:" + element.ElementName, data, element.ByteWidth)
+
+            data = FormatUtils.apply_format_conversion(data, element.Format)
+            print("Shape after data conversion: " + str(data.shape))
+
+            if element.SemanticName == "POSITION":
+                # YYSLS quantizes POSITION to UNORM values in the [0,1] range;
+                # restore real local coordinates with the bounding box
+                # parameters carried by the SubmeshJson. Checked at the call
+                # site so other presets never pay for the extra call.
+                if logic_name == LogicName.YYSLS:
+                    data = MeshCreateHelper.decompress_quantized_position(
+                        data,
+                        element.Format,
+                        local_bounding_box_min,
+                        local_bounding_box_max,
+                        vertex_compression_params,
+                    )
+                if len(data[0]) == 4:
+                    if not all(x[3] in (0, 1) for x in data):
+                        raise Fatal('Positions are 4D')
+
+                positions = [(x[0], x[1], x[2]) for x in data]
+                mesh.vertices.foreach_set('co', unpack_list(positions))
+            elif element.SemanticName.startswith("COLOR"):
+                # Build the (num_loops, 4) RGBA array with vectorized numpy, then write it in bulk via foreach_set.
+                # Avoids a per-element Python loop -- the vertex_colors compatibility layer is very slow in Blender 5.1.
+                num_loops = len(mesh.loops)
+                loop_vertex_indices = numpy.empty(num_loops, dtype=numpy.int32)
+                mesh.loops.foreach_get('vertex_index', loop_vertex_indices)
+
+                colors_flat = numpy.zeros((num_loops, 4), dtype=numpy.float32)
+                if data.ndim > 1:
+                    actual_channels = min(data.shape[1], 4)
+                    colors_flat[:, :actual_channels] = data[loop_vertex_indices, :actual_channels].astype(numpy.float32)
+                else:
+                    colors_flat[:, 0] = data[loop_vertex_indices].astype(numpy.float32)
+
+                # The SubmeshJson annotates which Blender color attribute type
+                # each game preset needs (BlenderColorType); old extractions
+                # without the annotation fall back to the historical rule
+                # (WWMI/EFMI -> FLOAT_COLOR, other games -> BYTE_COLOR).
+                color_type = element.get_blender_color_type(logic_name)
+                color_attr = mesh.color_attributes.new(name=element.ElementName, type=color_type, domain='CORNER')
+                color_attr.data.foreach_set('color', colors_flat.ravel())
+            elif element.SemanticName == "BLENDINDICES":
+                if data.ndim == 1:
+                    blend_indices[element.SemanticIndex] = numpy.array([(x,) for x in data])
+                else:
+                    blend_indices[element.SemanticIndex] = data
+            elif element.SemanticName == "BLENDWEIGHT" or element.SemanticName == "BLENDWEIGHTS":
+                blend_weights[element.SemanticIndex] = data
+            elif element.SemanticName.startswith("TEXCOORD"):
+                texcoords[element.SemanticIndex] = data
+            elif element.SemanticName.startswith("SHAPEKEY"):
+                shapekeys[element.SemanticIndex] = data
+            elif element.SemanticName.startswith("NORMAL"):
+                use_normals = True
+                if logic_name == LogicName.YYSLS:
+                    print("YYSLS normal processing")
+                    normals = [(x[0] * 2 - 1, x[1] * 2 - 1, x[2] * 2 - 1) for x in data]
+                elif logic_name == LogicName.EFMI and element.Format == "R32_UINT":
+                    print("Endfield packed normals processing (Endfield Packed Normals) - using TBNCodec")
+                    raw = data
+                    if raw.dtype != numpy.uint32:
+                        raw = raw.view(numpy.uint32)
+                    if raw.ndim > 1:
+                        raw = raw[:, 0]
+
+                    from ..utils.tbn_codec import TBNCodec
+                    normals = TBNCodec.decode_octahedral_r32_uint(raw).tolist()
+                    print("Endfield packed normals processing completed")
+                else:
+                    normals = [(x[0], x[1], x[2]) for x in data]
+            elif element.SemanticName == "ENCODEDDATA":
+                if logic_name == LogicName.EFMI:
+                    print("Endfield ENCODEDDATA processing - decoding TBN data with TBNCodec")
+                    use_normals = True
+
+                    raw = data
+                    if raw.dtype != numpy.uint32:
+                        raw = raw.view(numpy.uint32)
+                    if raw.ndim > 1:
+                        raw = raw[:, 0]
+
+                    from ..utils.tbn_codec import TBNCodec
+                    normals = TBNCodec.decode_octahedral_r32_uint(raw).tolist()
+                    print("Endfield ENCODEDDATA processing completed")
+                else:
+                    print(f"Warning: ENCODEDDATA element is only supported in EFMI format, current game type: {logic_name}")
+            elif element.SemanticName == "TANGENT":
+                pass
+            elif element.SemanticName == "BINORMAL":
+                pass
+            elif element.SemanticName == "BITANGENT":
+                pass
+            elif element.SemanticName == "RAWDATA":
+                # Reserved-region bytes in EFMI reverse-engineered products (stride gaps not declared in the
+                # input layout, flagged by EFMI-Tools fill_missing_semantics; officially named RAWDATA on
+                # the extraction side): read to keep stride alignment and vertex count consistent.
+                # YYSLS has already stored these bytes above; other presets retain
+                # their historical behavior without a mapped Blender attribute.
+                pass
+            else:
+                raise Fatal("Unknown ElementName: " + element.ElementName)
+            
+            TimerUtils.End(f"Process Element: {element.ElementName}")
+
+        if len(blend_weights) == 0 and len(blend_indices) != 0:
+            print("BLENDWEIGHTS is empty while BLENDINDICES data exists; special case: padding BLENDWEIGHTS with 1,0,0,0 by default")
+            for semantic_index, blendindices_tuple in blend_indices.items():
+                new_list = []
+                for _indices in blendindices_tuple:
+                    new_list.append((1.0, 0, 0, 0))
+                blend_weights[semantic_index] = new_list
+
+        MeshCreateHelper.import_uv_layers(mesh, obj, texcoords)
+
+        print("Importing vertex groups")
+        # Merged mode: remap local blend index to global bone ID with VGMap
+        if wwmi_vg_map:
+            import types as _types
+            _vg_component = _types.SimpleNamespace(
+                vg_map={str(k): int(v) for k, v in wwmi_vg_map.items()},
+                vg_offset=wwmi_vg_offset,
+            )
+        else:
+            _vg_component = None
+        # A bone may occur in both EXT8 sets. Accumulate those contributions
+        # instead of replacing the first set's weight with the second set's.
+        # Other presets and ordinary four-weight YYSLS retain legacy behavior.
+        MeshCreateHelper.import_vertex_groups(
+            mesh, obj, blend_indices, blend_weights, _vg_component,
+            merge_duplicate_weights=logic_name == LogicName.YYSLS and len(blend_weights) > 1,
+        )
+        print("Vertex group import complete")
+
+        MeshCreateHelper.import_shapekeys(mesh, obj, shapekeys)
+
+        if shapekey_position_data:
+            MeshCreateHelper.import_shapekey_positions(mesh, obj, shapekey_position_data)
+
+        if wwmi_shapekey_buffers is not None:
+            MeshCreateHelper.import_shapekeys_wwmi(mesh, obj, wwmi_shapekey_buffers, wwmi_vertex_offset, wwmi_vertex_count)
+
+        mesh.validate(verbose=False, clean_customdata=False)
+        mesh.update()
+        if use_normals:
+            MeshUtils.set_import_normals_v2(mesh=mesh, normals=normals)
+
+        MeshCreateHelper.create_bsdf_with_diffuse_linked(
+            obj=obj,
+            mesh_name=mesh_name,
+            directory=os.path.dirname(source_path),
+            logic_name=logic_name,
+        )
+
+        if logic_name == LogicName.WWMI or logic_name == LogicName.NTEMI or logic_name == LogicName.SnowBreak:
+            obj.rotation_euler[0] = 0
+            obj.rotation_euler[1] = 0
+            obj.rotation_euler[2] = math.radians(180)
+            obj.scale = (0.01, 0.01, 0.01)
+
+        print("Model import completed: " + logic_name)
+        if LogicName.is_zzmi_family(logic_name) or logic_name == LogicName.Naraka:
+            obj.rotation_euler[0] = 0
+            obj.rotation_euler[1] = 0
+            obj.rotation_euler[2] = 0
+
+        if logic_name == LogicName.EFMI:
+            obj.rotation_euler[0] = 0
+            obj.rotation_euler[1] = 0
+            obj.rotation_euler[2] = 0
+
+        if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
+            if MIMIGlobalProperties.import_skip_empty_vertex_groups():
+                VertexGroupUtils.remove_unused_vertex_groups(obj)
+
+        import_collection.objects.link(obj)
+        ObjUtils.select_obj(obj)
+
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+        if MIMIGlobalProperties.use_mirror_workflow():
+            # The non-mirrored view is a real X reflection, not a negative
+            # object scale.  The helper also stores a marker for export so the
+            # original game orientation can be restored on a temporary copy.
+            print(f"Non-mirror workflow: baking a perfect X mirror into {obj.name}")
+            MeshMirrorUtils.apply_import_mirror(
+                obj=obj,
+                axis="X",
+                mirror_uv="NONE",
+                swap_side_groups=True,
+            )
+
+        bpy.context.view_layer.update()
+        if not bpy.app.background:
+            try:
+                if bpy.ops.wm.redraw_timer.poll():
+                    bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
+            except RuntimeError:
+                pass
+
+        TimerUtils.End("Import 3Dmigoto Raw")
+        return obj
+
+    @staticmethod
+    def set_import_attributes(obj, gametypename:str):
+        obj["3DMigoto:RecalculateTANGENT"] = False
+        obj["3DMigoto:RecalculateCOLOR"] = False
+        obj['3DMigoto:GameTypeName'] = gametypename
+
+    @staticmethod
+    def set_import_coordinate(obj):
+        obj.matrix_world = axis_conversion(from_forward='-Z', from_up='Y').to_4x4()
+
+    @staticmethod
+    def initialize_mesh(mesh, ib_data, ib_count:int, ib_polygon_count:int, logic_name:str, vb_vertex_count:int):
+        if logic_name == LogicName.WWMI or logic_name == LogicName.NTEMI or logic_name == LogicName.YYSLS or logic_name == LogicName.SnowBreak:
+            flipped_indices = []
+            for i in range(0, len(ib_data), 3):
+                triangle = ib_data[i:i + 3]
+                flipped_indices.extend(triangle[::-1])
+            ib_data = flipped_indices
+
+        mesh.loops.add(ib_count)
+        mesh.polygons.add(ib_polygon_count)
+        mesh.loops.foreach_set('vertex_index', ib_data)
+        mesh.polygons.foreach_set('loop_start', [x * 3 for x in range(ib_polygon_count)])
+        mesh.polygons.foreach_set('loop_total', [3] * ib_polygon_count)
+        mesh.vertices.add(vb_vertex_count)
+        mesh.update()
+
+    @staticmethod
+    def import_uv_layers(mesh, obj, texcoords):
+        loops = mesh.loops
+        vertex_indices = numpy.array([loop.vertex_index for loop in loops], dtype=numpy.int32)
+
+        for texcoord, data in sorted(texcoords.items()):
+            data_np = numpy.array(data, dtype=numpy.float32)
+            dim = data_np.shape[1]
+
+            if dim == 4:
+                components_list = ('xy', 'zw')
+            elif dim == 2:
+                components_list = ('xy',)
+            else:
+                raise Fatal(f'Unhandled TEXCOORD dimension: {dim}')
+
+            cmap = {'x': 0, 'y': 1, 'z': 2, 'w': 3}
+
+            for components in components_list:
+                uv_name = f'TEXCOORD{texcoord if texcoord else ""}.{components}'
+                mesh.uv_layers.new(name=uv_name)
+                blender_uvs = mesh.uv_layers[uv_name]
+
+                c0 = cmap[components[0]]
+                c1 = cmap[components[1]]
+
+                uvs = numpy.empty((len(data_np), 2), dtype=numpy.float32)
+                uvs[:, 0] = data_np[:, c0]
+                uvs[:, 1] = 1.0 - data_np[:, c1]
+
+                max_index = numpy.max(vertex_indices) if len(vertex_indices) > 0 else 0
+                if max_index >= len(uvs):
+                    print(f"Warning: UV data too short. Max index: {max_index}, UV data len: {len(uvs)}.Padding with zeros.")
+                    padding_length = max_index - len(uvs) + 1
+                    padding = numpy.zeros((padding_length, 2), dtype=numpy.float32)
+                    uvs = numpy.vstack((uvs, padding))
+
+                uv_array = uvs[vertex_indices].ravel()
+                blender_uvs.data.foreach_set('uv', uv_array)
+
+    @staticmethod
+    def import_vertex_groups(mesh, obj, blend_indices, blend_weights, component, merge_duplicate_weights=False):
+        for semantic_index, bone_indices_list in blend_indices.items():
+            arr = numpy.asarray(bone_indices_list)
+            if arr.dtype.kind == 'f':
+                arr = numpy.rint(arr).astype(numpy.int64)
+            else:
+                arr = arr.astype(numpy.int64, copy=False)
+
+            arr[arr == 65535] = -1
+            blend_indices[semantic_index] = arr
+
+        assert len(blend_indices) == len(blend_weights)
+        if blend_indices:
+            max_valid_group_id = -1
+            for bone_indices_array in blend_indices.values():
+                flattened_indices = numpy.asarray(bone_indices_array, dtype=numpy.int64).ravel()
+                non_negative_indices = flattened_indices[flattened_indices >= 0]
+                if non_negative_indices.size > 0:
+                    max_valid_group_id = max(max_valid_group_id, int(non_negative_indices.max()))
+
+            if max_valid_group_id < 0:
+                return
+
+            if component is None:
+                num_vertex_groups = max_valid_group_id + 1
+            else:
+                mapped_group_ids = {int(group_id) for group_id in component.vg_map.values()}
+                vg_offset = getattr(component, 'vg_offset', 0)
+                max_global = max(mapped_group_ids) if mapped_group_ids else -1
+                max_global = max(max_global, vg_offset + max_valid_group_id)
+                if max_global < 0:
+                    return
+                num_vertex_groups = max_global + 1
+
+            print("num_vertex_groups: " + str(num_vertex_groups))
+
+            if num_vertex_groups > 10000:
+                raise Fatal("Under the current imported data type " + obj.get('3DMigoto:GameTypeName', "") + ", the BLENDINDICES vertex group count is: " + str(num_vertex_groups) + ". This is almost certainly not a valid situation; please switch to another data type and re-import")
+
+            vertex_group_by_id = {}
+            for i in range(num_vertex_groups):
+                vertex_group_by_id[i] = obj.vertex_groups.new(name=str(i))
+
+            for vertex in mesh.vertices:
+                for semantic_index in sorted(blend_indices.keys()):
+                    for i, w in zip(blend_indices[semantic_index][vertex.index], blend_weights[semantic_index][vertex.index]):
+                        if i < 0 or w == 0.0:
+                            continue
+
+                        if component is None:
+                            target_group_id = int(i)
+                        else:
+                            mapped_group_id = component.vg_map.get(str(int(i)))
+                            if mapped_group_id is None:
+                                target_group_id = component.vg_offset + int(i)
+                            else:
+                                target_group_id = int(mapped_group_id)
+
+                        if target_group_id < 0:
+                            continue
+
+                        vertex_group = vertex_group_by_id.get(target_group_id)
+                        if vertex_group is None:
+                            vertex_group = obj.vertex_groups.get(str(target_group_id))
+                            if vertex_group is None:
+                                vertex_group = obj.vertex_groups.new(name=str(target_group_id))
+                            vertex_group_by_id[target_group_id] = vertex_group
+
+                        vertex_group.add((vertex.index,), float(w), 'ADD' if merge_duplicate_weights else 'REPLACE')
+
+    @staticmethod
+    def import_shapekeys(mesh, obj, shapekeys):
+        if not shapekeys:
+            return
+
+        basis = obj.shape_key_add(name='Basis')
+        basis.interpolation = 'KEY_LINEAR'
+        obj.data.shape_keys.use_relative = True
+        try:
+            basis.value = 0.0
+        except Exception:
+            pass
+
+        vert_count = len(obj.data.vertices)
+        basis_co = numpy.empty(vert_count * 3, dtype=numpy.float32)
+        basis.data.foreach_get('co', basis_co)
+        basis_co = basis_co.reshape(-1, 3)
+
+        for sk_id, offsets in shapekeys.items():
+            new_sk = obj.shape_key_add(name=f'Deform {sk_id}')
+            new_sk.interpolation = 'KEY_LINEAR'
+            try:
+                new_sk.value = 0.0
+            except Exception:
+                pass
+
+            offset_arr = numpy.array(offsets, dtype=numpy.float32).reshape(-1, 3)
+            new_co = basis_co + offset_arr
+            new_sk.data.foreach_set('co', new_co.ravel())
+            try:
+                new_sk.value = 0.0
+            except Exception:
+                pass
+            del new_sk
+
+        del basis_co, offset_arr, new_co
+
+    @staticmethod
+    def import_shapekey_positions(mesh, obj, shapekey_position_data: dict):
+        '''
+        Import named shape keys of the ShapeKeyPositionBufferList form.
+
+        Each entry stores absolute vertex coordinates in the same coordinate space as the base
+        POSITION (layout identical to the Position category buffer), so they are written directly
+        as relative shape key co values, exactly like Basis is written.
+        '''
+        if not shapekey_position_data:
+            return
+
+        if obj.data.shape_keys is None:
+            basis = obj.shape_key_add(name='Basis')
+            basis.interpolation = 'KEY_LINEAR'
+            obj.data.shape_keys.use_relative = True
+            try:
+                basis.value = 0.0
+            except Exception:
+                pass
+
+        vert_count = len(obj.data.vertices)
+
+        for shapekey_name, position_data in shapekey_position_data.items():
+            co = numpy.asarray(position_data, dtype=numpy.float32)
+            if co.ndim == 1:
+                co = co.reshape(-1, 3)
+            elif co.ndim == 2 and co.shape[1] > 3:
+                # Same as the POSITION element, keep only the xyz components.
+                co = co[:, :3]
+
+            if co.ndim != 2 or co.shape[1] != 3 or co.shape[0] != vert_count:
+                print(
+                    "ShapeKeyPosition import: shape key " + str(shapekey_name)
+                    + " vertex data shape " + str(co.shape) + " does not match mesh vertex count " + str(vert_count)
+                    + ", skipped"
+                )
+                continue
+
+            new_sk = obj.shape_key_add(name=shapekey_name if shapekey_name else "ShapeKey")
+            new_sk.interpolation = 'KEY_LINEAR'
+            new_sk.data.foreach_set('co', numpy.ascontiguousarray(co).ravel())
+            try:
+                new_sk.value = 0.0
+            except Exception:
+                pass
+            del new_sk
+
+        print("ShapeKeyPosition import completed, imported " + str(len(shapekey_position_data)) + " named shape keys")
+
+    @staticmethod
+    def import_shapekeys_wwmi(mesh, obj, shapekey_buffers: dict, vertex_offset: int, vertex_count: int):
+        sk_offset_raw = shapekey_buffers.get("ShapeKeyOffset")
+        sk_vertex_id_raw = shapekey_buffers.get("ShapeKeyVertexId")
+        sk_vertex_offset_raw = shapekey_buffers.get("ShapeKeyVertexOffset")
+
+        if sk_offset_raw is None or sk_vertex_id_raw is None or sk_vertex_offset_raw is None:
+            return
+
+        # Buffer layout is explicit in new MMT outputs. Legacy compact files
+        # consist of complete 128-offset blocks; larger non-block CBs are raw.
+        # Never use runtime batch offsets as component mesh vertex offsets.
+        # Reject fractional binary entries before NumPy creates typed views.
+        # This produces a useful WWMI error instead of a generic reshape error.
+        # Half-float padding is part of every complete six-value sparse delta.
+        if sk_offset_raw.nbytes % 4 or sk_vertex_id_raw.nbytes % 4 or sk_vertex_offset_raw.nbytes % 12:
+            raise Fatal("WWMI shape key buffers contain incomplete binary entries.")
+        all_offsets = sk_offset_raw.view(numpy.uint32)
+        metadata = shapekey_buffers.get("metadata", {})
+        layout = metadata.get("buffer_layout", "")
+        raw_cb = layout == "raw_cb" or (not layout and len(all_offsets) % 128 != 0)
+        if len(all_offsets) < 128:
+            raise Fatal("WWMI ShapeKeyOffset buffer is shorter than 128 offsets.")
+        if raw_cb and len(all_offsets) < 262:
+            raise Fatal("WWMI raw CB is missing sparse entry offset [261].")
+        if not raw_cb and len(all_offsets) % 128:
+            raise Fatal("WWMI compact offsets contain an incomplete batch.")
+
+        # Metadata carries cumulative IDs for raw extraction batches. Legacy
+        # Mod buffers use fixed 127-key blocks and cumulative sparse entries.
+        # The two offsets are intentionally kept separate throughout import.
+        metadata_batches = metadata.get("batches", [])
+        batches = []
+        entry_base = 0
+        key_base = 0
+        block_count = 1 if raw_cb else len(all_offsets) // 128
+        for batch_id in range(block_count):
+            offsets = all_offsets[batch_id * 128:(batch_id + 1) * 128]
+            if int(offsets[0]) != 0 or numpy.any(offsets[1:] < offsets[:-1]):
+                raise Fatal("WWMI offsets must be monotonic and local to each batch.")
+            batch = metadata_batches[batch_id] if batch_id < len(metadata_batches) else {}
+            active_slots = numpy.flatnonzero(offsets[:-1] < offsets[-1])
+            key_count = int(active_slots[-1]) + 1 if len(active_slots) else 0
+            sparse_base = int(all_offsets[261]) if raw_cb else int(batch.get("buffer_vertex_offset", entry_base))
+            id_base = int(batch.get("shapekey_offset", key_base))
+            batches.append((offsets, sparse_base, id_base))
+            entry_base += int(offsets[-1])
+            key_base += int(batch.get("shapekey_count", key_count)) if metadata_batches else 127
+
+        # Validate the entire sparse range first, rather than silently dropping
+        # out-of-bounds entries and producing a plausible but incomplete mesh.
+        # Each entry contains six half floats; only XYZ is a position delta.
+        vertex_id_buffer = sk_vertex_id_raw.view(numpy.uint32)
+        vertex_offset_buffer = sk_vertex_offset_raw.view(numpy.float16)
+        for offsets, sparse_base, id_base in batches:
+            end = sparse_base + int(offsets[-1])
+            if end > len(vertex_id_buffer) or end * 6 > len(vertex_offset_buffer):
+                raise Fatal("WWMI shape key batch extends beyond its sparse buffers.")
+        if not any(int(offsets[-1]) for offsets, _, _ in batches):
+            return
+
+        if obj.data.shape_keys is None:
+            basis = obj.shape_key_add(name='Basis')
+            basis.interpolation = 'KEY_LINEAR'
+            obj.data.shape_keys.use_relative = True
+            try:
+                basis.value = 0.0
+            except Exception:
+                pass
+        else:
+            basis = obj.data.shape_keys.key_blocks.get('Basis') or obj.data.shape_keys.key_blocks[0]
+
+        vert_count = len(obj.data.vertices)
+        basis_co = numpy.empty(vert_count * 3, dtype=numpy.float32)
+        basis.data.foreach_get('co', basis_co)
+        basis_co = basis_co.reshape(-1, 3)
+
+        # A component window is relative to the whole mesh, whereas sparse_base
+        # selects entries in shared shape-key buffers. Combining them was the
+        # cause of lost later-batch keys, especially in segmented imports.
+        window_count = vert_count if vertex_count < 0 else min(vertex_count, vert_count)
+        for offsets, sparse_base, id_base in batches:
+            for slot in range(127):
+                first_entry = int(offsets[slot])
+                last_entry = int(offsets[slot + 1])
+                if first_entry == last_entry:
+                    # Empty middle slots retain their IDs but need no Blender key.
+                    # Subsequent populated slots must still be scanned normally.
+                    continue
+                entries = numpy.arange(sparse_base + first_entry, sparse_base + last_entry, dtype=numpy.int64)
+                local_vids = vertex_id_buffer[entries].astype(numpy.int64) - vertex_offset
+                local_mask = (local_vids >= 0) & (local_vids < window_count)
+                entries = entries[local_mask]
+                local_vids = local_vids[local_mask]
+                if len(entries) == 0:
+                    continue
+
+                # Start each key from Basis, never from the previously imported key.
+                # Repeated vertex IDs retain the existing additive delta behavior.
+                new_co = basis_co.copy()
+                deltas = vertex_offset_buffer.reshape(-1, 6)[entries, :3].astype(numpy.float32)
+                numpy.add.at(new_co, local_vids, deltas)
+                sk = obj.shape_key_add(name=f'Deform {id_base + slot}')
+                sk.interpolation = 'KEY_LINEAR'
+                sk.data.foreach_set('co', new_co.ravel())
+                try:
+                    sk.value = 0.0
+                except Exception:
+                    pass
+
+        print(f"WWMI ShapeKey import completed")
+
+    @staticmethod
+    def get_import_texture_paths(mesh_name:str, directory:str):
+        if "." in mesh_name:
+            mesh_name_split = str(mesh_name).split(".")[0].split("-")
+        else:
+            mesh_name_split = str(mesh_name).split("-")
+
+        if len(mesh_name_split) < 2:
+            return None, None
+
+        texture_prefix = mesh_name_split[0] + "-" + mesh_name_split[1] + "-"
+
+        texture_path = MeshCreateHelper._find_gimi_texture(texture_prefix, "-DiffuseMap", directory)
+        normal_path = MeshCreateHelper._find_gimi_texture(texture_prefix, "-NormalMap", directory)
+
+        return texture_path, normal_path
+
+    @staticmethod
+    def get_gimi_lightmap_path(mesh_name: str, directory: str):
+        if "." in mesh_name:
+            mesh_name_split = str(mesh_name).split(".")[0].split("-")
+        else:
+            mesh_name_split = str(mesh_name).split("-")
+        if len(mesh_name_split) < 2:
+            return None
+        texture_prefix = mesh_name_split[0] + "-" + mesh_name_split[1] + "-"
+        return MeshCreateHelper._find_gimi_texture(texture_prefix, "-LightMap", directory)
+
+    @staticmethod
+    def _find_gimi_texture(texture_prefix: str, texture_stem: str, directory: str):
+        """Resolve GIMI maps across the formats emitted by different dumpers."""
+        # DDS/PNG/TGA preserve the alpha masks consumed by the GIMI shader.
+        # JPG remains a compatibility fallback for ordinary material imports.
+        for extension in (".dds", ".png", ".tga", ".jpg", ".jpeg"):
+            path = TextureMetadataResolver.find_texture(
+                texture_prefix, texture_stem + extension, directory
+            )
+            if path is not None:
+                return path
+        return None
+
+    @staticmethod
+    def get_material_output_node(nodes):
+        output = nodes.get("Material Output")
+        if output is None:
+            output = next((node for node in nodes if node.bl_idname == 'ShaderNodeOutputMaterial'), None)
+        if output is None:
+            output = nodes.new(type='ShaderNodeOutputMaterial')
+        return output
+
+    @staticmethod
+    def get_principled_bsdf_node(material):
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
+
+        bsdf = nodes.get("Principled BSDF")
+        if not bsdf:
+            bsdf = next((node for node in nodes if node.bl_idname == 'ShaderNodeBsdfPrincipled'), None)
+        if not bsdf:
+            bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+            bsdf.location = (0, 0)
+            output = MeshCreateHelper.get_material_output_node(nodes)
+            if not any(link.from_node == bsdf and link.to_node == output for link in links):
+                links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+
+        return bsdf
+
+    @staticmethod
+    def apply_diffuse_texture(node_tree, bsdf, texture_path:str):
+        tex_image = node_tree.nodes.new('ShaderNodeTexImage')
+        tex_image.image = bpy.data.images.load(texture_path)
+        # Game diffuse maps pack data (emission / material masks) into the
+        # alpha channel: CHANNEL_PACKED keeps that data readable instead of
+        # letting Blender treat it as transparency. The Alpha output is left
+        # unlinked on purpose - packed data is not coverage.
+        tex_image.image.alpha_mode = "CHANNEL_PACKED"
+        tex_image.location.x = bsdf.location.x - 400
+        tex_image.location.y = bsdf.location.y
+        node_tree.links.new(bsdf.inputs['Base Color'], tex_image.outputs['Color'])
+        return tex_image
+
+    @staticmethod
+    def assign_material(obj, material):
+        if obj.data.materials:
+            obj.data.materials[0] = material
+        else:
+            obj.data.materials.append(material)
+
+    @staticmethod
+    def create_bsdf_with_diffuse_linked(obj, mesh_name:str, directory:str, logic_name:str | None = None):
+        material_name = f"{mesh_name}_Material"
+        if logic_name is None:
+            logic_name = GlobalConfig.logic_name
+        texture_path, normal_path = MeshCreateHelper.get_import_texture_paths(mesh_name, directory)
+
+        high_fidelity_gimi = (
+            MIMIGlobalProperties.gimi_high_fidelity_rendering()
+            and GIMIHighFidelityMaterial.is_genshin_workspace(logic_name=logic_name)
+        )
+        if texture_path is None and not high_fidelity_gimi:
+            return
+
+        material = bpy.data.materials.new(name=material_name)
+        material.use_nodes = True
+
+        if high_fidelity_gimi:
+            try:
+                GIMIHighFidelityMaterial.build_character(
+                    material=material,
+                    diffuse_path=texture_path,
+                    normal_path=normal_path,
+                    lightmap_path=MeshCreateHelper.get_gimi_lightmap_path(mesh_name, directory),
+                    directory=directory,
+                )
+                MeshCreateHelper.assign_material(obj, material)
+                # The current high-fidelity builder only targets Body/Clothes.
+                # Hash-named GIMI texture dumps carry no reliable Body token.
+                try:
+                    GIMIBodyOutline.ensure(
+                        obj,
+                        enabled=MIMIGlobalProperties.gimi_body_outline_enabled(),
+                        width_ratio=MIMIGlobalProperties.gimi_body_outline_width_ratio(),
+                    )
+                except OutlineError as error:
+                    print(f"[GIMI Outline] WARNING: {obj.name}: {error}")
+                return
+            except Exception as error:
+                # High-fidelity mode must never silently become a Principled
+                # material.  Preserve the error for the importer to report.
+                raise Fatal(f"GIMI high-fidelity node build failed: {error}") from error
+
+        bsdf = MeshCreateHelper.get_principled_bsdf_node(material)
+        MeshCreateHelper.apply_diffuse_texture(
+            node_tree=material.node_tree,
+            bsdf=bsdf,
+            texture_path=texture_path,
+        )
+
+        MeshCreateHelper.assign_material(obj, material)

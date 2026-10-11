@@ -1,0 +1,75 @@
+"""Image handling utilities for Material Combiner.
+
+This module provides functions for managing images associated with
+materials, including handling packed and unpacked images.
+"""
+
+import os
+from typing import Optional
+
+import bpy
+
+from ...i18n.i18n import tr
+
+
+def get_packed_file(
+    image: Optional[bpy.types.Image],
+) -> Optional[bpy.types.PackedFile]:
+    """Get packed file data from an image, packing if necessary.
+
+    If the image exists but is not packed, this function attempts to pack it.
+
+    Args:
+        image: Blender image to get packed data from.
+
+    Returns:
+        The image's packed file data or None if unavailable.
+    """
+    if image and not image.packed_file and _get_image_path(image):
+        try:
+            image.pack()
+        except RuntimeError:
+            return None
+    return image.packed_file if image and image.packed_file else None
+
+
+def get_image_pack_issue(image: Optional[bpy.types.Image]) -> Optional[str]:
+    """Return why an image cannot provide packed pixel data, if known."""
+    if not image:
+        return tr("No main texture connected to the current material output was found.")
+
+    if image.packed_file:
+        return None
+
+    filepath = getattr(image, "filepath", "")
+    if not filepath:
+        return tr("The texture has no file path; it may be an unsaved or runtime-generated image.")
+
+    path = os.path.abspath(bpy.path.abspath(filepath))
+    if path.lower().endswith((".spa", ".sph")):
+        return tr("This texture format is excluded from packing: {name}").format(name=os.path.basename(path))
+
+    if not os.path.isfile(path):
+        return tr("The texture file does not exist or its path is not accessible: {path}").format(path=path)
+
+    return None
+
+
+def _get_image_path(img: Optional[bpy.types.Image]) -> Optional[str]:
+    """Get the absolute file path for an image.
+
+    Resolves the absolute path and filters out unsupported special formats.
+
+    Args:
+        img: Blender image to get the path for.
+
+    Returns:
+        Absolute file path if valid, None otherwise.
+    """
+    if not img:
+        return None
+
+    path = os.path.abspath(bpy.path.abspath(img.filepath))
+    if os.path.isfile(path) and not path.lower().endswith((".spa", ".sph")):
+        return path
+    return None

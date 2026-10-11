@@ -1,0 +1,106 @@
+# IDEs and Editors
+.idea/
+.cursor/
+.cursorignore
+.spyderproject/
+.spyproject/
+.ropeproject/
+
+# Python Bytecode and Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.ruff_cache/
+.mypy_cache/
+.cache/
+
+# C Extensions
+*.so
+
+# Distribution / Packaging
+.Python/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer Logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit Test / Coverage Reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django Specific
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask Specific
+instance/
+.webassets-cache
+
+# Scrapy Specific
+.scrapy
+
+# Sphinx Documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# pyenv
+.python-version
+
+# Celery Beat Schedule File
+celerybeat-schedule
+
+# SageMath Parsed Files
+*.sage.py
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.env
+
+# mkdocs Documentation
+/site/
+
+# Material Combiner Addon Specific
+material-combiner-addon_updater/

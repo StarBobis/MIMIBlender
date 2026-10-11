@@ -1,0 +1,435 @@
+"""
+WWMI shape key INI sections.
+
+Everything related to the WWMI shape key pipeline lives here:
+
+- the shape key entries / batches derived from the blueprint and the
+  WWMI metadata,
+- the texture override + resource sections driving the WWMI shape key
+  compute shaders,
+- the optional custom apply-shapekeys command lists (with the HLSL
+  shaders copied next to the generated INI).
+
+Every resource and command list that belongs to one draw range carries the
+DrawIB as a suffix, because all INI files of a mod share one 3Dmigoto
+namespace. See ``names.py``.
+"""
+
+import os
+import shutil
+
+from ...common.global_config import GlobalConfig
+from ...common.mimi_global_properties import MIMIGlobalProperties
+from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
+from ...common.m_ini_helper import M_IniHelper
+from ...blueprint.blueprint_export_helper import BlueprintExportHelper
+from ...utils.format_utils import Fatal
+from .model import DrawIBModelWWMI
+from .names import scoped_global, scoped_name, scoped_section
+
+
+def get_safe_shapekey_name(shapekey_name: str) -> str:
+    """Delegate to the model: resource names must be INI-safe."""
+    return DrawIBModelWWMI.get_safe_shapekey_name(shapekey_name)
+
+
+def get_wwmi_shapekey_entries(draw_ib_model: DrawIBModelWWMI | None = None):
+    """Return (shapekey_name, safe_name, M_Key) entries for this export.
+
+    When a DrawIB model is given, only the shape keys that actually have
+    both a position and a vector buffer on that DrawIB are kept.
+    """
+    shapekeyname_mkey_dict = BlueprintExportHelper.get_current_shapekeyname_mkey_dict()
+    if draw_ib_model is not None:
+        available_names = (
+            set(draw_ib_model.obj_buffer_model_wwmi.shapekey_position_buffer_dict.keys())
+            & set(draw_ib_model.obj_buffer_model_wwmi.shapekey_vector_buffer_dict.keys())
+        )
+        shapekeyname_mkey_dict = {
+            shapekey_name: m_key
+            for shapekey_name, m_key in shapekeyname_mkey_dict.items()
+            if shapekey_name in available_names
+        }
+    return [
+        (shapekey_name, get_safe_shapekey_name(shapekey_name), m_key)
+        for shapekey_name, m_key in shapekeyname_mkey_dict.items()
+    ]
+
+
+def copy_wwmi_shapekey_shaders_to_mod_folder():
+    # Flat layout: shaders are copied next to the generated INI, no res subfolder
+    mod_path = GlobalConfig.path_generate_mod_folder()
+    os.makedirs(mod_path, exist_ok=True)
+
+    # This file lives in games/wwmi/, so the addon root is three levels up.
+    addon_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for filename in ("ShapesWWMIPosition.hlsl", "ShapesWWMIVector.hlsl"):
+        src = os.path.join(addon_root, "resources", filename)
+        shutil.copy2(src, os.path.join(mod_path, filename))
+
+
+def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
+    """Return the 128-offset shape key batches of this DrawIB.
+
+    Every batch carries the WWMI metadata (checksum, original vertex offset,
+    dispatch size) plus the accumulated custom vertex offset used by the mod.
+    """
+    shapekey_offsets = draw_ib_model.obj_buffer_model_wwmi.shapekey_offsets
+    if not shapekey_offsets:
+        return []
+
+    # A partial block cannot be interpreted by the runtime batch loader.
+    # Stop export explicitly instead of silently removing all setup sections.
+    # The error keeps the user from shipping an apparently successful bad Mod.
+    if len(shapekey_offsets) % 128:
+        raise Fatal("WWMI shape key offsets contain an incomplete batch.")
+    batch_count = len(shapekey_offsets) // 128
+    metadata_batches = list(getattr(draw_ib_model.wwmi_info.shapekeys, "batches", []) or [])
+    if not metadata_batches and getattr(draw_ib_model.wwmi_info.shapekeys, "checksum", 0):
+        metadata_batches = [{
+            "vertex_offset": 0,
+            "dispatch_y": draw_ib_model.wwmi_info.shapekeys.dispatch_y,
+            "checksum": draw_ib_model.wwmi_info.shapekeys.checksum,
+        }]
+    # Runtime checksum and original dispatch size cannot be recovered from
+    # compact Mod offsets, whose entries may have been edited or deduplicated.
+    # Re-extraction or a reverse output carrying original INI metadata is needed.
+    if len(metadata_batches) < batch_count:
+        raise Fatal("WWMI shape key batch metadata is missing. Re-extract with updated MMT before exporting.")
+
+    batches = []
+    custom_vertex_offset = 0
+    for batch_id in range(batch_count):
+        batch_offsets = shapekey_offsets[batch_id * 128:(batch_id + 1) * 128]
+        custom_vertex_count = batch_offsets[-1] if batch_offsets else 0
+        metadata = metadata_batches[batch_id]
+        # A zero checksum may legitimately occur with empty early key slots.
+        # New metadata records completeness; legacy metadata uses Dispatch Y.
+        # Preserve unsigned checksum values exactly as recorded by the game.
+        if metadata.get("runtime_metadata_complete") is False or int(metadata.get("dispatch_y", 0)) <= 0:
+            raise Fatal("WWMI original shape key runtime metadata is incomplete. Re-extract with updated MMT.")
+        batches.append({
+            "checksum": int(metadata.get("checksum", 0)),
+            "original_vertex_offset": int(metadata.get("vertex_offset", 0)),
+            "dispatch_y": int(metadata.get("dispatch_y", 0)),
+            "custom_vertex_offset": custom_vertex_offset,
+            "custom_vertex_count": custom_vertex_count,
+        })
+        custom_vertex_offset += custom_vertex_count
+    return batches
+
+
+def add_texture_override_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+    """Texture overrides + command lists driving the WWMI shape key loader."""
+    draw_ib = draw_ib_model.draw_ib
+    shapekey_batches = get_wwmi_shapekey_batches(draw_ib_model)
+    if not shapekey_batches:
+        return
+
+    # Without original hashes the runtime callbacks are never hooked at all.
+    # Compact buffer filenames do not identify the game's offset/scale resources.
+    # Refuse this partial export instead of producing unreferenced setup sections.
+    if not draw_ib_model.wwmi_info.shapekeys.offsets_hash or not draw_ib_model.wwmi_info.shapekeys.scale_hash:
+        raise Fatal("WWMI original shape key offset/scale hashes are missing. Re-extract or reverse the original INI with updated MMT.")
+    texture_override_shapekeys_section = M_IniSection(M_SectionType.TextureOverrideShapeKeys)
+
+    shapekey_offsets_hash = draw_ib_model.wwmi_info.shapekeys.offsets_hash
+    if shapekey_offsets_hash != "":
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyOffsets", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
+        texture_override_shapekeys_section.append("match_priority = 0")
+        texture_override_shapekeys_section.append("override_byte_stride = 24")
+        texture_override_shapekeys_section.append(
+            "override_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib)
+        )
+        texture_override_shapekeys_section.new_line()
+
+    shapekey_scale_hash = draw_ib_model.wwmi_info.shapekeys.scale_hash
+    if shapekey_scale_hash != "":
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyScale", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_scale_hash)
+        texture_override_shapekeys_section.append("match_priority = 0")
+        texture_override_shapekeys_section.append("override_byte_stride = 4")
+        texture_override_shapekeys_section.append(
+            "override_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib)
+        )
+        texture_override_shapekeys_section.new_line()
+
+    texture_override_shapekeys_section.append(scoped_section("CommandListSetupShapeKeysBatch", draw_ib))
+    for batch_id, batch in enumerate(shapekey_batches):
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_checksum_batch" + str(batch_id) + " = " + str(batch["checksum"]))
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_offset_original_batch" + str(batch_id) + " = " + str(batch["original_vertex_offset"]))
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_offset_custom_batch" + str(batch_id) + " = " + scoped_global("shapekey_vertex_offset_batch" + str(batch_id), draw_ib))
+    texture_override_shapekeys_section.append("cs-t33 = " + scoped_name("ResourceShapeKeyOffsetBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-u5 = " + scoped_name("ResourceCustomShapeKeyValuesRW", draw_ib))
+    texture_override_shapekeys_section.append("cs-u6 = " + scoped_name("ResourceShapeKeyCBRW", draw_ib))
+    texture_override_shapekeys_section.append("run = CustomShader\\WWMIv1\\ShapeKeyBatchOverrider")
+    texture_override_shapekeys_section.new_line()
+
+    texture_override_shapekeys_section.append(scoped_section("CommandListLoadShapeKeysBatch", draw_ib))
+    for batch_id, batch in enumerate(shapekey_batches):
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_dispatch_size_y_original_batch" + str(batch_id) + " = " + str(batch["dispatch_y"]))
+        texture_override_shapekeys_section.append("$\\WWMIv1\\shapekey_vertex_count_batch" + str(batch_id) + " = " + scoped_global("shapekey_vertex_count_batch" + str(batch_id), draw_ib))
+    texture_override_shapekeys_section.append("cs-t0 = " + scoped_name("ResourceShapeKeyVertexIdBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-t1 = " + scoped_name("ResourceShapeKeyVertexOffsetBuffer", draw_ib))
+    texture_override_shapekeys_section.append("cs-u6 = " + scoped_name("ResourceShapeKeyCBRW", draw_ib))
+    texture_override_shapekeys_section.append("run = CommandList\\WWMIv1\\LoadShapeKeysBatch")
+    texture_override_shapekeys_section.new_line()
+
+    if shapekey_offsets_hash != "":
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyLoaderCallback", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
+        texture_override_shapekeys_section.append("match_priority = 0")
+        texture_override_shapekeys_section.append("if $mod_enabled")
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+            texture_override_shapekeys_section.append("  if cs == 3381.3333 && " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
+        else:
+            texture_override_shapekeys_section.append("  if cs == 3381.3333")
+        texture_override_shapekeys_section.append("    handling = skip")
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListSetupShapeKeysBatch", draw_ib))
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListLoadShapeKeysBatch", draw_ib))
+        texture_override_shapekeys_section.append("  endif")
+        texture_override_shapekeys_section.append("endif")
+        texture_override_shapekeys_section.new_line()
+
+    texture_override_shapekeys_section.append(scoped_section("CommandListMultiplyShapeKeys", draw_ib))
+    texture_override_shapekeys_section.append("$\\WWMIv1\\custom_vertex_count = " + scoped_global("mesh_vertex_count", draw_ib))
+    texture_override_shapekeys_section.append("run = CustomShader\\WWMIv1\\ShapeKeyMultiplier")
+    texture_override_shapekeys_section.new_line()
+
+    if shapekey_offsets_hash != "":
+        texture_override_shapekeys_section.append(scoped_section("TextureOverrideShapeKeyMultiplierCallback", draw_ib))
+        texture_override_shapekeys_section.append("hash = " + shapekey_offsets_hash)
+        texture_override_shapekeys_section.append("match_priority = 0")
+        texture_override_shapekeys_section.append("if $mod_enabled")
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+            texture_override_shapekeys_section.append("  if cs == 3381.4444 && " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
+        else:
+            texture_override_shapekeys_section.append("  if cs == 3381.4444")
+        texture_override_shapekeys_section.append("    handling = skip")
+        texture_override_shapekeys_section.append("    run = " + scoped_name("CommandListMultiplyShapeKeys", draw_ib))
+        texture_override_shapekeys_section.append("  endif")
+        texture_override_shapekeys_section.append("endif")
+        texture_override_shapekeys_section.new_line()
+
+    ini_builder.append_section(texture_override_shapekeys_section)
+
+
+def add_resource_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+    """Resource declarations for the WWMI shape key override buffers.
+
+    The buffers are DrawIB scoped as well: their ``array`` size follows the
+    batch count of the DrawIB, so a shared name would leave a DrawIB with a
+    differently sized buffer than its own shape key batches expect.
+    """
+    draw_ib = draw_ib_model.draw_ib
+    shapekey_batches = get_wwmi_shapekey_batches(draw_ib_model)
+    if not shapekey_batches:
+        return
+
+    resource_shapekeys_section = M_IniSection(M_SectionType.ResourceShapeKeysOverride)
+    resource_shapekeys_section.append("; Resources: Shape Keys Override -------------------------")
+    resource_shapekeys_section.append(scoped_section("ResourceShapeKeyCBRW", draw_ib))
+    resource_shapekeys_section.append("type = RWBuffer")
+    resource_shapekeys_section.append("format = R32G32B32A32_UINT")
+    resource_shapekeys_section.append("array = 66")
+    resource_shapekeys_section.append(scoped_section("ResourceCustomShapeKeyValuesRW", draw_ib))
+    resource_shapekeys_section.append("type = RWBuffer")
+    resource_shapekeys_section.append("format = R32G32B32A32_FLOAT")
+    resource_shapekeys_section.append("array = " + str(32 * len(shapekey_batches)))
+    ini_builder.append_section(resource_shapekeys_section)
+
+
+def add_wwmi_shapekey_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+    """Custom apply-shapekeys command lists + resources (user hotkey driven).
+
+    These sections apply the blueprint shape keys through the two WWMI HLSL
+    shaders; they are only emitted when the blueprint defines shape keys
+    that exist on this DrawIB.
+    """
+    draw_ib = draw_ib_model.draw_ib
+    shapekey_entries = get_wwmi_shapekey_entries(draw_ib_model)
+    if not shapekey_entries:
+        return
+
+    copy_wwmi_shapekey_shaders_to_mod_folder()
+
+    # Shared public weights/key controls belong to the mod, not its buffers.
+    # Keep per-model compute/resource commands below, but emit controls once.
+    written_keys = getattr(ini_builder, "wwmi_shapekey_controls", {})
+    control_entries = []
+    # Several shape names may share a public control, even within one scope.
+    # Treat names case-insensitively like 3Dmigoto, and refuse mismatched
+    # definitions rather than silently selecting the first animation/key.
+    for entry in shapekey_entries:
+        m_key = entry[2]
+        name = m_key.key_name.casefold()
+        if name in written_keys:
+            if vars(written_keys[name]) != vars(m_key):
+                raise ValueError('WWMI conflicting shape control: ' + m_key.key_name)
+            continue
+        written_keys[name] = m_key
+        control_entries.append(entry)
+    ini_builder.wwmi_shapekey_controls = written_keys
+
+    constants_section = M_IniSection(M_SectionType.Constants)
+    constants_section.SectionName = "Constants"
+    for shapekey_name, _safe_name, m_key in control_entries:
+        constants_section.append("; ShapeKey: " + shapekey_name)
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            # Animation weights are transient runtime state. Persist only
+            # marks settings dirty here, but would restore stale weights on
+            # reload and unnecessarily include the clock in saved settings.
+            constants_section.append("global " + m_key.key_name + " = " + str(m_key.initialize_value))
+        else:
+            constants_section.append("global persist " + m_key.key_name + " = " + str(m_key.initialize_value))
+        constants_section.new_line()
+    ini_builder.append_section(constants_section)
+
+    # Time Shape Key timelines: the WWMI shape key compute reads the weight
+    # variables at draw time (x88 = $shapekeyN), so updating them in
+    # [Present] prepares their state for subsequent draws.
+    present_section = M_IniSection(M_SectionType.Present)
+    present_section.SectionName = "Present"
+    present_has_lines = False
+    for shapekey_name, _safe_name, m_key in control_entries:
+        if getattr(m_key, 'key_type', 'key') != "time_shapekey":
+            continue
+        present_section.append("; ShapeKey time timeline: " + shapekey_name)
+        # Share exactly the same keyboard and restart behavior as slot-style
+        # and Naraka shape animation, despite this separate resource pipeline.
+        M_IniHelper.add_time_animation_sections(ini_builder, present_section, m_key)
+        present_section.new_line()
+        present_has_lines = True
+    if present_has_lines:
+        ini_builder.append_section(present_section)
+
+    key_section = M_IniSection(M_SectionType.Key)
+    for shapekey_name, _safe_name, m_key in control_entries:
+        # Time weights use the common optional playback toggle, not this
+        # classic key that cycles through individual weight values.
+        if getattr(m_key, 'key_type', 'key') == "time_shapekey":
+            continue
+        if m_key.initialize_vk_str == "":
+            continue
+
+        key_section.append("[Key_ShapeKey_" + shapekey_name + "_" + draw_ib + "]")
+        comment = getattr(m_key, 'comment', '')
+        if comment:
+            # Keep every remark line inert and readable by external UI builders.
+            # Pasted multiline text must never become executable INI settings.
+            for comment_line in comment.splitlines():
+                key_section.append("; " + comment_line)
+        key_section.append("key = " + m_key.initialize_vk_str)
+        key_section.append("type = cycle")
+        key_section.append(m_key.key_name + " = 0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1")
+        key_section.new_line()
+    ini_builder.append_section(key_section)
+
+    commandlist_section = M_IniSection(M_SectionType.CommandList)
+    commandlist_section.append(scoped_section("CommandListApplyShapeKeysPosition", draw_ib))
+    # CustomShader restores shader objects, not the CS slots borrowed by this
+    # command list. Preserve the game's bindings instead of leaving them null.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(scoped_name("ResourceShapeBackup_" + slot, draw_ib) + " = ref " + slot)
+    commandlist_section.append(scoped_name("ResourcePositionBufferRW", draw_ib) + " = copy " + scoped_name("ResourcePositionBufferFloat", draw_ib))
+    commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 3))
+    commandlist_section.append("cs-t50 = " + scoped_name("ResourcePositionBufferFloat", draw_ib))
+    commandlist_section.append("cs-u5 = " + scoped_name("ResourcePositionBufferRW", draw_ib))
+    for shapekey_name, safe_name, m_key in shapekey_entries:
+        commandlist_section.append("; ShapeKey: " + shapekey_name)
+        commandlist_section.append("x88 = " + m_key.key_name)
+        commandlist_section.append("cs-t51 = " + scoped_name("ResourceShapeKeyPosition_" + safe_name, draw_ib))
+        commandlist_section.append("run = " + scoped_name("CustomShaderComputeWWMIShapeKeyPosition", draw_ib))
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(slot + " = ref " + scoped_name("ResourceShapeBackup_" + slot, draw_ib))
+    commandlist_section.append(scoped_name("ResourcePositionBufferShapeKeyVB", draw_ib) + " = copy " + scoped_name("ResourcePositionBufferRW", draw_ib))
+    commandlist_section.new_line()
+
+    # The custom shader section name is DrawIB scoped: its dispatch size is
+    # derived from the vertex count of this DrawIB, so it cannot be shared.
+    commandlist_section.append(scoped_section("CustomShaderComputeWWMIShapeKeyPosition", draw_ib))
+    commandlist_section.append("cs = ShapesWWMIPosition.hlsl")
+    commandlist_section.append("vs = null")
+    commandlist_section.append("ps = null")
+    commandlist_section.append("hs = null")
+    commandlist_section.append("ds = null")
+    commandlist_section.append("gs = null")
+    commandlist_section.append("dispatch = " + str((draw_ib_model.mesh_vertex_count * 3 + 63) // 64) + ", 1, 1")
+    commandlist_section.new_line()
+
+    commandlist_section.append(scoped_section("CommandListApplyShapeKeysVector", draw_ib))
+    # Position and Vector lists run sequentially, so they may reuse backups.
+    # Restore after each list so unrelated game dispatches keep their state.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(scoped_name("ResourceShapeBackup_" + slot, draw_ib) + " = ref " + slot)
+    commandlist_section.append(scoped_name("ResourceVectorBufferRW", draw_ib) + " = copy " + scoped_name("ResourceVectorBufferInt", draw_ib))
+    commandlist_section.append("x89 = " + str(draw_ib_model.mesh_vertex_count * 2))
+    commandlist_section.append("cs-t50 = " + scoped_name("ResourceVectorBufferInt", draw_ib))
+    commandlist_section.append("cs-u5 = " + scoped_name("ResourceVectorBufferRW", draw_ib))
+    for shapekey_name, safe_name, m_key in shapekey_entries:
+        commandlist_section.append("; ShapeKey: " + shapekey_name)
+        commandlist_section.append("x88 = " + m_key.key_name)
+        commandlist_section.append("cs-t51 = " + scoped_name("ResourceShapeKeyVector_" + safe_name, draw_ib))
+        commandlist_section.append("run = " + scoped_name("CustomShaderComputeWWMIShapeKeyVector", draw_ib))
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        commandlist_section.append(slot + " = ref " + scoped_name("ResourceShapeBackup_" + slot, draw_ib))
+    commandlist_section.append(scoped_name("ResourceVectorBufferShapeKeyVB", draw_ib) + " = copy " + scoped_name("ResourceVectorBufferRW", draw_ib))
+    commandlist_section.new_line()
+
+    commandlist_section.append(scoped_section("CustomShaderComputeWWMIShapeKeyVector", draw_ib))
+    commandlist_section.append("cs = ShapesWWMIVector.hlsl")
+    commandlist_section.append("vs = null")
+    commandlist_section.append("ps = null")
+    commandlist_section.append("hs = null")
+    commandlist_section.append("ds = null")
+    commandlist_section.append("gs = null")
+    commandlist_section.append("dispatch = " + str((draw_ib_model.mesh_vertex_count * 2 + 63) // 64) + ", 1, 1")
+    commandlist_section.new_line()
+    ini_builder.append_section(commandlist_section)
+
+    resource_section = M_IniSection(M_SectionType.ResourceBuffer)
+    # Empty resources hold references only; no extra buffer files are needed.
+    for slot in ("cs-t50", "cs-t51", "cs-u5"):
+        resource_section.append(scoped_section("ResourceShapeBackup_" + slot, draw_ib))
+        resource_section.new_line()
+    resource_section.append(scoped_section("ResourcePositionBufferRW", draw_ib))
+    resource_section.append("type = RWBuffer")
+    resource_section.append("format = R32_FLOAT")
+    resource_section.append("array = " + str(draw_ib_model.mesh_vertex_count * 3))
+    resource_section.new_line()
+    resource_section.append(scoped_section("ResourcePositionBufferFloat", draw_ib))
+    resource_section.append("type = Buffer")
+    resource_section.append("format = R32_FLOAT")
+    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Position.buf"))
+    resource_section.new_line()
+    resource_section.append(scoped_section("ResourcePositionBufferShapeKeyVB", draw_ib))
+    resource_section.append("type = Buffer")
+    resource_section.append("stride = 12")
+    resource_section.new_line()
+    resource_section.append(scoped_section("ResourceVectorBufferRW", draw_ib))
+    resource_section.append("type = RWBuffer")
+    resource_section.append("format = R8_SINT")
+    resource_section.append("array = " + str(draw_ib_model.mesh_vertex_count * 8))
+    resource_section.new_line()
+    resource_section.append(scoped_section("ResourceVectorBufferInt", draw_ib))
+    resource_section.append("type = Buffer")
+    resource_section.append("format = R8_SINT")
+    resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Vector.buf"))
+    resource_section.new_line()
+    resource_section.append(scoped_section("ResourceVectorBufferShapeKeyVB", draw_ib))
+    resource_section.append("type = Buffer")
+    resource_section.append("stride = 8")
+    resource_section.new_line()
+    for shapekey_name, safe_name, _m_key in shapekey_entries:
+        resource_section.append(scoped_section("ResourceShapeKeyPosition_" + safe_name, draw_ib))
+        resource_section.append("type = Buffer")
+        resource_section.append("format = R32_FLOAT")
+        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Position." + safe_name + ".buf"))
+        resource_section.new_line()
+        resource_section.append(scoped_section("ResourceShapeKeyVector_" + safe_name, draw_ib))
+        resource_section.append("type = Buffer")
+        resource_section.append("format = R8_SINT")
+        resource_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-Vector." + safe_name + ".buf"))
+        resource_section.new_line()
+    ini_builder.append_section(resource_section)

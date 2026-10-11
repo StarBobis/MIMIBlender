@@ -1,0 +1,798 @@
+import os
+import time
+import uuid
+
+import bpy
+from bpy_extras.io_utils import ImportHelper
+
+from ..common.global_config import LogicName
+from ..common.global_config import GlobalConfig
+from ..common.mimi_global_properties import MIMIGlobalProperties
+from ..i18n.i18n import I18nOperator, tr, translatable
+from .blueprint_export_helper import BlueprintExportHelper
+from .blueprint_node_base import MIMINodeBase
+from .blueprint_node_shapekey import MIMIShapeKeyListItem
+from ..workspace.mmt_workspace import WorkSpaceModel
+
+OBJECT_PERSISTENT_ID_KEY = "_ssmt_object_uuid"
+
+_picking_node_name = None
+_picking_tree_name = None
+
+
+class ObjectPersistentIdManager:
+    '''Persistent UUID management for Blender objects: generate, look up, verify.'''
+
+    @staticmethod
+    def _is_duplicate(target_obj, object_id):
+        if not target_obj or not object_id:
+            return False
+        for obj in bpy.data.objects:
+            if obj == target_obj:
+                continue
+            if str(obj.get(OBJECT_PERSISTENT_ID_KEY, "") or "") == object_id:
+                return True
+        return False
+
+    @staticmethod
+    def ensure_id(obj):
+        """
+        Get or create the persistent UUID of a Blender object.
+        Note: this function may only be called in contexts where writing to
+        data-blocks is allowed, not directly during node draw.
+        """
+        if obj is None:
+            return ""
+        object_id = str(obj.get(OBJECT_PERSISTENT_ID_KEY, "") or "")
+        if not object_id or ObjectPersistentIdManager._is_duplicate(obj, object_id):
+            object_id = uuid.uuid4().hex
+            obj[OBJECT_PERSISTENT_ID_KEY] = object_id
+        return object_id
+
+    @staticmethod
+    def find_by_id(object_id):
+        if not object_id:
+            return None
+        for obj in bpy.data.objects:
+            if str(obj.get(OBJECT_PERSISTENT_ID_KEY, "") or "") == str(object_id):
+                return obj
+        return None
+
+    @staticmethod
+    def resolve_node_target(node, allow_name_fallback=True):
+        if not node or getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
+            return None
+        resolved_obj = None
+        node_object_name = str(getattr(node, "object_name", "") or "")
+        node_object_id = str(getattr(node, "object_id", "") or "")
+        if node_object_id:
+            # Names can be reused after a rename. Prefer the saved UUID so a
+            # different object with the old name cannot hijack this node.
+            # An exact name+UUID match disambiguates freshly duplicated IDs.
+            named_obj = bpy.data.objects.get(node_object_name)
+            if named_obj and named_obj.get(OBJECT_PERSISTENT_ID_KEY) == node_object_id:
+                resolved_obj = named_obj
+            else:
+                resolved_obj = ObjectPersistentIdManager.find_by_id(node_object_id)
+        if resolved_obj is None and allow_name_fallback and node_object_name:
+            resolved_obj = bpy.data.objects.get(node_object_name)
+        return resolved_obj
+
+    @staticmethod
+    def refresh_node(node, allow_name_fallback=True):
+        """
+        Refresh a single Object Info node.
+        Writes are only performed at safe moments:
+        1. After an object is picked.
+        2. When the user manually runs "Refresh Blueprint".
+        3. Before generating a Mod.
+        4. After a node click, via a deferred timer, not directly in draw.
+        """
+        result = {"found": False, "changed": False, "object": None, "elapsed_ms": 0.0}
+        start_time = time.perf_counter()
+        resolved_obj = ObjectPersistentIdManager.resolve_node_target(node, allow_name_fallback=allow_name_fallback)
+        if resolved_obj is None:
+            result["elapsed_ms"] = (time.perf_counter() - start_time) * 1000.0
+            return result
+        result["found"] = True
+        result["object"] = resolved_obj
+        persistent_id = ObjectPersistentIdManager.ensure_id(resolved_obj)
+        if str(getattr(node, "object_id", "") or "") != persistent_id:
+            node.object_id = persistent_id
+            result["changed"] = True
+        if str(getattr(node, "object_name", "") or "") != resolved_obj.name:
+            node.object_name = resolved_obj.name
+            result["changed"] = True
+        result["elapsed_ms"] = (time.perf_counter() - start_time) * 1000.0
+        return result
+
+    @staticmethod
+    def refresh_all_nodes(context=None, tree=None, include_all_blueprints=False, source="unknown"):
+        """
+        Refresh all Object Info nodes in the blueprint.
+        Must be called before export so that each node's object_name follows
+        its UUID and is written back with the latest name.
+        """
+        checked_count = 0
+        updated_count = 0
+        missing_count = 0
+        start_time = time.perf_counter()
+        trees = []
+        if include_all_blueprints:
+            trees = [node_group for node_group in bpy.data.node_groups if getattr(node_group, "bl_idname", "") == 'MIMIBlueprintTreeType']
+        else:
+            tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
+            if tree:
+                trees = [tree]
+        for blueprint_tree in trees:
+            for node in blueprint_tree.nodes:
+                if getattr(node, "bl_idname", "") != 'MIMINode_Object_Info':
+                    continue
+                checked_count += 1
+                refresh_result = ObjectPersistentIdManager.refresh_node(node, allow_name_fallback=True)
+                if refresh_result["changed"]:
+                    updated_count += 1
+                has_reference = bool(str(getattr(node, "object_name", "") or "") or str(getattr(node, "object_id", "") or ""))
+                if has_reference and not refresh_result["found"]:
+                    missing_count += 1
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        summary = {"checked_count": checked_count, "updated_count": updated_count, "missing_count": missing_count, "elapsed_ms": elapsed_ms, "source": source}
+        print(f"[ObjectInfoRefresh:{source}] checked={checked_count}, updated={updated_count}, missing={missing_count}, elapsed={elapsed_ms:.3f} ms")
+        return summary
+
+
+class MMT_OT_SelectNodeObject(I18nOperator):
+    '''Select this object in 3D View'''
+    bl_idname = "mimi.select_node_object"
+    bl_label = "Select Object"
+    
+    object_name: bpy.props.StringProperty() # type: ignore
+    object_id: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        # Match refresh/export identity rules instead of selecting a new object
+        # that happens to reuse the referenced mesh's previous name.
+        obj = ObjectPersistentIdManager.find_by_id(self.object_id) if self.object_id else None
+        named_obj = bpy.data.objects.get(self.object_name) if self.object_name else None
+        if named_obj and (obj is None or named_obj.get(OBJECT_PERSISTENT_ID_KEY) == self.object_id):
+            obj = named_obj
+
+        if obj is None or obj.name not in context.view_layer.objects:
+            self.report({'WARNING'}, tr("Object not found"))
+            return {'CANCELLED'}
+
+        if obj:
+            try:
+                bpy.ops.object.select_all(action='DESELECT')
+            except Exception:
+                pass
+                
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            self.report({'INFO'}, tr("Selected object: {name}").format(name=obj.name))
+        else:
+            self.report({'WARNING'}, tr("Object not found"))
+        
+        return {'FINISHED'}
+
+
+class MMT_OT_StartPickObject(I18nOperator):
+    '''Start picking an object from 3D View'''
+    bl_idname = "mimi.start_pick_object"
+    bl_label = "Pick Object"
+    bl_description = "Click to pick an object in the 3D View"
+    
+    node_name: bpy.props.StringProperty() # type: ignore
+    tree_name: bpy.props.StringProperty() # type: ignore
+    
+    def execute(self, context):
+        global _picking_node_name, _picking_tree_name
+        
+        tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if not tree and self.tree_name:
+            tree = bpy.data.node_groups.get(self.tree_name)
+        if not tree:
+            tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
+        
+        if not tree:
+            self.report({'WARNING'}, tr("Cannot get node tree context"))
+            return {'CANCELLED'}
+        
+        _picking_node_name = self.node_name
+        _picking_tree_name = tree.name
+        self.report({'INFO'}, tr("Please click an object in the 3D View"))
+        
+        bpy.ops.mimi.pick_object_modal('INVOKE_DEFAULT')
+        
+        return {'FINISHED'}
+
+
+class MMT_OT_PickObjectModal(I18nOperator):
+    '''Modal operator for picking objects in 3D View'''
+    bl_idname = "mimi.pick_object_modal"
+    bl_label = "Pick Object"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+    
+    def invoke(self, context, event):
+        global _picking_node_name, _picking_tree_name
+        
+        if not _picking_node_name:
+            return {'CANCELLED'}
+
+        if not _picking_tree_name:
+            current_tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
+            _picking_tree_name = current_tree.name if current_tree else None
+        
+        self._initial_selected_objs = set(context.selected_objects)
+        if context.selected_objects:
+            self._last_selected_obj = context.selected_objects[0]
+        else:
+            self._last_selected_obj = None
+        
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+    
+    def modal(self, context, event):
+        global _picking_node_name, _picking_tree_name
+
+        def clear_picking_state():
+            global _picking_node_name, _picking_tree_name
+            _picking_node_name = None
+            _picking_tree_name = None
+
+        def resolve_picking_node():
+            tree = None
+            if isinstance(_picking_tree_name, str) and _picking_tree_name:
+                tree = bpy.data.node_groups.get(_picking_tree_name)
+
+            if tree:
+                node = tree.nodes.get(_picking_node_name)
+                if node:
+                    return tree, node
+
+            current_tree = BlueprintExportHelper.get_current_blueprint_tree(context=context)
+            if current_tree:
+                node = current_tree.nodes.get(_picking_node_name)
+                if node:
+                    return current_tree, node
+
+            node = BlueprintExportHelper.find_node_in_all_blueprints(_picking_node_name)
+            if node:
+                return getattr(node, "id_data", None), node
+
+            return None, None
+        
+        if event.type == 'ESC':
+            clear_picking_state()
+            return {'CANCELLED'}
+        
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    region = next((r for r in area.regions if r.type == 'WINDOW'), None)
+                    if region and area.x <= event.mouse_x <= area.x + area.width and area.y <= event.mouse_y <= area.y + area.height:
+                        return {'PASS_THROUGH'}
+        
+        if event.type == 'MOUSEMOVE':
+            current_selected = context.selected_objects
+            if current_selected:
+                current_obj = current_selected[0]
+                if current_obj != self._last_selected_obj and current_obj not in self._initial_selected_objs:
+                    tree, node = resolve_picking_node()
+                    if not node:
+                        clear_picking_state()
+                        self.report({'WARNING'}, tr("Cannot get node tree context"))
+                        return {'CANCELLED'}
+
+                    node.object_name = current_obj.name
+                    node.object_id = ObjectPersistentIdManager.ensure_id(current_obj)
+                    if tree:
+                        BlueprintExportHelper.set_runtime_blueprint_tree(tree)
+                    self.report({'INFO'}, tr("Picked object: {name}").format(name=current_obj.name))
+
+                    clear_picking_state()
+                    return {'FINISHED'}
+        
+        return {'PASS_THROUGH'}
+
+
+def draw_view3d_header(self, context):
+    global _picking_node_name
+    if _picking_node_name:
+        self.layout.label(text=tr("Please click an object in the 3D View..."), icon='EYEDROPPER')
+
+
+@translatable
+class MIMINode_Object_Info(MIMINodeBase):
+    '''Object Info Node'''
+    bl_idname = 'MIMINode_Object_Info'
+    bl_label = 'Object Info'
+    bl_icon = 'OBJECT_DATAMODE'
+    bl_width_min = 400
+
+    def _get_effective_parse_name(self):
+        normalized_submesh_name = str(self.submesh_name or "").strip()
+        prefix_name = normalized_submesh_name.partition(".")[0]
+        # Both the new format (2 segments) and the old format (>=3 segments) are valid submesh_name values
+        if normalized_submesh_name and len(prefix_name.split("-")) >= 2:
+            return normalized_submesh_name
+        return self.object_name
+
+    def _refresh_display_fields(self):
+        if self.object_name:
+            self.label = self.object_name
+        else:
+            # The default title is instance data, so bake in the language that
+            # is active when the node is created.
+            self.label = tr("Object Info")
+
+        # Collect all texts that participate in the width calculation
+        width_texts = [self.object_name, self.submesh_name]
+
+        # Also include every Submesh name from the dropdown in the width
+        # calculation, so long names that are not currently selected are not truncated
+        tree = self.id_data if hasattr(self, "id_data") and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
+        if tree is not None:
+            for item in getattr(tree, "ssmt_submesh_items", []):
+                name = str(getattr(item, "name", "") or "")
+                if name:
+                    width_texts.append(name)
+
+        self.update_node_width(width_texts)
+
+    def _refresh_index_info(self):
+        """Refresh the IndexCount/FirstIndex display based on submesh_name."""
+        self.index_count_display = ""
+        self.first_index_display = ""
+
+        submesh_name = str(self.submesh_name or "").strip()
+        if not submesh_name:
+            return
+
+        try:
+            ws_model = WorkSpaceModel()
+            parsed = ws_model.parse_any_format_name(submesh_name)
+            if parsed and parsed["lod"] and parsed["draw_ib"]:
+                ic = ws_model.get_index_count(parsed["lod"], parsed["draw_ib"], parsed["component"])
+                fi = ws_model.get_first_index(parsed["lod"], parsed["draw_ib"], parsed["component"])
+                self.index_count_display = str(ic)
+                self.first_index_display = str(fi)
+        except Exception:
+            pass
+
+    def update_object_name(self, context):
+        self._refresh_display_fields()
+        self._refresh_index_info()
+
+        if self.object_name:
+            obj = bpy.data.objects.get(self.object_name)
+            if obj:
+                self.object_id = ObjectPersistentIdManager.ensure_id(obj)
+        else:
+            self.object_id = ""
+
+    def update_submesh_name(self, context):
+        self._refresh_display_fields()
+        self._refresh_index_info()
+
+    object_name: bpy.props.StringProperty(name=tr("Object Name"), default="", update=update_object_name) #type: ignore
+    object_id: bpy.props.StringProperty(name=tr("Object ID"), default="") #type: ignore
+    original_object_name: bpy.props.StringProperty(name=tr("Original Object Name"), default="") #type: ignore
+    component: bpy.props.StringProperty(name=tr("Component"), default="") #type: ignore
+    submesh_name: bpy.props.StringProperty(name=tr("Submesh"), default="", update=update_submesh_name) #type: ignore
+    index_count_display: bpy.props.StringProperty(name="IndexCount", default="") #type: ignore
+    first_index_display: bpy.props.StringProperty(name="FirstIndex", default="") #type: ignore
+
+    def init(self, context):
+        self.outputs.new('MIMISocketObject', "Object")
+
+    def draw_buttons(self, context, layout):
+        tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
+        row = layout.row(align=True)
+
+        row.prop_search(self, "object_name", bpy.data, "objects", text="", icon='OBJECT_DATA')
+        
+        op = row.operator("mimi.start_pick_object", text="", icon='EYEDROPPER')
+        op.node_name = self.name
+        op.tree_name = tree.name if tree else ""
+
+        if self.object_name or self.object_id:
+            op = row.operator("mimi.select_node_object", text="", icon='RESTRICT_SELECT_OFF')
+            op.object_name = self.object_name
+            op.object_id = self.object_id
+
+        if tree is not None:
+            layout.prop_search(self, "submesh_name", tree, "ssmt_submesh_items", text=tr("Submesh"), icon='OUTLINER_COLLECTION')
+
+            if self.submesh_name:
+                layout.label(text=f"IndexCount: {self.index_count_display or '—'}")
+                layout.label(text=f"FirstIndex: {self.first_index_display or '—'}")
+
+            if self.submesh_name and self.submesh_name not in BlueprintExportHelper.get_tree_submesh_names(tree=tree):
+                layout.label(text=tr("Current Submesh is not in the list; export will fall back to object name resolution"), icon='ERROR')
+
+
+
+
+@translatable
+class MIMINode_Object_Group(MIMINodeBase):
+    '''Node used purely for grouping; accepts any node as input and gathers it into one group'''
+    bl_idname = 'MIMINode_Object_Group'
+    bl_label = 'Group'
+    bl_icon = 'GROUP'
+
+    def init(self, context):
+        self.inputs.new('MIMISocketObject', "Input 1")
+        self.outputs.new('MIMISocketObject', "Output")
+        self.width = 200
+
+    def draw_buttons(self, context, layout):
+        layout.operator("mimi.view_group_objects", text=tr("Preview Recursive Objects"), icon='HIDE_OFF').node_name = self.name
+
+    def update(self):
+        if self.inputs and self.inputs[-1].is_linked:
+            self.inputs.new('MIMISocketObject', "Input {count}".format(count=len(self.inputs) + 1))
+        
+        if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
+             self.inputs.remove(self.inputs[-1])
+
+
+
+
+class MMT_OT_SwitchKey_AddSocket(I18nOperator):
+    '''Add a new socket to the switch node'''
+    bl_idname = "mimi.switch_add_socket"
+    bl_label = "Add Socket"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    node_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if not tree:
+             return {'CANCELLED'}
+        node = tree.nodes.get(self.node_name)
+        if node:
+               node.inputs.new('MIMISocketObject', "Status {count}".format(count=len(node.inputs)))
+        return {'FINISHED'}
+
+
+class MMT_OT_SwitchKey_RemoveSocket(I18nOperator):
+    '''Remove the last socket from the switch node'''
+    bl_idname = "mimi.switch_remove_socket"
+    bl_label = "Remove Socket"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    node_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if not tree:
+             return {'CANCELLED'}
+        node = tree.nodes.get(self.node_name)
+        if node and len(node.inputs) > 0:
+            node.inputs.remove(node.inputs[-1])
+        return {'FINISHED'}
+
+
+@translatable
+class MIMINode_SwitchKey(MIMINodeBase):
+    '''Switch Key assigns each connected branch to one state of a shared variable; nodes bound to the same key merge into that variable automatically'''
+    bl_idname = 'MIMINode_SwitchKey'
+    bl_label = 'Switch Key'
+    bl_icon = 'GROUP'
+
+    def update_key_name(self, context):
+        self.update_node_width([self.key_name, self.key_alias, self.comment])
+
+    def update_key_alias(self, context):
+        sanitized_alias = "".join(
+            char for char in str(self.key_alias or "")
+            if char.isascii() and char.isalnum()
+        )
+        if self.key_alias != sanitized_alias:
+            self.key_alias = sanitized_alias
+            return
+        self.update_node_width([self.key_name, self.key_alias, self.comment])
+    
+    def update_comment(self, context):
+        self.update_node_width([self.key_name, self.key_alias, self.comment])
+    
+    key_name: bpy.props.StringProperty(
+        name=tr("Key Name"),
+        description=tr("Hotkey that cycles this switch; Switch Key nodes bound to the same key automatically share one variable, and different branch counts expand by least common multiple"),
+        default="",
+        update=update_key_name,
+    ) # type: ignore
+    key_alias: bpy.props.StringProperty(
+        name=tr("Variable Alias"),
+        description=tr("Only ASCII letters and digits are allowed; the same alias shares a variable and different branch counts expand by least common multiple; takes precedence over automatic same-key merging"),
+        default="",
+        update=update_key_alias,
+    ) # type: ignore
+    comment: bpy.props.StringProperty(name=tr("Comment"), description=tr("Comment text; written into the config table as comments"), default="", update=update_comment) # type: ignore
+    
+    def init(self, context):
+        # The default title is instance data, so bake in the active language.
+        self.label = tr("Switch Key")
+        self.inputs.new('MIMISocketObject', "Status 0")
+        self.outputs.new('MIMISocketObject', "Output")
+        self.width = 200
+        self.use_custom_color = True
+        self.color = (0.34, 0.54, 0.34)
+
+    def draw_buttons(self, context, layout):
+        row = layout.row(align=True)
+        row.prop(self, "key_name", text=tr("Key"))
+        row.operator("wm.url_open", text="", icon='HELP').url = "https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes"
+        
+        layout.prop(self, "key_alias", text=tr("Variable Alias"))
+        layout.prop(self, "comment", text=tr("Comment"))
+        
+        row = layout.row(align=True)
+        op_add = row.operator("mimi.switch_add_socket", text=tr("Add"), icon='ADD')
+        op_add.node_name = self.name
+        
+        op_rem = row.operator("mimi.switch_remove_socket", text=tr("Remove"), icon='REMOVE')
+        op_rem.node_name = self.name
+
+
+@translatable
+class MIMINode_Result_Output(MIMINodeBase):
+    '''Result Output Node'''
+    bl_idname = 'MIMINode_Result_Output'
+    bl_label = 'Generate Mod'
+    bl_icon = 'EXPORT'
+
+    enable_shapekey: bpy.props.BoolProperty(
+        name=tr("Use Shape Key Options"),
+        description=tr("Export the checked shape key buffers and runtime control config"),
+        default=False,
+    ) # type: ignore
+    shapekey_items: bpy.props.CollectionProperty(type=MIMIShapeKeyListItem) # type: ignore
+
+    def init(self, context):
+        self.inputs.new('MIMISocketObject', "Group 1")
+        self.width = 400
+
+    def draw_buttons(self, context, layout):
+        operator = layout.operator("mimi.generate_mod_blueprint", text=tr("Generate Mod"), icon='EXPORT')
+        operator.node_name = self.name
+        operator.tree_name = self.id_data.name if self.id_data else ""
+
+        from .blueprint_node_shapekey import draw_shapekey_settings
+        draw_shapekey_settings(self, layout)
+        
+        if GlobalConfig.logic_name == LogicName.WWMI:
+            layout.prop(context.scene.mimi_global_properties, "ignore_muted_shape_keys", text=tr("Ignore Muted Shape Keys"))
+            layout.prop(context.scene.mimi_global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
+            layout.prop(context.scene.mimi_global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
+
+        if GlobalConfig.logic_name != LogicName.GF2:
+            layout.prop(context.scene.mimi_global_properties,
+                        "recalculate_tangent",text=tr("Store Vector-Normalized Normals in TANGENT (Global)"))
+
+        if GlobalConfig.logic_name == LogicName.HIMI:
+            layout.prop(context.scene.mimi_global_properties,
+                        "recalculate_color",text=tr("Store Arithmetic-Average Normals in COLOR (Global)"))
+
+        if LogicName.is_zzmi_family(GlobalConfig.logic_name):
+            layout.prop(context.scene.mimi_global_properties, "zzz_use_slot_fix", text=tr("Use Slot Fix"))
+
+        layout.prop(context.scene.mimi_global_properties, "open_mod_folder_after_generate_mod",text=tr("Open Mod Folder After Generating Mod"))
+
+        layout.prop(context.scene.mimi_global_properties, "use_specific_generate_mod_folder_path", text=tr("Specify Generate Mod Folder"))
+
+        if MIMIGlobalProperties.use_specific_generate_mod_folder_path():
+            box = layout.box()
+            box.label(text=tr("Current Generate Mod Folder: "))
+            box.label(text=context.scene.mimi_global_properties.generate_mod_folder_path)
+
+            layout.operator("mimi.select_generate_mod_folder", text=tr("Select Generate Mod Folder"), icon='FILE_FOLDER')
+
+        # Optional tail comments: the generated INI then ends with the same
+        # closing lines XXMI Tools writes.
+        layout.prop(context.scene.mimi_global_properties, "simulate_xxmi_tail_comments", text=tr("Simulate XXMI Tail Comments"))
+
+    def update(self):
+        if self.inputs and self.inputs[-1].is_linked:
+            self.inputs.new('MIMISocketObject', "Group {count}".format(count=len(self.inputs) + 1))
+        
+        if len(self.inputs) > 1 and not self.inputs[-1].is_linked and not self.inputs[-2].is_linked:
+             self.inputs.remove(self.inputs[-1])
+
+
+class MMT_OT_View_Group_Objects(I18nOperator):
+    '''Recursively resolve all objects under the current group and display them in the current 3D View; clicking toggles local view. Note: group nodes should preferably not contain Switch Key, otherwise all switch branches are shown at once'''
+    bl_idname = "mimi.view_group_objects"
+    bl_label = "View Objects in Group"
+    
+    node_name: bpy.props.StringProperty() # type: ignore
+
+    def execute(self, context):
+        tree = getattr(context.space_data, "edit_tree", None) or getattr(context.space_data, "node_tree", None)
+        if not tree:
+             return {'CANCELLED'}
+        node = tree.nodes.get(self.node_name)
+        if not node:
+             return {'CANCELLED'}
+
+        # Find a 3D View in the current context to keep area and screen consistent
+        view_3d_area = None
+        target_window = None
+        target_screen = context.screen
+
+        # Search the current screen first
+        for area in target_screen.areas:
+            if area.type == 'VIEW_3D':
+                view_3d_area = area
+                break
+
+        # If the current screen has none, search other windows/screens
+        if not view_3d_area:
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        view_3d_area = area
+                        target_window = window
+                        target_screen = window.screen
+                        break
+                if view_3d_area:
+                    break
+
+        if not view_3d_area:
+            self.report({'WARNING'}, tr("No 3D View found"))
+            return {'CANCELLED'}
+
+        in_local_view = False
+        for space in view_3d_area.spaces:
+            if space.type == 'VIEW_3D' and space.local_view:
+                in_local_view = True
+                break
+
+        if in_local_view:
+            # Exit local view safely
+            try:
+                if target_window:
+                    with context.temp_override(window=target_window, area=view_3d_area, screen=target_screen):
+                        bpy.ops.view3d.localview()
+                else:
+                    with context.temp_override(area=view_3d_area, screen=target_screen):
+                        bpy.ops.view3d.localview()
+            except RuntimeError as error:
+                # SpaceView3D.local_view is read-only; assigning None raises
+                # another exception instead of recovering from a failed poll.
+                self.report({'WARNING'}, str(error))
+                return {'CANCELLED'}
+            self.report({'INFO'}, tr("Exited local view"))
+            return {'FINISHED'}
+
+        objects_to_show = set()
+        # Preview follows the same source ports as export, including Object
+        # List rows, reroutes, disabled nodes and nested custom groups.
+        from .blueprint_graph import iter_object_sources
+        target_view_layer = (target_window or context.window).view_layer
+        for source in iter_object_sources(node):
+            if getattr(source, "bl_idname", "") == 'MIMINode_Object_Info':
+                obj = ObjectPersistentIdManager.resolve_node_target(source)
+            else:
+                obj = getattr(source, "object_ref", None) or bpy.data.objects.get(source.object_name)
+            # Selecting an object outside the destination view layer raises.
+            # Skip it instead of aborting the whole preview after deselection.
+            if obj is not None and obj.name in target_view_layer.objects:
+                objects_to_show.add(obj)
+
+        if not objects_to_show:
+            self.report({'WARNING'}, tr("No objects found in this group"))
+            return {'CANCELLED'}
+
+        def deselect_all_safe():
+            # A separate blueprint window can belong to another scene.
+            # Selection must be changed in the destination 3D view's layer.
+            for o in target_view_layer.objects:
+                if o.select_get(view_layer=target_view_layer):
+                    o.select_set(False, view_layer=target_view_layer)
+
+        if context.mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+
+        deselect_all_safe()
+        for obj in objects_to_show:
+            obj.select_set(True, view_layer=target_view_layer)
+
+        # Get the 3D View space and configure it
+        view_3d_space = None
+        for space in view_3d_area.spaces:
+            if space.type == 'VIEW_3D':
+                view_3d_space = space
+                break
+
+        if view_3d_space:
+            # Set the shading type directly
+            view_3d_space.shading.type = 'SOLID'
+
+            # Find a valid region
+            region = next((r for r in view_3d_area.regions if r.type == 'WINDOW'), None)
+
+            if region:
+                # Build a complete override context including window/screen/area/region
+                try:
+                    override_kwargs = {
+                        'area': view_3d_area,
+                        'region': region,
+                        'screen': target_screen
+                    }
+                    if target_window:
+                        override_kwargs['window'] = target_window
+
+                    with context.temp_override(**override_kwargs):
+                        try:
+                            bpy.ops.view3d.localview()
+                            bpy.ops.view3d.view_axis(type='FRONT')
+                            bpy.ops.view3d.view_selected()
+                        except Exception as e:
+                            print(f"View setup warning: {e}")
+                except TypeError as e:
+                    # If temp_override still fails, fall back: do not use the operator
+                    print(f"temp_override failed, using fallback: {e}")
+                    # At least the shading type was set; inform the user
+                    self.report({'WARNING'}, tr("Objects are selected, but the view switch failed. Press '/' to enter local view manually"))
+
+        self.report({'INFO'}, tr("Showing {count} objects in local view").format(count=len(objects_to_show)))
+        return {'FINISHED'}
+
+
+class MMT_OT_SelectGenerateModFolder(I18nOperator, ImportHelper):
+    '''Choose the target folder for the generated Mod'''
+    bl_idname = "mimi.select_generate_mod_folder"
+    bl_label = "Select Generate Mod Folder"
+
+    directory: bpy.props.StringProperty(subtype='DIR_PATH') # type: ignore
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN'}) # type: ignore
+    filter_image: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
+
+    def invoke(self, context, event):
+        current_directory = context.scene.mimi_global_properties.generate_mod_folder_path
+        if current_directory:
+            self.directory = bpy.path.abspath(current_directory)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        selected_directory = bpy.path.abspath(self.directory).rstrip("\\/")
+        if not selected_directory:
+            self.report({'ERROR'}, tr("Please select a valid folder"))
+            return {'CANCELLED'}
+
+        os.makedirs(selected_directory, exist_ok=True)
+        context.scene.mimi_global_properties.generate_mod_folder_path = selected_directory
+        self.report({'INFO'}, tr("Generate Mod folder set to: {path}").format(path=selected_directory))
+        return {'FINISHED'}
+
+classes = (
+    MMT_OT_SelectGenerateModFolder,
+    MMT_OT_SelectNodeObject,
+    MMT_OT_StartPickObject,
+    MMT_OT_PickObjectModal,
+    MMT_OT_View_Group_Objects,
+    MIMINode_Object_Info,
+    MIMINode_Object_Group,
+    MIMINode_Result_Output,
+    MIMINode_SwitchKey,
+    MMT_OT_SwitchKey_AddSocket,
+    MMT_OT_SwitchKey_RemoveSocket,
+)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    bpy.types.VIEW3D_HT_header.append(draw_view3d_header)
+
+
+def unregister():
+    bpy.types.VIEW3D_HT_header.remove(draw_view3d_header)
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

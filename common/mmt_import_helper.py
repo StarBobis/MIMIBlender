@@ -1,0 +1,809 @@
+import bpy
+import numpy
+import os
+import re
+
+from .d3d11_element import D3D11Element
+from .mesh_create_helper import MeshCreateHelper
+from ..workspace.submesh_json import SubmeshJson, SubmeshCategoryBuffer
+from .mimi_global_properties import MIMIGlobalProperties
+from ..utils.format_utils import Fatal, FormatUtils
+from ..utils.material_texture_utils import apply_image_texture_to_material, find_node
+
+
+class MMTImportHelper:
+	@staticmethod
+	def create_mesh_from_json(json_file_path:str, import_collection:bpy.types.Collection | None = None, submesh_name_prefix:str = "", match_component_map:dict | None = None):
+		submesh_json = SubmeshJson(json_file_path)
+
+		elements, vb_data, vb_vertex_count, shapekey_buffers = MMTImportHelper.parse_category_buffers(submesh_json)
+		ib_data_list, ib_entry_array_indices, ib_data, ib_count, ib_polygon_count = MMTImportHelper.parse_index_buffers(submesh_json)
+		shapekey_position_data = MMTImportHelper.parse_shapekey_position_buffers(submesh_json)
+
+		mesh_name = os.path.splitext(submesh_json.FileName)[0]
+		logic_name = submesh_json.GamePreset
+		gametypename = submesh_json.WorkGameType
+
+		# When the caller passes a submesh_name_prefix (usually the DrawIB folder name),
+		# switch to the classic Submesh naming scheme instead of the raw Json file name:
+		# - the Submesh itself is named {DrawIB}-{MatchIndexCount}-{MatchFirstIndex},
+		#   where the match values are the Json top-level IndexCount/IndexOffset
+		#   (the draw range this Submesh occupies in the original model); when a
+		#   match_component_map is provided, the numeric pair is replaced by the
+		#   shorter ordinal form {DrawIB}-Component {N};
+		# - each draw call segment appends its part alias when it has one and only
+		#   falls back to its own .{IndexCount}-{FirstIndex} suffix when no alias
+		#   exists, so the object name always shows which Submesh it belongs to.
+		use_classic_submesh_name = bool(str(submesh_name_prefix).strip())
+		match_submesh_name = ""
+		if use_classic_submesh_name:
+			match_submesh_name = MMTImportHelper.build_match_submesh_name(
+				submesh_name_prefix=submesh_name_prefix,
+				match_index_count=submesh_json.IndexCount,
+				match_first_index=submesh_json.IndexOffset,
+				match_component_map=match_component_map,
+			)
+			mesh_name = match_submesh_name
+
+		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
+		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and MIMIGlobalProperties.is_merged_mode()) else None
+
+		# Reverse-engineered products may carry a DrawCallSegmentList (one segment per drawindexed).
+		# When valid segments exist, create one mesh object per segment (per-segment model creation,
+		# consistent with the per-slice split semantics of classic fmt output); otherwise import the whole IB as a single mesh.
+		draw_call_segments = MMTImportHelper.resolve_draw_call_segments(
+			submesh_json=submesh_json,
+			ib_data_list=ib_data_list,
+			ib_entry_array_indices=ib_entry_array_indices,
+			ib_data_full=ib_data,
+			vb_vertex_count=vb_vertex_count,
+		)
+		if len(draw_call_segments) > 0:
+			if shapekey_buffers:
+				# WWMI-style shape keys (the ShapeKeyOffset/VertexId/VertexOffset trio):
+				# Buffers are in whole-object space; importing converts through each segment's
+				# vertex window [vertex_min, vertex_max] (local = global - vertex_min),
+				# consistent with the whole-import vertex_offset/vertex_count semantics.
+				print("DrawCallSegment import: detected WWMI-style shape key buffers, importing segment by segment via vertex windows")
+
+			imported_obj_list = []
+			for segment_index, (segment_ib_data, vertex_min, vertex_max, segment_info) in enumerate(draw_call_segments):
+				# Part alias from the INI comment above the drawindexed.
+				# A WWMI alias may start with "Draw Component N."; remove that
+				# redundant source label while keeping the range-based Component
+				# number produced by the folder-level map.
+				segment_alias = MMTImportHelper.clean_draw_component_alias(
+					segment_info.get("alias", "")
+				)
+
+				if use_classic_submesh_name:
+					segment_index_count = segment_info["index_count"]
+					segment_first_index = segment_info["index_offset"]
+
+					# The match identity of a segment is the draw range of the IB
+					# partition it belongs to. Resolution order:
+					# 1. the segment's own MatchIndexCount/MatchFirstIndex, written
+					#    by newer reverse outputs for single-IB multi-component
+					#    groups (e.g. WWMI), where the IB entry can only hold one
+					#    whole-buffer range;
+					# 2. IndexOffset/IndexCount of the segment's IndexBufferList
+					#    entry (newer multi-IB reverse outputs);
+					# 3. the Json top-level pair (older outputs, also for the
+					#    DrawCallIndexList fallback whose ib_index is -1).
+					match_index_count = submesh_json.IndexCount
+					match_first_index = submesh_json.IndexOffset
+					segment_match_index_count = int(segment_info.get("match_index_count", 0) or 0)
+					if segment_match_index_count > 0:
+						match_index_count = segment_match_index_count
+						match_first_index = int(segment_info.get("match_first_index", 0) or 0)
+					else:
+						ib_entry_index = segment_info["ib_index"]
+						if 0 <= ib_entry_index < len(submesh_json.IndexBufferList):
+							ib_entry = submesh_json.IndexBufferList[ib_entry_index]
+							if ib_entry.IndexCount > 0:
+								match_index_count = ib_entry.IndexCount
+								match_first_index = ib_entry.IndexOffset
+					segment_match_name = MMTImportHelper.build_match_submesh_name(
+						submesh_name_prefix=submesh_name_prefix,
+						match_index_count=match_index_count,
+						match_first_index=match_first_index,
+						match_component_map=match_component_map,
+					)
+
+					if (
+						len(draw_call_segments) == 1
+						and segment_index_count == match_index_count
+						and segment_first_index == match_first_index
+					):
+						# A single segment covering the whole Submesh IS the Submesh
+						# itself; the dotted suffix would carry no extra information.
+						segment_mesh_name = segment_match_name
+					elif segment_alias:
+						# The part alias already identifies the segment, so the
+						# numeric .{IndexCount}-{FirstIndex} suffix is omitted to
+						# keep the object name short and readable.
+						segment_mesh_name = segment_match_name
+					else:
+						# Without an alias the draw range is the only thing telling
+						# sibling segments apart; keep the classic numeric suffix
+						# {MatchName}.{IndexCount}-{FirstIndex}.
+						segment_mesh_name = segment_match_name + "." + str(segment_index_count) + "-" + str(segment_first_index)
+				elif len(draw_call_segments) == 1:
+					segment_mesh_name = mesh_name
+				else:
+					segment_mesh_name = mesh_name + "-" + str(segment_index + 1).zfill(2)
+
+				# Append the part alias at the end of the object name,
+				# so the imported object directly shows which body part it is.
+				if segment_alias:
+					segment_mesh_name = MMTImportHelper.append_alias_to_mesh_name(segment_mesh_name, segment_alias)
+
+				# Each segment compresses its own vertex range [vertex_min, vertex_max]:
+				# VB element data and shape key data are sliced by the same range, and the IB is rebased to 0.
+				segment_vb_data = {}
+				for element_name, element_data in vb_data.items():
+					segment_vb_data[element_name] = element_data[vertex_min:vertex_max + 1]
+
+				segment_shapekey_position_data = {}
+				for shapekey_name, shapekey_data in shapekey_position_data.items():
+					segment_shapekey_position_data[shapekey_name] = shapekey_data[vertex_min:vertex_max + 1]
+
+				segment_obj = MeshCreateHelper.create_mesh_object(
+					mesh_name=segment_mesh_name,
+					source_path=submesh_json.JsonFilePath,
+					logic_name=logic_name,
+					gametypename=gametypename,
+					elements=elements,
+					vb_data=segment_vb_data,
+					ib_data=segment_ib_data - vertex_min,
+					vb_vertex_count=vertex_max - vertex_min + 1,
+					ib_count=len(segment_ib_data),
+					ib_polygon_count=int(len(segment_ib_data) / 3),
+					# Quantized POSITION decode parameters must reach segment
+					# imports too, otherwise segmented meshes keep crushed
+					# [0,1] coordinates.
+					local_bounding_box_min=submesh_json.LocalBoundingBoxMin,
+					local_bounding_box_max=submesh_json.LocalBoundingBoxMax,
+					vertex_compression_params=submesh_json.VertexCompressionParams,
+					import_collection=import_collection,
+					shapekey_position_data=segment_shapekey_position_data if segment_shapekey_position_data else None,
+					# WWMI shape key trio: whole buffers + per-segment vertex window
+					# Global IDs subtract both the component origin and segment-local origin.
+					wwmi_shapekey_buffers=shapekey_buffers if shapekey_buffers else None,
+					wwmi_vertex_offset=submesh_json.VertexOffset + vertex_min,
+					wwmi_vertex_count=vertex_max - vertex_min + 1,
+					wwmi_vg_map=wwmi_vg_map,
+					wwmi_vg_offset=submesh_json.VGOffset,
+				)
+				segment_obj["3DMigoto:DrawCallIBIndex"] = segment_info["ib_index"]
+				segment_obj["3DMigoto:DrawCallIndexOffset"] = segment_info["index_offset"]
+				segment_obj["3DMigoto:DrawCallIndexCount"] = segment_info["index_count"]
+
+				# NanoCat (MMT) linkage: when the SubMeshJson records a preview texture
+				# on this segment's IndexBufferList entry, apply it right away so the
+				# Blender viewport shows the same per-part assignment as the MMT 3D
+				# preview (no manual texture picking needed after import).
+				nanocat_texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
+					submesh_json=submesh_json,
+					ib_entry_index=segment_info["ib_index"],
+				)
+				if nanocat_texture_path:
+					MMTImportHelper.apply_nanocat_part_texture(segment_obj, nanocat_texture_path)
+
+				imported_obj_list.append(segment_obj)
+
+			if len(imported_obj_list) > 0:
+				print("DrawCallSegment import completed, created " + str(len(imported_obj_list)) + " segment meshes")
+				return imported_obj_list[0]
+
+			print("DrawCallSegmentList: all segments were invalid, falling back to whole import")
+
+		imported_obj = MeshCreateHelper.create_mesh_object(
+			mesh_name=mesh_name,
+			source_path=submesh_json.JsonFilePath,
+			logic_name=logic_name,
+			gametypename=gametypename,
+			elements=elements,
+			vb_data=vb_data,
+			ib_data=ib_data,
+			vb_vertex_count=vb_vertex_count,
+			ib_count=ib_count,
+			ib_polygon_count=ib_polygon_count,
+			local_bounding_box_min=submesh_json.LocalBoundingBoxMin,
+			local_bounding_box_max=submesh_json.LocalBoundingBoxMax,
+			vertex_compression_params=submesh_json.VertexCompressionParams,
+			import_collection=import_collection,
+			wwmi_shapekey_buffers=shapekey_buffers if shapekey_buffers else None,
+			shapekey_position_data=shapekey_position_data if shapekey_position_data else None,
+			wwmi_vertex_offset=submesh_json.VertexOffset,
+			wwmi_vertex_count=submesh_json.VertexCount,
+			wwmi_vg_map=wwmi_vg_map,
+			wwmi_vg_offset=submesh_json.VGOffset,
+		)
+
+		# Whole import merges every index buffer into a single mesh, so a precise
+		# per-segment mapping is impossible here; fall back to the first recorded
+		# NanoCat preview texture (segmented imports resolve per segment instead).
+		nanocat_texture_path = MMTImportHelper.resolve_nanocat_part_texture_path_for_whole_import(submesh_json)
+		if nanocat_texture_path:
+			MMTImportHelper.apply_nanocat_part_texture(imported_obj, nanocat_texture_path)
+		return imported_obj
+
+	@staticmethod
+	def clean_draw_component_alias(alias:str):
+		'''
+		Remove the redundant WWMI label from an alias without assigning its number.
+
+		The normalized Component number comes from the match-range map. The
+		"Draw Component N." text is only an original INI label and must not
+		override that range-based numbering.
+		'''
+		alias_text = str(alias).strip()
+		match = re.match(r"^draw\s+component\s+\d+(?:\.\s*(.*))?$", alias_text, re.IGNORECASE)
+		if match is None:
+			return alias_text
+		return (match.group(1) or "").strip()
+
+	@staticmethod
+	def build_match_submesh_name(submesh_name_prefix:str, match_index_count:int, match_first_index:int, match_component_map:dict | None = None):
+		'''
+		Build the Submesh match part of a classic mesh name.
+
+		Default form: {Prefix}-{MatchIndexCount}-{MatchFirstIndex}.
+		When the caller passes the folder-level match_component_map (the
+		DrawIB's IB partitions sorted by draw-range size ascending), the
+		numeric pair is replaced by its ordinal "Component N", which is
+		shorter and stays consistent across every data type of the same
+		DrawIB. A range missing from the map keeps the numeric fallback.
+		'''
+		prefix = str(submesh_name_prefix).strip()
+		if match_component_map:
+			component_index = match_component_map.get((int(match_first_index), int(match_index_count)))
+			if component_index is not None:
+				return prefix + "-Component " + str(component_index)
+		return prefix + "-" + str(match_index_count) + "-" + str(match_first_index)
+
+	@staticmethod
+	def append_alias_to_mesh_name(mesh_name:str, alias:str):
+		'''
+		Append ".<alias>" to a mesh name.
+
+		Blender ID names are limited to 63 bytes of UTF-8; when the combined
+		name would exceed the limit the alias tail is truncated first (at a
+		character boundary) so the base identity part stays fully readable.
+		'''
+		suffix = "." + alias.strip()
+		name_bytes = mesh_name.encode("utf-8")
+		suffix_bytes = suffix.encode("utf-8")
+		if len(name_bytes) + len(suffix_bytes) <= 63:
+			return mesh_name + suffix
+
+		# Truncate the suffix at a UTF-8 character boundary (drop trailing
+		# continuation bytes) so the decoded name stays valid text.
+		keep_bytes = 63 - len(name_bytes)
+		if keep_bytes <= 1:
+			# No room for ".x"; keep the base name rather than a bare dot.
+			return mesh_name
+		truncated_bytes = suffix_bytes[:keep_bytes]
+		while truncated_bytes and (truncated_bytes[-1] & 0xC0) == 0x80:
+			truncated_bytes = truncated_bytes[:-1]
+		return mesh_name + truncated_bytes.decode("utf-8", errors="ignore")
+
+	@staticmethod
+	def resolve_draw_call_segments(submesh_json:SubmeshJson, ib_data_list:list, ib_entry_array_indices:list, ib_data_full, vb_vertex_count:int):
+		'''
+		Resolve DrawCall segment info, returning [(segment_ib_data, vertex_min, vertex_max, segment_info)].
+
+		Prefer DrawCallSegmentList (complete ordered segments from the reverse tool,
+		one per drawindexed call, no deduplication). If missing, fall back to splitting
+		DrawCallIndexList in order -- but older versions deduplicated it by drawNumber; trust it
+		only when its count sum exactly matches the actual IB index count, otherwise abandon splitting.
+		'''
+		raw_segments = []
+
+		if len(submesh_json.DrawCallSegmentList) > 0:
+			for draw_call_segment in submesh_json.DrawCallSegmentList:
+				if draw_call_segment.IBIndex < 0 or draw_call_segment.IBIndex >= len(ib_entry_array_indices):
+					print("DrawCallSegment import: segment references non-existent IBIndex " + str(draw_call_segment.IBIndex) + ", skipped")
+					continue
+
+				source_ib_data = ib_data_list[ib_entry_array_indices[draw_call_segment.IBIndex]]
+				if draw_call_segment.IndexCount <= 0:
+					continue
+
+				segment_end = draw_call_segment.IndexOffset + draw_call_segment.IndexCount
+				if draw_call_segment.IndexOffset < 0 or segment_end > len(source_ib_data):
+					print(
+						"DrawCallSegment import: segment range out of bounds (IBIndex=" + str(draw_call_segment.IBIndex)
+						+ ", IndexOffset=" + str(draw_call_segment.IndexOffset)
+						+ ", IndexCount=" + str(draw_call_segment.IndexCount)
+						+ ", IB index count=" + str(len(source_ib_data)) + "), skipped"
+					)
+					continue
+
+				raw_segments.append((
+					source_ib_data[draw_call_segment.IndexOffset:segment_end],
+					{
+						"ib_index": draw_call_segment.IBIndex,
+						"index_offset": draw_call_segment.IndexOffset,
+						"index_count": draw_call_segment.IndexCount,
+						# Part alias from the INI comment above the drawindexed.
+						"alias": draw_call_segment.Alias,
+						# Per-segment match identity (0 = not recorded): single-IB
+						# multi-component groups (e.g. WWMI) carry it so the
+						# segment can be attributed to the right Component.
+						"match_first_index": draw_call_segment.MatchFirstIndex,
+						"match_index_count": draw_call_segment.MatchIndexCount,
+					},
+				))
+		elif len(submesh_json.DrawCallIndexList) > 0:
+			index_count_list = []
+			for draw_call_index in submesh_json.DrawCallIndexList:
+				try:
+					index_count_list.append(int(draw_call_index))
+				except (TypeError, ValueError):
+					index_count_list = []
+					break
+
+			if len(index_count_list) > 0:
+				if sum(index_count_list) == len(ib_data_full):
+					index_offset = 0
+					for index_count in index_count_list:
+						raw_segments.append((
+							ib_data_full[index_offset:index_offset + index_count],
+							{"ib_index": -1, "index_offset": index_offset, "index_count": index_count, "alias": "", "match_first_index": 0, "match_index_count": 0},
+						))
+						index_offset += index_count
+				else:
+					print(
+						"DrawCallIndexList total index count " + str(sum(index_count_list))
+						+ " does not match the actual IB index count " + str(len(ib_data_full))
+						+ " (older reverse tools deduplicated repeated drawNumber), cannot reliably split; importing as a whole. "
+						+ "Re-extracting with a newer reverse tool will produce an exact DrawCallSegmentList split."
+					)
+
+		draw_call_segments = []
+		for segment_ib_data, segment_info in raw_segments:
+			if len(segment_ib_data) == 0:
+				continue
+
+			vertex_min = int(segment_ib_data.min())
+			vertex_max = int(segment_ib_data.max())
+			if vertex_min < 0 or vertex_max >= vb_vertex_count:
+				print(
+					"DrawCallSegment import: segment vertex range [" + str(vertex_min) + ", " + str(vertex_max)
+					+ "] exceeds VB vertex count " + str(vb_vertex_count) + ", skipped"
+				)
+				continue
+
+			draw_call_segments.append((segment_ib_data, vertex_min, vertex_max, segment_info))
+
+		return draw_call_segments
+
+	@staticmethod
+	def parse_index_buffers(submesh_json:SubmeshJson):
+		'''
+		Parse all IB files described in IndexBufferList.
+
+		Returns (ib_data_list, ib_entry_array_indices, ib_data_full, ib_count, ib_polygon_count):
+		- ib_data_list: IB arrays deduplicated by FileName (keeping first-appearance order),
+		  used by DrawCallSegmentList for indexing via IBIndex;
+		- ib_entry_array_indices: maps each IndexBufferList entry to its index in ib_data_list
+		  (older reverse-engineered products may have several entries pointing at the same file);
+		- ib_data_full: full index data, all unique IBs concatenated in order (used for whole import).
+		'''
+		if len(submesh_json.IndexBufferList) == 0:
+			raise Fatal("SubmeshJson missing IndexBufferList.")
+
+		ib_data_list = []
+		filename_array_index_dict = {}
+		ib_entry_array_indices = []
+
+		for index_buffer in submesh_json.IndexBufferList:
+			if index_buffer.FileName in filename_array_index_dict:
+				ib_entry_array_indices.append(filename_array_index_dict[index_buffer.FileName])
+				continue
+
+			if not os.path.exists(index_buffer.FilePath):
+				raise Fatal("Unable to find matching .ib file for: " + index_buffer.FileName)
+
+			ib_file_size = os.path.getsize(index_buffer.FilePath)
+			if ib_file_size == 0:
+				raise Fatal("Current Import " + index_buffer.FileName + " file is empty, skip import.")
+
+			index_np_type = FormatUtils.get_nptype_from_format(index_buffer.DXGI_FORMAT)
+			index_stride = numpy.dtype(index_np_type).itemsize
+			if ib_file_size % index_stride != 0:
+				raise Fatal("Index buffer file size is not aligned with DXGI format stride: " + index_buffer.FileName)
+
+			ib_count = int(ib_file_size / index_stride)
+			ib_data = numpy.fromfile(index_buffer.FilePath, dtype=index_np_type, count=ib_count)
+
+			filename_array_index_dict[index_buffer.FileName] = len(ib_data_list)
+			ib_data_list.append(ib_data)
+			ib_entry_array_indices.append(filename_array_index_dict[index_buffer.FileName])
+
+		# IB indices are global (relative to full shared VB).
+		# When VertexCount > 0, VB is sliced to [VertexOffset : VertexOffset+VertexCount],
+		# so we subtract VertexOffset to make indices local to the sliced VB.
+		# When VertexCount == 0, the full VB is loaded without slicing,
+		# and the global IB indices are already valid for the full VB.
+		vertex_offset = submesh_json.VertexOffset
+		vertex_count = submesh_json.VertexCount
+		if vertex_offset > 0 and vertex_count > 0:
+			ib_data_list = [ib_data.astype(numpy.int64) - vertex_offset for ib_data in ib_data_list]
+
+		if len(ib_data_list) > 1:
+			ib_data_full = numpy.concatenate(ib_data_list)
+		else:
+			ib_data_full = ib_data_list[0]
+
+		ib_count = len(ib_data_full)
+		ib_polygon_count = int(ib_count / 3)
+
+		return ib_data_list, ib_entry_array_indices, ib_data_full, ib_count, ib_polygon_count
+
+	@staticmethod
+	def parse_category_buffers(submesh_json:SubmeshJson):
+		elements = []
+		vb_data = {}
+		vb_vertex_count = 0
+		shapekey_buffers = {}
+
+		vertex_slice_offset = submesh_json.VertexOffset
+		vertex_slice_count = submesh_json.VertexCount
+
+		# Buffer types that use standard D3D11ElementList structured layout.
+		# - Normal: standard vertex buffer (Position, Texcoord, Color, etc.)
+		# - BlendWeight: NTEMI packed BLENDINDICES + BLENDWEIGHTS buffer
+		# - TangentFrame: NTEMI packed TANGENT + NORMAL buffer
+		STRUCTURED_BUFFER_TYPES = {"Normal", "BlendWeight", "TangentFrame"}
+
+		for category_buffer in submesh_json.CategoryBufferList:
+			if category_buffer.Type not in STRUCTURED_BUFFER_TYPES:
+				continue
+
+			category_elements, category_vb_data, category_vertex_count = MMTImportHelper.parse_normal_category_buffer(
+				category_buffer, vertex_slice_offset, vertex_slice_count
+			)
+
+			if category_vertex_count > 0:
+				if vb_vertex_count == 0:
+					vb_vertex_count = category_vertex_count
+				elif vb_vertex_count != category_vertex_count:
+					raise Fatal(
+						"Vertex count mismatch between category buffers: "
+						+ category_buffer.FileName
+						+ " expected " + str(vb_vertex_count)
+						+ " actual " + str(category_vertex_count)
+					)
+
+			elements.extend(category_elements)
+			vb_data.update(category_vb_data)
+
+		SHAPEKEY_TYPES = ("ShapeKeyOffset", "ShapeKeyVertexId", "ShapeKeyVertexOffset", "ShapeKeyScale")
+
+		for category_buffer in submesh_json.CategoryBufferList:
+			if category_buffer.Type in STRUCTURED_BUFFER_TYPES:
+				continue
+
+			if category_buffer.Type in SHAPEKEY_TYPES:
+				if os.path.exists(category_buffer.FilePath) and os.path.getsize(category_buffer.FilePath) > 0:
+					shapekey_buffers[category_buffer.Type] = numpy.fromfile(category_buffer.FilePath, dtype=numpy.uint8)
+				continue
+
+			category_elements, category_vb_data, category_vertex_count = MMTImportHelper.parse_special_category_buffer(
+				category_buffer=category_buffer,
+				vb_vertex_count=vb_vertex_count,
+			)
+
+			if category_vertex_count > 0 and category_vertex_count != vb_vertex_count:
+				raise Fatal(
+					"Vertex count mismatch between category buffers: "
+					+ category_buffer.FileName
+					+ " expected " + str(vb_vertex_count)
+					+ " actual " + str(category_vertex_count)
+				)
+
+			elements.extend(category_elements)
+			vb_data.update(category_vb_data)
+
+		if vb_vertex_count == 0:
+			raise Fatal("No valid normal category buffer was parsed from SubmeshJson.")
+
+		# The runtime metadata describes buffer layout and batch ID boundaries.
+		# Keep it alongside untouched sparse arrays for whole and segmented imports.
+		# Do not apply the normal category's component slicing to sparse arrays.
+		if shapekey_buffers:
+			shapekey_buffers["metadata"] = submesh_json.ShapeKeysInfo
+		return elements, vb_data, vb_vertex_count, shapekey_buffers
+
+	@staticmethod
+	def parse_shapekey_position_buffers(submesh_json:SubmeshJson):
+		'''
+		Parse the shape key buffers described in ShapeKeyPositionBufferList.
+
+		A shape key buffer's binary layout is identical to the Position category's CategoryBuffer,
+		so it is parsed by directly reusing the Position category buffer's D3D11ElementList,
+		extracting the POSITION element's absolute coordinate data (same coordinate space as the base POSITION).
+		'''
+		shapekey_position_data = {}
+
+		if len(submesh_json.ShapeKeyPositionBufferList) == 0:
+			return shapekey_position_data
+
+		# Find the first CategoryBuffer containing a POSITION semantic element to serve as the layout template.
+		position_category_buffer = None
+		position_element = None
+		for category_buffer in submesh_json.CategoryBufferList:
+			for d3d11_element in category_buffer.D3D11ElementList:
+				if d3d11_element.SemanticName == "POSITION":
+					position_category_buffer = category_buffer
+					position_element = d3d11_element
+					break
+			if position_category_buffer is not None:
+				break
+
+		if position_category_buffer is None or position_element is None:
+			print("ShapeKeyPosition import: no Position category buffer found, skipping shape key import.")
+			return shapekey_position_data
+
+		if position_category_buffer.Stride <= 0:
+			return shapekey_position_data
+
+		for shapekey_buffer in submesh_json.ShapeKeyPositionBufferList:
+			if not shapekey_buffer.FileName:
+				continue
+
+			if not os.path.exists(shapekey_buffer.FilePath) or os.path.getsize(shapekey_buffer.FilePath) == 0:
+				print("ShapeKeyPosition import: shape key buffer missing or empty, skipped: " + shapekey_buffer.FileName)
+				continue
+
+			if os.path.getsize(shapekey_buffer.FilePath) % position_category_buffer.Stride != 0:
+				print("ShapeKeyPosition import: shape key buffer size not aligned with Position stride, skipped: " + shapekey_buffer.FileName)
+				continue
+
+			shapekey_category_buffer = SubmeshCategoryBuffer(
+				FileName=shapekey_buffer.FileName,
+				Type="Normal",
+				D3D11ElementList=position_category_buffer.D3D11ElementList,
+			)
+			shapekey_category_buffer.bind_dir_path(submesh_json.DirPath)
+			shapekey_category_buffer.calc_stride()
+
+			_, shapekey_vb_data, _ = MMTImportHelper.parse_normal_category_buffer(
+				shapekey_category_buffer,
+				vertex_slice_offset=submesh_json.VertexOffset,
+				vertex_slice_count=submesh_json.VertexCount,
+			)
+
+			position_data = shapekey_vb_data.get(position_element.ElementName)
+			if position_data is None:
+				continue
+
+			position_data = FormatUtils.apply_format_conversion(position_data, position_element.Format)
+			shapekey_position_data[shapekey_buffer.ShapeKeyName] = position_data
+
+		return shapekey_position_data
+
+	@staticmethod
+	def parse_normal_category_buffer(category_buffer:SubmeshCategoryBuffer, vertex_slice_offset:int=0, vertex_slice_count:int=-1):
+		if not os.path.exists(category_buffer.FilePath):
+			raise Fatal("Unable to find matching .buf file for: " + category_buffer.FileName)
+
+		if category_buffer.Stride <= 0:
+			if len(category_buffer.D3D11ElementList) == 0:
+				return [], {}, 0
+			raise Fatal("Category buffer stride is zero: " + category_buffer.FileName)
+
+		file_size = os.path.getsize(category_buffer.FilePath)
+		if file_size == 0:
+			raise Fatal("Current Import " + category_buffer.FileName + " file is empty, skip import.")
+		if file_size % category_buffer.Stride != 0:
+			raise Fatal("Category buffer file size is not aligned with stride: " + category_buffer.FileName)
+
+		vertex_count = int(file_size / category_buffer.Stride)
+		category_dtype = MMTImportHelper.create_dtype_from_elements(category_buffer.D3D11ElementList)
+		category_buffer_data = numpy.fromfile(category_buffer.FilePath, dtype=category_dtype, count=vertex_count)
+
+		if vertex_slice_count > 0:
+			category_buffer_data = category_buffer_data[vertex_slice_offset:vertex_slice_offset + vertex_slice_count]
+			vertex_count = vertex_slice_count
+
+		category_vb_data = {}
+		for d3d11_element in category_buffer.D3D11ElementList:
+			category_vb_data[d3d11_element.ElementName] = category_buffer_data[d3d11_element.ElementName]
+
+		return category_buffer.D3D11ElementList, category_vb_data, vertex_count
+
+	@staticmethod
+	def parse_special_category_buffer(category_buffer:SubmeshCategoryBuffer, vb_vertex_count:int):
+		if category_buffer.Type == "DynamicBlend":
+			return MMTImportHelper.parse_dynamic_blend_category_buffer(
+				category_buffer=category_buffer,
+				vb_vertex_count=vb_vertex_count,
+			)
+
+		print("Reserved special buffer parsing path, current Type: " + category_buffer.Type + ", FileName: " + category_buffer.FileName)
+		return [], {}, 0
+
+	@staticmethod
+	def parse_dynamic_blend_category_buffer(category_buffer:SubmeshCategoryBuffer, vb_vertex_count:int):
+		if vb_vertex_count <= 0:
+			raise Fatal("DynamicBlend parsing requires a valid vb_vertex_count.")
+
+		if not os.path.exists(category_buffer.FilePath):
+			raise Fatal("Unable to find matching .buf file for: " + category_buffer.FileName)
+
+		file_size = os.path.getsize(category_buffer.FilePath)
+		if file_size == 0:
+			raise Fatal("Current Import " + category_buffer.FileName + " file is empty, skip import.")
+		if file_size % 4 != 0:
+			raise Fatal("DynamicBlend buffer size must be aligned to uint32: " + category_buffer.FileName)
+
+		raw_u32 = numpy.fromfile(category_buffer.FilePath, dtype=numpy.uint32)
+		offset_count = vb_vertex_count + 1
+		if len(raw_u32) <= offset_count:
+			raise Fatal("DynamicBlend buffer is too short to contain offset table and packed entries: " + category_buffer.FileName)
+
+		offsets = raw_u32[:offset_count].astype(numpy.uint64)
+		packed_start_index = offset_count
+		packed_end_index = len(raw_u32)
+
+		if numpy.any(offsets < packed_start_index):
+			raise Fatal("DynamicBlend offset table points before packed entry stream: " + category_buffer.FileName)
+		if numpy.any(offsets > packed_end_index):
+			raise Fatal("DynamicBlend offset table points past buffer end: " + category_buffer.FileName)
+		if numpy.any(offsets[1:] < offsets[:-1]):
+			raise Fatal("DynamicBlend offset table is not monotonically increasing: " + category_buffer.FileName)
+
+		max_influence_count = int(numpy.max(offsets[1:] - offsets[:-1])) if vb_vertex_count > 0 else 0
+		semantic_group_count = max(1, (max_influence_count + 3) // 4)
+
+		blend_indices_dict = {}
+		blend_weights_dict = {}
+		for semantic_index in range(semantic_group_count):
+			blend_indices_dict[semantic_index] = numpy.zeros((vb_vertex_count, 4), dtype=numpy.uint32)
+			blend_weights_dict[semantic_index] = numpy.zeros((vb_vertex_count, 4), dtype=numpy.float32)
+
+		for vertex_index in range(vb_vertex_count):
+			start = int(offsets[vertex_index])
+			end = int(offsets[vertex_index + 1])
+			if end < start:
+				raise Fatal("DynamicBlend offset table contains inverted range at vertex: " + str(vertex_index))
+
+			packed_values = raw_u32[start:end]
+			for influence_index, packed_value in enumerate(packed_values):
+				semantic_index = influence_index // 4
+				channel_index = influence_index % 4
+				blend_indices_dict[semantic_index][vertex_index, channel_index] = packed_value & 0xFFFF
+				blend_weights_dict[semantic_index][vertex_index, channel_index] = ((packed_value >> 16) & 0xFFFF) / 65535.0
+
+		category_elements = []
+		category_vb_data = {}
+		aligned_byte_offset = 0
+		for semantic_index in range(semantic_group_count):
+			blendindices_element = D3D11Element(
+				SemanticName="BLENDINDICES",
+				SemanticIndex=semantic_index,
+				Format="R32G32B32A32_UINT",
+				ByteWidth=16,
+				ExtractSlot="cs-t1",
+				ExtractTechnique="compute",
+				Category="Blend",
+				AlignedByteOffset=aligned_byte_offset,
+			)
+			aligned_byte_offset += blendindices_element.ByteWidth
+
+			blendweight_element = D3D11Element(
+				SemanticName="BLENDWEIGHT",
+				SemanticIndex=semantic_index,
+				Format="R32G32B32A32_FLOAT",
+				ByteWidth=16,
+				ExtractSlot="cs-t1",
+				ExtractTechnique="compute",
+				Category="Blend",
+				AlignedByteOffset=aligned_byte_offset,
+			)
+			aligned_byte_offset += blendweight_element.ByteWidth
+
+			category_elements.append(blendindices_element)
+			category_elements.append(blendweight_element)
+			category_vb_data[blendindices_element.ElementName] = blend_indices_dict[semantic_index]
+			category_vb_data[blendweight_element.ElementName] = blend_weights_dict[semantic_index]
+
+		return category_elements, category_vb_data, vb_vertex_count
+
+	@staticmethod
+	def create_dtype_from_elements(d3d11_element_list:list):
+		fields = []
+		for d3d11_element in d3d11_element_list:
+			numpy_type = FormatUtils.get_nptype_from_format(d3d11_element.Format)
+			size = int(d3d11_element.ByteWidth / numpy.dtype(numpy_type).itemsize)
+			if size == 1:
+				fields.append((d3d11_element.ElementName, numpy_type))
+			else:
+				fields.append((d3d11_element.ElementName, numpy_type, size))
+		return numpy.dtype(fields)
+
+	@staticmethod
+	def resolve_nanocat_part_texture_path(submesh_json:SubmeshJson, ib_entry_index:int):
+		'''
+		Resolve the NanoCat (MMT) preview texture recorded on one IndexBufferList entry.
+
+		The MMT host writes "NanoCatPartTexture" into the SubMeshJson when the agent
+		assigns a base-color texture to a part. The value is a bare PNG file name and
+		the file itself lies flat in the reverse output root (the parent folder of the
+		variant folder holding the JSON), so both the JSON folder and its parent are
+		probed. Returns the absolute image path, or None when nothing usable is found.
+		'''
+		# A negative index is the DrawCallIndexList fallback (no IB entry mapping).
+		if ib_entry_index < 0 or ib_entry_index >= len(submesh_json.IndexBufferList):
+			return None
+
+		texture_name = str(submesh_json.IndexBufferList[ib_entry_index].NanoCatPartTexture or "").strip()
+		if not texture_name:
+			return None
+
+		# Only the bare file name is honored: paths inside the JSON stay untrusted.
+		texture_name = os.path.basename(texture_name)
+		for directory in (submesh_json.DirPath, os.path.dirname(submesh_json.DirPath)):
+			candidate = os.path.join(directory, texture_name)
+			if os.path.isfile(candidate):
+				return candidate
+		return None
+
+	@staticmethod
+	def resolve_nanocat_part_texture_path_for_whole_import(submesh_json:SubmeshJson):
+		'''
+		Pick a single NanoCat preview texture for the whole-import path (one mesh
+		merging every index buffer): the first entry with a resolvable texture wins.
+		'''
+		for entry_index in range(len(submesh_json.IndexBufferList)):
+			texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
+				submesh_json=submesh_json,
+				ib_entry_index=entry_index,
+			)
+			if texture_path:
+				return texture_path
+		return None
+
+	@staticmethod
+	def apply_nanocat_part_texture(obj, texture_path:str):
+		'''
+		Wire the NanoCat-assigned image into the imported object's material so the
+		Blender viewport preview matches the assignment made in the MMT 3D preview.
+
+		The shared apply_image_texture_to_material helper does the actual node
+		wiring; here we only guarantee the object owns a material and never clobber
+		a custom (e.g. GIMI high-fidelity) node tree with a plain Principled setup.
+		'''
+		if not texture_path or not os.path.isfile(texture_path):
+			return
+
+		# check_existing=True: re-imports share one image data-block per file path.
+		image_data = bpy.data.images.load(texture_path, check_existing=True)
+
+		# Reuse the first material slot when it exists; otherwise create a fresh
+		# preview material named after the texture file.
+		material = None
+		if obj.data.materials and obj.data.materials[0] is not None:
+			material = obj.data.materials[0]
+		if material is None:
+			material_name = os.path.splitext(os.path.basename(texture_path))[0] + "_Material"
+			material = bpy.data.materials.new(name=material_name)
+			if obj.data.materials:
+				obj.data.materials[0] = material
+			else:
+				obj.data.materials.append(material)
+
+		# A node tree that already renders something but has no Principled BSDF is
+		# a custom (e.g. high-fidelity) material: keep it intact and skip preview
+		# wiring instead of hijacking its material output.
+		if material.use_nodes and material.node_tree is not None and len(material.node_tree.nodes) > 0:
+			if find_node(material.node_tree.nodes, "ShaderNodeBsdfPrincipled") is None:
+				print("NanoCat part texture: custom material detected on " + obj.name + ", preview texture skipped: " + texture_path)
+				return
+
+		apply_image_texture_to_material(material, image_data)
+		print("NanoCat part texture applied: " + obj.name + " <- " + os.path.basename(texture_path))
