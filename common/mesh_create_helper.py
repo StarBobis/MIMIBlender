@@ -598,7 +598,7 @@ class MeshCreateHelper:
             return
 
         # Buffer layout is explicit in new MMT outputs. Legacy compact files
-        # consist of complete 128-offset blocks; larger non-block CBs are raw.
+        # consist of complete 128-offset blocks; raw CBs also hold shader state.
         # Never use runtime batch offsets as component mesh vertex offsets.
         # Reject fractional binary entries before NumPy creates typed views.
         # This produces a useful WWMI error instead of a generic reshape error.
@@ -609,6 +609,15 @@ class MeshCreateHelper:
         metadata = shapekey_buffers.get("metadata", {})
         layout = metadata.get("buffer_layout", "")
         raw_cb = layout == "raw_cb" or (not layout and len(all_offsets) % 128 != 0)
+        # Legacy frame-analysis captures include a full 4096-byte constant buffer.
+        # Its 1024 uints divide by 128, but words after the offset table contain
+        # shader state, not more batches. Size divisibility alone misreads them.
+        # Prefer valid compact blocks so genuine eight-batch mods still work.
+        # An explicit layout always wins, including malformed compact metadata.
+        if not layout and len(all_offsets) == 1024:
+            blocks = all_offsets.reshape(-1, 128)
+            compact_blocks = numpy.all(blocks[:, 0] == 0) and numpy.all(blocks[:, 1:] >= blocks[:, :-1])
+            raw_cb = not compact_blocks
         if len(all_offsets) < 128:
             raise Fatal("WWMI ShapeKeyOffset buffer is shorter than 128 offsets.")
         if raw_cb and len(all_offsets) < 262:

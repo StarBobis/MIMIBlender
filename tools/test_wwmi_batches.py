@@ -105,6 +105,55 @@ class BatchTests(unittest.TestCase):
         self.assertEqual([key.name for key in obj.data.shape_keys.key_blocks], ['Basis', 'Deform 0'])
         self.assertEqual(obj.data.shape_keys.key_blocks[1].data.co[0], 0.5)
 
+    def test_legacy_full_size_raw_cb(self):
+        # Xin's legacy MMT extraction stores the whole 4096-byte shader CB.
+        # The extra words include float bit patterns and are not offset blocks.
+        # Keep CB[261]'s sparse origin independent of the component vertex origin.
+        cb = numpy.zeros(1024, dtype='<u4')
+        cb[1:128] = 1
+        cb[256:261] = [1255466176, 1257630588, 1255483664, 1266679808, 1266679808]
+        cb[261] = 1
+        deltas = numpy.zeros((2, 6), dtype='<f2')
+        deltas[:, 0] = [0.25, 0.5]
+        obj = import_buffers(cb, [0, 100], deltas, origin=100)
+        keys = obj.data.shape_keys.key_blocks
+        self.assertEqual([key.name for key in keys], ['Basis', 'Deform 0'])
+        self.assertEqual(keys[1].data.co[0], 0.5)
+
+    def test_eight_compact_batches_are_not_a_raw_cb(self):
+        # Eight valid compact batches have exactly the same size as a raw CB.
+        # Structural validation preserves all eight blocks and their key IDs.
+        # This guards against fixing Xin with an unconditional file-size guess.
+        offsets = ([0] + [1] * 127) * 8
+        deltas = numpy.zeros((8, 6), dtype='<f2')
+        deltas[:, 0] = numpy.arange(1, 9) / 8
+        obj = import_buffers(offsets, [0] * 8, deltas)
+        keys = obj.data.shape_keys.key_blocks
+        self.assertEqual([key.name for key in keys[1:]], [f'Deform {127 * batch}' for batch in range(8)])
+        self.assertEqual(keys[-1].data.co[0], 1.0)
+
+    def test_explicit_compact_layout_is_not_reinterpreted(self):
+        # Declared compact buffers must not hide corrupt offsets as raw state.
+        # Only legacy captures with no layout marker use the detection fallback.
+        # The existing strict validation must continue to reject bad batches.
+        offsets = numpy.zeros(1024, dtype='<u4')
+        offsets[1:128] = 1
+        offsets[256] = 123
+        with self.assertRaisesRegex(ValueError, 'monotonic'):
+            import_buffers(offsets, [0], numpy.zeros((1, 6)), metadata={'buffer_layout': 'compact_batches'})
+
+    def test_explicit_full_size_raw_cb(self):
+        # Modern metadata disambiguates even an all-zero shader-state tail.
+        # CB[261] remains a sparse origin, not the first offset of batch two.
+        # Test the explicit branch alongside the no-metadata legacy fallback.
+        offsets = numpy.zeros(1024, dtype='<u4')
+        offsets[1:128] = 1
+        offsets[261] = 1
+        deltas = numpy.zeros((2, 6), dtype='<f2')
+        deltas[1, 0] = 0.75
+        obj = import_buffers(offsets, [0, 0], deltas, metadata={'buffer_layout': 'raw_cb'})
+        self.assertEqual(obj.data.shape_keys.key_blocks[1].data.co[0], 0.75)
+
     def test_middle_empty_slot_and_second_batch(self):
         # First key is blank; slot one is populated and must retain ID one.
         # Legacy compact block two always begins at global key ID 127.
