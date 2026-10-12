@@ -164,12 +164,20 @@ class DrawCallModel:
 
         return " && ".join(condition_str_list)
 
-    def get_drawindexed_str(self, obj_name_draw_offset_dict: Optional[dict[str, int]] = None) -> str:
-        draw_offset = self.index_offset if obj_name_draw_offset_dict is None else obj_name_draw_offset_dict.get(self.obj_name, self.index_offset)
+    def _get_draw_offset(self, offsets=None) -> int:
+        # One object can appear in multiple Submeshes or blueprint branches.
+        # Resolve the exact draw first; name-only offsets are legacy fallbacks.
+        # Never let a later body region overwrite an earlier region's range.
+        if offsets is None:
+            return self.index_offset
+        return offsets.get(id(self), offsets.get(self.obj_name, self.index_offset))
+
+    def get_drawindexed_str(self, obj_name_draw_offset_dict: Optional[dict[str | int, int]] = None) -> str:
+        draw_offset = self._get_draw_offset(obj_name_draw_offset_dict)
         return f"drawindexed = {self.index_count},{draw_offset},0"
 
-    def get_drawindexed_instanced_str(self, obj_name_draw_offset_dict: Optional[dict[str, int]] = None) -> str:
-        draw_offset = self.index_offset if obj_name_draw_offset_dict is None else obj_name_draw_offset_dict.get(self.obj_name, self.index_offset)
+    def get_drawindexed_instanced_str(self, obj_name_draw_offset_dict: Optional[dict[str | int, int]] = None) -> str:
+        draw_offset = self._get_draw_offset(obj_name_draw_offset_dict)
         return f"drawindexedinstanced = {self.index_count},INSTANCE_COUNT,{draw_offset},0,FIRST_INSTANCE"
         
  

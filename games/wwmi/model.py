@@ -246,6 +246,18 @@ class DrawIBModelWWMI:
             self.merged_object.object["wwmi_shapekey_batch_counts"] = batch_counts
         self.obj_buffer_model_wwmi = ExportUtils.build_wwmi_obj_buffer_result(element_context)
 
+        # WWMI bypasses SubMeshModel, but must use the same actual polygon ranges.
+        # Keep components contiguous for dispatch and merged-component remapping.
+        # TempObject entries are the range owners consumed by the WWMI INI writer.
+        from ...utils.draw_range_utils import DrawRangeUtils
+        range_owners = [temp for component in self.merged_object.components for temp in component.objects]
+        self.obj_buffer_model_wwmi.ib = DrawRangeUtils.align_buffer_ranges(
+            element_context.mesh, self.obj_buffer_model_wwmi.ib, range_owners,
+        )
+        for component in self.merged_object.components:
+            component.index_count = sum(temp.index_count for temp in component.objects)
+        self.merged_object.index_count = len(self.obj_buffer_model_wwmi.ib)
+
         position_stride: int = self.d3d11_game_type.CategoryStrideDict["Position"]
         position_bytelength: int = len(self.obj_buffer_model_wwmi.category_buffer_dict["Position"])
         self.mesh_vertex_count = int(position_bytelength / position_stride)
@@ -356,6 +368,7 @@ class DrawIBModelWWMI:
 
         self.component_real_vg_count_dict = {}
         index_offset = 0
+        owner = 0
 
         for component_id, component in enumerate(components):
             component.objects.sort(key=lambda temp_object: temp_object.name)
@@ -384,6 +397,12 @@ class DrawIBModelWWMI:
                     print("WWMI: restored the workflow mirror for " + temp_obj.name)
 
                 ObjUtils.triangulate_object(bpy.context, temp_obj)
+
+                # Track the same component/object order used for WWMI draw emission.
+                # Face tags survive the two joins and the evaluated buffer mesh.
+                from ...utils.draw_range_utils import DrawRangeUtils
+                owner += 1
+                DrawRangeUtils.tag_object(temp_obj, owner)
 
                 vertex_groups = ObjUtils.get_vertex_groups(temp_obj)
                 # MergedComponent validates exported global identities later.

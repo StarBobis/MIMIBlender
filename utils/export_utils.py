@@ -118,6 +118,7 @@ class ExportUtils:
     def build_unity_obj_buffer_result(
         obj: bpy.types.Object,
         d3d11_game_type: D3D11GameType,
+        drawcall_model_list: Optional[list] = None,
     ) -> UnityBufferBuildResult:
         ObjBufferHelper.check_and_verify_attributes(obj=obj, d3d11_game_type=d3d11_game_type)
 
@@ -139,6 +140,13 @@ class ExportUtils:
             d3d11_game_type=d3d11_game_type,
             dtype=element_context.total_structured_dtype,
         )
+        # Resolve ownership while the exact evaluated buffer mesh is still available.
+        # Keep legacy standalone callers unchanged when no draw list is supplied.
+        # Reordering IB triangles does not change the vertex/loop maps used by keys.
+        if drawcall_model_list is not None:
+            from .draw_range_utils import DrawRangeUtils
+            ib = DrawRangeUtils.align_buffer_ranges(element_context.mesh, ib, drawcall_model_list)
+
         shape_key_buffer_dict = ExportUtils.build_unity_shape_key_buffer_dict(
             obj=obj,
             d3d11_game_type=d3d11_game_type,

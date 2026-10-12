@@ -210,7 +210,11 @@ class DrawIBModel:
             total_ib.extend(index + vertex_base for index in submesh_model.ib)
 
             for draw_call_model in submesh_model.drawcall_model_list:
-                obj_name_draw_offset[draw_call_model.obj_name] = submesh_index_offset + draw_call_model.index_offset
+                # Scope offsets to the draw, not just the reused Blender name.
+                # Retain name keys for callers that still use the legacy lookup.
+                offset = submesh_index_offset + draw_call_model.index_offset
+                obj_name_draw_offset[id(draw_call_model)] = offset
+                obj_name_draw_offset[draw_call_model.obj_name] = offset
 
             submesh_index_offset += len(submesh_model.ib)
 
@@ -228,6 +232,9 @@ class DrawIBModel:
             total_index_count += len(remapped_ib)
 
             for draw_call_model in submesh_model.drawcall_model_list:
+                # Local offsets also differ when object order varies by Submesh.
+                # Exact draw identities prevent one body's range replacing another.
+                obj_name_draw_offset[id(draw_call_model)] = draw_call_model.index_offset
                 obj_name_draw_offset[draw_call_model.obj_name] = draw_call_model.index_offset
 
         return submesh_ib_dict, obj_name_draw_offset, total_index_count

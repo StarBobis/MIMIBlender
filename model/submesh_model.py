@@ -116,7 +116,7 @@ class SubMeshModel:
         index_offset = 0
         submesh_temp_obj_list = []
         temp_collection_list = []
-        for draw_call_model in self.drawcall_model_list:
+        for owner, draw_call_model in enumerate(self.drawcall_model_list, start=1):
             # Fetch the original obj
             source_obj = ObjUtils.get_obj_by_name(draw_call_model.obj_name)
 
@@ -146,6 +146,11 @@ class SubMeshModel:
 
             # Triangulate the obj
             ObjUtils.triangulate_object(bpy.context, temp_obj)
+
+            # Keep polygon ownership through the join and evaluated mesh.
+            # Disconnected upper/lower faces must remain under the same key.
+            from ..utils.draw_range_utils import DrawRangeUtils
+            DrawRangeUtils.tag_object(temp_obj, owner)
 
             # Compute the extra attributes; the loop holds references, so modifying them in place is enough
             draw_call_model.vertex_count = len(temp_obj.data.vertices)
@@ -191,7 +196,11 @@ class SubMeshModel:
         obj_buffer_result = ExportUtils.build_unity_obj_buffer_result(
             obj=submesh_merged_obj,
             d3d11_game_type=self.d3d11_game_type,
+            drawcall_model_list=self.drawcall_model_list,
         )
+        # Final ranges are derived from the evaluated IB, including generated faces.
+        # Do not reuse pre-merge counts when a modifier changes topology or order.
+        self.index_count = len(obj_buffer_result.ib)
         self.ib = obj_buffer_result.ib
         self.category_buffer_dict = obj_buffer_result.category_buffer_dict
         self.index_vertex_id_dict = obj_buffer_result.index_loop_id_dict
