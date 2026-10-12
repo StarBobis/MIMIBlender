@@ -6,7 +6,6 @@ from ..utils.timer_utils import TimerUtils
 from ..utils.command_utils import CommandUtils
 
 from ..common.global_config import GlobalConfig
-from ..common.global_config import LogicName
 
 from ..games import get_exporter_class
 
@@ -18,17 +17,6 @@ from ..blueprint.blueprint_node_face_mod import (
     export_face_mod_from_node,
 )
 from ..i18n.i18n import I18nOperator, tr
-
-
-def _is_mod_generation_blocked(report_callback):
-    # Keep the exporters registered; this restriction only stops generation.
-    # Match exact presets so ZZMIDX12 and other supported games stay available.
-    blocked_presets = {LogicName.GIMI, LogicName.SRMI, LogicName.HIMI, LogicName.ZZMI}
-    if GlobalConfig.logic_name not in blocked_presets:
-        return False
-    # Report before blueprint parsing, object updates, or output file creation.
-    report_callback({'ERROR'}, tr("The current game preset does not yet support generating Mods"))
-    return True
 
 
 def _export_blueprint_model(blueprint_model):
@@ -67,9 +55,7 @@ def _export_regular_output(tree, context, output_node, config_name):
 
 
 def generate_mod_from_output_node(tree, context, output_node, report_callback):
-    # Direct node exports must stop before any generation state is changed.
-    if _is_mod_generation_blocked(report_callback):
-        return {'CANCELLED'}
+    # Validate the selected output before changing generation state.
     if getattr(output_node, "bl_idname", "") not in _OUTPUT_NODE_IDS:
         report_callback({'ERROR'}, tr("Please select a valid Output node"))
         return {'CANCELLED'}
@@ -105,9 +91,7 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
 
 
 def generate_mod_from_tree(tree, context, report_callback):
-    # Shared shortcuts use the same preset restriction as direct node exports.
-    if _is_mod_generation_blocked(report_callback):
-        return {'CANCELLED'}
+    # Shared shortcuts require one unambiguous output before exporting.
     if not tree:
         report_callback({'ERROR'}, tr("No valid blueprint found"))
         return {'CANCELLED'}
@@ -152,9 +136,7 @@ class MMTGenerateModBlueprint(I18nOperator):
     tree_name: bpy.props.StringProperty()  # type: ignore
 
     def execute(self, context):
-        # Reject the click before resolving or touching the current blueprint.
-        if _is_mod_generation_blocked(self.report):
-            return {'CANCELLED'}
+        # Resolve the requested blueprint before selecting its output.
         tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
         tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
         if not tree:
@@ -176,9 +158,7 @@ class MMTGenerateSelectedBlueprintMod(I18nOperator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        # Reject quick generation before selection or blueprint state changes.
-        if _is_mod_generation_blocked(self.report):
-            return {'CANCELLED'}
+        # Resolve the selected blueprint without imposing preset restrictions.
         mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
         selected_name = getattr(mimi_global_properties, "selected_blueprint_name", "") if mimi_global_properties else ""
 

@@ -58,8 +58,8 @@ bl_info = {
     "name": "MIMIBlender",
     "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
-    # Publish legacy WWMI workspace shape-key buffer compatibility.
-    "version": (1, 0, 45),
+    # Keep the updater and manual-install package on the same release version.
+    "version": (1, 0, 46),
     "location": "View3D",
     "category": "Generic"
 }
