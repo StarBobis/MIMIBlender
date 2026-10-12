@@ -1001,6 +1001,16 @@ def _get_sword_reverse_source_mode_items(self, context):
     ]
 
 
+def _get_sword_reverse_path_options():
+    # Blender 4.2 has no relative-path flag and rejects it during registration.
+    # Detect the matching RNA capability instead of guessing a version boundary.
+    # Keep the flag on newer runtimes, including 4.5 and 5.2, for their file browser.
+    # Older Blender supports // paths without it; import-time resolution is unchanged.
+    if 'is_path_supports_blend_relative' in bpy.types.StringProperty.bl_rna.properties:
+        return {'PATH_SUPPORTS_BLEND_RELATIVE'}
+    return set()
+
+
 def register():
     # Register the preview image collection
     pcoll = bpy.utils.previews.new()
@@ -1038,8 +1048,9 @@ def register():
         description=tr("Manually specify the folder used for the one-click import of reverse results"),
         default="",
         subtype='DIR_PATH',
-        # Permit Blender-relative file browser paths; resolve them at import.
-        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
+        # Only pass the relative-path flag to Blender versions that accept it.
+        # The stored property name and the import-time path handling stay unchanged.
+        options=_get_sword_reverse_path_options(),
         # Fires right after the user picks a folder, so the yes / no hint under
         # the field follows the new selection immediately.
         update=_on_sword_reverse_source_changed,
