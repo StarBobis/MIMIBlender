@@ -349,6 +349,59 @@ def _create_and_layout_obj_info_nodes(tree, group_node, foldername_imported_obj_
 
 
 
+def _layout_imported_blueprint(tree):
+    """Lay out a generated graph by dependencies, using editor-space coordinates."""
+    # Node creation order and old positions are not dependency order.
+    # Frames are containers, never stages in the object-processing pipeline.
+    nodes = [node for node in tree.nodes if node.bl_idname != 'NodeFrame']
+    by_name = {node.name: node for node in nodes}
+    predecessors = {node.name: set() for node in nodes}
+    for link in tree.links:
+        if link.from_node.name in by_name and link.to_node.name in by_name:
+            predecessors[link.to_node.name].add(link.from_node.name)
+
+    # Longest-path layers put every target strictly after all its sources.
+    # Parallel branches share a column; joins follow the longest branch.
+    # Compute the complete plan first so a cycle never causes a partial move.
+    layers = {}
+    remaining = list(nodes)
+    while remaining:
+        ready = [node for node in remaining
+                 if predecessors[node.name].issubset(layers)]
+        if not ready:
+            return False
+        for node in ready:
+            parents = predecessors[node.name]
+            layers[node.name] = max((layers[name] + 1 for name in parents), default=0)
+            remaining.remove(node)
+
+    # Measure widths directly: freshly created nodes have no drawn dimensions.
+    # A fixed edge-to-edge gap prevents wide source nodes reaching past targets.
+    x = 40.0
+    for layer in sorted(set(layers.values())):
+        column = [node for node in nodes if layers[node.name] == layer]
+        y = 0.0
+        for node in column:
+            # Assign absolute positions even when the node is inside a Frame.
+            # Blender stores child locations relative to every ancestor frame.
+            parent_x = parent_y = 0.0
+            parent = node.parent
+            while parent is not None:
+                parent_x += parent.location.x
+                parent_y += parent.location.y
+                parent = parent.parent
+            node.location = (x - parent_x, y - parent_y)
+
+            # Socket rows dominate tall imported lists and master groups.
+            # Reserve controls as well, without relying on a GUI layout pass.
+            # Export controls need extra room when a Face branch shares a layer.
+            sockets = max(len(node.inputs), len(node.outputs))
+            height = max(float(node.dimensions.y), 360.0 + 24.0 * sockets)
+            y -= height + 100.0
+        x += max(float(node.width) for node in column) + 180.0
+    return True
+
+
 def _clear_blueprint_node_selection(tree):
     """Leave generated blueprints ready for inspection, without a selected graph."""
     for node in tree.nodes:
@@ -546,6 +599,9 @@ def ImprotFromWorkSpaceFull(self, context):
             tree, group_node, oldfoldername_item_dict, oldfoldername_jsonpath_dict,
         )
 
+        # Final links, including the Face branch, define the visual order.
+        # Share this dependency layout between full import and refresh import.
+        _layout_imported_blueprint(tree)
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
         mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
@@ -841,6 +897,9 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
             tree, group_node, oldfoldername_item_dict, oldfoldername_jsonpath_dict or {},
         )
 
+        # Final links, including the Face branch, define the visual order.
+        # Share this dependency layout between full import and refresh import.
+        _layout_imported_blueprint(tree)
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
         mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)

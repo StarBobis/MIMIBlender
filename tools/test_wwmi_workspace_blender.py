@@ -134,6 +134,17 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(tree.bl_idname, 'MIMIBlueprintTreeType')
             self.assertTrue(any(node.bl_idname == 'MIMINode_Result_Output' for node in tree.nodes))
             self.assertGreater(len(tree.links), 0)
+            # Compare editor-space coordinates, including each frame ancestor.
+            # The real full import must put every source before its target.
+            def absolute_x(node):
+                x = node.location.x
+                parent = node.parent
+                while parent is not None:
+                    x += parent.location.x
+                    parent = parent.parent
+                return x
+            for link in tree.links:
+                self.assertGreaterEqual(absolute_x(link.to_node) - absolute_x(link.from_node) - link.from_node.width, 80.0)
             self.assertEqual(bpy.context.scene.mimi_global_properties.selected_blueprint_name, tree.name)
             print('Verified eight meshes, sparse shape-key coordinates, Import.json selection and blueprint.')
 
