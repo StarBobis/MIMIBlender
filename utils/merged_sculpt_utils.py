@@ -95,6 +95,12 @@ class MergedSculptUtils:
                 # Kept only to warn when the source moved during sculpting.
                 "world_matrix": cls._matrix_rows(obj.matrix_world),
                 "shape_keys": cls._shape_key_names(obj),
+                # Eye visibility belongs to a view layer, not to the object
+                # globally. Save its owner so switching layers is harmless.
+                "visibility": {
+                    "view_layer": context.view_layer.name,
+                    "hidden": obj.hide_get(view_layer=context.view_layer),
+                },
             })
 
         # Duplicate first, stamp afterwards: obj.copy() inherits custom
@@ -139,6 +145,11 @@ class MergedSculptUtils:
         warnings = cls._prepare_shape_keys(merged_obj, records)
 
         ObjUtils.select_obj(merged_obj)
+        # Hide only after the target and its recovery payload are ready.
+        # The originals otherwise overlap the sculpt and obscure strokes.
+        # Use the eye toggle; global viewport and render flags stay intact.
+        for obj in sources:
+            obj.hide_set(True, view_layer=context.view_layer)
         return merged_obj, warnings
 
     # ------------------------------------------------------------------
@@ -224,7 +235,8 @@ class MergedSculptUtils:
                 mesh.update()
             raise
 
-        cls._cleanup_stamps(resolved, payload["session"])
+        # Successful apply ends isolation; failures above keep it intact.
+        cls._cleanup_stamps(context, resolved, payload["session"])
         cls._remove_merged_object(merged_obj)
         return len(resolved)
 
@@ -239,9 +251,16 @@ class MergedSculptUtils:
         payload = json.loads(merged_obj[PROP_SOURCES])
         # Clear all exact stamps, including duplicated sources which cannot
         # be resolved for apply. Never remove another session's stamp.
-        expected = {payload["session"] + ":" + r["uid"] for r in payload["sources"]}
+        expected = {
+            payload["session"] + ":" + record["uid"]: record
+            for record in payload["sources"]
+        }
+        # Duplicate sources inherit the stamp, so restore their visibility
+        # too. Objects owned by another session must remain untouched.
         for obj in bpy.data.objects:
-            if obj.get(PROP_SOURCE_UID) in expected:
+            record = expected.get(obj.get(PROP_SOURCE_UID))
+            if record is not None:
+                cls._restore_source_visibility(context, obj, record)
                 del obj[PROP_SOURCE_UID]
         cls._remove_merged_object(merged_obj)
 
@@ -336,11 +355,26 @@ class MergedSculptUtils:
         return resolved, missing, conflicts
 
     @classmethod
-    def _cleanup_stamps(cls, resolved, session):
-        """Remove only stamps owned by the session being completed."""
+    def _cleanup_stamps(cls, context, resolved, session):
+        """Restore visibility and remove only this session's source stamps."""
         for obj, record in resolved:
             if obj.get(PROP_SOURCE_UID) == session + ":" + record["uid"]:
+                cls._restore_source_visibility(context, obj, record)
                 del obj[PROP_SOURCE_UID]
+
+    @classmethod
+    def _restore_source_visibility(cls, context, obj, record):
+        """Restore the eye toggle in the layer where isolation started."""
+        visibility = record.get("visibility")
+        # Older sessions never hid sources automatically. Do not guess their
+        # original state or override visibility the user changed manually.
+        if visibility is None:
+            return
+        view_layer = context.scene.view_layers.get(visibility["view_layer"])
+        # A removed layer or an unlinked source has no eye toggle to restore.
+        # Other layers and global viewport/render flags are never touched.
+        if view_layer is not None and obj.name in view_layer.objects:
+            obj.hide_set(visibility["hidden"], view_layer=view_layer)
 
     @classmethod
     def _remove_merged_object(cls, merged_obj):

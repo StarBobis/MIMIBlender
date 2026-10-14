@@ -102,6 +102,11 @@ class MergedSculptTests(unittest.TestCase):
         merged, warnings = MergedSculptUtils.create_merged_object(bpy.context)
         # No test in this suite intentionally produces a shape key mismatch.
         self.assertEqual([], warnings)
+        # Every fresh session must isolate its target from the originals.
+        # Checking here exercises all existing core creation scenarios too.
+        self.assertFalse(merged.hide_get())
+        for obj in objects:
+            self.assertTrue(obj.hide_get())
         return merged
 
     def sculpt_merged(self, merged, delta):
@@ -135,6 +140,9 @@ class MergedSculptTests(unittest.TestCase):
             record = payload["sources"][index]
             self.assertEqual(payload["session"] + ":" + record["uid"],
                              cube[PROP_SOURCE_UID])
+            # Visibility is additive to schema v2 and records the eye owner.
+            self.assertEqual({"view_layer": bpy.context.view_layer.name,
+                              "hidden": False}, record["visibility"])
 
         # Sculpt a constant offset, then apply: identity transforms mean the
         # sources must receive exactly old_position + delta.
@@ -147,6 +155,8 @@ class MergedSculptTests(unittest.TestCase):
                 read_cos(cube.data.vertices), old + numpy.asarray(delta),
                 atol=1e-5)
             self.assertNotIn(PROP_SOURCE_UID, cube)
+            # Ending a successful session reveals its original sources.
+            self.assertFalse(cube.hide_get())
         # Applying is the end of the session: merged object and mesh are gone.
         self.assertNotIn(merged_name, bpy.data.objects)
         self.assertNotIn(merged_mesh_name, bpy.data.meshes)
@@ -258,6 +268,67 @@ class MergedSculptTests(unittest.TestCase):
                 read_cos(keys["deform"].data), old_deform[index], atol=1e-6)
 
     # ------------------------------------------------------------------
+    # Visibility lifecycle: isolate only the layer used to create a session.
+    # Do not replace global object flags or another layer's eye settings.
+    # ------------------------------------------------------------------
+    def test_visibility_restored_after_switching_layers(self):
+        for action in ("apply", "discard"):
+            cubes = [make_cube(action + "_a"), make_cube(action + "_b")]
+            original_layer = bpy.context.view_layer
+            other_layer = bpy.context.scene.view_layers.new("other_layer")
+            try:
+                # Render flags may differ even when both sources are visible.
+                # A separate layer also has its own independent eye state.
+                cubes[0].hide_render = True
+                cubes[0].hide_set(True, view_layer=other_layer)
+                merged = self.create_merged(cubes)
+                self.assertTrue(cubes[0].hide_render)
+                self.assertFalse(cubes[1].hide_render)
+                for cube in cubes:
+                    self.assertFalse(cube.hide_viewport)
+                self.assertTrue(cubes[0].hide_get(view_layer=other_layer))
+                self.assertFalse(cubes[1].hide_get(view_layer=other_layer))
+
+                # Finish from another layer: recovery still belongs to the
+                # original layer, not the layer currently shown in the UI.
+                bpy.context.window.view_layer = other_layer
+                select_only([merged])
+                if action == "apply":
+                    MergedSculptUtils.apply_merged_sculpt(bpy.context)
+                else:
+                    MergedSculptUtils.discard_merged_sculpt(bpy.context)
+                for cube in cubes:
+                    self.assertFalse(cube.hide_get(view_layer=original_layer))
+                    self.assertFalse(cube.hide_viewport)
+                self.assertTrue(cubes[0].hide_get(view_layer=other_layer))
+                self.assertFalse(cubes[1].hide_get(view_layer=other_layer))
+                self.assertTrue(cubes[0].hide_render)
+                self.assertFalse(cubes[1].hide_render)
+            finally:
+                # Remove the temporary layer even when an assertion fails.
+                # Returning to the original layer isolates the next test.
+                bpy.context.window.view_layer = original_layer
+                bpy.context.scene.view_layers.remove(other_layer)
+
+    def test_legacy_sessions_keep_manual_visibility(self):
+        for action in ("apply", "discard"):
+            cubes = [make_cube("legacy_a"), make_cube("legacy_b")]
+            merged = self.create_merged(cubes)
+            payload = json.loads(merged[PROP_SOURCES])
+            # Simulate a saved session from before visibility was recorded.
+            # Its missing state must not be interpreted as "show all".
+            for record in payload["sources"]:
+                del record["visibility"]
+            merged[PROP_SOURCES] = json.dumps(payload)
+            cubes[0].hide_set(False)
+            if action == "apply":
+                MergedSculptUtils.apply_merged_sculpt(bpy.context)
+            else:
+                MergedSculptUtils.discard_merged_sculpt(bpy.context)
+            self.assertFalse(cubes[0].hide_get())
+            self.assertTrue(cubes[1].hide_get())
+
+    # ------------------------------------------------------------------
     # Failure guards (all-or-nothing: nothing may be written on failure)
     # ------------------------------------------------------------------
     def test_missing_source_aborts_everything(self):
@@ -340,8 +411,12 @@ class MergedSculptTests(unittest.TestCase):
                 read_cos(cube.data.vertices), old + numpy.asarray(delta),
                 atol=1e-5)
         # Session A is completely untouched by session B's apply.
+        # Its sources stay hidden until that session is also completed.
+        for cube in group_b:
+            self.assertFalse(cube.hide_get())
         for cube in group_a:
             self.assertIn(PROP_SOURCE_UID, cube)
+            self.assertTrue(cube.hide_get())
         self.assertIn(merged_a_name, bpy.data.objects)
 
         # Clean session A explicitly by selecting its merged object.
@@ -374,6 +449,8 @@ class MergedSculptTests(unittest.TestCase):
             numpy.testing.assert_allclose(
                 read_cos(cube.data.vertices), old, atol=1e-6)
             self.assertNotIn(PROP_SOURCE_UID, cube)
+            # Discard reveals the unchanged original without manual toggles.
+            self.assertFalse(cube.hide_get())
         self.assertNotIn(merged_name, bpy.data.objects)
 
     # ------------------------------------------------------------------
@@ -427,6 +504,9 @@ class MergedSculptTests(unittest.TestCase):
         a, b, c = [make_cube(n) for n in ("common", "first", "second")]
         merged = self.create_merged([a, b])
         stamp = a[PROP_SOURCE_UID]
+        # Hidden sources cannot be selected normally. Reveal it explicitly
+        # to exercise a user's attempt to reuse an existing session source.
+        a.hide_set(False)
         select_only([a, c])
         with self.assertRaisesRegex(ValueError, "already belongs"):
             MergedSculptUtils.create_merged_object(bpy.context)
@@ -467,10 +547,16 @@ class MergedSculptTests(unittest.TestCase):
         bpy.context.scene.collection.objects.link(duplicate)
         other = make_cube("another_session")
         other[PROP_SOURCE_UID] = "other:uid"
+        # Discard must recover hidden exact duplicates, but not reveal an
+        # unrelated session's sources while cleaning up the current one.
+        duplicate.hide_set(True)
+        other.hide_set(True)
         MergedSculptUtils.discard_merged_sculpt(bpy.context)
         for obj in (a, b, duplicate):
             self.assertNotIn(PROP_SOURCE_UID, obj)
+            self.assertFalse(obj.hide_get())
         self.assertEqual("other:uid", other[PROP_SOURCE_UID])
+        self.assertTrue(other.hide_get())
 
     def test_unexpected_write_failure_rolls_back(self):
         from unittest.mock import patch
@@ -495,6 +581,8 @@ class MergedSculptTests(unittest.TestCase):
         for cube, old in zip(cubes, before):
             numpy.testing.assert_array_equal(read_cos(cube.data.vertices), old)
             self.assertIn(PROP_SOURCE_UID, cube)
+            # A failed apply must preserve isolation for another attempt.
+            self.assertTrue(cube.hide_get())
         self.assertIn(PROP_SOURCES, merged)
 
     # ------------------------------------------------------------------

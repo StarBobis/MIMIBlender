@@ -189,6 +189,9 @@ class MIMIPanelMergedSculpt(bpy.types.Panel):
         # Show the safety constraints before the user starts a session.
         layout.label(text=tr("Use single-user meshes; one session per source."))
         layout.label(text=tr("Keep source UID stamps; do not change vertex count."))
+        # Explain the automatic eye toggles before creating a sculpt target.
+        # Both apply and discard restore the recorded source visibility.
+        layout.label(text=tr("Sources auto-hide; apply/discard restores visibility."))
 
         # Status block: locate the current merged object (if any) and show
         # its session summary. Reading custom properties in draw() is fine;

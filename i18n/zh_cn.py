@@ -1166,4 +1166,6 @@ TRANSLATIONS_ZH_CN = {
     "Merged sculpt session data is corrupt.": "合并雕刻会话数据已损坏。",
     "Use single-user meshes; one session per source.": "网格须为单用户；每个来源仅参与一个会话。",
     "Keep source UID stamps; do not change vertex count.": "保留来源 UID 标记；不要改变顶点数。",
+    # Explain source isolation and its automatic lifecycle recovery.
+    "Sources auto-hide; apply/discard restores visibility.": "来源自动隐藏；应用或丢弃后恢复显示。",
 }
