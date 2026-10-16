@@ -232,5 +232,90 @@ class BatchTests(unittest.TestCase):
         self.assertGreater(numpy.count_nonzero(keys[-1].data.co), 0)
 
 
+class ShapeKeyHookTests(unittest.TestCase):
+    # Use the actual INI writer without importing Blender-dependent modules.
+    # A list implements the append/new_line API used by this one section.
+    # Scoped names remain real enough to verify every callback reference.
+    def write_sections(self, offsets_hash, scale_hash, offsets=None, batches=None):
+        class Section(list):
+            # Section type does not affect this writer's generated lines.
+            # Keep blank lines visible, just like the production INI builder.
+            def __init__(self, section_type):
+                super().__init__()
+
+            def new_line(self):
+                self.append('')
+
+        sections = []
+        namespace = {
+            'Fatal': ValueError, 'get_wwmi_shapekey_batches': EXPORT,
+            'M_IniSection': Section,
+            'M_SectionType': SimpleNamespace(TextureOverrideShapeKeys=0),
+            'MIMIGlobalProperties': SimpleNamespace(import_merged_vgmap=lambda: 'MERGED'),
+            'scoped_section': lambda name, draw_ib: '[' + name + '_' + draw_ib + ']',
+            'scoped_name': lambda name, draw_ib: name + '_' + draw_ib,
+            'scoped_global': lambda name, draw_ib: '$' + name + '_' + draw_ib,
+        }
+        # Valid runtime metadata isolates hash validation from batch validation.
+        # Explicit empty offsets represent a genuinely shape-less model.
+        # Missing offset hashes must still fail even when a scale hash exists.
+        shape = SimpleNamespace(offsets_hash=offsets_hash, scale_hash=scale_hash,
+                                batches=batches or [{'checksum': 1104, 'vertex_offset': 0, 'dispatch_y': 912}],
+                                checksum=1104, dispatch_y=912)
+        model = SimpleNamespace(draw_ib='94517393_LOD0', wwmi_info=SimpleNamespace(shapekeys=shape),
+                                obj_buffer_model_wwmi=SimpleNamespace(shapekey_offsets=[0] + [1] * 127 if offsets is None else offsets))
+        writer = load_function('games/wwmi/shapekeys.py', 'add_texture_override_shapekeys', namespace)
+        writer(SimpleNamespace(append_section=sections.append), model)
+        return '\n'.join(line for section in sections for line in section)
+
+    def test_missing_scale_keeps_runtime_callbacks(self):
+        # This is the live failing character's exact pair of resource hashes.
+        # Both runtime callbacks must remain hooked through the offsets hash.
+        # Do not emit an empty scale override or silently drop all shape keys.
+        text = self.write_sections('15791c57', '')
+        self.assertNotIn('[TextureOverrideShapeKeyScale_', text)
+        self.assertEqual(text.count('hash = 15791c57'), 3)
+        for name in ('TextureOverrideShapeKeyOffsets', 'TextureOverrideShapeKeyLoaderCallback',
+                     'TextureOverrideShapeKeyMultiplierCallback', 'CommandListSetupShapeKeysBatch',
+                     'CommandListLoadShapeKeysBatch', 'CommandListMultiplyShapeKeys'):
+            self.assertIn('[' + name + '_94517393_LOD0]', text)
+        self.assertIn('shapekey_checksum_batch0 = 1104', text)
+        self.assertIn('shapekey_dispatch_size_y_original_batch0 = 912', text)
+
+    def test_present_scale_still_gets_size_override(self):
+        # Older captures with a separate scale resource keep identical behavior.
+        # The resource hash and stride must belong to that optional section.
+        # Loader callbacks still use the offsets resource, not the scale hash.
+        text = self.write_sections('15791c57', '12345678')
+        self.assertIn('[TextureOverrideShapeKeyScale_94517393_LOD0]\nhash = 12345678', text)
+        self.assertIn('override_byte_stride = 4', text)
+        self.assertEqual(text.count('hash = 15791c57'), 3)
+
+    def test_missing_offsets_still_fails(self):
+        # Scale metadata alone cannot hook either runtime callback.
+        # Keep strict validation for genuinely unusable capture metadata.
+        # Test both absent hashes and the scale-only variant independently.
+        for scale in ('', '12345678'):
+            with self.subTest(scale=scale), self.assertRaisesRegex(ValueError, 'offsets hash is missing'):
+                self.write_sections('', scale)
+
+    def test_no_shape_buffers_need_no_hashes(self):
+        # Static models never run the original shape key pipeline.
+        # Missing hashes on such models must not prevent ordinary export.
+        # No orphaned setup commands should be emitted in this case either.
+        self.assertEqual(self.write_sections('', '', offsets=[]), '')
+
+    def test_missing_scale_preserves_multiple_batches(self):
+        # Optional scale resources are independent of runtime batch count.
+        # Keep distinct dispatch sizes and original sparse offsets per batch.
+        # Reusing batch zero would break characters with more than 127 keys.
+        batches = [{'checksum': 1104, 'vertex_offset': 0, 'dispatch_y': 912},
+                   {'checksum': 7, 'vertex_offset': 29161, 'dispatch_y': 3}]
+        text = self.write_sections('15791c57', '', offsets=([0] + [1] * 127) * 2, batches=batches)
+        self.assertIn('shapekey_checksum_batch1 = 7', text)
+        self.assertIn('shapekey_vertex_offset_original_batch1 = 29161', text)
+        self.assertIn('shapekey_dispatch_size_y_original_batch1 = 3', text)
+
+
 if __name__ == '__main__':
     unittest.main()

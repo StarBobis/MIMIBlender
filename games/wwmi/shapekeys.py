@@ -126,11 +126,14 @@ def add_texture_override_shapekeys(ini_builder: M_IniBuilder, draw_ib_model: Dra
     if not shapekey_batches:
         return
 
-    # Without original hashes the runtime callbacks are never hooked at all.
-    # Compact buffer filenames do not identify the game's offset/scale resources.
-    # Refuse this partial export instead of producing unreferenced setup sections.
-    if not draw_ib_model.wwmi_info.shapekeys.offsets_hash or not draw_ib_model.wwmi_info.shapekeys.scale_hash:
-        raise Fatal("WWMI original shape key offset/scale hashes are missing. Re-extract or reverse the original INI with updated MMT.")
+    # The offsets hash hooks both loader and multiplier callbacks on cs-u0.
+    # Without it the setup sections would never be called by the WWMI runtime.
+    # Compact buffer filenames cannot recover that original resource identity.
+    # The scale hash only adds an optional resource-size override below.
+    # Some valid captures have no scale hash; keep their offsets callbacks active.
+    # Never substitute a sparse delta hash for either original game resource.
+    if not draw_ib_model.wwmi_info.shapekeys.offsets_hash:
+        raise Fatal("WWMI original shape key offsets hash is missing. Re-extract or reverse the original INI with updated MMT.")
     texture_override_shapekeys_section = M_IniSection(M_SectionType.TextureOverrideShapeKeys)
 
     shapekey_offsets_hash = draw_ib_model.wwmi_info.shapekeys.offsets_hash
