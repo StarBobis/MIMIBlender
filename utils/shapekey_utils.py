@@ -402,7 +402,18 @@ class ShapeKeyUtils:
         if any(count < 0 or count > 127 for count in batch_counts):
             raise ValueError("Invalid WWMI original shape key batch sizes.")
         if max_shapekey_id >= sum(batch_counts):
-            raise ValueError("WWMI shape key ID exceeds the original runtime batch capacity.")
+            # Explicit Deform/Custom IDs address original runtime slots.
+            # Automatic packing cannot create the missing dispatch identities.
+            # Report both capacities before any output buffers are written.
+            draw_ib = merged_obj.get("wwmi_export_draw_ib", "unknown")
+            raise ValueError(
+                "WWMI DrawIB " + str(draw_ib) + ": shape key ID " + str(max_shapekey_id)
+                + " exceeds the original runtime batch capacity of " + str(sum(batch_counts))
+                + " slots in " + str(len(batch_counts)) + " batch(es). "
+                "Check the bound workspace/LOD and preserve the reverse source's original "
+                "batch metadata. Automatic shape ID packing cannot infer missing runtime "
+                "checksums; do not delete or renumber native Deform/Custom keys to hide this error."
+            )
 
         # Always emit 128 offsets per runtime batch, including trailing blanks.
         # Blank slots consume no sparse entries but preserve runtime block size.

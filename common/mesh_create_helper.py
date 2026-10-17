@@ -11,6 +11,7 @@ from ..utils.mesh_utils import MeshUtils
 from ..utils.mesh_mirror_utils import MeshMirrorUtils
 from ..utils.obj_utils import ObjUtils
 from ..workspace.texture_metadata_helper import TextureMetadataResolver
+from ..workspace.wwmi_reverse_metadata import capture_reverse_shape_metadata
 from ..utils.timer_utils import TimerUtils
 from ..utils.vertexgroup_utils import VertexGroupUtils
 
@@ -593,6 +594,10 @@ class MeshCreateHelper:
 
     @staticmethod
     def import_shapekeys_wwmi(mesh, obj, shapekey_buffers: dict, vertex_offset: int, vertex_count: int):
+        # Retain original runtime records even when this component has no deltas.
+        # Subsequent export validates these records against its target workspace.
+        # The property survives saving, reopening, and ordinary object copies.
+        capture_reverse_shape_metadata(obj, shapekey_buffers)
         sk_offset_raw = shapekey_buffers.get("ShapeKeyOffset")
         sk_vertex_id_raw = shapekey_buffers.get("ShapeKeyVertexId")
         sk_vertex_offset_raw = shapekey_buffers.get("ShapeKeyVertexOffset")

@@ -516,6 +516,11 @@ class MMTImportHelper:
 		# Do not apply the normal category's component slicing to sparse arrays.
 		if shapekey_buffers:
 			shapekey_buffers["metadata"] = submesh_json.ShapeKeysInfo
+			# Reverse outputs retain original draw ranges separately from edited IBs.
+			# Carry those ranges to each imported object for safe batch association.
+			# Normal extraction imports do not gain reverse-source metadata.
+			if submesh_json.JsonDict.get("GamePreset") == "WWMI":
+				shapekey_buffers["source_match_components"] = submesh_json.JsonDict.get("MatchComponentList")
 		return elements, vb_data, vb_vertex_count, shapekey_buffers
 
 	@staticmethod

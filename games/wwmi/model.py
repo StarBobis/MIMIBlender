@@ -25,6 +25,7 @@ from ...utils.obj_utils import (
 from ...utils.shapekey_utils import ShapeKeyUtils
 from ...utils.vertexgroup_utils import VertexGroupUtils
 from ...workspace.wwmi_info import WWMIInfoObject, WWMIInfoHelper
+from ...workspace.wwmi_reverse_metadata import resolve_reverse_shape_metadata
 from ...common.buffer_export_helper import BufferExportHelper
 from ...common.obj_buffer_helper import ObjBufferHelper
 from ...workspace.mmt_workspace import MMTWorkSpace
@@ -167,7 +168,14 @@ class DrawIBModelWWMI:
         # Build the WWMIInfoObject from the ordered SubmeshJson list;
         # it holds all component info of the current DrawIB and is used later when building MergedObject and exporting
         self.wwmi_info = WWMIInfoHelper.build_from_json_list(ordered_submesh_json_list)
-        
+        # Reverse imports may preserve extra original shape runtime dispatches.
+        # Only explicitly attached metadata from connected objects is considered.
+        # Validate it before making temporary meshes; never change native palettes.
+        resolve_reverse_shape_metadata(
+            self.wwmi_info,
+            [bpy.data.objects.get(model.obj_name) for model in self.ordered_drawcall_model_list],
+            self.draw_ib,
+        )
         self.merged_object = self.build_merged_object()
 
         obj_name_temp_object_dict: dict[str, TempObject] = {}
@@ -270,6 +278,10 @@ class DrawIBModelWWMI:
             batch_counts.append(count)
         if batch_counts:
             self.merged_object.object["wwmi_shapekey_batch_counts"] = batch_counts
+        # Context belongs only to the disposable export object, not user meshes.
+        # Capacity errors should identify the target instead of suggesting that
+        # numbered native keys can be repaired by arbitrary automatic renaming.
+        self.merged_object.object["wwmi_export_draw_ib"] = self.draw_ib
         self.obj_buffer_model_wwmi = ExportUtils.build_wwmi_obj_buffer_result(element_context)
 
         # WWMI bypasses SubMeshModel, but must use the same actual polygon ranges.

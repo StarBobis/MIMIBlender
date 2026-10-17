@@ -225,7 +225,11 @@ class WWMIMultiDrawIBExportTests(unittest.TestCase):
             stack.enter_context(patch.object(wwmi_model.MMTWorkSpace, 'check_and_get_submesh_json_path', side_effect=lambda name: name))
             stack.enter_context(patch.object(wwmi_model, 'SubmeshJson', side_effect=lambda path: SimpleNamespace(JsonDict={}, path=path)))
             stack.enter_context(patch.object(wwmi_model.D3D11GameType, 'from_submesh_json_dict', return_value=SimpleNamespace()))
-            metadata = stack.enter_context(patch.object(wwmi_model.WWMIInfoHelper, 'build_from_json_list', return_value=SimpleNamespace()))
+            # This fixture has no real source objects or reverse shape metadata.
+            # Keep the normal native shape container present at the new boundary.
+            # The assertion still targets exact LOD-scoped metadata selection.
+            empty_info = SimpleNamespace(shapekeys=SimpleNamespace(batches=[]))
+            metadata = stack.enter_context(patch.object(wwmi_model.WWMIInfoHelper, 'build_from_json_list', return_value=empty_info))
             stack.enter_context(patch.object(wwmi_model.DrawIBModelWWMI, 'build_merged_object', side_effect=GeometryReached))
             for lod in ('LOD0', 'LOD1'):
                 instance = wwmi_model.DrawIBModelWWMI.__new__(wwmi_model.DrawIBModelWWMI)

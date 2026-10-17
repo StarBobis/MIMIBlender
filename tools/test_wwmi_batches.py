@@ -72,7 +72,11 @@ class Object(dict):
         return key
 
 
-IMPORT = load_function('common/mesh_create_helper.py', 'import_shapekeys_wwmi', {'numpy': numpy, 'Fatal': ValueError})
+REVERSE_METADATA = runpy.run_path(str(ROOT / 'workspace/wwmi_reverse_metadata.py'))
+IMPORT = load_function('common/mesh_create_helper.py', 'import_shapekeys_wwmi', {
+    'numpy': numpy, 'Fatal': ValueError,
+    'capture_reverse_shape_metadata': REVERSE_METADATA['capture_reverse_shape_metadata'],
+})
 EXPORT = load_function('games/wwmi/shapekeys.py', 'get_wwmi_shapekey_batches', {'Fatal': ValueError})
 PACK = load_function('utils/shapekey_utils.py', 'extract_shapekey_data', {'math': math})
 
@@ -187,6 +191,17 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(packed[255], 1)
         self.assertEqual(ids, [0, 0])
         self.assertEqual(deltas[6], 0.75)
+
+    def test_real_project_capacity_error_identifies_target_and_key(self):
+        # The real reverse project contains Deform 175, not an unnamed custom key.
+        # An older native workspace has only 127 original runtime slots.
+        # Packing must retain that distinction instead of dropping or renaming keys.
+        obj = Object(1)
+        obj['wwmi_shapekey_batch_counts'] = [127]
+        obj['wwmi_export_draw_ib'] = 'e590b8d4_LOD0'
+        helper = SimpleNamespace(get_shapekey_cache=lambda *args: {175: {0: [0.25, 0, 0]}})
+        with self.assertRaisesRegex(ValueError, 'e590b8d4_LOD0: shape key ID 175.*127 slots'):
+            PACK(helper, obj, {})
 
     def test_truncated_sparse_buffers_fail(self):
         # Previously the importer filtered invalid entries and silently lost keys.

@@ -159,6 +159,33 @@ class MergedComponentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "component 1.*223"):
             self.convert()
 
+    def test_real_project_bone_229_remains_a_cross_component_error(self):
+        # The supplied scene also uses bone 229 on the component with offset 105.
+        # Unlike alias 223 -> 68, bone 229 belongs to another original palette.
+        # Extending shape metadata must never relax this weight-preservation guard.
+        self.obj.vertex_groups[0].name = '229'
+        self.context.original_elementname_data_dict['BLENDWEIGHT'][:, 1] = 0
+        self.extracted[0].vg_offset = 105
+        self.extracted[0].vg_count = 121
+        self.extracted[0].vg_map = {'118': 68}
+        self.extracted[1].vg_offset = 227
+        self.extracted[1].vg_count = 108
+        self.extracted[1].vg_map = {'2': 229}
+        before = self.context.original_elementname_data_dict['BLENDWEIGHT'].copy()
+        with self.assertRaisesRegex(ValueError, "component 0, object 'part_a'.*229"):
+            self.convert()
+        numpy.testing.assert_array_equal(self.context.original_elementname_data_dict['BLENDWEIGHT'], before)
+
+    def test_workspace_fatal_uses_the_exporters_expected_error_type(self):
+        # Missing workspace bindings previously escaped as an unrelated Fatal.
+        # The export UI already catches the shared format error class.
+        # Keep old module imports compatible without duplicating exception types.
+        from MIMIBlender.utils.format_utils import Fatal
+        from MIMIBlender.utils.mmt_error_utils import MMTErrorUtils, Fatal as WorkspaceFatal
+        self.assertIs(WorkspaceFatal, Fatal)
+        with self.assertRaises(Fatal):
+            MMTErrorUtils.raise_fatal('missing extracted submesh')
+
     def test_merged_remap_uses_names_and_dynamic_stride(self):
         # Sparse names and reordered Blender indices exercise two regressions
         # together: 552 must neither become internal index 1 nor overflow 512.

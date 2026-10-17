@@ -2,7 +2,7 @@
 
 ## Scope and evidence
 
-This audit follows the reported Merged Component bone 223 error and the Merged native shape-key batch metadata error. The original failing Blender project was unavailable. Evidence combines source/protocol inspection, synthetic regressions, and fresh imports of five existing local extraction workspaces. It is not an in-game rendering certification.
+This audit follows the reported Merged Component bone 223 error and the Merged native shape-key batch metadata error. The original failing Blender project was unavailable during the initial audit. Evidence for that audit combines source/protocol inspection, synthetic regressions, and fresh imports of five existing local extraction workspaces. The later supplied-project investigation is recorded separately below. It is not an in-game rendering certification.
 
 The audited path is extraction metadata consumption → vertex-group import → blueprint component/LOD selection → temporary joins → bone/shape buffer construction → generated INI/runtime resources → failure cleanup. No extractor or third-party runtime files were modified.
 
@@ -51,7 +51,7 @@ Runtime protocol inspection covered the installed WWMI 1.10 INI plus its BlendRe
 - All models' native shape dispatch metadata and required offsets hashes are checked **before any buffer write**, preventing this class of error from leaving an existing Mod half-updated.
 - Expected `Fatal` errors reach the existing operator error-report path rather than an uncaught traceback.
 
-The exact trigger in the unavailable original project remains unproven. A truly missing additional batch is not papered over: the exporter still refuses to fabricate runtime data or discard its shapes.
+The initial audit did not establish the exact trigger in the then-unavailable project. The supplied-project investigation below now distinguishes missing metadata from native ID packing. A truly missing additional batch is not papered over: the exporter still refuses to fabricate runtime data or discard its shapes.
 
 ### 5. Import and UniComponent palette compatibility
 
@@ -116,7 +116,60 @@ Set `MIMI_AUDIT_WORKSPACE` to a local workspace name and optionally `MIMI_AUDIT_
 
 ## Remaining boundaries
 
-- No original failing scene or in-game test was available; no claim is made about their observed final rendering.
+- The original scene was unavailable for the initial 109-test/20-export audit. The later supplied-scene checks below are separate; no in-game rendering test has been performed.
 - Corrupt/missing original batch metadata, genuine cross-component weights in an offline-local architecture, and more than 256 effective bones in one R8 draw remain explicit errors.
 - Preflight prevents metadata-validation partial writes, not arbitrary filesystem failures during subsequent output generation. Export is not a transactional filesystem operation.
-- This patch does not migrate saved user scenes, overwrite extraction caches, or modify WWMI-Tools/the runtime. It does not change unrelated game presets' export protocols.
+- The initial patch did not migrate saved scenes. The explicit metadata-only repair helper described below is opt-in and does not save the scene. Neither patch overwrites extraction caches or modifies WWMI-Tools/the runtime or unrelated game export protocols.
+
+## Supplied-project investigation and reverse metadata follow-up
+
+### Reproduction and distinct causes
+
+The later supplied scene contains nine edited reverse-import meshes, eight native component bindings, and native `Deform` IDs **0–175**. Its blueprint targets `LOD0.e590b8d4`. The reverse JSON is input data, not a replacement for the native MMT export workspace.
+
+- Saved workspace synchronization currently resolves to the host's `Default` workspace. That is not evidence that the user selected the wrong workspace when the scene was originally saved. Explicitly selecting the matching `Xin` extraction isolates the actual export failures.
+- With that extraction, MergedComponent rejects component 3's bone **229**. It has positive weights on **281 vertices**, up to approximately **0.482353**, and is absent from component 3's original palette. This differs from the already-fixed metadata-backed alias **223 → 68 → local 118**.
+- Merged then reaches shape packing: the native extraction only records one legacy **127-slot** batch, while the scene uses **176 native IDs**. The reverse JSON already records two complete runtime batches, **127 + 49**, but the old reverse import did not retain those records on its objects for export.
+- The reverse source and extraction match all eight original component draw ranges, the shape offsets/scale hashes, and the first runtime batch's checksum/dispatch. The second batch records checksum **3465**, dispatch Y **712**, and original vertex base **75507**. None of those values is inferred from edited buffers.
+
+### Implemented metadata fix
+
+[Reverse metadata preservation and validation](<workspace/wwmi_reverse_metadata.py>) stores a portable JSON custom property on newly imported WWMI reverse objects. The metadata includes original component match ranges and shape runtime records, not an absolute source path.
+
+[WWMI model initialization](<games/wwmi/model.py>) considers only connected source objects and validates their metadata before creating temporary meshes. Original component ranges, resource hashes, and every overlapping runtime batch must agree. Multiple sources may contribute consistent longer sequences, but conflicting records fail atomically. Native skeleton palettes and mesh counts remain unchanged; compact reverse buffer counts/addresses never replace original runtime identities.
+
+Existing saved projects cannot retrospectively recover properties that were never stored. To attach the known source metadata without reimporting edited geometry:
+
+1. Enable the updated addon and select the edited meshes imported from the relevant reverse source.
+2. Open [the metadata attachment helper](<tools/attach_wwmi_reverse_metadata_blender.py>) in Blender's Text Editor and set `source_json` to that explicit reverse JSON.
+3. Run the helper. It attaches metadata only, does not save any file, and rolls back its property changes if attachment fails.
+4. Export against the matching native workspace. Target compatibility is validated during export. Use Merged if retaining weights that cannot fit an original local palette.
+
+[Shape packing diagnostics](<utils/shapekey_utils.py>) now report the DrawIB, offending native ID, slot capacity, and missing-metadata remedy. Do not delete or renumber native keys merely to suppress this error. [Workspace errors](<utils/mmt_error_utils.py>) now reuse the exporter's shared expected-error class, fixing missing-workspace failures that previously escaped the UI report handler.
+
+### Supplied-scene and persistence checks
+
+With only explicit metadata attachment and in-memory selection of the matching workspace/Merged mode, the supplied scene exported successfully through the production code. The final exporter was not monkey-patched to fabricate batch records. Generated resources contain both 128-offset blocks and both recorded runtime dispatch identities. All source mesh coordinates, group names/weights, shape names/coordinates, and face topology passed preservation checks; temporary objects/meshes were cleaned up. The original blend's SHA-256 remained unchanged.
+
+A separate factory-scene probe imported all **10 recorded reverse JSON segments** (one whole-buffer segment plus nine component segments), verified IDs 0–175, copied an object, saved only that newly generated test scene, and reopened it. All imported objects retained the metadata property. The user scene itself retains only the nine component objects. The reverse source JSON and adjacent resources were unchanged. No original project was saved; local Blender also warned that it was older than the binary that wrote that project.
+
+The follow-up regression run passed **127 tests**: 29 MergedComponent, 21 shape batches, 15 reverse metadata, 15 component modes, 17 multi-DrawIB INI, 25 merged sculpt, and 5 split draw ranges. The LOD isolation fixture was updated to include the native shape container required by production metadata initialization; the production validation was not bypassed.
+
+The earlier 20-export matrix is historical, not a rerun against this supplied scene. No exported Mod has been visually validated in game.
+
+### Follow-up design: automatic component reassignment
+
+A missing bone in the current component does **not** prove that the triangle cannot be exported with any original local palette. Before rejecting reassignment, intersect the compatible-component candidates for **every positive influence on every vertex of each triangle**. Metadata-backed aliases must participate in the same way as normal localization.
+
+Read-only analysis of the nine supplied source meshes found:
+
+| Skeleton feasibility | Triangles |
+| --- | ---: |
+| Already compatible with the assigned component | 68019 |
+| Exactly one alternative component candidate | 25142 |
+| Multiple alternative component candidates | 1843 |
+| No original component can represent all influences | 5131 |
+
+The last group consists of **2007** triangles on component 3 and **3124** on component 6. Across the source objects, **3151 vertices** individually have no compatible original palette. Copying boundary vertices or merely separating objects cannot remove an individual vertex's mixed-palette bone dependencies.
+
+These counts establish skeleton feasibility only, not compatible material/texture/draw states. Automatic reassignment is a **follow-up design, not implemented by the metadata patch**. The agreed safety direction is: preserve existing valid assignments; automatically handle only proven safe assignments; carry vertex/shape data when splitting export copies; report ambiguous ownership and truly incompatible influences with source-face locations and repair options. Do not silently delete weights, renumber native shape IDs, or fall back to Merged without the user's choice. Such a report should distinguish selecting a target component, correcting metadata/workspace selection, deliberately repainting weights (which changes deformation), and explicitly choosing Merged to retain cross-component weights.
