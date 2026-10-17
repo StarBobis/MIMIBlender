@@ -212,6 +212,15 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
         default=3,
     ) # type: ignore
 
+    # Palette compatibility alone cannot establish shader/material equivalence.
+    # Keep existing scenes conservative until the user explicitly accepts the
+    # destination component's native draw state for uniquely routable triangles.
+    allow_component_draw_state_changes: bpy.props.BoolProperty(
+        name=tr("Allow Component Draw-State Changes"),
+        description=tr("MergedComponent only: move uniquely compatible triangles to another original component. Uses its native shaders/materials; explicit blueprint texture bindings and switches follow the source. Ambiguous or incompatible faces still stop export"),
+        default=False,
+    ) # type: ignore
+
     ignore_muted_shape_keys: bpy.props.BoolProperty(
         name=tr("Ignore Disabled Shape Keys"),
         description=tr("When enabled, shape keys that are not enabled are ignored during Mod generation; enabled shape keys are included in the Mod"),
@@ -347,6 +356,12 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
     @classmethod
     def ignore_muted_shape_keys(cls):
         return cls._instance().ignore_muted_shape_keys
+
+    @classmethod
+    def allow_component_draw_state_changes(cls):
+        # Read the per-scene opt-in instead of inferring consent from bone overlap.
+        # No export operation writes this setting or switches architecture itself.
+        return cls._instance().allow_component_draw_state_changes
 
     @classmethod
     def apply_all_modifiers(cls):

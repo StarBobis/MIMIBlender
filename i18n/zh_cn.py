@@ -17,6 +17,29 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    # Routing consent is separate from bone compatibility and never inferred.
+    "Allow Component Draw-State Changes": "允许切换组件绘制状态",
+    "MergedComponent only: move uniquely compatible triangles to another original component. Uses its native shaders/materials; explicit blueprint texture bindings and switches follow the source. Ambiguous or incompatible faces still stop export": "仅用于 MergedComponent：将唯一兼容的三角面移至其他原始组件，使用目标组件的原生着色器/材质；源蓝图的显式贴图绑定和开关条件随面保留。归属不明确或骨骼不兼容的面仍会阻止导出",
+    "MergedComponent routing stopped: {incompatible} incompatible triangles, {ambiguous} ambiguous, {draw_state} require draw-state consent. Open report: {report}. No weights were deleted; repair the reported faces or explicitly use Merged.": "MergedComponent 自动分配已停止：{incompatible} 个三角面无兼容骨骼表，{ambiguous} 个归属不明确，{draw_state} 个需要授权切换绘制状态。请打开报告：{report}。未删除任何权重；请修复报告中的面，或主动切换到 Merged。",
+    "MergedComponent face routing report": "MergedComponent 面归属检查报告",
+    "Indices below are zero-based. Source faces precede modifiers; export triangles and vertices follow modifiers.": "以下编号从 0 开始。source_face 为应用修改器前的源面编号；triangle 和 export_vertices 为应用修改器后的导出三角面与顶点编号。",
+    "Select a source object, then press F3 > Select WWMI Problem Faces. Selection refuses changed topology.": "选中源物体后，按 F3 搜索“选中 WWMI 问题面”，或点击“选中问题面”。若源拓扑已改变，请重新导出生成报告。",
+    "incompatible: no original palette contains every positive weight. Check workspace/LOD and bone names; repaint only if the weights are wrong, or explicitly use Merged.": "incompatible（无法表示）：没有任何原始组件骨骼表能容纳该面的全部正权重。检查工作区、LOD 和骨骼名称；仅在权重确实错误时人工重绘，否则主动选择 Merged。复制顶点不能解决单个顶点的跨表权重依赖。",
+    "ambiguous: multiple target palettes fit. Separate these source faces into another object and bind it to the intended Submesh in the blueprint.": "ambiguous（归属不明确）：candidates 列出了多个骨骼兼容的候选组件。请将这些源面分离成物体，在蓝图中绑定到你确定的目标 Submesh；不能仅靠骨骼判断材质归属。",
+    "draw_state: one palette fits, but original target shaders/materials are not proven equivalent. Confirm the destination appearance, then enable Allow Component Draw-State Changes, or use Merged.": "draw_state（需要授权）：只有一个骨骼兼容组件，但无法证明其原生着色器/材质与源组件等价。确认可以使用目标组件的绘制状态后，勾选“允许切换组件绘制状态”，或选择 Merged。",
+    "The routing plan was cancelled. Reassigned counts are proposals only. No automatic weight deletion, native shape-key renumbering, or architecture fallback was performed.": "整份分配计划已取消，reassigned 数量仅为可迁移建议，并未实际移动任何面。本次没有自动删除权重、重编号原生形态键或回退导出架构。",
+    "Source object": "源物体",
+    "Source face indices": "源面编号",
+    "Open Routing Report": "打开分配报告",
+    "Select Problem Faces": "选中问题面",
+    "Select WWMI Problem Faces": "选中 WWMI 问题面",
+    "Open the latest MergedComponent routing report in the Text Editor": "在文本编辑器中打开最新的 MergedComponent 面归属检查报告",
+    "Select reported source faces on the active object without changing geometry or weights": "在当前激活的源物体上选中报告中的问题面，不修改几何或权重",
+    "No MergedComponent routing report is available": "尚无 MergedComponent 分配报告，请先尝试导出",
+    "Select a source mesh and generate a routing report first": "请先尝试导出生成分配报告，然后选中一个源网格物体",
+    "No current report for this object, or topology changed; export again to refresh the report": "报告中没有此物体，或源拓扑已改变；请重新导出以更新报告",
+    "These generated triangles have no reliable source face; inspect the export triangle details in the report": "这些生成的三角面没有可靠的源面对应关系；请查看报告中的导出三角面详情",
+    "Selected {count} source faces; weights and geometry were not modified": "已选中 {count} 个源面；未修改权重或几何",
     # Editable atlas allocation and merge approval messages.
     "Solid Color": "纯色",
     "Shared Materials ({count})": "共用材质：{count} 个",

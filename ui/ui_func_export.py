@@ -191,7 +191,98 @@ class MMTGenerateSelectedBlueprintMod(I18nOperator):
 
         return generate_mod_from_tree(tree=tree, context=context, report_callback=self.report)
     
+class MIMIOpenWWMIComponentReport(I18nOperator, bpy.types.Operator):
+    """Expose a full diagnostic without writing into the user's source directory.
+
+    Reports live in Blender Text datablocks and survive temporary export cleanup.
+    The compact export error names the report, but cannot display thousands of
+    triangle records. This operator provides access without console inspection.
+    Older reports remain available manually; the button opens the newest one.
+    """
+    bl_idname = "mimi.open_wwmi_component_report"
+    bl_label = "Open Routing Report"
+    bl_description = "Open the latest MergedComponent routing report in the Text Editor"
+
+    def execute(self, context):
+        from ..games.wwmi.component_routing_blender import latest_report
+        text = latest_report()
+        if text is None:
+            self.report({'WARNING'}, tr("No MergedComponent routing report is available"))
+            return {'CANCELLED'}
+        # Reuse an existing Text Editor where possible, without opening a window.
+        # A background invocation still reports the Text name without UI access.
+        # Opening a report never modifies the source objects or the Text contents.
+        area = next((area for area in context.screen.areas if area.type == 'TEXT_EDITOR'), None) if context.screen else None
+        area = area or context.area
+        if area is not None:
+            area.type = 'TEXT_EDITOR'
+            area.spaces.active.text = text
+        self.report({'INFO'}, text.name)
+        return {'FINISHED'}
+
+
+class MIMISelectWWMIProblemFaces(I18nOperator, bpy.types.Operator):
+    """Select original polygons as an explicit, undoable repair aid.
+
+    The user chooses the active object; the tool never guesses which source to
+    edit from a joined export vertex number. Triangulated quads and modifier
+    duplicates may yield several issues for one source polygon, so selection
+    deduplicates source indices. Unknown indices remain available in the report.
+    Neither entering edit mode nor setting selection changes bone dependencies.
+    Actual weight repair or separation is a subsequent deliberate user action.
+    """
+    bl_idname = "mimi.select_wwmi_problem_faces"
+    bl_label = "Select WWMI Problem Faces"
+    bl_description = "Select reported source faces on the active object without changing geometry or weights"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        import json
+        from ..games.wwmi.component_routing_blender import latest_report, topology_signature, REPORT_DATA
+        text = latest_report()
+        obj = context.active_object
+        if text is None or obj is None or obj.type != 'MESH':
+            self.report({'WARNING'}, tr("Select a source mesh and generate a routing report first"))
+            return {'CANCELLED'}
+        report = json.loads(text[REPORT_DATA])
+        entry = report['objects'].get(obj.name)
+        # Flush edit-mode topology before comparing it to the diagnostic snapshot.
+        # Never select stale indices after face deletion, subdivision, or reordering.
+        # Weight/coordinate-only repairs keep the ordered topology signature valid.
+        obj.update_from_editmode()
+        if entry is None or entry['topology'] != topology_signature(obj.data):
+            self.report({'WARNING'}, tr("No current report for this object, or topology changed; export again to refresh the report"))
+            return {'CANCELLED'}
+        faces = {issue['source_face'] for issue in entry['issues'] if issue['source_face'] >= 0}
+        if not faces or max(faces) >= len(obj.data.polygons):
+            self.report({'WARNING'}, tr("These generated triangles have no reliable source face; inspect the export triangle details in the report"))
+            return {'CANCELLED'}
+        # Selection is an explicit repair aid, not an automatic geometry edit.
+        # Exit multi-object edit mode so unrelated objects keep their selections.
+        # Only the active source mesh receives the reported face-selection mask.
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        # Clear subordinate selection flags before entering face-select mode.
+        # Otherwise previously selected edges can cause Blender to select extra
+        # faces, obscuring the exact diagnostic mask the user asked to inspect.
+        for vertex in obj.data.vertices:
+            vertex.select = False
+        for edge in obj.data.edges:
+            edge.select = False
+        for face in obj.data.polygons:
+            face.select = face.index in faces
+        context.tool_settings.mesh_select_mode = (False, False, True)
+        bpy.ops.object.mode_set(mode='EDIT')
+        self.report({'INFO'}, tr("Selected {count} source faces; weights and geometry were not modified").format(count=len(faces)))
+        return {'FINISHED'}
+
+
 def register():
+    bpy.utils.register_class(MIMIOpenWWMIComponentReport)
+    bpy.utils.register_class(MIMISelectWWMIProblemFaces)
     bpy.utils.register_class(MMTGenerateModBlueprint)
     bpy.utils.register_class(MMTGenerateSelectedBlueprintMod)
 
@@ -199,4 +290,6 @@ def register():
 def unregister():
     bpy.utils.unregister_class(MMTGenerateSelectedBlueprintMod)
     bpy.utils.unregister_class(MMTGenerateModBlueprint)
+    bpy.utils.unregister_class(MIMISelectWWMIProblemFaces)
+    bpy.utils.unregister_class(MIMIOpenWWMIComponentReport)
 

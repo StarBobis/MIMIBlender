@@ -5,18 +5,13 @@ so geometry, shape keys and user weights never need destructive splitting.
 Every array row is interpreted using its blueprint-assigned draw component.
 """
 
-import re
-
 import numpy
 
-
-# Blender adds numeric suffixes when temporary joins encounter duplicate names.
-# Such groups still describe the same global bone; arbitrary names are rejected
-# only when a positive exported weight actually references them.
-GLOBAL_GROUP_NAME = re.compile(r"^(\d+)(?:\.\d+)?$")
+from .component_routing import GLOBAL_GROUP_NAME, build_bone_maps, resolve_local
 
 
-def localize_blendindices(element_context, components, extracted_components, draw_ib):
+def localize_blendindices(element_context, components, extracted_components, draw_ib,
+                          routed_loop_components=None):
     """Return local export arrays, without editing mesh data or vertex groups."""
     mesh = element_context.mesh
     source = element_context.original_elementname_data_dict
@@ -46,6 +41,14 @@ def localize_blendindices(element_context, components, extracted_components, dra
                 loop_objects[start:end] = [temp_object.name] * polygon.loop_total
     if numpy.any(loop_components < 0):
         raise ValueError("MergedComponent: export loops have no blueprint component")
+    # Routing changes ownership, never mesh order or the source identity in errors.
+    # Require one valid component for every loop before packing local indices.
+    # The caller applies the new draw ranges only after localization succeeds.
+    if routed_loop_components is not None:
+        routed = numpy.asarray(routed_loop_components, dtype=numpy.int32)
+        if routed.shape != loop_components.shape or numpy.any(routed < 0) or numpy.any(routed >= len(components)):
+            raise ValueError("MergedComponent: invalid routed loop ownership")
+        loop_components = routed
 
     # Numeric group names are the persistent global identity. Internal Blender
     # group indices can change after deletion, reordering and temporary joins.
@@ -60,11 +63,7 @@ def localize_blendindices(element_context, components, extracted_components, dra
     # valid identities for the same bone: e.g. Xin slot 105 + 118 == 223 maps
     # to canonical bone 68. Recover only aliases explicitly proven by metadata;
     # never treat an arbitrary out-of-palette bone as a local index.
-    aliases = {}
-    for extracted in extracted_components:
-        for local_id, canonical_id in extracted.vg_map.items():
-            if 0 <= int(local_id) < extracted.vg_count:
-                aliases[extracted.vg_offset + int(local_id)] = int(canonical_id)
+    _, aliases = build_bone_maps(extracted_components)
 
     # The actual layout determines representable local indices. Keeping the
     # wide source arrays until this point prevents accidental uint8 truncation.
@@ -96,13 +95,7 @@ def localize_blendindices(element_context, components, extracted_components, dra
             rows = numpy.flatnonzero(loop_components == component_index)
             if rows.size == 0:
                 continue
-            explicit_map = {int(key): int(value) for key, value in extracted.vg_map.items()}
-            reverse_map = {}
-            for local_id in range(extracted.vg_count):
-                if local_id > maximum_local:
-                    continue
-                global_id = explicit_map.get(local_id, extracted.vg_offset + local_id)
-                reverse_map.setdefault(global_id, local_id)
+            reverse_map = build_bone_maps([extracted], maximum_local)[0][0]
 
             # Validate only final nonzero exported influences, including the
             # existing weight quantization/top-K policy. Zero-weight padding
@@ -117,12 +110,8 @@ def localize_blendindices(element_context, components, extracted_components, dra
                 # Prefer an exact canonical identity, then resolve a legacy
                 # runtime-slot alias. Cycles cannot establish a valid target.
                 # This changes export arrays only, never the source groups.
-                mapped_id = global_id
-                visited = set()
-                while mapped_id not in reverse_map and mapped_id in aliases and mapped_id not in visited:
-                    visited.add(mapped_id)
-                    mapped_id = aliases[mapped_id]
-                if global_id is None or mapped_id not in reverse_map:
+                local_id = resolve_local(global_id, reverse_map, aliases)
+                if global_id is None or local_id is None:
                     first_row = int(rows[numpy.nonzero(matching)[0][0]])
                     identity = str(global_id) if global_id is not None else "unnamed group index " + str(group_index)
                     raise ValueError(
@@ -131,7 +120,7 @@ def localize_blendindices(element_context, components, extracted_components, dra
                         + " to its original local skeleton. Keep the target component's bone range"
                         + " or use Merged for cross-component weights. No weights were deleted."
                     )
-                selected_local[matching] = reverse_map[mapped_id]
+                selected_local[matching] = local_id
             local_indices[rows] = selected_local
         output[element] = local_indices
     return output

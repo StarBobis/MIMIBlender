@@ -172,4 +172,41 @@ Read-only analysis of the nine supplied source meshes found:
 
 The last group consists of **2007** triangles on component 3 and **3124** on component 6. Across the source objects, **3151 vertices** individually have no compatible original palette. Copying boundary vertices or merely separating objects cannot remove an individual vertex's mixed-palette bone dependencies.
 
-These counts establish skeleton feasibility only, not compatible material/texture/draw states. Automatic reassignment is a **follow-up design, not implemented by the metadata patch**. The agreed safety direction is: preserve existing valid assignments; automatically handle only proven safe assignments; carry vertex/shape data when splitting export copies; report ambiguous ownership and truly incompatible influences with source-face locations and repair options. Do not silently delete weights, renumber native shape IDs, or fall back to Merged without the user's choice. Such a report should distinguish selecting a target component, correcting metadata/workspace selection, deliberately repainting weights (which changes deformation), and explicitly choosing Merged to retain cross-component weights.
+These counts establish skeleton feasibility only, not compatible material/texture/draw states. Automatic reassignment was not part of the metadata patch. It is now implemented in the separate follow-up below, with explicit consent for native destination draw-state changes rather than claiming that matching bone palettes prove matching materials.
+
+## Follow-up: conservative whole-triangle component routing
+
+The [pure planner](<games/wwmi/component_routing.py>) checks every positive influence of every triangle corner against the actual representable original palettes. It shares canonical/alias resolution with [final local-index conversion](<games/wwmi/merged_component.py>). An already valid blueprint target always wins. A unique alternative requires the new **Allow Component Draw-State Changes** option, which defaults to false. Multiple alternatives and impossible triangles remain errors.
+
+The [Blender adapter](<games/wwmi/component_routing_blender.py>) rebuckets only the temporary export IB and draw models. It does not physically split source objects or edit source weights. Shared vertices with different destination local indices duplicate naturally during buffer packing; both original native shape IDs and their deltas follow the existing vertex mapping. Original texture binding resolution runs before routing. Every conditional draw branch is copied separately, including explicit texture capture/restore lines, hotkey conditions, and time conditions. Unspecified native shader/material state comes from the destination component under the user's explicit consent.
+
+Any remaining issue prevents the entire plan for that DrawIB from being applied. The complete Blender Text report contains source object names, pre-modifier source face IDs, post-modifier triangle/vertex IDs, all positive weights, candidate component IDs, and individually unassignable vertices. The new UI buttons open the report and select problem source faces. Selection validates ordered source topology rather than trusting matching polygon counts. Unknown modifier provenance is not guessed. See the [Chinese usage and repair guide](<wwmi_component_routing.md>).
+
+### Follow-up regression results
+
+All **151 focused tests passed**: the previous 127 plus [15 pure routing tests](<tools/test_wwmi_component_routing.py>) and [9 Blender routing tests](<tools/test_wwmi_component_routing_blender.py>). New integration checks cover:
+
+- Four source vertices producing six output vertices due to different local palettes, with original `Deform 0` and `Deform 127` deltas duplicated correctly across two runtime batches.
+- Real conditional INI draws, keyboard/time conditions, explicit per-draw texture capture/restore, multiple source branches, and complete non-contiguous IB rebucketing.
+- Atomic rejection when one face can move but another cannot; conservative default consent.
+- Problem-face selection, stale-topology rejection, joined-object provenance, triangulated quads, and Mirror modifier provenance with shape keys.
+
+The [real-workspace roundtrip harness](<tools/test_wwmi_roundtrip_blender.py>) was also rerun on Xin, Default, MoNing, QingXiao, and Veilinai in **all four architectures: 20 successful exports**. Every run retained complete source index coverage, unchanged source geometry/weights/shapes, and no temporary-object or orphaned-mesh residue. Xin's Merged runtime stride remains 553; its local modes remain unaffected by that extended runtime table.
+
+The global translation coverage command still reports **67 pre-existing missing keys**. Comparison against HEAD confirms the same 67 before and after this change, with **22 newly referenced UI/report messages and no new missing translations**. This is not reported as a clean global i18n check.
+
+### Supplied-project results after routing integration
+
+The same factory-startup, disabled-autoexec, read-only project probe was rerun against the matching Xin workspace and the production reverse-metadata attachment helper:
+
+| Result | Default consent off | Consent on |
+| --- | ---: | ---: |
+| Already valid in original target | 68,019 | 68,019 |
+| Unique alternative awaiting consent | 25,142 | 0 |
+| Proposed reassignment | 0 | 25,142 |
+| Multiple alternative targets | 1,843 | 1,843 |
+| No complete original palette | 5,131 | 5,131 |
+
+Both MergedComponent attempts correctly cancel with a complete report. Proposed reassignment counts are **not applied changes** when other faces remain blocked. The original project still cannot be fully exported through local palettes without explicit repairs or architectural choice; routing does not pretend otherwise.
+
+The independent **Merged export still succeeds** with the preserved native two-batch shape metadata. All three project probes retain identical source geometry, weights, group names, and shape coordinates, leave no temporary objects or meshes, and preserve the original blend SHA-256 `44b363e30ddc2c497cf316c654e06d605431f5e305c6ce4e53160989c4fd72a5`. No game-side appearance verification is claimed.

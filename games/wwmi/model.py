@@ -240,13 +240,20 @@ class DrawIBModelWWMI:
             obj=self.merged_object.object,
         )
 
-        # Localize only the export arrays; the source keeps global group names.
-        # This must run before packing into the game's narrow integer layout.
+        # Plan complete triangles before localizing export arrays. Every positive
+        # influence participates, even if later buffer quantization would hide it.
+        # Source geometry and native shape identities remain unchanged throughout.
+        routed_draw_links = []
         if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
+            from .component_routing_blender import prepare_routing, apply_routing
             try:
+                routing = prepare_routing(self, element_context,
+                                          MIMIGlobalProperties.allow_component_draw_state_changes())
                 element_context.final_elementname_data_dict.update(localize_blendindices(
                     element_context, self.merged_object.components, self.wwmi_info.components, self.draw_ib,
+                    routed_loop_components=routing['loop_components'],
                 ))
+                routed_draw_links = apply_routing(self, element_context, routing, ordered_submesh_name_list)
             except ValueError:
                 # Mapping failures must leave only the user's original objects.
                 # The merged export object is a disposable copy, never a source.
@@ -295,6 +302,13 @@ class DrawIBModelWWMI:
         for component in self.merged_object.components:
             component.index_count = sum(temp.index_count for temp in component.objects)
         self.merged_object.index_count = len(self.obj_buffer_model_wwmi.ib)
+        # Routed draw copies must use the final IB buckets, never pre-join ranges.
+        # Several key branches may intentionally reference the same geometry.
+        # Update every branch by object identity rather than synthetic name lookup.
+        for draw, temp in routed_draw_links:
+            draw.index_count = temp.index_count
+            draw.index_offset = temp.index_offset
+            draw.vertex_count = temp.vertex_count
 
         position_stride: int = self.d3d11_game_type.CategoryStrideDict["Position"]
         position_bytelength: int = len(self.obj_buffer_model_wwmi.category_buffer_dict["Position"])
@@ -447,6 +461,13 @@ class DrawIBModelWWMI:
 
             for temp_object in component.objects:
                 temp_obj = temp_object.object
+
+                # Carry source face identity through modifiers and triangulation.
+                # Only disposable MergedComponent copies receive these attributes.
+                # They support repair selection without changing source meshes.
+                if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
+                    from .component_routing_blender import tag_source_faces
+                    tag_source_faces(temp_obj)
 
                 if MIMIGlobalProperties.ignore_muted_shape_keys() and temp_obj.data.shape_keys:
                     muted_shape_keys = []
