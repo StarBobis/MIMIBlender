@@ -8,6 +8,7 @@ These tests verify buffer generation, not in-game rendering.
 """
 import ast
 import math
+import runpy
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -230,6 +231,71 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(len(keys), 162)
         self.assertEqual(keys[-1].name, 'Deform 160')
         self.assertGreater(numpy.count_nonzero(keys[-1].data.co), 0)
+
+
+class MetadataCompatibilityTests(unittest.TestCase):
+    # The workspace loader has no Blender dependencies. Load its real dataclasses
+    # and helper together instead of reproducing normalization logic in tests.
+    # Every fixture is in-memory and cannot change a user's workspace records.
+    helper = runpy.run_path(str(ROOT / 'workspace/wwmi_info.py'))['WWMIInfoHelper']
+
+    def load(self, records):
+        components = [SimpleNamespace(VertexOffset=0, VertexCount=1, IndexOffset=i * 3,
+                                      IndexCount=3, VGOffset=i, VGCount=1, VGMap={},
+                                      VertexLimitVB='12345678', CB4Hash='87654321',
+                                      JsonDict={'IndexOffset': i * 3, 'IndexCount': 3},
+                                      ShapeKeysInfo=record) for i, record in enumerate(records)]
+        return self.helper.build_from_json_list(components).shapekeys
+
+    def test_later_component_recovers_legacy_zero_checksum(self):
+        # Empty leading component metadata cannot hide the face component.
+        # Zero is a real checksum, not a missing runtime dispatch record.
+        # Explicit original sparse bases and key counts survive normalization.
+        shape = self.load([{}, {'checksum': 0, 'dispatch_y': 2, 'vertex_offset': 11,
+                               'shapekey_count': 4, 'offsets_hash': 'abcd1234'}])
+        self.assertEqual(shape.checksum, 0)
+        self.assertEqual(shape.batches[0]['vertex_offset'], 11)
+        self.assertEqual(shape.batches[0]['shapekey_count'], 4)
+        model = SimpleNamespace(wwmi_info=SimpleNamespace(shapekeys=shape),
+                                obj_buffer_model_wwmi=SimpleNamespace(shapekey_offsets=[0] * 128))
+        self.assertEqual(EXPORT(model)[0]['checksum'], 0)
+
+    def test_conflicting_metadata_is_not_silently_selected(self):
+        # A stale face record may belong to another capture of the same DrawIB.
+        # Choosing the richer record is unsafe if original checksums disagree.
+        # The error identifies the conflicting field for workspace diagnosis.
+        with self.assertRaisesRegex(ValueError, 'conflicting.*checksum'):
+            self.load([{'checksum': 0}, {'checksum': 7}])
+
+    def test_missing_checksum_does_not_become_zero(self):
+        # Dispatch dimensions alone do not establish a valid runtime checksum.
+        # Explicit batches also require the checksum field, not a default zero.
+        # New and legacy missing metadata must both remain actionable errors.
+        shape = self.load([{'dispatch_y': 2}])
+        self.assertIsNone(shape.checksum)
+        shape.batches = [{'dispatch_y': 2, 'vertex_offset': 0}]
+        model = SimpleNamespace(wwmi_info=SimpleNamespace(shapekeys=shape),
+                                obj_buffer_model_wwmi=SimpleNamespace(shapekey_offsets=[0] * 128))
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            EXPORT(model)
+
+    def test_mesh_without_shapes_produces_an_empty_cache(self):
+        # The old truthy (None, None, None) sentinel reached dictionary methods
+        # in the native packer. Exercise its real early-return path directly.
+        # No synthetic batch or dispatch should be created for an empty mesh.
+        cache = load_function('utils/shapekey_utils.py', 'get_shapekey_cache',
+                              {'TimerUtils': SimpleNamespace(End=lambda name: None)})
+        obj = SimpleNamespace(name='no_shapes', data=SimpleNamespace(shape_keys=None))
+        self.assertEqual(cache(obj, {}), {})
+
+    def test_legacy_direct_zero_checksum_is_accepted(self):
+        # Some integrations pass the typed metadata directly without its loader.
+        # Preserve this single-batch compatibility path for a zero checksum too.
+        # It still needs positive original dispatch dimensions to be usable.
+        shape = SimpleNamespace(batches=[], checksum=0, dispatch_y=2)
+        model = SimpleNamespace(wwmi_info=SimpleNamespace(shapekeys=shape),
+                                obj_buffer_model_wwmi=SimpleNamespace(shapekey_offsets=[0] * 128))
+        self.assertEqual(len(EXPORT(model)), 1)
 
 
 class ShapeKeyHookTests(unittest.TestCase):

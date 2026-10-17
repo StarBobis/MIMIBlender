@@ -85,7 +85,7 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
         raise Fatal("WWMI shape key offsets contain an incomplete batch.")
     batch_count = len(shapekey_offsets) // 128
     metadata_batches = list(getattr(draw_ib_model.wwmi_info.shapekeys, "batches", []) or [])
-    if not metadata_batches and getattr(draw_ib_model.wwmi_info.shapekeys, "checksum", 0):
+    if not metadata_batches and getattr(draw_ib_model.wwmi_info.shapekeys, "checksum", None) is not None:
         metadata_batches = [{
             "vertex_offset": 0,
             "dispatch_y": draw_ib_model.wwmi_info.shapekeys.dispatch_y,
@@ -95,7 +95,14 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
     # compact Mod offsets, whose entries may have been edited or deduplicated.
     # Re-extraction or a reverse output carrying original INI metadata is needed.
     if len(metadata_batches) < batch_count:
-        raise Fatal("WWMI shape key batch metadata is missing. Re-extract with updated MMT before exporting.")
+        raise Fatal(
+            "WWMI DrawIB " + str(getattr(draw_ib_model, "draw_ib", "unknown"))
+            + ": exported " + str(batch_count) + " shape key batches, but only "
+            + str(len(metadata_batches)) + " original runtime metadata records are available. "
+            "Check the bound workspace/LOD and Deform/Custom numeric key IDs. "
+            "Additional runtime batches require original extraction or reverse INI metadata; "
+            "their checksums cannot be inferred from edited shape buffers."
+        )
 
     batches = []
     custom_vertex_offset = 0
@@ -106,7 +113,9 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
         # A zero checksum may legitimately occur with empty early key slots.
         # New metadata records completeness; legacy metadata uses Dispatch Y.
         # Preserve unsigned checksum values exactly as recorded by the game.
-        if metadata.get("runtime_metadata_complete") is False or int(metadata.get("dispatch_y", 0)) <= 0:
+        if (metadata.get("runtime_metadata_complete") is False
+                or metadata.get("checksum") is None
+                or int(metadata.get("dispatch_y", 0)) <= 0):
             raise Fatal("WWMI original shape key runtime metadata is incomplete. Re-extract with updated MMT.")
         batches.append({
             "checksum": int(metadata.get("checksum", 0)),

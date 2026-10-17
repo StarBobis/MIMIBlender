@@ -132,6 +132,295 @@ class MergedComponentTests(unittest.TestCase):
             self.convert()
         numpy.testing.assert_array_equal(self.context.original_elementname_data_dict["BLENDWEIGHT"], before)
 
+    def test_legacy_runtime_slot_alias_is_not_cross_component_weight(self):
+        # Xin's old merged/reverse slot 223 is local 118 at VGOffset 105.
+        # Current import merges that duplicate into bone 68. Both identities
+        # address the same original bone and must produce local slot 118.
+        self.obj.vertex_groups[0].name = "223"
+        self.context.original_elementname_data_dict["BLENDWEIGHT"][:, 1] = 0
+        self.extracted[0].vg_offset = 105
+        self.extracted[0].vg_count = 121
+        self.extracted[0].vg_map = {"118": 68}
+        self.extracted[1].vg_map = {"9": 68}
+        output = self.convert()["BLENDINDICES"]
+        self.assertTrue(numpy.all(output[:3, 0] == 118))
+        self.assertTrue(numpy.all(output[3:, 0] == 9))
+        self.assertEqual(self.obj.vertex_groups[0].name, "223")
+
+    def test_alias_does_not_authorize_an_unrelated_component(self):
+        # An alias may only reach a bone present in the target palette.
+        # This preserves rejection of genuine cross-component influences.
+        # No arbitrary offset subtraction is allowed as an escape hatch.
+        self.obj.vertex_groups[0].name = "223"
+        self.context.original_elementname_data_dict["BLENDWEIGHT"][:, 1] = 0
+        self.extracted[0].vg_offset = 105
+        self.extracted[0].vg_count = 121
+        self.extracted[0].vg_map = {"118": 68}
+        with self.assertRaisesRegex(ValueError, "component 1.*223"):
+            self.convert()
+
+    def test_merged_remap_uses_names_and_dynamic_stride(self):
+        # Sparse names and reordered Blender indices exercise two regressions
+        # together: 552 must neither become internal index 1 nor overflow 512.
+        # The source groups remain untouched by this export-only mapping.
+        self.obj.vertex_groups[0].add([0, 1, 2], 0.6, 'REPLACE')
+        self.obj.vertex_groups[1].add([0, 1, 2], 0.4, 'REPLACE')
+        model = DrawIBModelWWMI.__new__(DrawIBModelWWMI)
+        model.wwmi_info = SimpleNamespace(components=[WWMIInfoComponent(0, 0, 0, 0, 0, 553, {})])
+        model.d3d11_game_type = SimpleNamespace(get_blendindices_count_wwmi=lambda: 4)
+        model.component_real_vg_count_dict = {}
+        model.export_blendremap_forward_and_reverse([(0, self.obj)])
+        self.assertEqual(model.blend_remap_bone_count, 553)
+        self.assertEqual(len(model.blend_remap_reverse_buffer), 553)
+        numpy.testing.assert_array_equal(model.blend_remap_forward_buffer[:2], [522, 552])
+        self.assertEqual(model.blend_remap_reverse_buffer[552], 1)
+        # Do not mock a Blender RNA property with the same name as its accessor:
+        # restoring that descriptor can replace the instance enum with a method.
+        settings = MIMIGlobalProperties._instance()
+        previous_mode = settings.import_merged_vgmap
+        try:
+            settings.import_merged_vgmap = 'MERGED'
+            model.resolve_named_blendindices(self.context)
+        finally:
+            settings.import_merged_vgmap = previous_mode
+        numpy.testing.assert_array_equal(self.context.original_elementname_data_dict['BLENDINDICES'][0], [522, 552, 0, 0])
+        # A gap below the maximum extent is not an initialized runtime bone.
+        # Reject it before creating a map that reads undefined skeleton matrices.
+        model.wwmi_info.components[0].vg_offset = 500
+        model.wwmi_info.components[0].vg_count = 53
+        self.obj.vertex_groups[0].name = '400'
+        with self.assertRaisesRegex(ValueError, 'outside the original merged skeleton'):
+            model.export_blendremap_forward_and_reverse([(0, self.obj)])
+
+    def test_extended_runtime_stride_is_set_for_every_shader_call(self):
+        # The runtime resets the stride after each blend/skeleton remapper call.
+        # Verify all three assignments, both matrix buffer sizes, and the mod's
+        # minimum runtime version, not just successful numpy buffer generation.
+        from MIMIBlender.common.m_ini_builder import M_IniBuilder
+        from MIMIBlender.games.wwmi import blend_remap
+        model = make_model()
+        model.blend_remap_bone_count = 553
+        model.wwmi_info.components[-1].vg_offset = 500
+        model.wwmi_info.components[-1].vg_count = 53
+        exporter = make_exporter(model)
+        # An ordinary first DrawIB must not lower the shared runtime requirement
+        # needed by an extended second DrawIB in the same generated Mod.
+        first_model = make_model(draw_ib='deadbeef')
+        exporter.drawib_drawibmodel_dict = {first_model.draw_ib: first_model, model.draw_ib: model}
+        builder = M_IniBuilder()
+        settings = MIMIGlobalProperties._instance()
+        previous_mode = settings.import_merged_vgmap
+        try:
+            settings.import_merged_vgmap = 'MERGED'
+            exporter.add_constants_section(builder, first_model)
+            blend_remap.add_blend_remap_sections(builder, model)
+            blend_remap.add_resource_merged_skeleton(builder, model)
+        finally:
+            settings.import_merged_vgmap = previous_mode
+        text = '\n'.join(render_lines(builder))
+        self.assertEqual(text.count('blend_remap_bone_count = 553'), 3)
+        self.assertEqual(text.count('array = 1659'), 2)
+        self.assertIn('global $required_wwmi_version = 1.10', text)
+
+    def test_failed_model_build_cleans_only_its_disposable_objects(self):
+        # A runtime validation failure can occur after one or more joins.
+        # Verify exception cleanup by identity, preserving a pre-existing mesh
+        # even if it happens to use the exporter's temporary naming convention.
+        original_objects = set(bpy.data.objects)
+        original_meshes = set(bpy.data.meshes)
+
+        def fail_build(model):
+            mesh = bpy.data.meshes.new('failure_copy')
+            obj = bpy.data.objects.new('TEMP_EXPORT_OBJECT', mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            raise ValueError('synthetic validation failure')
+
+        with patch.object(DrawIBModelWWMI, '_initialize_model', fail_build):
+            with self.assertRaisesRegex(ValueError, 'synthetic'):
+                DrawIBModelWWMI('deadbeef', None)
+        self.assertEqual(set(bpy.data.objects), original_objects)
+        self.assertEqual(set(bpy.data.meshes), original_meshes)
+
+    def test_unico_empty_map_keeps_offsets_and_lod_scope(self):
+        # UniComponent must not skip a valid offset-only legacy palette or mix
+        # another LOD that happens to reuse the same DrawIB hash. Capture the
+        # production split arguments without creating any disposable geometry.
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+        from MIMIBlender.workspace.mmt_workspace import MMTWorkSpace
+        from MIMIBlender.utils.vertexgroup_utils import VertexGroupUtils
+        palette = SimpleNamespace(VGMap={}, VGOffset=522, VGCount=4)
+        model = BluePrintModel.__new__(BluePrintModel)
+        with patch.object(MMTWorkSpace, 'get_ordered_submesh_name_list_by_drawib', return_value=['LOD0.deadbeef-0', 'LOD1.deadbeef-0']):
+            with patch.object(MMTWorkSpace, 'check_and_get_submesh_json_path', return_value='unused'):
+                with patch('MIMIBlender.workspace.submesh_json.SubmeshJson', return_value=palette):
+                    with patch.object(VertexGroupUtils, 'split_merged_object_by_submesh_vg_ranges', return_value=[]) as split:
+                        model._unico_split_object(self.obj, 'LOD0.deadbeef-0')
+        maps = split.call_args.kwargs['submesh_reverse_vg_map']
+        self.assertEqual(maps, {'LOD0.deadbeef-0': {522: 0, 523: 1, 524: 2, 525: 3}})
+
+    def test_unico_shared_bone_fallback_tolerates_helper_groups(self):
+        # Shared-bone vertices use the fallback path, not unique ownership.
+        # A nonnumeric unused helper group previously crashed its comprehension.
+        # Test the real split and then remove only its returned temporary copies.
+        from MIMIBlender.utils.vertexgroup_utils import VertexGroupUtils
+        self.obj.vertex_groups[0].add(list(range(4)), 1.0, 'REPLACE')
+        pieces = VertexGroupUtils.split_merged_object_by_submesh_vg_ranges(
+            self.obj, {'part_a': {522}}, {'part_a': {522: 0}}, {'part_a': set()})
+        try:
+            self.assertEqual(len(pieces), 1)
+            self.assertEqual(len(pieces[0][1].data.polygons), 2)
+            self.assertEqual(len(self.obj.data.polygons), 2)
+            self.assertEqual(self.obj.vertex_groups[0].name, '522')
+        finally:
+            for _, piece in pieces:
+                mesh = piece.data
+                bpy.data.objects.remove(piece, do_unlink=True)
+                bpy.data.meshes.remove(mesh)
+
+    def test_unico_constructor_failure_cleans_unregistered_split_copies(self):
+        # The caller's blueprint_model remains None when its constructor fails.
+        # Emulate a later invalid node after an earlier split created a mesh.
+        # Identity-based cleanup must preserve all pre-existing source data.
+        from MIMIBlender.ui import ui_func_export
+        before_objects = set(bpy.data.objects)
+        before_meshes = set(bpy.data.meshes)
+
+        def failed_parser(**kwargs):
+            mesh = bpy.data.meshes.new('partial_split')
+            obj = bpy.data.objects.new('Uni_partial_split', mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            raise ValueError('invalid later component')
+
+        with patch.object(MIMIGlobalProperties, 'is_unico_component', return_value=True):
+            with patch.object(ui_func_export.GlobalConfig, 'path_generate_mod_folder', return_value='unused'):
+                with patch.object(ui_func_export, 'BluePrintModel', side_effect=failed_parser):
+                    with self.assertRaisesRegex(ValueError, 'invalid later'):
+                        ui_func_export._export_regular_output(None, bpy.context, None, 'unused.ini')
+        self.assertEqual(set(bpy.data.objects), before_objects)
+        self.assertEqual(set(bpy.data.meshes), before_meshes)
+        self.assertIsNone(ui_func_export.BlueprintExportHelper.runtime_output_node)
+        self.assertEqual(ui_func_export.GlobalConfig.generated_mod_name_override, '')
+
+    def test_unico_rejects_boundary_faces_without_creating_copies(self):
+        # A face crossing dominant component ownership used to disappear when
+        # each split deleted the other component's vertices. Fail before making
+        # any disposable copies, leaving both source faces and weights intact.
+        from MIMIBlender.utils.vertexgroup_utils import VertexGroupUtils
+        self.obj.vertex_groups[0].add([0, 1], 1.0, 'REPLACE')
+        self.obj.vertex_groups[1].add([2, 3], 1.0, 'REPLACE')
+        maps = {'a': {522}, 'b': {552}}
+        before = set(bpy.data.objects)
+        with self.assertRaisesRegex(ValueError, 'spans incompatible'):
+            VertexGroupUtils.split_merged_object_by_submesh_vg_ranges(
+                self.obj, maps, {'a': {522: 0}, 'b': {552: 0}}, maps)
+        self.assertEqual(set(bpy.data.objects), before)
+        self.assertEqual(len(self.obj.data.polygons), 2)
+
+    def test_unico_rejects_silent_cross_component_weight_loss(self):
+        # All vertices choose component A, so face counts alone would pass.
+        # The weaker bone belongs only to B and cannot be dropped silently.
+        # Merged is the supported runtime path for this cross-component edit.
+        from MIMIBlender.utils.vertexgroup_utils import VertexGroupUtils
+        self.obj.vertex_groups[0].add(list(range(4)), 0.8, 'REPLACE')
+        self.obj.vertex_groups[1].add(list(range(4)), 0.2, 'REPLACE')
+        maps = {'a': {522}, 'b': {552}}
+        with self.assertRaisesRegex(ValueError, 'outside its component palette'):
+            VertexGroupUtils.split_merged_object_by_submesh_vg_ranges(
+                self.obj, maps, {'a': {522: 0}, 'b': {552: 0}}, maps)
+        self.assertAlmostEqual(self.obj.vertex_groups[1].weight(0), 0.2)
+
+    def test_shape_metadata_preflight_does_not_overwrite_buffers(self):
+        # A late shape metadata error previously occurred only during INI writing,
+        # after replacing existing Mod buffers. Validate every model first so
+        # a missing second runtime batch cannot leave a half-updated export.
+        from unittest.mock import Mock
+        from MIMIBlender.utils.format_utils import Fatal
+        model = make_model()
+        model.obj_buffer_model_wwmi.shapekey_offsets = [0] * 256
+        model.wwmi_info.shapekeys.batches = [{'checksum': 0, 'dispatch_y': 2, 'vertex_offset': 0}]
+        model.write_buffer_files = Mock()
+        exporter = make_exporter(model)
+        with self.assertRaises(Fatal):
+            exporter.export()
+        model.write_buffer_files.assert_not_called()
+
+    def test_merged_rejects_more_than_256_effective_bones(self):
+        # Global skeletons may exceed 512, but each R8 draw still holds 256 bones.
+        # Distribute 257 active identities across vertices to exceed the palette
+        # without exceeding the permitted per-vertex influence count.
+        self.obj.data.clear_geometry()
+        self.obj.data.from_pydata([(float(i), 0, 0) for i in range(257)], [], [])
+        for identity in range(257):
+            group = self.obj.vertex_groups.new(name=str(identity))
+            group.add([identity], 1.0, 'REPLACE')
+        model = DrawIBModelWWMI.__new__(DrawIBModelWWMI)
+        model.wwmi_info = SimpleNamespace(components=[WWMIInfoComponent(0, 0, 0, 0, 0, 553, {})])
+        model.d3d11_game_type = SimpleNamespace(get_blendindices_count_wwmi=lambda: 4)
+        model.component_real_vg_count_dict = {}
+        with self.assertRaisesRegex(ValueError, 'more than 256'):
+            model.export_blendremap_forward_and_reverse([(0, self.obj)])
+
+    def test_duplicate_name_merge_precedes_runtime_palette_selection(self):
+        # Combining two 510 groups promotes a previously fifth-ranked influence
+        # into the top four. Building the map first omitted 513 and truncated it
+        # later. Exercise real joins, numeric-name merging, and palette creation.
+        from MIMIBlender.model.draw_call_model import DrawCallModel
+        self.obj.vertex_groups[0].name = '510'
+        self.obj.vertex_groups[1].name = '511'
+        for name, weight in [('510', 0.2), ('510.001', 0.2), ('511', 0.3), ('512', 0.2), ('513', 0.1)]:
+            group = self.obj.vertex_groups.get(name) or self.obj.vertex_groups.new(name=name)
+            group.add(list(range(4)), weight, 'REPLACE')
+        model = DrawIBModelWWMI.__new__(DrawIBModelWWMI)
+        model.wwmi_info = SimpleNamespace(components=[WWMIInfoComponent(0, 4, 0, 6, 0, 553, {})])
+        model.submesh_drawcall_groups = [[DrawCallModel(obj_name=self.obj.name, submesh_name='LOD0.deadbeef-0')]]
+        model.d3d11_game_type = SimpleNamespace(get_blendindices_count_wwmi=lambda: 4)
+        settings = MIMIGlobalProperties._instance()
+        previous_mode = settings.import_merged_vgmap
+        previous_fill = settings.export_add_missing_vertex_groups
+        before_objects = set(bpy.data.objects)
+        before_meshes = set(bpy.data.meshes)
+        try:
+            settings.import_merged_vgmap = 'MERGED'
+            settings.export_add_missing_vertex_groups = True
+            model.build_merged_object()
+            self.assertEqual(model.component_real_vg_count_dict[0], 4)
+            self.assertEqual(next(iter(model.blend_remap_maps.values()))['forward'], [510, 511, 512, 513])
+            self.assertAlmostEqual(self.obj.vertex_groups['510'].weight(0), 0.2)
+            self.assertIn('510.001', self.obj.vertex_groups)
+        finally:
+            settings.import_merged_vgmap = previous_mode
+            settings.export_add_missing_vertex_groups = previous_fill
+            for obj in set(bpy.data.objects) - before_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            for mesh in set(bpy.data.meshes) - before_meshes:
+                if mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+
+    def test_local_modes_use_sparse_group_names_and_validate_limits(self):
+        # Deleting unused groups changes internal indices without renaming bones.
+        # Both original-local and UniComponent's split-local export must retain
+        # those numeric names, clear padding, and reject unrepresentable slots.
+        self.obj.vertex_groups[0].name = '7'
+        self.obj.vertex_groups[1].name = '19'
+        model = DrawIBModelWWMI.__new__(DrawIBModelWWMI)
+        model.wwmi_info = SimpleNamespace(components=self.extracted)
+        model.merged_object = SimpleNamespace(components=self.components)
+        settings = MIMIGlobalProperties._instance()
+        previous_mode = settings.import_merged_vgmap
+        try:
+            for mode in ['PER_COMPONENT', 'UNICOMPONENT']:
+                settings.import_merged_vgmap = mode
+                context = self.make_context(4)
+                model.resolve_named_blendindices(context)
+                numpy.testing.assert_array_equal(context.final_elementname_data_dict['BLENDINDICES'], [[7, 19, 0, 0]] * 6)
+            self.obj.vertex_groups[1].name = '256'
+            for component in self.extracted:
+                component.vg_count = 300
+            with self.assertRaisesRegex(ValueError, 'outside its local palette'):
+                model.resolve_named_blendindices(self.make_context(4))
+        finally:
+            settings.import_merged_vgmap = previous_mode
+
     def test_active_unnamed_group_is_rejected(self):
         self.context.original_elementname_data_dict["BLENDWEIGHT"][:, 2] = 1
         with self.assertRaisesRegex(ValueError, "unnamed group index 2"):
@@ -227,6 +516,7 @@ class MergedComponentTests(unittest.TestCase):
         model.wwmi_info = SimpleNamespace(components=self.extracted)
         draw = SimpleNamespace(obj_name=self.obj.name)
         model.submesh_drawcall_groups = [[draw], [draw]]
+        self.assertEqual(MIMIGlobalProperties.import_merged_vgmap(), 'MERGED_COMPONENT')
         with self.assertRaisesRegex(ValueError, "multiple components"):
             try:
                 model.build_merged_object()

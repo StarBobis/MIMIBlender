@@ -55,6 +55,17 @@ def localize_blendindices(element_context, components, extracted_components, dra
         if match:
             global_ids[group.index] = int(match.group(1))
 
+    # Older merged exports and reverse imports retain runtime skeleton slots,
+    # whereas current imports collapse duplicate slots through VGMap. Both are
+    # valid identities for the same bone: e.g. Xin slot 105 + 118 == 223 maps
+    # to canonical bone 68. Recover only aliases explicitly proven by metadata;
+    # never treat an arbitrary out-of-palette bone as a local index.
+    aliases = {}
+    for extracted in extracted_components:
+        for local_id, canonical_id in extracted.vg_map.items():
+            if 0 <= int(local_id) < extracted.vg_count:
+                aliases[extracted.vg_offset + int(local_id)] = int(canonical_id)
+
     # The actual layout determines representable local indices. Keeping the
     # wide source arrays until this point prevents accidental uint8 truncation.
     for element in element_context.d3d11_game_type.OrderedFullElementList:
@@ -103,7 +114,15 @@ def localize_blendindices(element_context, components, extracted_components, dra
                 group_index = int(group_index)
                 matching = (selected_indices == group_index) & active
                 global_id = global_ids.get(group_index)
-                if global_id is None or global_id not in reverse_map:
+                # Prefer an exact canonical identity, then resolve a legacy
+                # runtime-slot alias. Cycles cannot establish a valid target.
+                # This changes export arrays only, never the source groups.
+                mapped_id = global_id
+                visited = set()
+                while mapped_id not in reverse_map and mapped_id in aliases and mapped_id not in visited:
+                    visited.add(mapped_id)
+                    mapped_id = aliases[mapped_id]
+                if global_id is None or mapped_id not in reverse_map:
                     first_row = int(rows[numpy.nonzero(matching)[0][0]])
                     identity = str(global_id) if global_id is not None else "unnamed group index " + str(group_index)
                     raise ValueError(
@@ -112,7 +131,7 @@ def localize_blendindices(element_context, components, extracted_components, dra
                         + " to its original local skeleton. Keep the target component's bone range"
                         + " or use Merged for cross-component weights. No weights were deleted."
                     )
-                selected_local[matching] = reverse_map[global_id]
+                selected_local[matching] = reverse_map[mapped_id]
             local_indices[rows] = selected_local
         output[element] = local_indices
     return output

@@ -89,7 +89,13 @@ class Exporter:
         # Mod globals are singleton declarations even with multiple models.
         # Inspect the builder, not exporter state, so rebuilding stays safe.
         if not any(section.SectionType == M_SectionType.Constants for section in ini_builder.ini_section_list):
-            constants_section.append("global $required_wwmi_version = " + WWMI_REQUIRED_RUNTIME_VERSION)
+            # Extended tables require the verified WWMI 1.10 stride API. The
+            # requirement is mod-wide, so inspect every DrawIB before emitting
+            # the singleton even if the first character needs only legacy maps.
+            models = getattr(self, "drawib_drawibmodel_dict", {}).values()
+            extended_remap = any(model.blend_remap and getattr(model, "blend_remap_bone_count", 512) > 512 for model in models)
+            required_version = "1.10" if extended_remap else WWMI_REQUIRED_RUNTIME_VERSION
+            constants_section.append("global $required_wwmi_version = " + required_version)
             constants_section.append("global $mod_id = -1000")
             constants_section.append("global $mod_enabled = 0")
             constants_section.append("global $object_detected = 0")
@@ -604,6 +610,13 @@ class Exporter:
             os.path.join(GlobalConfig.path_generate_mod_folder(), filename))
 
     def export(self):
+        # Validate all native shape dispatches before overwriting any buffer.
+        # A bad second DrawIB must not leave a half-updated Mod on disk.
+        # Missing metadata remains an error, never a reason to drop shape keys.
+        for draw_ib_model in self.drawib_drawibmodel_dict.values():
+            batches = shapekeys.get_wwmi_shapekey_batches(draw_ib_model)
+            if batches and not draw_ib_model.wwmi_info.shapekeys.offsets_hash:
+                raise ValueError("WWMI native shape keys require the original offsets hash before export.")
         for draw_ib_model in self.drawib_drawibmodel_dict.values():
             draw_ib_model.write_buffer_files()
         self.generate_unreal_vs_config_ini()

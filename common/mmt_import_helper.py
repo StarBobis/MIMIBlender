@@ -46,7 +46,7 @@ class MMTImportHelper:
 			mesh_name = match_submesh_name
 
 		# Merged / UniComponent mode: remap local blend index to global bone ID via VGMap
-		wwmi_vg_map = submesh_json.VGMap if (submesh_json.VGMap and MIMIGlobalProperties.is_merged_mode()) else None
+		wwmi_vg_map = submesh_json.VGMap if MIMIGlobalProperties.is_merged_mode() else None
 
 		# Reverse-engineered products may carry a DrawCallSegmentList (one segment per drawindexed).
 		# When valid segments exist, create one mesh object per segment (per-segment model creation,

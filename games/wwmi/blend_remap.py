@@ -125,6 +125,11 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
                 blend_remap_section.append("    $\\WWMIv1\\blend_remap_id = " + str(blend_remap_id))
                 blend_remap_section.append("    " + scoped_name("ResourceRemappedBlendBufferRW", draw_ib) + " = copy " + scoped_name("ResourceBlendBufferNoStride", draw_ib))
                 blend_remap_section.append("    cs-u4 = ref " + scoped_name("ResourceRemappedBlendBufferRW", draw_ib))
+                # Runtime 1.10 resets this parameter after every shader call.
+                # Set it per component; a one-time assignment would misaddress
+                # later concatenated maps on skeletons larger than 512 bones.
+                if getattr(draw_ib_model, "blend_remap_bone_count", 512) > 512:
+                    blend_remap_section.append("    $\\WWMIv1\\blend_remap_bone_count = " + str(draw_ib_model.blend_remap_bone_count))
                 blend_remap_section.append("    run = CustomShader\\WWMIv1\\BlendRemapper")
                 blend_remap_section.append("    " + scoped_name("ResourceRemappedBlendBufferComponent" + component_count_str, draw_ib) + " = copy " + scoped_name("ResourceRemappedBlendBufferRW", draw_ib))
                 blend_remap_section.append("    " + scoped_name("ResourceRemappedBlendBufferComponent" + component_count_str, draw_ib) + " = copy_desc " + scoped_name("ResourceBlendBuffer", draw_ib))
@@ -153,10 +158,18 @@ def add_blend_remap_sections(ini_builder: M_IniBuilder, draw_ib_model: DrawIBMod
                 blend_remap_section.append("$\\WWMIv1\\vg_count = " + str(vg_count))
                 blend_remap_section.append("cs-t38 = " + scoped_name("ResourceMergedSkeletonRemap", draw_ib))
                 blend_remap_section.append("cs-u5 = " + scoped_name("ResourceRemappedSkeletonRW", draw_ib))
+                # Both regular and extra skeleton calls reset the runtime stride.
+                # Older 512-bone exports keep their existing 1.00-compatible INI.
+                if getattr(draw_ib_model, "blend_remap_bone_count", 512) > 512:
+                    blend_remap_section.append("$\\WWMIv1\\blend_remap_bone_count = " + str(draw_ib_model.blend_remap_bone_count))
                 blend_remap_section.append("run = CustomShader\\WWMIv1\\SkeletonRemapper")
                 blend_remap_section.append(scoped_name("ResourceRemappedSkeletonComponent" + str(component_index), draw_ib) + " = copy " + scoped_name("ResourceRemappedSkeletonRW", draw_ib))
                 blend_remap_section.append("cs-t38 = " + scoped_name("ResourceExtraMergedSkeletonRemap", draw_ib))
                 blend_remap_section.append("cs-u5 = " + scoped_name("ResourceExtraRemappedSkeletonRW", draw_ib))
+                # Both regular and extra skeleton calls reset the runtime stride.
+                # Older 512-bone exports keep their existing 1.00-compatible INI.
+                if getattr(draw_ib_model, "blend_remap_bone_count", 512) > 512:
+                    blend_remap_section.append("$\\WWMIv1\\blend_remap_bone_count = " + str(draw_ib_model.blend_remap_bone_count))
                 blend_remap_section.append("run = CustomShader\\WWMIv1\\SkeletonRemapper")
                 blend_remap_section.append(scoped_name("ResourceExtraRemappedSkeletonComponent" + str(component_index), draw_ib) + " = copy " + scoped_name("ResourceExtraRemappedSkeletonRW", draw_ib))
                 blend_remap_section.new_line()
@@ -221,22 +234,27 @@ def add_commandlist_merge_skeleton_section(ini_builder: M_IniBuilder, draw_ib_mo
 def add_resource_merged_skeleton(ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
     """Resource declarations for the merged skeleton buffers.
 
-    With a blend remap the RW buffers need double capacity (1536 instead of
-    768) because remapped and original skeletons share the same buffer.
+    Each original runtime bone needs three float4 matrix rows. Retain the
+    legacy minimum sizes, but cover every component's actual runtime extent.
     """
     draw_ib = draw_ib_model.draw_ib
+    # SkeletonMerger writes offset + local_id, including unused alias slots.
+    # Sizing only from weighted groups can still cause GPU out-of-bounds writes.
+    # Keep all components, even ones with no replacement mesh in this export.
+    skeleton_count = max((c.vg_offset + c.vg_count for c in draw_ib_model.wwmi_info.components), default=0)
+    array_size = max(1536 if draw_ib_model.blend_remap else 768, skeleton_count * 3)
     resource_skeleton_section = M_IniSection(M_SectionType.ResourceSkeletonOverride)
     resource_skeleton_section.append(scoped_section("ResourceMergedSkeleton", draw_ib))
     resource_skeleton_section.new_line()
     resource_skeleton_section.append(scoped_section("ResourceMergedSkeletonRW", draw_ib))
     resource_skeleton_section.append("type = RWBuffer")
     resource_skeleton_section.append("format = R32G32B32A32_FLOAT")
-    resource_skeleton_section.append("array = 1536" if draw_ib_model.blend_remap else "array = 768")
+    resource_skeleton_section.append("array = " + str(array_size))
     resource_skeleton_section.new_line()
     resource_skeleton_section.append(scoped_section("ResourceExtraMergedSkeleton", draw_ib))
     resource_skeleton_section.new_line()
     resource_skeleton_section.append(scoped_section("ResourceExtraMergedSkeletonRW", draw_ib))
     resource_skeleton_section.append("type = RWBuffer")
     resource_skeleton_section.append("format = R32G32B32A32_FLOAT")
-    resource_skeleton_section.append("array = 1536" if draw_ib_model.blend_remap else "array = 768")
+    resource_skeleton_section.append("array = " + str(array_size))
     ini_builder.append_section(resource_skeleton_section)

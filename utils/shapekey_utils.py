@@ -438,7 +438,9 @@ class ShapeKeyUtils:
         if mesh_shapekeys is None:
             print(f"obj: {obj.name} does not contain shape keys, skipping")
             TimerUtils.End("shapekey_cache")
-            return None, None, None
+            # A tuple of Nones is truthy and breaks the native shape packer.
+            # A mesh without shape keys has an empty cache, not a failed batch.
+            return {}
 
         # Build the reverse mapping from vertex index to global index_id
         vertex_to_indices = {}

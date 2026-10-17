@@ -992,6 +992,11 @@ class BluePrintModel:
 
         # Get the names of all Submeshes under this DrawIB
         all_submesh_names = MMTWorkSpace.get_ordered_submesh_name_list_by_drawib(draw_ib)
+        # A shared DrawIB hash does not make different LOD palettes interchangeable.
+        # Match the same scope that the exporter uses for runtime metadata.
+        lod_prefix = normalized_name.split(".", 1)[0] if normalized_name.upper().startswith("LOD") and "." in normalized_name else ""
+        all_submesh_names = [name for name in all_submesh_names
+                             if (name.split(".", 1)[0] if "." in name else "") == lod_prefix]
         if not all_submesh_names:
             LOG.warning(f"BluePrintModel: no Submesh found under DrawIB '{draw_ib}'")
             return []
@@ -1001,6 +1006,7 @@ class BluePrintModel:
         # Load each Submesh's VGMap and build the submesh -> VG mapping
         submesh_vg_map: dict[str, set[int]] = {}
         submesh_reverse_vg_map: dict[str, dict[int, int]] = {}
+        runtime_aliases = {}
 
         for sm_name in all_submesh_names:
             try:
@@ -1008,17 +1014,31 @@ class BluePrintModel:
                 sm_json = SubmeshJson(sm_path)
                 vg_map = sm_json.VGMap  # {local_idx: global_bone_id}
                 LOG.info(f"BluePrintModel:   Submesh '{sm_name}' VGMap = {dict(vg_map)}")
-                if not vg_map:
-                    continue
-
-                global_vg_set = set(int(v) for v in vg_map.values())
-                reverse_map = {int(v): int(k) for k, v in vg_map.items()}
+                # VGMap is an override table, not necessarily the whole palette.
+                # Include offset fallbacks and metadata-proven runtime aliases
+                # so legacy/reverse imports split like current canonical imports.
+                reverse_map = {}
+                for local_id in range(sm_json.VGCount):
+                    global_id = int(vg_map.get(str(local_id), sm_json.VGOffset + local_id))
+                    reverse_map.setdefault(global_id, local_id)
+                for local_id in range(sm_json.VGCount):
+                    runtime_aliases[sm_json.VGOffset + local_id] = int(vg_map.get(str(local_id), sm_json.VGOffset + local_id))
+                global_vg_set = set(reverse_map)
 
                 submesh_vg_map[sm_name] = global_vg_set
                 submesh_reverse_vg_map[sm_name] = reverse_map
             except Exception as e:
-                LOG.warning(f"BluePrintModel: failed to load the VGMap of Submesh '{sm_name}': {e}")
-                continue
+                # Missing one palette must not silently discard its geometry.
+                raise ValueError(f"WWMI cannot load the palette of Submesh '{sm_name}': {e}") from e
+
+        # Shared aliases must have the same ownership as their canonical bone.
+        # Adding only each component's own runtime slots falsely marks shared
+        # duplicate bones as unique and can split reverse-imported faces apart.
+        for sm_name, reverse_map in submesh_reverse_vg_map.items():
+            for alias, canonical in runtime_aliases.items():
+                if canonical in reverse_map:
+                    reverse_map.setdefault(alias, reverse_map[canonical])
+            submesh_vg_map[sm_name] = set(reverse_map)
 
         if not submesh_vg_map:
             LOG.warning(f"BluePrintModel: none of the Submeshes under DrawIB '{draw_ib}' has a VGMap; cannot split")
@@ -1034,10 +1054,11 @@ class BluePrintModel:
         # The VGs actually present on the object
         obj_vg_ids = set()
         for vg in obj.vertex_groups:
-            try:
-                obj_vg_ids.add(int(vg.name))
-            except ValueError:
-                pass
+            # Numeric Blender suffixes preserve the underlying bone identity.
+            # Helper groups are ignored when choosing candidate palettes.
+            match = re.fullmatch(r"(\d+)(?:\.\d+)?", vg.name)
+            if match:
+                obj_vg_ids.add(int(match.group(1)))
 
         # Keep only the Submeshes that matter
         filtered_vg_map: dict[str, set[int]] = {}

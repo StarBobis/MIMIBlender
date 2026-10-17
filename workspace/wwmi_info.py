@@ -19,7 +19,9 @@ class WWMIInfoShapeKeys:
     scale_hash: str = ''
     vertex_count: int = 0
     dispatch_y: int = 0
-    checksum: int = 0
+    # Missing and zero are different: empty leading shape slots can hash to 0.
+    # None preserves absence until the runtime metadata validator reports it.
+    checksum: int | None = None
     batches: list = field(default_factory=list)
 
 
@@ -69,21 +71,37 @@ class WWMIInfoHelper:
             total_index_count += index_count
             max_vertex_end = max(max_vertex_end, vertex_offset + vertex_count)
 
-        sk_info = first_json.ShapeKeysInfo
+        # Shapes belong to the DrawIB/LOD, not necessarily its first component.
+        # Older workspaces sometimes attach them only to the face component.
+        # Merge complementary records, but do not silently select conflicting
+        # runtime hashes or checksums from another extraction of the character.
+        sk_info = {}
+        for submesh in ordered_submesh_json_list:
+            for key, value in submesh.ShapeKeysInfo.items():
+                if value is None or value == "" or value == []:
+                    continue
+                if key in sk_info and sk_info[key] != value:
+                    raise ValueError("WWMI conflicting shape key metadata for " + key)
+                sk_info[key] = value
         shapekeys = WWMIInfoShapeKeys(
             offsets_hash=sk_info.get("offsets_hash", ""),
             scale_hash=sk_info.get("scale_hash", ""),
             vertex_count=sk_info.get("vertex_count", 0),
             dispatch_y=sk_info.get("dispatch_y", 0),
-            checksum=sk_info.get("checksum", 0),
+            checksum=sk_info.get("checksum"),
             batches=list(sk_info.get("batches", [])),
         )
-        if not shapekeys.batches and shapekeys.checksum > 0:
+        if not shapekeys.batches and shapekeys.checksum is not None:
+            # Legacy extraction has one batch, even with a valid zero checksum.
+            # Preserve explicit original bases and key counts when available.
+            # Never infer another runtime dispatch from edited Mod buffers.
             shapekeys.batches = [{
-                "vertex_offset": 0,
+                "vertex_offset": sk_info.get("vertex_offset", 0),
                 "vertex_count": shapekeys.vertex_count,
                 "dispatch_y": shapekeys.dispatch_y,
                 "checksum": shapekeys.checksum,
+                "shapekey_count": sk_info.get("shapekey_count", 127),
+                "runtime_metadata_complete": sk_info.get("runtime_metadata_complete", True),
             }]
 
         return WWMIInfoObject(

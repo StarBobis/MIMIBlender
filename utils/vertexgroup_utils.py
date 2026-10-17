@@ -2,6 +2,7 @@ import bpy
 import itertools
 import numpy
 import math
+import re
 
 from mathutils import Vector,Matrix
 
@@ -1037,6 +1038,15 @@ class VertexGroupUtils:
         import time
         print(f"\n[UniComponent] Splitting: '{obj.name}' ({len(obj.data.vertices)} verts, {len(obj.vertex_groups)} VG)")
 
+        # Names, not internal indices, identify global bones. Temporary joins
+        # may append a Blender numeric suffix; nonnumeric helper groups do not
+        # participate in palette ownership and must not crash shared fallback.
+        numeric_ids = {}
+        for group in obj.vertex_groups:
+            match = re.fullmatch(r"(\d+)(?:\.\d+)?", group.name)
+            if match:
+                numeric_ids[group.index] = int(match.group(1))
+
         # --- Precompute each vertex's "primary Submesh" (based on the highest weight among unique VGs) ---
         vert_primary_sm: list[str | None] = [None] * len(obj.data.vertices)
         has_unique = submesh_unique_vg_map is not None
@@ -1046,11 +1056,8 @@ class VertexGroupUtils:
             unique_vg_sm: dict[int, str] = {}
             for sm_name, uvgs in submesh_unique_vg_map.items():
                 for vg in obj.vertex_groups:
-                    try:
-                        if int(vg.name) in uvgs:
-                            unique_vg_sm[vg.index] = sm_name
-                    except ValueError:
-                        pass
+                    if numeric_ids.get(vg.index) in uvgs:
+                        unique_vg_sm[vg.index] = sm_name
 
             for v in obj.data.vertices:
                 if not v.groups:
@@ -1070,13 +1077,42 @@ class VertexGroupUtils:
                 # Find the VG with the highest weight, check which Submeshes it belongs to, and take the first one
                 best_g = max(v.groups, key=lambda g: g.weight)
                 for sm_name, vg_set in submesh_vg_map.items():
-                    if best_g.group in {vg.index for vg in obj.vertex_groups if int(vg.name) in vg_set}:
+                    if numeric_ids.get(best_g.group) in vg_set:
                         if best_g.group in unique_vg_sm:
                             vert_primary_sm[v.index] = unique_vg_sm[best_g.group]
                         else:
                             # Shared VG fallback: take the first Submesh the VG belongs to
                             vert_primary_sm[v.index] = sm_name
                         break
+
+        if has_unique:
+            # Deleting vertices also deletes every incident face. A dominant-bone
+            # split cannot represent a face spanning palettes without data loss;
+            # reject it before creating any copies rather than exporting holes.
+            for polygon in obj.data.polygons:
+                owners = {vert_primary_sm[index] for index in polygon.vertices}
+                if len(owners) != 1 or None in owners:
+                    raise ValueError(
+                        "UniComponent: object '" + obj.name + "', polygon " + str(polygon.index)
+                        + " spans incompatible component palettes or has no skeleton ownership; "
+                        "use Merged to preserve cross-component geometry and weights."
+                    )
+            # Keeping a face is insufficient if group filtering then drops one of
+            # its meaningful influences. Explicit ignore groups are the only
+            # intentional exception, matching the other WWMI export modes.
+            for vertex in obj.data.vertices:
+                owner = vert_primary_sm[vertex.index]
+                allowed = submesh_vg_map.get(owner, set())
+                for influence in vertex.groups:
+                    group = obj.vertex_groups[influence.group]
+                    if influence.weight <= 0 or 'ignore' in group.name.lower():
+                        continue
+                    if numeric_ids.get(influence.group) not in allowed:
+                        raise ValueError(
+                            "UniComponent: object '" + obj.name + "', vertex " + str(vertex.index)
+                            + " has weight on bone '" + group.name + "' outside its component palette; "
+                            "use Merged instead of discarding this influence."
+                        )
 
         # --- Create a split object for each Submesh ---
         results: list[tuple[str, bpy.types.Object]] = []
@@ -1086,11 +1122,8 @@ class VertexGroupUtils:
         for sm_name, vg_set in sorted(submesh_vg_map.items()):
             sm_vg_indices: set[int] = set()
             for vg in obj.vertex_groups:
-                try:
-                    if int(vg.name) in vg_set:
-                        sm_vg_indices.add(vg.index)
-                except ValueError:
-                    pass
+                if numeric_ids.get(vg.index) in vg_set:
+                    sm_vg_indices.add(vg.index)
             if not sm_vg_indices:
                 continue
 
@@ -1135,11 +1168,7 @@ class VertexGroupUtils:
             reverse_map = submesh_reverse_vg_map.get(sm_name, {})
             vg_to_remove = []
             for vg in new_obj.vertex_groups:
-                try:
-                    vid = int(vg.name)
-                except ValueError:
-                    vg_to_remove.append(vg)
-                    continue
+                vid = numeric_ids.get(vg.index)
                 if vid in reverse_map:
                     vg.name = str(reverse_map[vid])
                 elif vid not in vg_set:

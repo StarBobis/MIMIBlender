@@ -4,8 +4,10 @@ import bpy
 
 from ..utils.timer_utils import TimerUtils
 from ..utils.command_utils import CommandUtils
+from ..utils.format_utils import Fatal
 
 from ..common.global_config import GlobalConfig
+from ..common.mimi_global_properties import MIMIGlobalProperties
 
 from ..games import get_exporter_class
 
@@ -36,12 +38,26 @@ def _export_regular_output(tree, context, output_node, config_name):
     GlobalConfig.generated_mod_name_override = stem
     BlueprintExportHelper.runtime_output_node = output_node
     blueprint_model = None
+    # A constructor can fail after earlier UniComponent nodes created copies,
+    # before blueprint_model is assigned. Track identities, never name prefixes,
+    # so that cancellation cannot leave partial split meshes in the user scene.
+    cleanup_split = MIMIGlobalProperties.is_unico_component()
+    original_objects = set(bpy.data.objects) if cleanup_split else set()
+    original_meshes = set(bpy.data.meshes) if cleanup_split else set()
     try:
         blueprint_model = BluePrintModel(tree=tree, context=context, output_node=output_node)
         _export_blueprint_model(blueprint_model)
     finally:
         if blueprint_model is not None:
             _cleanup_unico_temp_objects(blueprint_model)
+        if cleanup_split:
+            # This also catches copies not yet registered on the failed parser.
+            # Remove only newly orphaned meshes, including successful split data.
+            for obj in set(bpy.data.objects) - original_objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            for mesh in set(bpy.data.meshes) - original_meshes:
+                if mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
         BlueprintExportHelper.runtime_output_node = None
         GlobalConfig.generated_mod_name_override = ""
 
@@ -77,7 +93,7 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
             # The generated root INI is always named after the workspace.
             config_name = f"{GlobalConfig.get_workspace_name()}.ini"
             _export_regular_output(tree, context, output_node, config_name)
-    except (FaceModExportError, OSError, ValueError) as error:
+    except (FaceModExportError, Fatal, OSError, ValueError) as error:
         BlueprintExportHelper.runtime_output_node = None
         GlobalConfig.generated_mod_name_override = ""
         TimerUtils.End("GenerateMod Mod")

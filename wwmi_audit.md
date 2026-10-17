@@ -368,3 +368,9 @@ endif
 - 全量 13 个套件结果：12 通过；`test_dynamic_animation_blender.py` 失败，但已用 `git stash` 在未改动的基线上复现同一失败，属**既有问题**，与本次改动无关。
 
 **仍然需要你做的**：真机验证（V6）。本次改动只保证生成结果符合参考实现与引擎语义，没有任何一条在游戏内加载验证过。
+
+---
+
+## 八、Post-v1.0.49 compatibility follow-up
+
+The [WWMI compatibility audit](wwmi_compatibility_audit.md) documents the later global-bone alias, extended runtime skeleton, shape metadata, UniComponent safety, and temporary-data cleanup fixes, together with focused regressions and the five-workspace/four-architecture roundtrip matrix. Its findings and verification boundaries are separate from the historical v1.0.30 implementation above.

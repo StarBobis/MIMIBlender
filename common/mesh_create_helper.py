@@ -277,7 +277,9 @@ class MeshCreateHelper:
 
         print("Importing vertex groups")
         # Merged mode: remap local blend index to global bone ID with VGMap
-        if wwmi_vg_map:
+        # An empty map still has meaningful offset-based global identities.
+        # None alone means local import; truthiness loses sparse legacy maps.
+        if wwmi_vg_map is not None:
             import types as _types
             _vg_component = _types.SimpleNamespace(
                 vg_map={str(k): int(v) for k, v in wwmi_vg_map.items()},
@@ -285,12 +287,13 @@ class MeshCreateHelper:
             )
         else:
             _vg_component = None
-        # A bone may occur in both EXT8 sets. Accumulate those contributions
-        # instead of replacing the first set's weight with the second set's.
+        # A bone may occur in both EXT8 sets or multiple WWMI local alias slots.
+        # Accumulate those contributions instead of replacing the first weight.
         # Other presets and ordinary four-weight YYSLS retain legacy behavior.
         MeshCreateHelper.import_vertex_groups(
             mesh, obj, blend_indices, blend_weights, _vg_component,
-            merge_duplicate_weights=logic_name == LogicName.YYSLS and len(blend_weights) > 1,
+            merge_duplicate_weights=(logic_name == LogicName.WWMI
+                                     or (logic_name == LogicName.YYSLS and len(blend_weights) > 1)),
         )
         print("Vertex group import complete")
 
