@@ -10,6 +10,7 @@ from ..utils.vertexgroup_utils import VertexGroupUtils
 from ..utils.shapekey_utils import ShapeKeyUtils
 from ..utils.algorithm_utils import AlgorithmUtils
 from ..utils.mesh_mirror_utils import MeshMirrorUtils
+from ..utils.skeleton_helper import SkeletonHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
 
 def keep_one_triangle_in_mesh_object(obj):
@@ -900,6 +901,47 @@ class MirrorMeshOperator(I18nOperator):
 
 
 @translatable
+class ApplySkeletonSidecarOperator(I18nOperator):
+    bl_idname = "mimi.apply_skeleton_sidecar"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_label = "Apply Skeleton From Reverse Output"
+    bl_description = "Reads skeleton.json from the reverse output, rebuilds the armature and binds the selected meshes"
+
+    naming_mode: bpy.props.EnumProperty(
+        name="Bone Naming",
+        items=[
+            ("BONE_TO_GROUP", "Rename Bones", "Rename armature bones to the numeric vertex group names (keeps the model exportable)"),
+            ("GROUP_TO_BONE", "Rename Vertex Groups", "Rename mesh vertex groups to the skeleton bone names"),
+        ],
+        default="BONE_TO_GROUP",
+    )
+
+    skeleton_file: bpy.props.StringProperty(
+        name="Skeleton File",
+        description="Optional skeleton.json path; empty searches the reverse output folder",
+        subtype='FILE_PATH',
+        default="",
+    )
+
+    def invoke(self, context, event):
+        if not self.skeleton_file:
+            self.skeleton_file = SkeletonHelper.find_sidecar()
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def execute(self, context):
+        objects = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not objects:
+            self.report({'ERROR'}, tr("Select at least one mesh object."))
+            return {'CANCELLED'}
+        summary = SkeletonHelper.apply(self.naming_mode, objects, self.skeleton_file)
+        if not summary:
+            self.report({'ERROR'}, tr("No skeleton.json found for the reverse output."))
+            return {'CANCELLED'}
+        self.report({'INFO'}, summary)
+        return {'FINISHED'}
+
+
+@translatable
 class MIMIPanelModelProcess(bpy.types.Panel):
     '''
     Having a copy here matters because beginners have no idea the right-click menu can trigger these features; unless it is handed to them on a plate, beginners will not discover them.
@@ -944,6 +986,7 @@ class MIMIPanelModelProcess(bpy.types.Panel):
         layout.operator(WWMI_ApplyModifierForObjectWithShapeKeysOperator.bl_idname, text=tr(WWMI_ApplyModifierForObjectWithShapeKeysOperator.bl_label))
         layout.operator(SmoothNormalSaveToUV.bl_idname, text=tr(SmoothNormalSaveToUV.bl_label))
         layout.operator(RenameAmatureFromGame.bl_idname, text=tr(RenameAmatureFromGame.bl_label))
+        layout.operator(ApplySkeletonSidecarOperator.bl_idname, text=tr(ApplySkeletonSidecarOperator.bl_label))
         layout.separator()
         
         layout.operator(RecalculateTANGENTWithVectorNormalizedNormal.bl_idname, text=tr(RecalculateTANGENTWithVectorNormalizedNormal.bl_label))
@@ -1033,6 +1076,7 @@ def register():
     bpy.utils.register_class(WWMI_ApplyModifierForObjectWithShapeKeysOperator)
     bpy.utils.register_class(SmoothNormalSaveToUV)
     bpy.utils.register_class(RenameAmatureFromGame)
+    bpy.utils.register_class(ApplySkeletonSidecarOperator)
     bpy.utils.register_class(ModelSplitByLoosePart)
     bpy.utils.register_class(ModelSplitByVertexGroup)
     bpy.utils.register_class(ModelDeleteLoosePoint)
@@ -1078,6 +1122,7 @@ def unregister():
     bpy.utils.unregister_class(ModelSplitByVertexGroup)
     bpy.utils.unregister_class(ModelSplitByLoosePart)
     bpy.utils.unregister_class(RenameAmatureFromGame)
+    bpy.utils.unregister_class(ApplySkeletonSidecarOperator)
     bpy.utils.unregister_class(SmoothNormalSaveToUV)
     bpy.utils.unregister_class(WWMI_ApplyModifierForObjectWithShapeKeysOperator)
     bpy.utils.unregister_class(RecalculateCOLORWithVectorNormalizedNormal)
