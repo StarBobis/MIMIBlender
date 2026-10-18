@@ -68,10 +68,19 @@ class SkeletonHelper:
         return ""
 
     @staticmethod
-    def pick_drawib(sidecar, object_names):
+    def pick_drawib(sidecar, object_names, draw_ib_name=""):
         entries = sidecar.get("DrawIBs") or []
         if not entries:
             return None
+        wanted = str(draw_ib_name or "").strip().lower()
+        if wanted:
+            for entry in entries:
+                if str(entry.get("DrawIB", "")).strip().lower() == wanted:
+                    return entry
+            for entry in entries:
+                folder = os.path.basename(str(entry.get("Folder", ""))).strip().lower()
+                if folder and folder == wanted:
+                    return entry
         for entry in entries:
             draw_ib = str(entry.get("DrawIB", ""))
             if draw_ib and any(draw_ib.lower() in name.lower() for name in object_names):
@@ -191,38 +200,60 @@ class SkeletonHelper:
         return bound
 
     @classmethod
-    def apply(cls, naming_mode, objects, sidecar_path=""):
+    def apply(cls, naming_mode, objects, sidecar_path="", draw_ib_name=""):
+        """Apply the sidecar to one group of meshes (manual operator entry point)."""
+        return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
+
+    @classmethod
+    def apply_groups(cls, naming_mode, groups, sidecar_path=""):
+        """Bind several DrawIB groups at once, one armature per character.
+
+        groups: {drawib_folder_name: [mesh objects]}
+        """
+        if str(naming_mode or "").upper() == "NONE":
+            return ""
         path = sidecar_path or cls.find_sidecar()
         if not path or not os.path.isfile(path):
             return ""
-        sidecar = cls.load_sidecar(path)
-        object_names = [obj.name for obj in objects]
-        draw_ib = cls.pick_drawib(sidecar, object_names)
-        if draw_ib is None:
-            return ""
-        character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
-        if character is None:
+        try:
+            sidecar = cls.load_sidecar(path)
+        except Exception as error:  # noqa: BLE001 - a broken sidecar must not break the import
+            print("Skeleton sidecar cannot be read:", error)
             return ""
 
-        armature_obj, bone_names = cls.build_armature(character, naming_mode)
-        if armature_obj is None:
-            return ""
+        armatures = {}
+        bound_counts = {}
+        for draw_ib_name, objects in groups.items():
+            meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
+            if not meshes:
+                continue
+            draw_ib = cls.pick_drawib(sidecar, [obj.name for obj in meshes], draw_ib_name)
+            if draw_ib is None:
+                continue
+            character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
+            if character is None:
+                continue
+            key = str(character.get("Id", ""))
+            if key not in armatures:
+                armature_obj, bone_names = cls.build_armature(character, naming_mode)
+                if armature_obj is None:
+                    continue
+                armatures[key] = (armature_obj, bone_names, character)
+            armature_obj, bone_names, character = armatures[key]
+            if naming_mode == NAMING_GROUP_TO_BONE:
+                cls.rename_groups_to_bones(meshes, character, bone_names)
+            cls.bind(meshes, armature_obj)
+            bound_counts[key] = bound_counts.get(key, 0) + len(meshes)
 
-        if naming_mode == NAMING_GROUP_TO_BONE:
-            cls.rename_groups_to_bones(objects, character, bone_names)
-
-        cls.bind(objects, armature_obj)
-
-        mapped = int(draw_ib.get("MappedBones", 0))
-        used = int(draw_ib.get("UsedBones", 0))
-        return (
-            "Skeleton applied: "
-            + str(character.get("Name", ""))
-            + " ("
-            + str(mapped)
-            + "/"
-            + str(used)
-            + " bones, "
-            + str(len(bone_names))
-            + " total)"
-        )
+        summaries = []
+        for key, (_, bone_names, character) in armatures.items():
+            summaries.append(
+                "Skeleton: "
+                + str(character.get("Name", ""))
+                + " ("
+                + str(len(bone_names))
+                + " bones, "
+                + str(bound_counts.get(key, 0))
+                + " meshes)"
+            )
+        return " | ".join(summaries)

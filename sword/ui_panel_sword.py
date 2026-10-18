@@ -29,6 +29,7 @@ from .reverse_source_probe import (
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
+from ..utils.skeleton_helper import SkeletonHelper
 
 # Store the preview image collection
 preview_collections = {}
@@ -542,6 +543,27 @@ class SwordImportAllReversed(I18nOperator):
         ordered_ranges = sorted(match_ranges, key=lambda match_range: (match_range[1], match_range[0]))
         return {match_range: component_index for component_index, match_range in enumerate(ordered_ranges)}
 
+    def _bind_skeleton(self, context, reverse_output_folder_path, drawib_objects):
+        """Bind every imported DrawIB group to its character armature.
+
+        The reverse pass writes skeleton.json next to the DrawIB folders; when it
+        is missing (texture-only mods, mods without skin data, older outputs) the
+        import simply finishes without an armature.
+        """
+        mode = str(getattr(context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
+        if mode.upper() == "NONE" or not drawib_objects:
+            return
+        sidecar_path = os.path.join(reverse_output_folder_path, "skeleton.json")
+        if not os.path.isfile(sidecar_path):
+            return
+        try:
+            summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path)
+        except Exception as error:  # noqa: BLE001 - binding must never break the import
+            self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))
+            return
+        if summary:
+            self.report({'INFO'}, tr("Skeleton applied: {summary}").format(summary=summary))
+
     def _import_ssmt_fmt(self, context, folder_probe):
         '''
         ssmt_fmt format import:
@@ -586,6 +608,9 @@ class SwordImportAllReversed(I18nOperator):
             return {'FINISHED'}
 
         imported_data_type_count = 0
+        # DrawIB folder name -> every mesh object imported for it, so the
+        # character armature can be bound once after the whole import.
+        drawib_objects = {}
         for subfolder_path in subfolder_path_list:
 
             # The subfolder name is the DrawIB this group of meshes belongs to
@@ -668,6 +693,7 @@ class SwordImportAllReversed(I18nOperator):
                     continue
 
                 imported_data_type_count += 1
+                drawib_objects.setdefault(drawib_folder_name, []).extend(list(datatype_collection.objects))
 
         if imported_data_type_count == 0:
             # Every data type failed. Remove the empty collection tree that the
@@ -679,6 +705,10 @@ class SwordImportAllReversed(I18nOperator):
 
         # A DrawIB whose every data type failed only has empty children left.
         prune_empty_collections(reverse_collection)
+
+        # Skeleton binding is part of the one-click import: when the reverse pass
+        # wrote skeleton.json, the character armature is rebuilt and bound now.
+        self._bind_skeleton(context, reverse_output_folder_path, drawib_objects)
 
         # Summarize the result so the user knows every candidate data type was
         # imported into its own collection and can now compare them one by one.
@@ -934,6 +964,20 @@ class MIMISword_ImageMaterialPanel(Panel):
         # One-click import of the reverse result button
         layout.operator("mimi.import_all_reverse", text=tr("Import All Reversed Models"), icon='IMPORT')
 
+        # Skeleton binding happens automatically during that import; this
+        # dropdown picks how the two name spaces are reconciled.
+        layout.prop(scene, "mimi_sword_skeleton_mode", text=tr("Skeleton Naming"))
+        skeleton_folder, skeleton_error = resolve_sword_reverse_source_folder(scene)
+        skeleton_path = (
+            os.path.join(skeleton_folder, "skeleton.json")
+            if skeleton_folder and not skeleton_error
+            else ""
+        )
+        if skeleton_path and os.path.isfile(skeleton_path):
+            layout.label(text=tr("Skeleton file found: the import will bind the character armature"), icon='ARMATURE_DATA')
+        else:
+            layout.label(text=tr("No skeleton.json next to this folder; no armature will be created"), icon='INFO')
+
         # Folder selection button
         row = layout.row()
         row.operator("mimi.select_image_folder", text=tr("Select Preview Texture Folder"), icon='FILE_FOLDER')
@@ -1055,6 +1099,28 @@ def register():
         # the field follows the new selection immediately.
         update=_on_sword_reverse_source_changed,
     )
+    bpy.types.Scene.mimi_sword_skeleton_mode = EnumProperty(
+        name=tr("Skeleton Naming"),
+        description=tr("How the imported reverse models are bound to the character skeleton"),
+        items=[
+            (
+                "BONE_TO_GROUP",
+                tr("Rename Bones"),
+                tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable)"),
+            ),
+            (
+                "GROUP_TO_BONE",
+                tr("Rename Vertex Groups"),
+                tr("Rename mesh vertex groups to the skeleton bone names"),
+            ),
+            (
+                "NONE",
+                tr("No Skeleton"),
+                tr("Import the meshes without building an armature"),
+            ),
+        ],
+        default="BONE_TO_GROUP",
+    )
 
 def unregister():
     try:
@@ -1063,6 +1129,7 @@ def unregister():
         del bpy.types.Scene.mimi_sword_reverse_source_mode
         del bpy.types.Scene.mimi_sword_specific_reversed_workspace_name
         del bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path
+        del bpy.types.Scene.mimi_sword_skeleton_mode
     except Exception:
         pass
 

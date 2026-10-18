@@ -12,6 +12,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
+from ..utils.skeleton_helper import SkeletonHelper
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
@@ -458,6 +459,30 @@ def _deselect_imported_shader_nodes(imported_objects):
                 clear_tree(material.node_tree)
 
 
+def _auto_bind_workspace_skeleton(operator, drawib_objects):
+    """Bind a workspace import when the folder carries a reverse skeleton sidecar.
+
+    Workspaces normally have no sidecar; reverse results copied into one keep it,
+    so the same one-click import can build the armature. A missing sidecar is a
+    normal state, never a warning.
+    """
+    if not drawib_objects:
+        return
+    sidecar_path = os.path.join(GlobalConfig.path_workspace_folder(), "skeleton.json")
+    if not os.path.isfile(sidecar_path):
+        return
+    mode = str(getattr(bpy.context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
+    if mode.upper() == "NONE":
+        return
+    try:
+        summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path)
+    except Exception as error:  # noqa: BLE001 - binding must never break the import
+        print("Skeleton binding failed:", error)
+        return
+    if summary:
+        operator.report({'INFO'}, summary)
+
+
 def ImprotFromWorkSpaceFull(self, context):
     
     # Create a WorkSpaceModel to manage all the mappings
@@ -477,6 +502,9 @@ def ImprotFromWorkSpaceFull(self, context):
     oldfoldername_jsonpath_dict = {}
     all_submesh_display_names = []
     successful_import_count = 0
+    # DrawIB -> imported meshes, so a workspace that also holds a reverse
+    # skeleton sidecar can be bound in the same one-click pass.
+    drawib_imported_objects = {}
 
     for lod_name in sorted(ws_model.lod_components.keys()):
         # Create a blue sub-collection per LOD, linked under the workspace collection
@@ -527,6 +555,7 @@ def ImprotFromWorkSpaceFull(self, context):
                             foldername_imported_obj_dict[new_submesh_name] = (imported_obj, display_name)
                             all_submesh_display_names.append(display_name)
                             successful_import_count += 1
+                            drawib_imported_objects.setdefault(draw_ib, []).append(imported_obj)
 
                         foldername_gametypename_dict[new_submesh_name] = gametype_name
                         oldfoldername_jsonpath_dict[old_folder_name] = json_file_path
@@ -540,6 +569,8 @@ def ImprotFromWorkSpaceFull(self, context):
     if successful_import_count == 0:
         self.report({'ERROR'}, tr("No models were successfully imported from the current workspace; blueprint generation was skipped."))
         return
+
+    _auto_bind_workspace_skeleton(self, drawib_imported_objects)
 
     # Save the workspace-level Import.json selection record (using new-format keys)
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
