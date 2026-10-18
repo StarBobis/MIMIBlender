@@ -54,6 +54,20 @@ class SkeletonHelper:
             return json.load(handle)
 
     @staticmethod
+    def sidecar_naming_mode(path):
+        """Naming mode requested by the desktop app, if the sidecar declares one."""
+        try:
+            sidecar = SkeletonHelper.load_sidecar(path)
+        except Exception:  # noqa: BLE001 - a broken sidecar falls back to the operator default
+            return ""
+        mode = str(sidecar.get("NamingMode", "") or "")
+        if mode == "groupToBone":
+            return NAMING_GROUP_TO_BONE
+        if mode == "boneToGroup":
+            return NAMING_BONE_TO_GROUP
+        return ""
+
+    @staticmethod
     def pick_drawib(sidecar, object_names):
         entries = sidecar.get("DrawIBs") or []
         if not entries:

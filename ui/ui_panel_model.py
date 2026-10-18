@@ -926,6 +926,10 @@ class ApplySkeletonSidecarOperator(I18nOperator):
     def invoke(self, context, event):
         if not self.skeleton_file:
             self.skeleton_file = SkeletonHelper.find_sidecar()
+        if self.skeleton_file:
+            requested_mode = SkeletonHelper.sidecar_naming_mode(self.skeleton_file)
+            if requested_mode:
+                self.naming_mode = requested_mode
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def execute(self, context):
