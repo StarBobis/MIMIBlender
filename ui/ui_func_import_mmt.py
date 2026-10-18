@@ -474,8 +474,11 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects):
     mode = str(getattr(bpy.context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
     if mode.upper() == "NONE":
         return
+    # Workspace imports share the Mod Reverse panel's cleanup choice, so a
+    # reverse result copied into a workspace behaves exactly like a direct one.
+    cleanup_mode = str(getattr(bpy.context.scene, "mimi_sword_skeleton_cleanup", "NONE") or "NONE")
     try:
-        summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path)
+        summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path, cleanup_mode)
     except Exception as error:  # noqa: BLE001 - binding must never break the import
         print("Skeleton binding failed:", error)
         return

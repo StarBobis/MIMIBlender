@@ -39,6 +39,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import bpy
 
@@ -188,6 +189,8 @@ class ReverseImportTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_root, ignore_errors=True)
         panel.clear_sword_reverse_probe_cache()
+        # Keep test order independent: the forwarding test changes the choice.
+        self.scene.mimi_sword_skeleton_cleanup = 'NONE'
 
     def folder(self, name):
         """Return a fresh sub folder of the temporary root."""
@@ -506,6 +509,51 @@ class ReverseImportTests(unittest.TestCase):
         self.scene.mimi_sword_custom_reverse_output_folder_path = '//review_relative'
         path, _error = panel.resolve_sword_reverse_source_folder(self.scene)
         self.assertEqual(path, os.path.normpath(bpy.path.abspath('//review_relative')))
+
+    def test_skeleton_cleanup_choices_are_translated(self):
+        # The bone cleanup dropdown keeps stable identifiers for saved scenes
+        # while both interface languages show their own captions.
+        self.assertEqual(self.scene.mimi_sword_skeleton_cleanup, 'NONE')
+        self.assertEqual(
+            [item[0] for item in panel._get_sword_skeleton_cleanup_items(None, None)],
+            ['NONE', 'DELETE', 'HIDE'],
+        )
+        self.assertEqual(
+            [item[1] for item in panel._get_sword_skeleton_cleanup_items(None, None)],
+            ['Keep All Bones', 'Delete Invalid Bones', 'Hide Invalid Bones'],
+        )
+        i18n.apply_language('zh')
+        try:
+            chinese_labels = [
+                item[1] for item in panel._get_sword_skeleton_cleanup_items(None, None)
+            ]
+        finally:
+            i18n.apply_language('en')
+        self.assertEqual(chinese_labels, ['不清理骨骼', '删除无效骨骼', '隐藏无效骨骼'])
+
+    def test_bone_cleanup_choice_reaches_skeleton_helper(self):
+        # The import operator hands the scene dropdown to the helper that owns
+        # the actual bone cleanup logic; no real armature is needed here.
+        folder = self.folder('bind_forward')
+        with open(os.path.join(folder, 'skeleton.json'), 'w', encoding='utf-8') as handle:
+            handle.write('{}')
+        self.scene.mimi_sword_skeleton_mode = 'BONE_TO_GROUP'
+        self.scene.mimi_sword_skeleton_cleanup = 'DELETE'
+        fake_operator = types.SimpleNamespace(report=lambda *args: None)
+        with mock.patch.object(
+            panel.SkeletonHelper, 'apply_groups', return_value='ok'
+        ) as apply_groups:
+            panel.SwordImportAllReversed._bind_skeleton(
+                fake_operator,
+                bpy.context,
+                folder,
+                {'drawib1': [object()]},
+            )
+        apply_groups.assert_called_once()
+        call_arguments = apply_groups.call_args.args
+        # Positional signature: naming mode, groups, sidecar path, cleanup mode.
+        self.assertEqual(call_arguments[0], 'BONE_TO_GROUP')
+        self.assertEqual(call_arguments[3], 'DELETE')
 
     def test_failed_import_removes_unlinked_objects(self):
         # Mesh creation can throw before linking an object to its collection.

@@ -25,6 +25,14 @@ NAMING_BONE_TO_GROUP = "BONE_TO_GROUP"
 NAMING_GROUP_TO_BONE = "GROUP_TO_BONE"
 MIRROR_MARKER = "MIMI:MirrorWorkflowApplied"
 
+# Bone cleanup modes offered by the Mod Reverse panel. A bone counts as invalid
+# when no imported mesh stores a non-zero weight in a vertex group of the same
+# name: reverse outputs carry the whole character skeleton, while one mod
+# usually deforms only a small part of it.
+BONE_CLEANUP_NONE = "NONE"
+BONE_CLEANUP_DELETE = "DELETE"
+BONE_CLEANUP_HIDE = "HIDE"
+
 
 class SkeletonHelper:
     @staticmethod
@@ -70,7 +78,6 @@ class SkeletonHelper:
             return NAMING_BONE_TO_GROUP
         return ""
 
-    @staticmethod
     @staticmethod
     def pick_drawib(sidecar, object_names, draw_ib_name=""):
         entries = sidecar.get("DrawIBs") or []
@@ -327,13 +334,156 @@ class SkeletonHelper:
             bound += 1
         return bound
 
+    @staticmethod
+    def collect_weighted_group_names(objects):
+        """Return every vertex group name that at least one vertex actually uses.
+
+        A vertex group alone does not prove a bone is bound: the importer creates
+        groups for every numeric slot up to the highest used one, so the palette
+        gaps contain empty groups. Only a stored weight above zero binds a
+        vertex, therefore only those group names may keep a bone alive.
+        """
+        weighted_names = set()
+        for obj in objects:
+            if obj is None or getattr(obj, "type", "") != "MESH":
+                continue
+            mesh = getattr(obj, "data", None)
+            if mesh is None or len(obj.vertex_groups) == 0:
+                continue
+
+            # Group indices are stable inside one object; resolve the names only
+            # once, then collect the indices that receive a real weight.
+            group_names = {group.index: group.name for group in obj.vertex_groups}
+            used_group_indices = set()
+            for vertex in mesh.vertices:
+                for assignment in vertex.groups:
+                    # Zero weights are padding slots written by the importer.
+                    # Counting them would keep bones that deform nothing.
+                    if assignment.weight > 0.0:
+                        used_group_indices.add(assignment.group)
+
+            for group_index in used_group_indices:
+                group_name = group_names.get(group_index)
+                if group_name:
+                    weighted_names.add(group_name)
+        return weighted_names
+
+    @classmethod
+    def cleanup_bones(cls, armature_obj, mesh_objects, cleanup_mode):
+        """Delete or hide bones that no bound mesh actually deforms.
+
+        Returns ``(removed_count, hidden_count)`` so the caller can add the
+        result to its report. The mesh_objects list must contain every mesh
+        bound to this armature, because a bone may be used by only one part.
+        """
+        mode = str(cleanup_mode or BONE_CLEANUP_NONE).upper()
+        if mode not in (BONE_CLEANUP_DELETE, BONE_CLEANUP_HIDE):
+            return 0, 0
+        if armature_obj is None or getattr(armature_obj, "type", "") != "ARMATURE":
+            return 0, 0
+
+        bone_names = {bone.name for bone in armature_obj.data.bones}
+        if not bone_names:
+            return 0, 0
+
+        weighted_names = cls.collect_weighted_group_names(mesh_objects)
+        if not weighted_names:
+            # No mesh carries any weight at all. Deleting every bone would
+            # destroy a skeleton the user may still need, so leave it intact;
+            # hiding everything would be equally surprising.
+            print("Bone cleanup skipped: no weighted vertex group was found")
+            return 0, 0
+
+        invalid_names = bone_names - weighted_names
+        if not invalid_names:
+            return 0, 0
+        if mode == BONE_CLEANUP_HIDE:
+            return 0, cls._hide_invalid_bones(armature_obj, invalid_names)
+        return cls._delete_invalid_bones(armature_obj, invalid_names), 0
+
+    @staticmethod
+    def _hide_invalid_bones(armature_obj, invalid_names):
+        """Hide invalid bones in Edit and Pose Mode without changing anything else."""
+        hidden_count = 0
+        for bone in armature_obj.data.bones:
+            if bone.name not in invalid_names:
+                continue
+            # Bone.hide controls Edit Mode, while PoseBone.hide controls Pose
+            # Mode; set both so the unused part really disappears from view.
+            bone.hide = True
+            pose_bone = armature_obj.pose.bones.get(bone.name)
+            if pose_bone is not None:
+                pose_bone.hide = True
+            hidden_count += 1
+        return hidden_count
+
+    @staticmethod
+    def _delete_invalid_bones(armature_obj, invalid_names):
+        """Remove invalid bones and keep every usable child in the hierarchy.
+
+        A usable child of a removed bone is reattached to the nearest usable
+        ancestor. The child keeps its rest position because Edit Bone heads and
+        tails live in armature space; clearing use_connect before changing the
+        parent prevents Blender from snapping the head onto the new parent's
+        tail. Without this step the surviving skeleton would break apart.
+        """
+        view_layer = bpy.context.view_layer
+        previous_active = view_layer.objects.active
+        was_selected = armature_obj.select_get()
+
+        # Edit Bone operations need the armature active, selected and visible.
+        view_layer.objects.active = armature_obj
+        armature_obj.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            edit_bones = armature_obj.data.edit_bones
+
+            # A hidden Edit Bone cannot be relied on to be removed, so reveal
+            # only the doomed bones; usable bones keep their own visibility.
+            for bone in edit_bones:
+                if bone.name in invalid_names:
+                    bone.hide = False
+
+            # Reattach usable children before any bone disappears. Walking up
+            # over the invalid chain finds the closest ancestor worth keeping.
+            for bone in list(edit_bones):
+                if bone.name not in invalid_names:
+                    continue
+                for child in list(bone.children):
+                    if child.name in invalid_names:
+                        # This child is deleted too; its own usable children are
+                        # handled when its turn comes in this same loop.
+                        continue
+                    ancestor = bone.parent
+                    while ancestor is not None and ancestor.name in invalid_names:
+                        ancestor = ancestor.parent
+                    child.use_connect = False
+                    child.parent = ancestor
+
+            # Remove one bone at a time and re-fetch it by name: removing an
+            # Edit Bone invalidates other Edit Bone references in Blender.
+            removed_count = 0
+            for bone_name in sorted(invalid_names):
+                edit_bone = edit_bones.get(bone_name)
+                if edit_bone is None:
+                    continue
+                edit_bones.remove(edit_bone)
+                removed_count += 1
+            return removed_count
+        finally:
+            # Always leave Edit Mode, even when a removal raised an exception.
+            if armature_obj.mode != "OBJECT":
+                bpy.ops.object.mode_set(mode="OBJECT")
+            armature_obj.select_set(was_selected)
+            view_layer.objects.active = previous_active
+
     @classmethod
     def apply(cls, naming_mode, objects, sidecar_path="", draw_ib_name=""):
         """Apply the sidecar to one group of meshes (manual operator entry point)."""
         return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
 
     @classmethod
-    def apply_groups(cls, naming_mode, groups, sidecar_path=""):
+    def apply_groups(cls, naming_mode, groups, sidecar_path="", cleanup_mode=BONE_CLEANUP_NONE):
         """Bind several DrawIB groups at once, one armature per character.
 
         groups: {drawib_folder_name: [mesh objects]}
@@ -355,6 +505,9 @@ class SkeletonHelper:
 
         armatures = {}
         bound_counts = {}
+        # Every mesh bound to an armature must be known when its bones are
+        # cleaned: a bone may be used by only one of the character's parts.
+        armature_meshes = {}
         for draw_ib_name, objects in groups.items():
             meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
             if not meshes:
@@ -398,9 +551,41 @@ class SkeletonHelper:
                 cls.rename_groups_to_bones(character, meshes, original_names, final_names)
             cls.bind(meshes, armature_obj)
             bound_counts[key] = bound_counts.get(key, 0) + len(meshes)
+            armature_meshes.setdefault(key, []).extend(meshes)
 
         summaries = []
-        for key, (_, final_names, _, character) in armatures.items():
+        cleanup_notes = []
+        for key, (armature_obj, final_names, _, character) in armatures.items():
+            # Cleanup runs after every DrawIB of this character is bound, so a
+            # bone used by a later mesh is never deleted too early.
+            removed_count, hidden_count = cls.cleanup_bones(
+                armature_obj,
+                armature_meshes.get(key, []),
+                cleanup_mode,
+            )
+            # Several characters can be imported at once (body, weapon, ...),
+            # so every cleanup note names the skeleton it belongs to.
+            character_name = str(character.get("Name", "") or key)
+            if removed_count:
+                cleanup_notes.append(
+                    "Bone cleanup "
+                    + character_name
+                    + ": "
+                    + str(removed_count)
+                    + " invalid bone(s) removed, "
+                    + str(len(armature_obj.data.bones))
+                    + " kept"
+                )
+            elif hidden_count:
+                cleanup_notes.append(
+                    "Bone cleanup "
+                    + character_name
+                    + ": "
+                    + str(hidden_count)
+                    + " invalid bone(s) hidden, "
+                    + str(len(armature_obj.data.bones) - hidden_count)
+                    + " used"
+                )
             summaries.append(
                 "Skeleton: "
                 + str(character.get("Name", ""))
@@ -410,4 +595,5 @@ class SkeletonHelper:
                 + str(bound_counts.get(key, 0))
                 + " meshes)"
             )
+        summaries.extend(cleanup_notes)
         return " | ".join(summaries)

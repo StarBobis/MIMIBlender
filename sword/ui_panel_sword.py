@@ -29,7 +29,12 @@ from .reverse_source_probe import (
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
-from ..utils.skeleton_helper import SkeletonHelper
+from ..utils.skeleton_helper import (
+    BONE_CLEANUP_DELETE,
+    BONE_CLEANUP_HIDE,
+    BONE_CLEANUP_NONE,
+    SkeletonHelper,
+)
 
 # Store the preview image collection
 preview_collections = {}
@@ -553,11 +558,17 @@ class SwordImportAllReversed(I18nOperator):
         mode = str(getattr(context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
         if mode.upper() == "NONE" or not drawib_objects:
             return
+        # The cleanup choice travels with the import, exactly like the naming
+        # mode above; the helper falls back to "keep everything" on bad values.
+        cleanup_mode = str(
+            getattr(context.scene, "mimi_sword_skeleton_cleanup", BONE_CLEANUP_NONE)
+            or BONE_CLEANUP_NONE
+        )
         sidecar_path = os.path.join(reverse_output_folder_path, "skeleton.json")
         if not os.path.isfile(sidecar_path):
             return
         try:
-            summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path)
+            summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path, cleanup_mode)
         except Exception as error:  # noqa: BLE001 - binding must never break the import
             self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))
             return
@@ -967,6 +978,11 @@ class MIMISword_ImageMaterialPanel(Panel):
         # Skeleton binding happens automatically during that import; this
         # dropdown picks how the two name spaces are reconciled.
         layout.prop(scene, "mimi_sword_skeleton_mode", text=tr("Skeleton Naming"))
+        # Cleanup is meaningless without an armature, so grey it out instead of
+        # hiding it: the choice stays visible and keeps its stored value.
+        cleanup_row = layout.row()
+        cleanup_row.enabled = str(scene.mimi_sword_skeleton_mode or "").upper() != "NONE"
+        cleanup_row.prop(scene, "mimi_sword_skeleton_cleanup", text=tr("Bone Cleanup"))
         skeleton_folder, skeleton_error = resolve_sword_reverse_source_folder(scene)
         skeleton_path = (
             os.path.join(skeleton_folder, "skeleton.json")
@@ -1035,6 +1051,28 @@ class MIMISword_SplitModel_Panel(Panel):
         op = layout.operator("mimi.extract_submesh", text=tr("Split Model by DrawIndexed Values"))
         op.start_index = scene.mimi_submesh_start
         op.index_count = scene.mimi_submesh_count
+
+def _get_sword_skeleton_cleanup_items(self, context):
+    # Dynamic items callback so the dropdown follows the UI language, while the
+    # stored identifiers stay stable for saved scenes.
+    return [
+        (
+            BONE_CLEANUP_NONE,
+            tr("Keep All Bones"),
+            tr("Keep the whole character skeleton; bones that no imported mesh uses stay in the armature"),
+        ),
+        (
+            BONE_CLEANUP_DELETE,
+            tr("Delete Invalid Bones"),
+            tr("Delete bones that no imported mesh uses; children of a deleted bone are reattached to the nearest usable parent"),
+        ),
+        (
+            BONE_CLEANUP_HIDE,
+            tr("Hide Invalid Bones"),
+            tr("Hide bones that no imported mesh uses; the skeleton hierarchy is not changed"),
+        ),
+    ]
+
 
 def _get_sword_reverse_source_mode_items(self, context):
     # Dynamic items callback so the dropdown entries follow the UI language.
@@ -1121,6 +1159,16 @@ def register():
         ],
         default="BONE_TO_GROUP",
     )
+    bpy.types.Scene.mimi_sword_skeleton_cleanup = EnumProperty(
+        name=tr("Bone Cleanup"),
+        description=tr("How bones that no imported mesh uses are handled after the armature is bound"),
+        # Dynamic items keep the three choices translated without changing the
+        # saved identifiers. Dynamic items only allow integer (0-based)
+        # defaults; the first item ("Keep All Bones") is the intended default,
+        # so the default argument is omitted on purpose.
+        items=_get_sword_skeleton_cleanup_items,
+    )
+
 
 def unregister():
     try:
@@ -1130,6 +1178,7 @@ def unregister():
         del bpy.types.Scene.mimi_sword_specific_reversed_workspace_name
         del bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path
         del bpy.types.Scene.mimi_sword_skeleton_mode
+        del bpy.types.Scene.mimi_sword_skeleton_cleanup
     except Exception:
         pass
 
