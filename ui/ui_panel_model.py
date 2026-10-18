@@ -908,17 +908,17 @@ class ApplySkeletonSidecarOperator(I18nOperator):
     bl_description = "Reads skeleton.json from the reverse output, rebuilds the armature and binds the selected meshes"
 
     naming_mode: bpy.props.EnumProperty(
-        name="Bone Naming",
+        name=tr("Bone Naming"),
         items=[
-            ("BONE_TO_GROUP", "Rename Bones", "Rename armature bones to the numeric vertex group names (keeps the model exportable)"),
-            ("GROUP_TO_BONE", "Rename Vertex Groups", "Rename mesh vertex groups to the skeleton bone names"),
+            ("BONE_TO_GROUP", tr("Rename Bones"), tr("Rename armature bones to the numeric vertex group names (keeps the model exportable)")),
+            ("GROUP_TO_BONE", tr("Rename Vertex Groups"), tr("Rename mesh vertex groups to the skeleton bone names")),
         ],
         default="BONE_TO_GROUP",
     )
 
     skeleton_file: bpy.props.StringProperty(
-        name="Skeleton File",
-        description="Optional skeleton.json path; empty searches the reverse output folder",
+        name=tr("Skeleton File"),
+        description=tr("Optional skeleton.json path; empty searches the reverse output folder"),
         subtype='FILE_PATH',
         default="",
     )
