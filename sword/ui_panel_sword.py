@@ -29,11 +29,11 @@ from .reverse_source_probe import (
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
-from ..utils.skeleton_helper import (
-    BONE_CLEANUP_DELETE,
-    BONE_CLEANUP_HIDE,
-    BONE_CLEANUP_NONE,
-    SkeletonHelper,
+from ..utils.skeleton_helper import SkeletonHelper
+from ..utils.skeleton_ui import (
+    draw_skeleton_binding,
+    ensure_bind_settings,
+    remember_bind_report,
 )
 
 # Store the preview image collection
@@ -555,24 +555,25 @@ class SwordImportAllReversed(I18nOperator):
         is missing (texture-only mods, mods without skin data, older outputs) the
         import simply finishes without an armature.
         """
-        mode = str(getattr(context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
-        if mode.upper() == "NONE" or not drawib_objects:
+        # One shared settings object decides whether to bind at all and which
+        # naming/cleanup mode to use; the same values drive the workspace import.
+        settings = ensure_bind_settings(context.scene)
+        if not settings.bind or not drawib_objects:
             return
-        # The cleanup choice travels with the import, exactly like the naming
-        # mode above; the helper falls back to "keep everything" on bad values.
-        cleanup_mode = str(
-            getattr(context.scene, "mimi_sword_skeleton_cleanup", BONE_CLEANUP_NONE)
-            or BONE_CLEANUP_NONE
-        )
         sidecar_path = os.path.join(reverse_output_folder_path, "skeleton.json")
         if not os.path.isfile(sidecar_path):
             return
         try:
-            summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path, cleanup_mode)
+            summary = SkeletonHelper.apply_groups(
+                settings.naming, drawib_objects, sidecar_path, settings.cleanup
+            )
         except Exception as error:  # noqa: BLE001 - binding must never break the import
             self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))
             return
         if summary:
+            # Keep the result visible in both import panels instead of leaving
+            # it in the info bar where the next report overwrites it.
+            remember_bind_report(context.scene, summary)
             self.report({'INFO'}, tr("Skeleton applied: {summary}").format(summary=summary))
 
     def _import_ssmt_fmt(self, context, folder_probe):
@@ -975,24 +976,15 @@ class MIMISword_ImageMaterialPanel(Panel):
         # One-click import of the reverse result button
         layout.operator("mimi.import_all_reverse", text=tr("Import All Reversed Models"), icon='IMPORT')
 
-        # Skeleton binding happens automatically during that import; this
-        # dropdown picks how the two name spaces are reconciled.
-        layout.prop(scene, "mimi_sword_skeleton_mode", text=tr("Skeleton Naming"))
-        # Cleanup is meaningless without an armature, so grey it out instead of
-        # hiding it: the choice stays visible and keeps its stored value.
-        cleanup_row = layout.row()
-        cleanup_row.enabled = str(scene.mimi_sword_skeleton_mode or "").upper() != "NONE"
-        cleanup_row.prop(scene, "mimi_sword_skeleton_cleanup", text=tr("Bone Cleanup"))
+        # Skeleton binding happens automatically during that import. The block
+        # is shared with the workspace import, so both entry points show the
+        # same controls and a hint for their own sidecar folder.
         skeleton_folder, skeleton_error = resolve_sword_reverse_source_folder(scene)
-        skeleton_path = (
-            os.path.join(skeleton_folder, "skeleton.json")
-            if skeleton_folder and not skeleton_error
-            else ""
+        draw_skeleton_binding(
+            layout,
+            scene,
+            "" if skeleton_error else skeleton_folder,
         )
-        if skeleton_path and os.path.isfile(skeleton_path):
-            layout.label(text=tr("Skeleton file found: the import will bind the character armature"), icon='ARMATURE_DATA')
-        else:
-            layout.label(text=tr("No skeleton.json next to this folder; no armature will be created"), icon='INFO')
 
         # Folder selection button
         row = layout.row()
@@ -1051,27 +1043,6 @@ class MIMISword_SplitModel_Panel(Panel):
         op = layout.operator("mimi.extract_submesh", text=tr("Split Model by DrawIndexed Values"))
         op.start_index = scene.mimi_submesh_start
         op.index_count = scene.mimi_submesh_count
-
-def _get_sword_skeleton_cleanup_items(self, context):
-    # Dynamic items callback so the dropdown follows the UI language, while the
-    # stored identifiers stay stable for saved scenes.
-    return [
-        (
-            BONE_CLEANUP_NONE,
-            tr("Keep All Bones"),
-            tr("Keep the whole character skeleton; bones that no imported mesh uses stay in the armature"),
-        ),
-        (
-            BONE_CLEANUP_DELETE,
-            tr("Delete Invalid Bones"),
-            tr("Delete bones that no imported mesh uses; children of a deleted bone are reattached to the nearest usable parent"),
-        ),
-        (
-            BONE_CLEANUP_HIDE,
-            tr("Hide Invalid Bones"),
-            tr("Hide bones that no imported mesh uses; the skeleton hierarchy is not changed"),
-        ),
-    ]
 
 
 def _get_sword_reverse_source_mode_items(self, context):
@@ -1137,37 +1108,9 @@ def register():
         # the field follows the new selection immediately.
         update=_on_sword_reverse_source_changed,
     )
-    bpy.types.Scene.mimi_sword_skeleton_mode = EnumProperty(
-        name=tr("Skeleton Naming"),
-        description=tr("How the imported reverse models are bound to the character skeleton"),
-        items=[
-            (
-                "BONE_TO_GROUP",
-                tr("Rename Bones"),
-                tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable)"),
-            ),
-            (
-                "GROUP_TO_BONE",
-                tr("Rename Vertex Groups"),
-                tr("Rename mesh vertex groups to the skeleton bone names"),
-            ),
-            (
-                "NONE",
-                tr("No Skeleton"),
-                tr("Import the meshes without building an armature"),
-            ),
-        ],
-        default="BONE_TO_GROUP",
-    )
-    bpy.types.Scene.mimi_sword_skeleton_cleanup = EnumProperty(
-        name=tr("Bone Cleanup"),
-        description=tr("How bones that no imported mesh uses are handled after the armature is bound"),
-        # Dynamic items keep the three choices translated without changing the
-        # saved identifiers. Dynamic items only allow integer (0-based)
-        # defaults; the first item ("Keep All Bones") is the intended default,
-        # so the default argument is omitted on purpose.
-        items=_get_sword_skeleton_cleanup_items,
-    )
+    # The skeleton binding properties moved to utils/skeleton_ui.py: the
+    # workspace import uses the same settings, so the reverse panel must not
+    # own them any more.
 
 
 def unregister():
@@ -1177,8 +1120,6 @@ def unregister():
         del bpy.types.Scene.mimi_sword_reverse_source_mode
         del bpy.types.Scene.mimi_sword_specific_reversed_workspace_name
         del bpy.types.Scene.mimi_sword_custom_reverse_output_folder_path
-        del bpy.types.Scene.mimi_sword_skeleton_mode
-        del bpy.types.Scene.mimi_sword_skeleton_cleanup
     except Exception:
         pass
 

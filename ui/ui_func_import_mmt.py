@@ -13,6 +13,7 @@ from bpy_extras.io_utils import ImportHelper
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
 from ..utils.skeleton_helper import SkeletonHelper
+from ..utils.skeleton_ui import ensure_bind_settings, remember_bind_report
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
@@ -460,29 +461,32 @@ def _deselect_imported_shader_nodes(imported_objects):
 
 
 def _auto_bind_workspace_skeleton(operator, drawib_objects):
-    """Bind a workspace import when the folder carries a reverse skeleton sidecar.
+    """Bind a workspace import when the folder carries a skeleton sidecar.
 
-    Workspaces normally have no sidecar; reverse results copied into one keep it,
-    so the same one-click import can build the armature. A missing sidecar is a
-    normal state, never a warning.
+    The extraction pass mirrors skeleton.json into the workspace root, and a
+    reverse result copied into a workspace keeps it too, so the same one-click
+    import can build the armature. A missing sidecar is a normal state, never a
+    warning.
     """
     if not drawib_objects:
+        return
+    # The settings block under the import button writes these values; both
+    # import paths resolve them through the same helper.
+    settings = ensure_bind_settings(bpy.context.scene)
+    if not settings.bind:
         return
     sidecar_path = os.path.join(GlobalConfig.path_workspace_folder(), "skeleton.json")
     if not os.path.isfile(sidecar_path):
         return
-    mode = str(getattr(bpy.context.scene, "mimi_sword_skeleton_mode", "BONE_TO_GROUP") or "BONE_TO_GROUP")
-    if mode.upper() == "NONE":
-        return
-    # Workspace imports share the Mod Reverse panel's cleanup choice, so a
-    # reverse result copied into a workspace behaves exactly like a direct one.
-    cleanup_mode = str(getattr(bpy.context.scene, "mimi_sword_skeleton_cleanup", "NONE") or "NONE")
     try:
-        summary = SkeletonHelper.apply_groups(mode, drawib_objects, sidecar_path, cleanup_mode)
+        summary = SkeletonHelper.apply_groups(
+            settings.naming, drawib_objects, sidecar_path, settings.cleanup
+        )
     except Exception as error:  # noqa: BLE001 - binding must never break the import
         print("Skeleton binding failed:", error)
         return
     if summary:
+        remember_bind_report(bpy.context.scene, summary)
         operator.report({'INFO'}, summary)
 
 

@@ -23,6 +23,9 @@ from mathutils import Matrix, Vector
 
 NAMING_BONE_TO_GROUP = "BONE_TO_GROUP"
 NAMING_GROUP_TO_BONE = "GROUP_TO_BONE"
+# Requested naming mode: take whatever the desktop app stored in the sidecar.
+# The two concrete modes above stay available as explicit overrides.
+NAMING_SIDECAR = "SIDECAR"
 MIRROR_MARKER = "MIMI:MirrorWorkflowApplied"
 
 # Bone cleanup modes offered by the Mod Reverse panel. A bone counts as invalid
@@ -65,6 +68,16 @@ class SkeletonHelper:
             return json.load(handle)
 
     @staticmethod
+    def naming_from_sidecar(sidecar):
+        """Concrete naming mode requested by a loaded sidecar.
+
+        Missing or unknown values fall back to keeping the numeric vertex
+        groups, which is the mode that keeps a reversed model exportable.
+        """
+        mode = str((sidecar or {}).get("NamingMode", "") or "")
+        return NAMING_GROUP_TO_BONE if mode == "groupToBone" else NAMING_BONE_TO_GROUP
+
+    @staticmethod
     def sidecar_naming_mode(path):
         """Naming mode requested by the desktop app, if the sidecar declares one."""
         try:
@@ -79,42 +92,65 @@ class SkeletonHelper:
         return ""
 
     @staticmethod
+    def _draw_ib_keys(value):
+        """Return the DrawIB keys one sidecar value can be addressed by.
+
+        A value is a plain reverse folder (``195857d8``), an extraction folder
+        with the draw call counts (``195857d8-1234-0``) or a nested path that
+        also names its data-type folder. The full path segment and, for a
+        hexadecimal DrawIB, its leading hash are both valid keys. Imported
+        workspace objects are keyed by that leading hash only, which is why
+        comparing the whole string was not enough.
+        """
+        keys = set()
+        text = str(value or "").replace("\\", "/").strip("/")
+        for segment in (part.strip().lower() for part in text.split("/")):
+            if not segment:
+                continue
+            keys.add(segment)
+            leading = re.split(r"[-_]", segment, maxsplit=1)[0]
+            if re.fullmatch(r"[0-9a-f]{6,}", leading):
+                keys.add(leading)
+        return keys
+
+    @staticmethod
     def pick_drawib(sidecar, object_names, draw_ib_name=""):
         entries = sidecar.get("DrawIBs") or []
         if not entries:
             return None
 
-        def first_segment(value):
-            # Extraction sidecars key entries by nested folders
-            # (drawib-indexcount-firstindex/TYPE_...), while imported objects are
-            # named after the top DrawIB folder only.
-            text = str(value or "").replace("\\", "/").strip("/")
-            return text.split("/")[0].strip().lower() if text else ""
-
+        names = [str(name or "").strip().lower() for name in object_names or []]
+        name_tokens = set()
+        for name in names:
+            # Object names look like "LOD0.e590b8d4-0", so split them into
+            # comparable words instead of searching the whole string.
+            name_tokens.update(part for part in re.split(r"[^0-9a-z]+", name) if part)
         wanted = str(draw_ib_name or "").strip().lower()
+
         if wanted:
+            # Exact folder names first: the reverse pass writes plain DrawIBs.
             for entry in entries:
                 if str(entry.get("DrawIB", "")).strip().lower() == wanted:
                     return entry
+            # Extraction folders append the draw call counts and may nest a
+            # data-type folder, so compare the derived keys as well.
             for entry in entries:
-                if first_segment(entry.get("DrawIB")) == wanted:
+                if wanted in SkeletonHelper._draw_ib_keys(entry.get("DrawIB")):
                     return entry
-            for entry in entries:
-                folder = os.path.basename(str(entry.get("Folder", ""))).strip().lower()
-                if folder and folder == wanted:
-                    return entry
+        # Fall back to the imported object names, which embed the same folder.
         for entry in entries:
-            draw_ib = str(entry.get("DrawIB", ""))
-            short = first_segment(draw_ib)
-            if draw_ib and any(draw_ib.lower() in name.lower() for name in object_names):
+            keys = SkeletonHelper._draw_ib_keys(entry.get("DrawIB"))
+            if not keys:
+                continue
+            if keys & name_tokens:
                 return entry
-            if short and any(short in name.lower() for name in object_names):
+            if any(key in name for key in keys for name in names):
                 return entry
         if len(entries) == 1:
             return entries[0]
         for entry in entries:
-            folder = os.path.basename(str(entry.get("Folder", "")))
-            if folder and any(folder.lower() in name.lower() for name in object_names):
+            folder = os.path.basename(str(entry.get("Folder", ""))).strip().lower()
+            if folder and any(folder in name for name in names):
                 return entry
         return entries[0]
 
@@ -487,6 +523,8 @@ class SkeletonHelper:
         """Bind several DrawIB groups at once, one armature per character.
 
         groups: {drawib_folder_name: [mesh objects]}
+        naming_mode may also be NAMING_SIDECAR: the sidecar then decides, which
+        is what the shared import settings default to.
         """
         if str(naming_mode or "").upper() == "NONE":
             return ""
@@ -498,6 +536,11 @@ class SkeletonHelper:
         except Exception as error:  # noqa: BLE001 - a broken sidecar must not break the import
             print("Skeleton sidecar cannot be read:", error)
             return ""
+
+        # Resolve "follow the desktop app" after the sidecar is loaded, so the
+        # rest of the binding only has to know the two concrete modes.
+        if str(naming_mode or "").upper() == NAMING_SIDECAR:
+            naming_mode = cls.naming_from_sidecar(sidecar)
 
         space = sidecar.get("Space") or {}
         space_scale = float(space.get("Scale", 1.0) or 1.0)

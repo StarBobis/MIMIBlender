@@ -7,6 +7,7 @@ from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable, get_preferences
+from ..utils.skeleton_ui import draw_skeleton_binding
 
 from .ui_func_export import MMTGenerateSelectedBlueprintMod
 from .ui_func_import_mmt import MMTImportAllFromCurrentWorkSpaceBlueprint, MMTImportRaw
@@ -101,6 +102,10 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         layout.operator(MMTImportRaw.bl_idname, text=tr(MMTImportRaw.bl_label), icon='IMPORT')
         # One-click import of the current MMT workspace contents
         layout.operator(MMTImportAllFromCurrentWorkSpaceBlueprint.bl_idname, text=tr(MMTImportAllFromCurrentWorkSpaceBlueprint.bl_label), icon='IMPORT')
+        # The workspace import binds the skeleton sidecar that extraction mirrors
+        # into the workspace root, so its settings belong under this button too.
+        # The same block is drawn in the Mod Reverse panel for the reverse output.
+        draw_skeleton_binding(layout, context.scene, GlobalConfig.path_workspace_folder())
 
         # MMT blueprint dropdown list
         blueprint_row = layout.row(align=True)

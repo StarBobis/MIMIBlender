@@ -55,6 +55,9 @@ global_config = importlib.import_module('MIMIBlender.common.global_config')
 # that property group must be registered like it is in a normal add-on start.
 global_properties = importlib.import_module('MIMIBlender.common.mimi_global_properties')
 i18n = importlib.import_module('MIMIBlender.i18n.i18n')
+# Skeleton settings live in their own shared module now, because the same
+# properties drive the workspace import too.
+skeleton_ui = importlib.import_module('MIMIBlender.utils.skeleton_ui')
 
 # Smallest importable quad: four vertices, six indices, two triangles.
 _QUAD_POSITIONS = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
@@ -515,17 +518,17 @@ class ReverseImportTests(unittest.TestCase):
         # while both interface languages show their own captions.
         self.assertEqual(self.scene.mimi_sword_skeleton_cleanup, 'NONE')
         self.assertEqual(
-            [item[0] for item in panel._get_sword_skeleton_cleanup_items(None, None)],
+            [item[0] for item in skeleton_ui.get_cleanup_items(None, None)],
             ['NONE', 'DELETE', 'HIDE'],
         )
         self.assertEqual(
-            [item[1] for item in panel._get_sword_skeleton_cleanup_items(None, None)],
+            [item[1] for item in skeleton_ui.get_cleanup_items(None, None)],
             ['Keep All Bones', 'Delete Invalid Bones', 'Hide Invalid Bones'],
         )
         i18n.apply_language('zh')
         try:
             chinese_labels = [
-                item[1] for item in panel._get_sword_skeleton_cleanup_items(None, None)
+                item[1] for item in skeleton_ui.get_cleanup_items(None, None)
             ]
         finally:
             i18n.apply_language('en')
@@ -537,7 +540,8 @@ class ReverseImportTests(unittest.TestCase):
         folder = self.folder('bind_forward')
         with open(os.path.join(folder, 'skeleton.json'), 'w', encoding='utf-8') as handle:
             handle.write('{}')
-        self.scene.mimi_sword_skeleton_mode = 'BONE_TO_GROUP'
+        self.scene.mimi_sword_bind_skeleton = True
+        self.scene.mimi_sword_skeleton_naming = 'BONE_TO_GROUP'
         self.scene.mimi_sword_skeleton_cleanup = 'DELETE'
         fake_operator = types.SimpleNamespace(report=lambda *args: None)
         with mock.patch.object(
@@ -615,6 +619,7 @@ def main():
     # Exercise register/unregister/re-register so add-on reload remains safe.
     print('Blender version:', bpy.app.version_string)
     global_properties.register()
+    skeleton_ui.register()
     panel.register()
     panel.unregister()
     panel.register()
@@ -626,6 +631,7 @@ def main():
             raise RuntimeError('Mod Reverse import integration checks failed')
     finally:
         panel.unregister()
+        skeleton_ui.unregister()
         global_properties.unregister()
 
 

@@ -9,6 +9,10 @@ from .i18n import i18n
 
 from .common import mimi_global_properties
 
+# Skeleton binding settings are shared by the reverse import and the workspace
+# import, so they register before any panel that draws them.
+from .utils import skeleton_ui
+
 # Auto-update feature (GitHub release checker). Imported before the updater
 # panel module, because the panel imports this module itself.
 from . import addon_updater_ops
@@ -86,6 +90,9 @@ def _register_steps():
     # 1. Configs
     yield mimi_global_properties.register
     yield gimi_body_outline.register
+    # Shared import settings: the panels below draw their properties and the
+    # register step also converts scenes saved before the settings were split.
+    yield skeleton_ui.register
 
     # 2. Addon Updater (engine configuration + sidebar panel).
     # Registers after i18n so the updater preferences already exist, and
@@ -187,6 +194,8 @@ def unregister():
         blueprint_node_base.unregister,
         _unregister_updater,
         mimi_global_properties.unregister,
+        # The shared import settings are used by panels above, so they go last.
+        skeleton_ui.unregister,
         # i18n unregisters last so the language preference outlives every UI class.
         i18n.unregister,
     ]
