@@ -16,7 +16,7 @@ import json
 import os
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 
 NAMING_BONE_TO_GROUP = "BONE_TO_GROUP"
@@ -114,10 +114,51 @@ class SkeletonHelper:
         return candidate
 
     @staticmethod
+    def _rest_heads(bones):
+        heads = []
+        for bone in bones:
+            rest = bone.get("Rest") or [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+            heads.append(Vector((rest[3], rest[7], rest[11])))
+        return heads
+
+    @staticmethod
+    def _bone_lengths(bones):
+        """Display length per bone.
+
+        An explicit ``Length`` (newer sidecars) wins; otherwise the distance to
+        the first child's head is used, leaves inherit a fraction of their
+        parent. Without this every bone kept Blender's default length and the
+        skeleton showed up as a trail of dots inside the mesh.
+        """
+        heads = SkeletonHelper._rest_heads(bones)
+        lengths = [0.0] * len(bones)
+        for index, bone in enumerate(bones):
+            explicit = float(bone.get("Length", 0) or 0)
+            if explicit > 1e-5:
+                lengths[index] = explicit
+                continue
+            children = [
+                child_index
+                for child_index, child in enumerate(bones)
+                if int(child.get("Parent", -1)) == index and child_index != index
+            ]
+            if children:
+                lengths[index] = min((heads[child] - heads[index]).length for child in children)
+        for index, bone in enumerate(bones):
+            if lengths[index] > 1e-5:
+                continue
+            parent = int(bone.get("Parent", -1))
+            if 0 <= parent < len(bones) and lengths[parent] > 1e-5:
+                lengths[index] = lengths[parent] * 0.6
+            else:
+                lengths[index] = 0.05
+        return [max(0.01, min(1.0, value)) for value in lengths]
+
+    @staticmethod
     def build_armature(character, naming_mode):
         bones = character.get("Bones") or []
         if not bones:
-            return None, []
+            return None, [], []
 
         armature = bpy.data.armatures.new(str(character.get("Id", "Skeleton")) + "_Armature")
         armature_obj = bpy.data.objects.new(armature.name, armature)
@@ -129,17 +170,23 @@ class SkeletonHelper:
         view_layer.objects.active = armature_obj
         armature_obj.select_set(True)
 
+        lengths = SkeletonHelper._bone_lengths(bones)
         used_names = set()
         created = []
+        originals = []
         bpy.ops.object.mode_set(mode="EDIT")
         edit_bones = []
-        for bone in bones:
-            edit_bone = armature.edit_bones.new(SkeletonHelper._unique_name(bone.get("Name", ""), used_names))
+        for index, bone in enumerate(bones):
+            original_name = bone.get("Name", "")
+            edit_bone = armature.edit_bones.new(SkeletonHelper._unique_name(original_name, used_names))
             rest = bone.get("Rest") or [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-            matrix = Matrix([rest[0:4], rest[4:8], rest[8:12], rest[12:16]])
-            edit_bone.matrix = matrix
+            edit_bone.matrix = Matrix([rest[0:4], rest[4:8], rest[8:12], rest[12:16]])
+            # The matrix setter also rewrites the tail from the current length,
+            # so the display length must be applied after it.
+            edit_bone.length = lengths[index]
             edit_bones.append(edit_bone)
             created.append(edit_bone.name)
+            originals.append(original_name)
 
         for index, bone in enumerate(bones):
             parent = int(bone.get("Parent", -1))
@@ -149,34 +196,60 @@ class SkeletonHelper:
 
         bpy.ops.object.mode_set(mode="OBJECT")
         armature_obj.show_in_front = True
-
-        if naming_mode == NAMING_BONE_TO_GROUP:
-            for index, name in enumerate(created):
-                group_name = str(index)
-                if group_name in armature.bones:
-                    continue
-                bone = armature.bones.get(name)
-                if bone is not None:
-                    bone.name = group_name
+        armature.display_type = 'OCTAHEDRAL'
 
         if previous_active is not None:
             view_layer.objects.active = previous_active
-        return armature_obj, created
+        return armature_obj, created, originals
 
     @staticmethod
-    def rename_groups_to_bones(objects, character, bone_names):
-        bone_map = {int(index): name for index, name in (character.get("BoneMap") or {}).items()}
+    def _bone_map(character):
+        return {int(index): str(name) for index, name in (character.get("BoneMap") or {}).items()}
+
+    @classmethod
+    def rename_bones_to_groups(cls, character, armature_obj, original_names, final_names):
+        """BONE_TO_GROUP: bones take the game palette numbers stored in the groups.
+
+        The sidecar ``BoneMap`` is game index -> source bone name, and armature
+        order is unrelated to the game palette order, so the rename must go
+        through the name map. Renaming bone N to the string "N" (armature order)
+        produces a skeleton that looks right but deforms nothing.
+        """
+        name_to_index = {name: index for index, name in cls._bone_map(character).items()}
+        by_original = {}
+        for original, final in zip(original_names, final_names):
+            by_original.setdefault(original, final)
+        renamed = 0
+        for original, game_index in name_to_index.items():
+            final = by_original.get(original)
+            if not final:
+                continue
+            bone = armature_obj.data.bones.get(final)
+            if bone is not None:
+                bone.name = str(game_index)
+                renamed += 1
+        return renamed
+
+    @classmethod
+    def rename_groups_to_bones(cls, character, objects, original_names, final_names):
+        """GROUP_TO_BONE: groups take the source bone names of the character."""
+        bone_map = cls._bone_map(character)
+        by_original = {}
+        for original, final in zip(original_names, final_names):
+            by_original.setdefault(original, final)
         renamed = 0
         for obj in objects:
             for group in obj.vertex_groups:
                 if not group.name.isdigit():
                     continue
                 index = int(group.name)
-                if index not in bone_map:
+                original = bone_map.get(index)
+                if original is None:
                     continue
-                target = bone_names[index] if index < len(bone_names) else bone_map[index]
-                group.name = target
-                renamed += 1
+                target = by_original.get(original, original)
+                if target:
+                    group.name = target
+                    renamed += 1
         return renamed
 
     @staticmethod
@@ -235,23 +308,25 @@ class SkeletonHelper:
                 continue
             key = str(character.get("Id", ""))
             if key not in armatures:
-                armature_obj, bone_names = cls.build_armature(character, naming_mode)
+                armature_obj, final_names, original_names = cls.build_armature(character, naming_mode)
                 if armature_obj is None:
                     continue
-                armatures[key] = (armature_obj, bone_names, character)
-            armature_obj, bone_names, character = armatures[key]
-            if naming_mode == NAMING_GROUP_TO_BONE:
-                cls.rename_groups_to_bones(meshes, character, bone_names)
+                armatures[key] = (armature_obj, final_names, original_names, character)
+            armature_obj, final_names, original_names, character = armatures[key]
+            if naming_mode == NAMING_BONE_TO_GROUP:
+                cls.rename_bones_to_groups(character, armature_obj, original_names, final_names)
+            elif naming_mode == NAMING_GROUP_TO_BONE:
+                cls.rename_groups_to_bones(character, meshes, original_names, final_names)
             cls.bind(meshes, armature_obj)
             bound_counts[key] = bound_counts.get(key, 0) + len(meshes)
 
         summaries = []
-        for key, (_, bone_names, character) in armatures.items():
+        for key, (_, final_names, _, character) in armatures.items():
             summaries.append(
                 "Skeleton: "
                 + str(character.get("Name", ""))
                 + " ("
-                + str(len(bone_names))
+                + str(len(final_names))
                 + " bones, "
                 + str(bound_counts.get(key, 0))
                 + " meshes)"
