@@ -213,7 +213,11 @@ class SkeletonHelper:
                 lengths[index] = lengths[parent] * 0.6
             else:
                 lengths[index] = 0.05
-        return [max(0.01, min(1.0, value)) for value in lengths]
+        # Length and Rest use the same source units (WWMI packs are centimetres).
+        # Do not cap source lengths at one: the importer applies the unit scale
+        # afterwards, so that cap reduced every WWMI bone to at most one cm.
+        # Explicit and inferred lengths must preserve their physical proportions.
+        return [max(1e-5, value) for value in lengths]
 
     @staticmethod
     def _mirrored_matrix(matrix):
@@ -566,6 +570,17 @@ class SkeletonHelper:
             # bone names and rename each component's groups instead.
             components = draw_ib.get("Components") or []
             component_mode = bool(components)
+            if component_mode:
+                # Whole-IB recovery meshes overlap several local palettes and
+                # cannot be bound through one aggregate map. Preserve their
+                # geometry, but do not report them as successfully bound parts.
+                identified = [mesh for mesh in meshes if cls.pick_component(components, mesh.name)]
+                skipped = len(meshes) - len(identified)
+                if skipped:
+                    print("Skeleton binding skipped " + str(skipped) + " mesh(es) without component identity")
+                meshes = identified
+                if not meshes:
+                    continue
             effective_naming = NAMING_GROUP_TO_BONE if component_mode else naming_mode
             key = str(character.get("Id", ""))
             if key not in armatures:
