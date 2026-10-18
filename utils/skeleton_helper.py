@@ -15,6 +15,7 @@ Two naming modes exist because the two namespaces have different owners:
 import json
 import math
 import os
+import re
 
 import bpy
 from mathutils import Matrix, Vector
@@ -252,20 +253,16 @@ class SkeletonHelper:
                 renamed += 1
         return renamed
 
-    @classmethod
-    def rename_groups_to_bones(cls, character, objects, original_names, final_names):
-        """GROUP_TO_BONE: groups take the source bone names of the character."""
-        bone_map = cls._bone_map(character)
-        by_original = {}
-        for original, final in zip(original_names, final_names):
-            by_original.setdefault(original, final)
+    @staticmethod
+    def rename_groups_with_map(objects, mapping, by_original=None):
+        """Rename numeric vertex groups through an explicit index -> bone map."""
+        by_original = by_original or {}
         renamed = 0
         for obj in objects:
             for group in obj.vertex_groups:
                 if not group.name.isdigit():
                     continue
-                index = int(group.name)
-                original = bone_map.get(index)
+                original = mapping.get(str(int(group.name)))
                 if original is None:
                     continue
                 target = by_original.get(original, original)
@@ -273,6 +270,27 @@ class SkeletonHelper:
                     group.name = target
                     renamed += 1
         return renamed
+
+    @staticmethod
+    def pick_component(components, object_name):
+        """Pick the component entry for an imported mesh (`...-Component 3`)."""
+        match = re.search(r"component[\s_-]*(\d+)", str(object_name or ""), re.IGNORECASE)
+        if match:
+            index = int(match.group(1))
+            for entry in components:
+                if int(entry.get("ComponentIndex", -1)) == index:
+                    return entry
+        return None
+
+    @classmethod
+    def rename_groups_to_bones(cls, character, objects, original_names, final_names):
+        """GROUP_TO_BONE: groups take the source bone names of the character."""
+        bone_map = cls._bone_map(character)
+        by_original = {}
+        for original, final in zip(original_names, final_names):
+            by_original.setdefault(original, final)
+        mapping = {str(index): name for index, name in bone_map.items()}
+        return cls.rename_groups_with_map(objects, mapping, by_original)
 
     @staticmethod
     def bind(objects, armature_obj):
@@ -332,6 +350,12 @@ class SkeletonHelper:
             character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
             if character is None:
                 continue
+            # WWMI components each carry their own numeric palette, so a single
+            # armature cannot be renamed to every component's numbers. Keep the
+            # bone names and rename each component's groups instead.
+            components = draw_ib.get("Components") or []
+            component_mode = bool(components)
+            effective_naming = NAMING_GROUP_TO_BONE if component_mode else naming_mode
             key = str(character.get("Id", ""))
             if key not in armatures:
                 # A non-mirrored workflow bakes an X reflection into the imported
@@ -339,13 +363,21 @@ class SkeletonHelper:
                 # land on the wrong side of the model.
                 mirror_x = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
                 armature_obj, final_names, original_names = cls.build_armature(
-                    character, naming_mode, mirror_x, space_scale, space_rotation_z
+                    character, effective_naming, mirror_x, space_scale, space_rotation_z
                 )
                 if armature_obj is None:
                     continue
                 armatures[key] = (armature_obj, final_names, original_names, character)
             armature_obj, final_names, original_names, character = armatures[key]
-            if naming_mode == NAMING_BONE_TO_GROUP:
+            if component_mode:
+                by_original = {}
+                for original, final in zip(original_names, final_names):
+                    by_original.setdefault(original, final)
+                for mesh in meshes:
+                    entry = cls.pick_component(components, mesh.name)
+                    mapping = (entry or {}).get("BoneMap") or draw_ib.get("BoneMap") or {}
+                    cls.rename_groups_with_map([mesh], mapping, by_original)
+            elif naming_mode == NAMING_BONE_TO_GROUP:
                 cls.rename_bones_to_groups(character, armature_obj, original_names, final_names)
             elif naming_mode == NAMING_GROUP_TO_BONE:
                 cls.rename_groups_to_bones(character, meshes, original_names, final_names)
