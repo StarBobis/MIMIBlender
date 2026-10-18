@@ -21,6 +21,7 @@ from mathutils import Matrix, Vector
 
 NAMING_BONE_TO_GROUP = "BONE_TO_GROUP"
 NAMING_GROUP_TO_BONE = "GROUP_TO_BONE"
+MIRROR_MARKER = "MIMI:MirrorWorkflowApplied"
 
 
 class SkeletonHelper:
@@ -155,7 +156,13 @@ class SkeletonHelper:
         return [max(0.01, min(1.0, value)) for value in lengths]
 
     @staticmethod
-    def build_armature(character, naming_mode):
+    def _mirrored_matrix(matrix):
+        """Reflect a bone transform across X (`S M S` with `S = diag(-1,1,1,1)`)."""
+        reflection = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+        return reflection @ matrix @ reflection
+
+    @staticmethod
+    def build_armature(character, naming_mode, mirror_x=False):
         bones = character.get("Bones") or []
         if not bones:
             return None, [], []
@@ -180,7 +187,10 @@ class SkeletonHelper:
             original_name = bone.get("Name", "")
             edit_bone = armature.edit_bones.new(SkeletonHelper._unique_name(original_name, used_names))
             rest = bone.get("Rest") or [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-            edit_bone.matrix = Matrix([rest[0:4], rest[4:8], rest[8:12], rest[12:16]])
+            matrix = Matrix([rest[0:4], rest[4:8], rest[8:12], rest[12:16]])
+            if mirror_x:
+                matrix = SkeletonHelper._mirrored_matrix(matrix)
+            edit_bone.matrix = matrix
             # The matrix setter also rewrites the tail from the current length,
             # so the display length must be applied after it.
             edit_bone.length = lengths[index]
@@ -308,7 +318,13 @@ class SkeletonHelper:
                 continue
             key = str(character.get("Id", ""))
             if key not in armatures:
-                armature_obj, final_names, original_names = cls.build_armature(character, naming_mode)
+                # A non-mirrored workflow bakes an X reflection into the imported
+                # mesh; the armature must receive the same reflection or bones
+                # land on the wrong side of the model.
+                mirror_x = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
+                armature_obj, final_names, original_names = cls.build_armature(
+                    character, naming_mode, mirror_x
+                )
                 if armature_obj is None:
                     continue
                 armatures[key] = (armature_obj, final_names, original_names, character)
