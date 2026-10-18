@@ -13,6 +13,7 @@ Two naming modes exist because the two namespaces have different owners:
 """
 
 import json
+import math
 import os
 
 import bpy
@@ -162,7 +163,15 @@ class SkeletonHelper:
         return reflection @ matrix @ reflection
 
     @staticmethod
-    def build_armature(character, naming_mode, mirror_x=False):
+    def _space_matrix(scale, rotation_z):
+        """Transform the game importer baked into the mesh (WWMI: 0.01, 180 deg)."""
+        if abs(scale - 1.0) < 1e-9 and abs(rotation_z) < 1e-9:
+            return None
+        matrix = Matrix.Rotation(math.radians(rotation_z), 4, "Z") @ Matrix.Scale(scale, 4)
+        return matrix
+
+    @staticmethod
+    def build_armature(character, naming_mode, mirror_x=False, space_scale=1.0, space_rotation_z=0.0):
         bones = character.get("Bones") or []
         if not bones:
             return None, [], []
@@ -178,6 +187,7 @@ class SkeletonHelper:
         armature_obj.select_set(True)
 
         lengths = SkeletonHelper._bone_lengths(bones)
+        space_matrix = SkeletonHelper._space_matrix(space_scale, space_rotation_z)
         used_names = set()
         created = []
         originals = []
@@ -190,10 +200,12 @@ class SkeletonHelper:
             matrix = Matrix([rest[0:4], rest[4:8], rest[8:12], rest[12:16]])
             if mirror_x:
                 matrix = SkeletonHelper._mirrored_matrix(matrix)
+            if space_matrix is not None:
+                matrix = space_matrix @ matrix
             edit_bone.matrix = matrix
             # The matrix setter also rewrites the tail from the current length,
             # so the display length must be applied after it.
-            edit_bone.length = lengths[index]
+            edit_bone.length = lengths[index] * (space_scale if space_matrix is not None else 1.0)
             edit_bones.append(edit_bone)
             created.append(edit_bone.name)
             originals.append(original_name)
@@ -304,6 +316,10 @@ class SkeletonHelper:
             print("Skeleton sidecar cannot be read:", error)
             return ""
 
+        space = sidecar.get("Space") or {}
+        space_scale = float(space.get("Scale", 1.0) or 1.0)
+        space_rotation_z = float(space.get("RotationZ", 0.0) or 0.0)
+
         armatures = {}
         bound_counts = {}
         for draw_ib_name, objects in groups.items():
@@ -323,7 +339,7 @@ class SkeletonHelper:
                 # land on the wrong side of the model.
                 mirror_x = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
                 armature_obj, final_names, original_names = cls.build_armature(
-                    character, naming_mode, mirror_x
+                    character, naming_mode, mirror_x, space_scale, space_rotation_z
                 )
                 if armature_obj is None:
                     continue
