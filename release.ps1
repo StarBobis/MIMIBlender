@@ -335,7 +335,8 @@ try {
 $payloadObject = [ordered]@{
     tag_name         = $tag
     target_commitish = $branch
-    name             = $tag                # existing releases are named after the tag
+    # Public titles contain only the product name and version.
+    name             = "MIMIBlender $releaseVersion"
     body             = $Notes
     draft            = [bool]$Draft
     prerelease       = $false
