@@ -23,7 +23,7 @@ from ..core.models import (
     ChannelSource,
 )
 from ..utils.images import get_packed_file
-from ..utils.materials import get_diffuse
+from ..utils.materials import get_effective_diffuse
 
 # Extra texture types that get their own atlas when "Atlas PBR Textures" is
 # enabled. Order matters only for stable diagnostics output.
@@ -102,9 +102,10 @@ def build_base_plane(
         plan.base_key = key
         # The "blend diffuse color" option multiplies the texture by the
         # material's diffuse color. Its alpha component is always 1.0, so
-        # the alpha channel itself is never tinted.
-        if getattr(mat, "mimi_smc_diffuse", False):
-            plan.diffuse_color = _srgb255_to_linear(get_diffuse(mat))
+        # the alpha channel itself is never tinted. White means "no tint":
+        # get_effective_diffuse() also drops the color that a texture link
+        # made invisible, which used to darken every merged texture by 0.8.
+        plan.diffuse_color = _srgb255_to_linear(get_effective_diffuse(mat))
 
     # Resolve the alpha strategy: explicit per-material setting first, then
     # the AUTO fallback that follows the Principled Alpha input link.

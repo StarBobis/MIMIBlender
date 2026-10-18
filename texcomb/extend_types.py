@@ -482,9 +482,12 @@ def _register_material_properties() -> None:
         description=tr("Reference to the original material, used to track the material's source"),
     )
 
+    # Opt-in: a texture already carries its color, and the shader socket keeps
+    # a stale default (0.8 grey) behind the link. Enabling this by default made
+    # every merged texture 0.8x darker in linear space for no visible reason.
     bpy.types.Material.mimi_smc_diffuse = BoolProperty(
         name=tr("Blend Diffuse Color"),
-        default=True,
+        default=False,
         description=tr("Blend the diffuse color with the texture"),
     )
 

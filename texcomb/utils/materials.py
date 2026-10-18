@@ -23,6 +23,26 @@ GAMMA_FACTOR = 1.055
 GAMMA_OFFSET = 0.055
 DEFAULT_DIFFUSE = (255, 255, 255, 255)
 
+# Blender's factory value for a shader color socket (the default of a new
+# Principled BSDF "Base Color"). A linked texture keeps this number stored on
+# the socket even though the link, not the number, drives the color, so the
+# value describes no visible color and must never be used as a tint.
+FACTORY_BASE_COLOR = 0.8
+
+# 0.8 linear becomes about 0.9 of an sRGB mid-tone, which is exactly the kind
+# of silent "the merged texture got darker" difference this check prevents.
+# Socket values survive save/load as 32-bit floats, so exact equality with
+# FACTORY_BASE_COLOR cannot be assumed; compare with a small tolerance.
+FACTORY_COLOR_EPSILON = 1e-4
+
+# Which socket holds the visible color of every supported shader type.
+SHADER_COLOR_INPUTS = {
+    "principled": "Base Color",
+    "diffuse": "Color",
+    "specular": "Base Color",
+    "emission": "Color",
+}
+
 # Shader node type mappings
 SHADER_NODE_TYPES = {
     "ShaderNodeBsdfPrincipled": "principled",
@@ -268,6 +288,76 @@ def get_diffuse(mat: bpy.types.Material) -> Tuple[int, int, int, int]:
             pass
 
     return DEFAULT_DIFFUSE
+
+
+def is_factory_linked_base_color(mat: bpy.types.Material) -> bool:
+    """Checks whether a texture link hides Blender's factory color value.
+
+    A linked color socket still carries its stored default value: a new
+    Principled BSDF keeps (0.8, 0.8, 0.8, 1.0) on "Base Color" after an image
+    is plugged in. That number never affected the original render, so using it
+    as a diffuse tint multiplies the merged atlas by 0.8 in linear space, which
+    is about 10% darker in mid-tone sRGB values. The user then sees a darker
+    texture with no visible reason in the source material.
+
+    Args:
+        mat: Material to inspect.
+
+    Returns:
+        True when the shader color input is linked and still holds the factory
+        grey value that the link itself made irrelevant.
+    """
+    if not mat or not mat.node_tree or not mat.node_tree.nodes:
+        return False
+
+    # Trace the same shader that get_diffuse() reads, so both agree.
+    output_node = _find_output_node(mat.node_tree.nodes)
+    if not output_node:
+        return False
+
+    shader_info = _trace_shader_from_output(output_node)
+    if not shader_info:
+        return False
+
+    shader_node, shader_type = shader_info
+    input_name = SHADER_COLOR_INPUTS.get(shader_type)
+    if not input_name or input_name not in shader_node.inputs:
+        return False
+
+    socket = shader_node.inputs[input_name]
+    # An unlinked socket is the real color of a solid-color material.
+    if not socket.is_linked:
+        return False
+
+    # Compare RGB only: the alpha component is never used as a tint.
+    for channel in socket.default_value[:3]:
+        if abs(channel - FACTORY_BASE_COLOR) > FACTORY_COLOR_EPSILON:
+            return False
+
+    return True
+
+
+def get_effective_diffuse(mat: bpy.types.Material) -> Tuple[int, int, int, int]:
+    """Returns the diffuse color the combiner will actually bake.
+
+    White means "no tint". A tint must be skipped when the original material
+    never showed that color: either the user turned the option off, or a
+    texture link replaced the socket value (see is_factory_linked_base_color).
+
+    Solid-color materials must keep using get_diffuse() directly, because for
+    those the socket value is the texture content, not a tint.
+
+    Args:
+        mat: Material to read the tint from.
+
+    Returns:
+        sRGB RGBA bytes, white when no tint should be applied.
+    """
+    if not getattr(mat, "mimi_smc_diffuse", False):
+        return DEFAULT_DIFFUSE
+    if is_factory_linked_base_color(mat):
+        return DEFAULT_DIFFUSE
+    return get_diffuse(mat)
 
 
 def get_gfx_textures(
@@ -1006,14 +1096,8 @@ def _extract_shader_color(
     Returns:
         RGBA color values (0-255) or None.
     """
-    input_map = {
-        "principled": "Base Color",
-        "diffuse": "Color",
-        "specular": "Base Color",
-        "emission": "Color",
-    }
-
-    input_name = input_map.get(shader_type)
+    # The socket name depends on the shader, not on the material at hand.
+    input_name = SHADER_COLOR_INPUTS.get(shader_type)
     if input_name and input_name in shader_node.inputs:
         return _rgb_to_srgb255(shader_node.inputs[input_name].default_value)
 

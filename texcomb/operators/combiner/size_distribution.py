@@ -62,7 +62,7 @@ from ....i18n.i18n import I18nOperator, tr
 from ...core import layout
 from ...globs import CombineListTypes
 from .combiner_ops import get_data, get_mats_uv, get_size, get_structure, _get_image_size
-from ...utils.materials import get_image_from_material, get_diffuse, get_gfx_textures, get_alpha_texture
+from ...utils.materials import get_image_from_material, get_diffuse, get_effective_diffuse, get_gfx_textures, get_alpha_texture
 from ...utils.images import get_packed_file
 
 # Only layout-affecting options participate; output paths and codecs do not.
@@ -285,7 +285,10 @@ def output_groups(scene, structure):
     for mat, item in structure.items():
         image = get_image_from_material(mat)
         packed = get_packed_file(image) if image else None
-        color = get_diffuse(mat) if not packed or mat.mimi_smc_diffuse else (255, 255, 255, 255)
+        # A packed texture keeps its own color; only an explicit, visible tint
+        # may split it into another group. get_effective_diffuse() returns
+        # white when the tint is off or when a texture link hid the value.
+        color = get_diffuse(mat) if not packed else get_effective_diffuse(mat)
         alpha_mode = mat.mimi_smc_alpha_mode
         alpha = None
         if alpha_mode in {"SEPARATE", "MULTIPLY"}:
