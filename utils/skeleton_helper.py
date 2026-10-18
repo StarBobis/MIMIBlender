@@ -71,14 +71,26 @@ class SkeletonHelper:
         return ""
 
     @staticmethod
+    @staticmethod
     def pick_drawib(sidecar, object_names, draw_ib_name=""):
         entries = sidecar.get("DrawIBs") or []
         if not entries:
             return None
+
+        def first_segment(value):
+            # Extraction sidecars key entries by nested folders
+            # (drawib-indexcount-firstindex/TYPE_...), while imported objects are
+            # named after the top DrawIB folder only.
+            text = str(value or "").replace("\\", "/").strip("/")
+            return text.split("/")[0].strip().lower() if text else ""
+
         wanted = str(draw_ib_name or "").strip().lower()
         if wanted:
             for entry in entries:
                 if str(entry.get("DrawIB", "")).strip().lower() == wanted:
+                    return entry
+            for entry in entries:
+                if first_segment(entry.get("DrawIB")) == wanted:
                     return entry
             for entry in entries:
                 folder = os.path.basename(str(entry.get("Folder", ""))).strip().lower()
@@ -86,7 +98,10 @@ class SkeletonHelper:
                     return entry
         for entry in entries:
             draw_ib = str(entry.get("DrawIB", ""))
+            short = first_segment(draw_ib)
             if draw_ib and any(draw_ib.lower() in name.lower() for name in object_names):
+                return entry
+            if short and any(short in name.lower() for name in object_names):
                 return entry
         if len(entries) == 1:
             return entries[0]
