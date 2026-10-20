@@ -27,6 +27,14 @@ spacing or increase the total maximum. The planner never silently shrinks locks.
 ## Semantics
 
 - Automatic defaults retain the existing source-size and UV-repeat calculations.
+- UVs that reach past one tile reserve a sampling window, not a whole grid.
+  With **Crop to UV Bounds** on (the default) the region is the real per-axis
+  extent, so a 2% overshoot costs 2% of a tile. Each row shows its window as
+  `[2x2]` beside the name and the panel lists how many rows are tiled.
+  Unchecking the option restores the legacy whole-tile power-of-two grid, where
+  any overshoot above one reserves a full extra tile in each axis.
+- A vertical tiling can therefore produce a portrait atlas. Orientation is not
+  forced: rotating the finished canvas would swap approved region positions.
 - Manual dimensions override the automatic preference, including its source cap.
   They describe reserved content bounds, not independent stretch axes. The source
   image and repeated UV extent fit proportionally inside those bounds; unused
@@ -49,8 +57,9 @@ spacing or increase the total maximum. The planner never silently shrinks locks.
   to inspect member names. Membership is cached as material pointers, not rebuilt
   during redraw. Recalculation can split/merge groups when output settings change.
 - Equivalent baked outputs share one packed region even with distinct material IDs.
-  Different tint, alpha, enabled PBR maps or UV-repeat bounds keep separate regions,
-  but materials sharing the source image still keep equal content dimensions.
+  Different tint, alpha or enabled PBR maps keep separate regions. UV coverage is
+  normalized to one window per source image, so peers never disagree about which
+  tiles they bake, and materials sharing the source image keep equal dimensions.
 - The merge uses stored, approved positions; it does not repack, rotate or resize
   the finished canvas, since those operations could change manual dimensions.
 - Legacy custom canvas limits are packing constraints rather than post-resizes.

@@ -96,8 +96,9 @@ def source_signature(scene):
     Panel redraws must use distribution_ui_signature instead.
     """
     digest = hashlib.sha256()
-    # Reject approvals made before shared square-grid sampling was introduced.
-    state = ["shared-grid-v1"] + [getattr(scene, "mimi_smc_" + name) for name in SETTINGS]
+    # Reject approvals made before the exact per-axis UV window was introduced;
+    # their stored regions assume whole-tile repeats and would stretch content.
+    state = ["shared-uv-window-v2"] + [getattr(scene, "mimi_smc_" + name) for name in SETTINGS]
     selected = []
     objects = set()
     materials = set()
@@ -158,8 +159,9 @@ def distribution_ui_signature(scene):
     Deep source edits are checked by the full fingerprint at merge time.
     No draw callback synchronizes edit meshes or allocates coordinate arrays.
     """
-    # Reject approvals made before shared square-grid sampling was introduced.
-    state = ["shared-grid-v1"] + [getattr(scene, "mimi_smc_" + name) for name in SETTINGS]
+    # Reject approvals made before the exact per-axis UV window was introduced;
+    # their stored regions assume whole-tile repeats and would stretch content.
+    state = ["shared-uv-window-v2"] + [getattr(scene, "mimi_smc_" + name) for name in SETTINGS]
     # Include selection IDs without retaining live datablock references.
     state.append([(entry.ob.as_pointer() if entry.ob else 0,
                    entry.mat.as_pointer() if entry.mat else 0, entry.layer)
@@ -210,13 +212,42 @@ def prepare_sources(scene, read_only=True):
     return data, mats_uv, structure
 
 
+def shared_uv_window(scene, structure, group):
+    """Return the shared (repeat_u, repeat_v) sampling window for one family.
+
+    Every material sharing a source image must bake identical base pixels so
+    equivalent outputs can still share one packed region. The window is the
+    largest normalized UV extent in the family, applied to each axis on its own.
+
+    Two policies define that window:
+    - Crop to UV bounds (default): keep the real extent, so a 2% overshoot
+      costs 2% of a tile instead of a whole duplicated 2x2 block.
+    - Whole tiles: the historical square power-of-two grid. Tile edges stay
+      pixel aligned, but any extent above one reserves a full extra tile.
+    """
+    extents = [structure[mat]["gfx"]["uv_size"] for mat in group]
+    # UVs that only cover part of a tile still sample the whole tile.
+    extent_u = max(1.0, max(item[0] for item in extents))
+    extent_v = max(1.0, max(item[1] for item in extents))
+    if scene.mimi_smc_crop:
+        # Exact bounds: one tile plus whatever fraction the UVs really use.
+        return extent_u, extent_v
+    # Legacy whole tiles: one square grid, rounded up to powers of two.
+    repeat = 1 << (max(1, math.ceil(max(extent_u, extent_v))) - 1).bit_length()
+    return float(repeat), float(repeat)
+
+
 def prepare_shared_sampling(scene, structure):
     """Separate source aspect from UV coverage before sizing and deduplication.
 
-    A common square tile grid covers every member's normalized UV bounds.
-    The two grid axes have the same repeat count, so individual tiles and the
-    complete region both retain the original image aspect. Unused tiles are
-    deliberate: cropping to different per-material bounds prevents deduping.
+    Each source-image family gets one shared sampling window, so every member
+    bakes exactly the same repeated content and equivalent outputs can still
+    merge into one region. The window is per axis: a texture tiled twice
+    vertically does not also reserve two horizontal copies.
+
+    Cropping to UV bounds (the default) reserves only the fraction of a tile
+    that UVs actually reach. Disabling it restores the legacy whole-tile grid,
+    which is explicit but duplicates a full tile for any small overshoot.
     Preview and merge both call this adapter; neither wraps polygon corners
     with modulo, which would break triangles crossing a tile boundary.
     """
@@ -229,8 +260,8 @@ def prepare_shared_sampling(scene, structure):
     for group in groups:
         if not group:
             continue
-        extent = max(max(structure[mat]["gfx"]["uv_size"]) for mat in group)
-        repeat = 1 << (max(1, math.ceil(extent)) - 1).bit_length()
+        # One window for the whole family: peers must bake identical content.
+        window_u, window_v = shared_uv_window(scene, structure, group)
         for mat in group:
             gfx = structure[mat]["gfx"]
             image = get_image_from_material(mat)
@@ -239,6 +270,8 @@ def prepare_shared_sampling(scene, structure):
                 # UV overshoot must not turn a flat 32-square into 25x32.
                 side = 32 if scene.mimi_smc_uniform_size or scene.mimi_smc_total_size else scene.mimi_smc_diffuse_size
                 size = (layout.floor_power_of_two(side),) * 2
+                # A flat color has no tile detail; keep the region square.
+                native = (max(window_u, window_v),) * 2
             else:
                 bounds = _get_image_size(mat, image)
                 if scene.mimi_smc_uniform_size:
@@ -250,13 +283,17 @@ def prepare_shared_sampling(scene, structure):
                     # some source ratios; never report a distorted plan as valid.
                     raise ValueError(tr("Cannot preserve source aspect with power-of-two dimensions: {material}").format(
                         material=mat.name)) from exc
-                size = tuple(axis * repeat for axis in tile)
+                # Whole pixels derived from the shared window. repeat_plane
+                # crops with the same rounding, so repeated content is not
+                # resampled a second time just to fit the allocated box.
+                size = (math.ceil(tile[0] * window_u), math.ceil(tile[1] * window_v))
+                native = (source[0] * window_u, source[1] * window_v)
             # Spacing belongs outside the content, including automatic solids.
             # All callers subtract this same gap exactly once before budgeting.
             gfx["size"] = tuple(axis + scene.mimi_smc_gaps for axis in size)
             gfx["gaps"] = scene.mimi_smc_gaps
-            gfx["uv_size"] = (repeat, repeat)
-            gfx["native_extent"] = tuple(axis * repeat for axis in source)
+            gfx["uv_size"] = (window_u, window_v)
+            gfx["native_extent"] = native
 
 
 def texture_groups(structure):
@@ -343,6 +380,10 @@ def rebuild_distribution(scene, structure, sizes, fixed, fits=None):
         # Visible fields describe actual content, not blank reserved area.
         # A square source therefore never reports a stretched result after planning.
         entry.width, entry.height = content
+        # Cache the sampling window: a row above 1 bakes its source more than
+        # once. Redraws and tests read this value instead of rescanning sources.
+        window_u, window_v = structure[root]["gfx"]["uv_size"]
+        entry.uv_repeat_u, entry.uv_repeat_v = float(window_u), float(window_v)
         entry.allocation_width, entry.allocation_height = allocation
         entry.locked = any(mat in fixed for mat in group)
         if fits:

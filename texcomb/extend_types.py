@@ -11,6 +11,7 @@ from bpy.props import (
     BoolProperty,
     CollectionProperty,
     EnumProperty,
+    FloatProperty,
     FloatVectorProperty,
     IntProperty,
     PointerProperty,
@@ -226,6 +227,11 @@ class MIMISizeDistributionEntry(bpy.types.PropertyGroup):
     # Stored positions make merge execution reproduce the preview exactly.
     x: IntProperty(default=0, options={"HIDDEN"})
     y: IntProperty(default=0, options={"HIDDEN"})
+    # Sampling window in source tiles, filled only by the planner. Values above
+    # one mean this row bakes the source texture more than once, which the panel
+    # shows as a tile count so a larger atlas is never a surprise.
+    uv_repeat_u: FloatProperty(default=1.0, options={"HIDDEN"})
+    uv_repeat_v: FloatProperty(default=1.0, options={"HIDDEN"})
 
 
 class MIMICombineListEntry(bpy.types.PropertyGroup):

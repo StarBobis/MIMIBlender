@@ -56,6 +56,8 @@ TRANSLATIONS_ZH_CN = {
     "Calculate editable material sizes and validate atlas packing": "计算可编辑的材质尺寸，并验证能否排入图集",
     "Edit dimensions to lock; uncheck Fixed to restore automatic sizing": "修改宽高自动固定；取消固定恢复自动分配（尺寸不含间距）",
     "Valid distribution: {width} x {height}": "尺寸分布有效：{width} × {height}",
+    # A row above one tile bakes the source more than once; say how often.
+    "Tiled textures: {count}, up to {u} x {v} tiles": "平铺贴图：{count} 个，最多 {u} × {v} 块（图集面积随之增大）",
     "Generate or recalculate a valid size distribution before combining": "请先生成或推演有效的尺寸分布，再合并贴图",
     "Select at least two materials with valid UVs": "请至少选择两个具有有效 UV 的材质",
     "Materials changed; generate the size distribution again": "参与合并的材质已变化，请重新生成尺寸分布",

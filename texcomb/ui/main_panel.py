@@ -21,6 +21,37 @@ _INSTALL_HELP_TEXT = (
 )
 
 
+def format_tile_count(value: float) -> str:
+    """Format one sampling window axis without noisy trailing decimals.
+
+    Whole repeats read as "2"; fractional ones keep up to two decimals so a
+    1.02 overshoot is visibly small instead of looking like a whole tile.
+    """
+    text = "{:.2f}".format(value)
+    return text.rstrip("0").rstrip(".")
+
+
+def distribution_repeat_summary(scene: bpy.types.Scene):
+    """Return (tiled_rows, largest_u, largest_v) from cached row values only.
+
+    Drawing must stay cheap: this reads two floats per row and never touches
+    materials, meshes or shader nodes. It only explains why the atlas is
+    larger than one copy per source texture.
+    """
+    tiled = 0
+    largest_u = 1.0
+    largest_v = 1.0
+    for entry in scene.mimi_smc_distribution:
+        # A flat color has no tile detail and no repeated texture cost.
+        if entry.preview_solid:
+            continue
+        if entry.uv_repeat_u > 1.0 or entry.uv_repeat_v > 1.0:
+            tiled += 1
+        largest_u = max(largest_u, entry.uv_repeat_u)
+        largest_v = max(largest_v, entry.uv_repeat_v)
+    return tiled, largest_u, largest_v
+
+
 def draw_remove_unused_button(
     scn: bpy.types.Scene, layout: bpy.types.UILayout
 ) -> None:
@@ -91,7 +122,16 @@ class MIMISMC_UL_SizeDistribution(bpy.types.UIList):
             thumbnail.label(text="", icon_value=icon_id)
         else:
             thumbnail.label(text="", icon="MATERIAL")
-        name_cell.label(text=item.mat.name if item.mat else tr("Missing Material"))
+        name_text = item.mat.name if item.mat else tr("Missing Material")
+        # A flat color has no tile detail, so it never shows a repeat marker.
+        if not item.preview_solid and (item.uv_repeat_u > 1.0 or item.uv_repeat_v > 1.0):
+            # Tiled rows bake the source more than once; show the cost inline
+            # so a larger atlas is explained before the merge runs.
+            name_text += "  [{}x{}]".format(
+                format_tile_count(item.uv_repeat_u),
+                format_tile_count(item.uv_repeat_v),
+            )
+        name_cell.label(text=name_text)
         count_cell.label(text="×{}".format(len(item.members)) if len(item.members) > 1 else "")
         # Separate dimension cells always have equal width on every visible row.
         fixed.prop(item, "locked", text=tr("Fixed"))
@@ -346,6 +386,17 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
                 box.template_list("MIMISMC_UL_SizeDistribution", "size_distribution", scene,
                                   "mimi_smc_distribution", scene, "mimi_smc_distribution_index",
                                   rows=6, maxrows=8)
+                # Tiled rows bake their source image more than once. Explain
+                # that cost next to the list instead of hiding it in the atlas.
+                tiled_rows, largest_u, largest_v = distribution_repeat_summary(scene)
+                if tiled_rows:
+                    box.label(
+                        text=tr("Tiled textures: {count}, up to {u} x {v} tiles").format(
+                            count=tiled_rows,
+                            u=format_tile_count(largest_u),
+                            v=format_tile_count(largest_v)),
+                        icon="INFO",
+                    )
                 # The selected row gets a larger preview below the scroll list.
                 # This keeps every row compact while making textures recognizable.
                 index = scene.mimi_smc_distribution_index

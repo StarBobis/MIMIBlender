@@ -9,7 +9,8 @@ Synthetic mode additionally composes an atlas and measures remapped UVs.
 Acceptance boundaries:
 - Preview generation never changes mesh coordinates.
 - All unlocked rows preserve original image proportions exactly.
-- Both dimensions must be powers of two, even with external spacing.
+- Single-tile rows keep power-of-two dimensions, even with external spacing.
+- Tiled rows reserve only the UV extent they use and stay proportional per tile.
 - Two materials sharing an image but not UV bounds consume one region.
 - Cross-tile polygons remain continuous; their corners are never modulo-wrapped.
 - Negative UV tiles are normalized only during the actual merge.
@@ -43,15 +44,29 @@ def check_plan(planner, scene):
     Return a primitive snapshot, because Blender RNA rows are replaced on
     recalculation and retaining old row wrappers would invalidate comparisons.
     A readable texture supplies the ratio; plain colors have no source aspect.
+    A row that samples beyond one tile keeps the source aspect inside its tile,
+    so the visible region may be any size while each baked tile stays square.
     """
     # Compare exact integer ratios so rounding cannot mask a distortion.
     rows = list(scene.mimi_smc_distribution)
     assert rows and not any(row.locked for row in rows)
     for row in rows:
-        assert all(axis > 0 and axis & (axis - 1) == 0 for axis in (row.width, row.height))
+        assert row.width > 0 and row.height > 0
+        repeat_u = max(row.uv_repeat_u, 1.0)
+        repeat_v = max(row.uv_repeat_v, 1.0)
+        if repeat_u == 1.0 and repeat_v == 1.0:
+            # A single-tile row keeps the power-of-two region contract.
+            assert all(axis & (axis - 1) == 0 for axis in (row.width, row.height))
         image = planner.get_image_from_material(row.mat)
         if image and planner.get_packed_file(image):
-            assert row.width * image.size[1] == row.height * image.size[0], row.mat.name
+            if repeat_u == 1.0 and repeat_v == 1.0:
+                assert row.width * image.size[1] == row.height * image.size[0], row.mat.name
+            else:
+                # Exact crop: the tile inside a tiled region keeps its aspect
+                # within integer rounding, so measure the per-tile scale.
+                scale_u = (row.width / repeat_u) / image.size[0]
+                scale_v = (row.height / repeat_v) / image.size[1]
+                assert abs(scale_u - scale_v) <= 0.02 * max(scale_u, scale_v), row.mat.name
     return [(row.mat.name, row.width, row.height, row.x, row.y) for row in rows]
 
 
@@ -148,7 +163,8 @@ def verify_synthetic(planner):
     assert bpy.ops.mimi.generate_size_distribution() == {"FINISHED"}
     baseline = check_plan(planner, scene)
     assert len(baseline) == 1
-    assert baseline[0][1:3] == (128, 128)
+    # One tile wide, 6.8125 tiles tall: 16 x 109 pixels, not an 8x8 grid.
+    assert baseline[0][1:3] == (16, 109)
     assert len(scene.mimi_smc_distribution[0].members) == 2
     # Automatic updates must reset callback-induced locks before returning.
     scene.mimi_smc_distribution[0].width = 65
@@ -157,15 +173,16 @@ def verify_synthetic(planner):
     assert snapshot(objects) == before
     assert tuple(image.size) == (16, 16)
     # Recalculation starts from native preferences, not the last reduced plan.
-    scene.mimi_smc_total_width = scene.mimi_smc_total_height = 128
+    scene.mimi_smc_total_width = scene.mimi_smc_total_height = 64
     assert bpy.ops.mimi.generate_size_distribution(recalculate=True) == {"FINISHED"}
     check_plan(planner, scene)
-    assert scene.mimi_smc_distribution[0].width == 64
+    assert scene.mimi_smc_distribution[0].width == 8
     scene.mimi_smc_total_width = scene.mimi_smc_total_height = 256
     assert bpy.ops.mimi.generate_size_distribution(recalculate=True) == {"FINISHED"}
     assert check_plan(planner, scene) == baseline
     _, _, structure = planner.prepare_sources(scene)
-    assert structure[first]["gfx"]["uv_size"] == structure[second]["gfx"]["uv_size"] == (8, 8)
+    # Exact-crop windows are per axis; both peers share the same window.
+    assert structure[first]["gfx"]["uv_size"] == structure[second]["gfx"]["uv_size"] == (1.0, 6.8125)
     planner.apply_distribution(scene, structure)
     assert len(structure) == 1
     # Compare packed source bytes to real final atlas samples, including a face

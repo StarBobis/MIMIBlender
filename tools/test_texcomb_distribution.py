@@ -187,7 +187,8 @@ def main():
         def template_icon(self, **kwargs):
             self.icons.append(kwargs["icon_value"])
     preview_item = SimpleNamespace(mat=objects[0][1], preview_image=SimpleNamespace(
-        preview=SimpleNamespace(icon_id=123), name="test_texture"), members=[], preview_solid=False)
+        preview=SimpleNamespace(icon_id=123), name="test_texture"), members=[], preview_solid=False,
+        uv_repeat_u=1.0, uv_repeat_v=1.0)
     recorder = PreviewLayout()
     with patch.object(planner, "prepare_distribution_previews", side_effect=AssertionError("Preview creation during redraw")):
         MIMISMC_UL_SizeDistribution.draw_item(None, bpy.context, recorder, scene, preview_item, 0, scene, "mimi_smc_distribution_index", 0)

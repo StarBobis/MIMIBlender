@@ -97,9 +97,9 @@ def run_case(crop, strategy, limited=False, uniform=False, pixel_art=False, cust
     scene.mimi_smc_original_size = False
     scene.mimi_smc_total_size = budget
     if budget:
-        # Square repeat envelopes need more area than the old cropped strips.
-        # This budget still forces reduction, while retaining eight texels per
-        # tile so the source-pixel tolerance remains a useful mapping check.
+        # Exact-crop envelopes are far smaller than the old square grids, so
+        # this ceiling verifies a tall plan stays inside the budget. Forced
+        # reduction itself is covered by the dedicated distribution suite.
         scene.mimi_smc_total_width = 128
         scene.mimi_smc_total_height = 128
     scene.mimi_smc_uniform_size_value = 128
@@ -115,8 +115,12 @@ def run_case(crop, strategy, limited=False, uniform=False, pixel_art=False, cust
     path = next(os.path.join(directory, n) for n in os.listdir(directory) if n.endswith(".png"))
     atlas = Image.open(path).convert("RGBA")
     if uniform:
-        # Automatic atlases must be square or landscape, including tall repeats.
-        assert atlas.width >= atlas.height, atlas.size
+        # Exact-crop regions reserve only the UV extent, so a vertical tiling
+        # may legitimately produce a portrait canvas. Whole-tile mode still
+        # needs three 128 x 128 squares. Bound the area instead of the shape:
+        # 256 x 256 fits every fixture and rejects a duplicated-tile blowup.
+        assert atlas.width * atlas.height <= 256 * 256, (
+            crop, strategy, limited, pixel_art, tall, budget, atlas.size)
     checks = 0
     for obj, source, original in cases:
         assert len(obj.data.materials) == 1
