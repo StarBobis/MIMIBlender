@@ -55,7 +55,6 @@ _STATE = {
 }
 _CANCEL = threading.Event()
 _WORKER = None
-_TIMER_ON = False
 _ON_DONE = [None]
 
 # Job states reported by the node UI.
@@ -568,7 +567,6 @@ def _worker(jobs, cache):
 
 def _timer_tick():
     """Main-thread poll: update progress, detect completion, finalise the UI."""
-    global _TIMER_ON
     with _STATE_LOCK:
         running = bool(_STATE["running"])
         done = int(_STATE["done"])
@@ -581,7 +579,6 @@ def _timer_tick():
         return TIMER_INTERVAL
 
     # The worker has finished: finalise the UI exactly once.
-    _TIMER_ON = False
     _progress_end()
     _tag_node_editors()
     if cancelled:
@@ -615,7 +612,7 @@ def start_conversion(jobs, on_done=None):
     Jobs whose source already matches the original are skipped, so pressing
     Convert twice is harmless. Returns 0 when nothing needs conversion.
     """
-    global _WORKER, _TIMER_ON
+    global _WORKER
     if is_running():
         return 0
     ensure_configured()
@@ -654,8 +651,9 @@ def start_conversion(jobs, on_done=None):
         target=_worker, args=(prepared, cache), name="MIMITextureFormat", daemon=True,
     )
     _WORKER.start()
-    if not _TIMER_ON:
-        _TIMER_ON = True
+    # Prefer the live registration check: a file load can purge timers, and a
+    # stale local flag would then silently stop future progress updates.
+    if not bpy.app.timers.is_registered(_timer_tick):
         bpy.app.timers.register(_timer_tick, first_interval=TIMER_INTERVAL, persistent=True)
     return len(prepared)
 
