@@ -292,6 +292,31 @@ class SkeletonHelper:
         return {int(index): str(name) for index, name in (character.get("BoneMap") or {}).items()}
 
     @classmethod
+    def drawib_map(cls, draw_ib, character):
+        """Numeric group -> bone name for one DrawIB.
+
+        A mod that rebuilt some of its meshes indexes each DrawIB's palette
+        separately, so the DrawIB map wins and the character map is only the
+        fallback for sidecars written before that table existed.
+        """
+        own = (draw_ib or {}).get("BoneMap") or {}
+        if own:
+            return {str(index): str(name) for index, name in own.items()}
+        return {str(index): str(name) for index, name in (character.get("BoneMap") or {}).items()}
+
+    @staticmethod
+    def palettes_conflict(mappings):
+        """True when two numeric palettes of one character disagree."""
+        seen = {}
+        for mapping in mappings:
+            for index, name in mapping.items():
+                previous = seen.get(index)
+                if previous is not None and previous != name:
+                    return True
+                seen[index] = name
+        return False
+
+    @classmethod
     def rename_bones_to_groups(cls, character, armature_obj, original_names, final_names):
         """BONE_TO_GROUP: bones take the game palette numbers stored in the groups.
 
@@ -373,6 +398,25 @@ class SkeletonHelper:
                 obj.matrix_world = world
             bound += 1
         return bound
+
+    @staticmethod
+    def count_unbound_groups(armature_obj, mesh_objects):
+        """Weighted vertex groups whose name matches no bone.
+
+        Those vertices keep their rest position whatever the armature does, so a
+        non-zero count is the shortest honest signal that a binding is incomplete.
+        """
+        bone_names = {bone.name for bone in armature_obj.data.bones}
+        meshes = 0
+        groups = 0
+        for obj in mesh_objects:
+            if obj is None or getattr(obj, "type", "") != "MESH":
+                continue
+            missing = [name for name in SkeletonHelper.collect_weighted_group_names([obj]) if name not in bone_names]
+            if missing:
+                meshes += 1
+                groups += len(missing)
+        return meshes, groups
 
     @staticmethod
     def collect_weighted_group_names(objects):
@@ -550,11 +594,12 @@ class SkeletonHelper:
         space_scale = float(space.get("Scale", 1.0) or 1.0)
         space_rotation_z = float(space.get("RotationZ", 0.0) or 0.0)
 
-        armatures = {}
-        bound_counts = {}
-        # Every mesh bound to an armature must be known when its bones are
-        # cleaned: a bone may be used by only one of the character's parts.
-        armature_meshes = {}
+        # Resolve every group before touching the scene. One armature serves a
+        # whole character, so the naming mode has to be chosen once for that
+        # character: renaming bones to numbers for one DrawIB and groups to bone
+        # names for the next left one of them pointing at no bone at all.
+        plans = []
+        palettes = {}
         for draw_ib_name, objects in groups.items():
             meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
             if not meshes:
@@ -565,24 +610,49 @@ class SkeletonHelper:
             character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
             if character is None:
                 continue
-            # WWMI components each carry their own numeric palette, so a single
-            # armature cannot be renamed to every component's numbers. Keep the
-            # bone names and rename each component's groups instead.
             components = draw_ib.get("Components") or []
-            component_mode = bool(components)
-            if component_mode:
-                # Whole-IB recovery meshes overlap several local palettes and
-                # cannot be bound through one aggregate map. Preserve their
-                # geometry, but do not report them as successfully bound parts.
-                identified = [mesh for mesh in meshes if cls.pick_component(components, mesh.name)]
-                skipped = len(meshes) - len(identified)
-                if skipped:
-                    print("Skeleton binding skipped " + str(skipped) + " mesh(es) without component identity")
-                meshes = identified
-                if not meshes:
-                    continue
-            effective_naming = NAMING_GROUP_TO_BONE if component_mode else naming_mode
+            fallback = cls.drawib_map(draw_ib, character)
+            # A DrawIB with declared components may still carry meshes without a
+            # component identity (whole-buffer recovery parts); those keep the
+            # DrawIB palette instead of being dropped from the binding.
+            component_maps = [entry.get("BoneMap") or {} for entry in components if entry.get("BoneMap")]
+            maps = [mapping for mapping in component_maps if mapping] or [fallback]
             key = str(character.get("Id", ""))
+            palettes.setdefault(key, []).extend(maps)
+            plans.append(
+                {
+                    "key": key,
+                    "draw_ib": draw_ib,
+                    "character": character,
+                    "meshes": meshes,
+                    "components": components,
+                    "fallback": fallback,
+                }
+            )
+
+        if not plans:
+            return ""
+
+        # Several palettes cannot be expressed by renaming one armature, so such
+        # a character always binds through group names.
+        group_mode = {}
+        for key, mappings in palettes.items():
+            group_mode[key] = bool([entry for entry in plans if entry["key"] == key and entry["components"]])
+            if not group_mode[key] and cls.palettes_conflict(mappings):
+                group_mode[key] = True
+
+        armatures = {}
+        bound_counts = {}
+        skipped_meshes = 0
+        # Every mesh bound to an armature must be known when its bones are
+        # cleaned: a bone may be used by only one of the character's parts.
+        armature_meshes = {}
+        for plan in plans:
+            key = plan["key"]
+            character = plan["character"]
+            draw_ib = plan["draw_ib"]
+            meshes = plan["meshes"]
+            effective_naming = NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_mode
             if key not in armatures:
                 # A non-mirrored workflow bakes an X reflection into the imported
                 # mesh; the armature must receive the same reflection or bones
@@ -595,21 +665,36 @@ class SkeletonHelper:
                     continue
                 armatures[key] = (armature_obj, final_names, original_names, character)
             armature_obj, final_names, original_names, character = armatures[key]
-            if component_mode:
+            if effective_naming == NAMING_BONE_TO_GROUP:
+                cls.rename_bones_to_groups(character, armature_obj, original_names, final_names)
+                bindable = meshes
+            else:
                 by_original = {}
                 for original, final in zip(original_names, final_names):
                     by_original.setdefault(original, final)
+                bindable = []
                 for mesh in meshes:
-                    entry = cls.pick_component(components, mesh.name)
-                    mapping = (entry or {}).get("BoneMap") or draw_ib.get("BoneMap") or {}
-                    cls.rename_groups_with_map([mesh], mapping, by_original)
-            elif naming_mode == NAMING_BONE_TO_GROUP:
-                cls.rename_bones_to_groups(character, armature_obj, original_names, final_names)
-            elif naming_mode == NAMING_GROUP_TO_BONE:
-                cls.rename_groups_to_bones(character, meshes, original_names, final_names)
-            cls.bind(meshes, armature_obj)
-            bound_counts[key] = bound_counts.get(key, 0) + len(meshes)
-            armature_meshes.setdefault(key, []).extend(meshes)
+                    entry = cls.pick_component(plan["components"], mesh.name)
+                    if plan["components"] and entry is None:
+                        # A declared component table means each component owns an
+                        # independent palette; a whole-buffer recovery mesh
+                        # cannot be resolved and must keep its raw geometry.
+                        skipped_meshes += 1
+                        continue
+                    mapping = (entry or {}).get("BoneMap") or plan["fallback"]
+                    if mapping:
+                        cls.rename_groups_with_map([mesh], mapping, by_original)
+                    bindable.append(mesh)
+            cls.bind(bindable, armature_obj)
+            bound_counts[key] = bound_counts.get(key, 0) + len(bindable)
+            armature_meshes.setdefault(key, []).extend(bindable)
+
+        if skipped_meshes:
+            print(
+                "Skeleton binding skipped "
+                + str(skipped_meshes)
+                + " mesh(es) without component identity"
+            )
 
         summaries = []
         cleanup_notes = []
@@ -653,5 +738,18 @@ class SkeletonHelper:
                 + str(bound_counts.get(key, 0))
                 + " meshes)"
             )
+            unbound_meshes, unbound_groups = cls.count_unbound_groups(
+                armature_obj, armature_meshes.get(key, [])
+            )
+            if unbound_meshes:
+                summaries.append(
+                    "Skeleton "
+                    + character_name
+                    + ": "
+                    + str(unbound_groups)
+                    + " weighted group(s) in "
+                    + str(unbound_meshes)
+                    + " mesh(es) match no bone"
+                )
         summaries.extend(cleanup_notes)
         return " | ".join(summaries)
