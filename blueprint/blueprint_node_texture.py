@@ -28,6 +28,7 @@ Texture sources:
             one resource between several objects).
 '''
 import re
+import time
 
 import bpy
 from bpy.types import PropertyGroup
@@ -36,6 +37,31 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
 from ..common.global_config import GlobalConfig
 from ..common.gimi_texture_slots import get_gimi_texture_slot
+from ..common.texture_output_naming import (
+    INDEX_PLACEHOLDER,
+    file_resource_stem,
+    normalize_alias_stem,
+    shared_slot_output_filename,
+    slot_mark_output_filename,
+)
+from .texture_format_widgets import (
+    DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
+    draw_convert_all as _draw_convert_all,
+    draw_node_progress as _draw_node_progress,
+    draw_row_controls as _draw_row_controls,
+    format_mode_items as _format_mode_items,
+    manual_format_items as _manual_format_items,
+    predicted_suffix,
+)
+from .texture_output_widgets import (
+    alias_suffix_note,
+    display_suffix,
+    draw_file_missing_warning,
+    draw_generated_name,
+    draw_rename_box,
+    first_hint,
+    upstream_draw_ib_hints,
+)
 
 # 3Dmigoto texture slot syntax: shader stage (ps/vs/gs/hs/ds/cs) + binding
 # type (t/s/b/u) + register number, written lowercase by convention.
@@ -67,10 +93,15 @@ def _texture_slot_item_refresh_display(item):
     # Known GIMI MARK rows target an API semantic, not the captured ps-t slot.
     logical_slot = _gimi_mark_slot(item)
     restore_suffix = " (+restore)" if getattr(item, "restore_after_draw", False) and not logical_slot else ""
-    item.name = "{slot} <- {source}{suffix}".format(
+    # A row the user renamed shows its new file name, so the list itself
+    # already tells which binding owns which generated texture.
+    alias_stem = normalize_alias_stem(getattr(item, "output_name", ""))
+    alias_suffix = " -> " + alias_stem if alias_stem else ""
+    item.name = "{slot} <- {source}{suffix}{alias}".format(
         slot=logical_slot or str(getattr(item, "slot", "") or "").strip() or "?",
         source=source,
         suffix=restore_suffix,
+        alias=alias_suffix,
     )
 
 
@@ -122,6 +153,37 @@ class MIMITextureSlotItem(PropertyGroup):
     resource_name: bpy.props.StringProperty(
         name=tr("Resource Name"),
         description=tr("Name of an existing [ResourceXXX] section, e.g. ResourceMySharedTexture"),
+        default="",
+        update=lambda self, context: _texture_slot_item_refresh_display(self),
+    ) # type: ignore
+
+    format_mode: bpy.props.EnumProperty(
+        name=tr("Format Source"),
+        description=tr("Auto follows the format of the captured original texture; Manual applies the format selected below when no original can be resolved"),
+        items=_format_mode_items,
+        # Blender only accepts an integer default when ``items`` is a callback;
+        # index 0 is the 'AUTO' entry the callback returns first.
+        default=0,
+        update=lambda self, context: _texture_slot_item_refresh_display(self),
+    ) # type: ignore
+
+    manual_format: bpy.props.EnumProperty(
+        name=tr("Target Format"),
+        description=tr("DXGI format written by texconv when the format source is Manual"),
+        items=_manual_format_items,
+        # Same rule: a callback based enum list requires an integer index.
+        default=0,
+    ) # type: ignore
+
+    force_original_size: bpy.props.BoolProperty(
+        name=tr("Force Original Resolution"),
+        description=tr("Resize the replacement to the captured texture resolution instead of keeping its own size"),
+        default=False,
+    ) # type: ignore
+
+    output_name: bpy.props.StringProperty(
+        name=tr("Rename To"),
+        description=tr("Leave empty to keep the generated file name shown above; fill in to rename the generated texture file (the image format suffix stays)"),
         default="",
         update=lambda self, context: _texture_slot_item_refresh_display(self),
     ) # type: ignore
@@ -232,6 +294,94 @@ def _texture_slot_item_mark_changed(item):
     _texture_slot_item_refresh_display(item)
 
 
+# Reading the marks of a Submesh opens a JSON file, and Blender redraws a node
+# on every mouse move, so the preview keeps a very short cache instead of
+# hitting the disk dozens of times per second.
+_MARK_DICT_CACHE = {}
+_MARK_DICT_CACHE_TTL_SECONDS = 2.0
+_MARK_DICT_CACHE_LIMIT = 16
+
+
+def invalidate_mark_cache():
+    '''Drop the cached marks; a Refresh / Auto Fill press means the data changed.'''
+    _MARK_DICT_CACHE.clear()
+
+
+def _cached_submesh_mark_dicts(submesh_name):
+    '''Return the mark dicts of one Submesh, cached for the node preview.'''
+    name = str(submesh_name or "").strip()
+    if not name:
+        return []
+    now = time.monotonic()
+    cached = _MARK_DICT_CACHE.get(name)
+    if cached is not None and now - cached[0] < _MARK_DICT_CACHE_TTL_SECONDS:
+        return cached[1]
+    try:
+        mark_dict_list = _load_submesh_mark_dicts(name)
+    except Exception:
+        # A missing or half-written Submesh JSON must not break the node.
+        mark_dict_list = []
+    if len(_MARK_DICT_CACHE) >= _MARK_DICT_CACHE_LIMIT:
+        _MARK_DICT_CACHE.clear()
+    _MARK_DICT_CACHE[name] = (now, mark_dict_list)
+    return mark_dict_list
+
+
+def _slot_row_output_name(node, item):
+    '''Return how one Slot Texture Bind row names its generated file.
+
+    The result is ``(generated_name, suffix, suffix_is_certain, can_rename,
+    disabled_reason)``.  ``generated_name`` is the exact name the export writes
+    while the alias field is empty; every part of it comes from the same helper
+    the exporter calls, so the node can never show a name that export ignores.
+    '''
+    # Known GIMI marks are submitted to the game API by name; no file exists.
+    if _gimi_mark_slot(item):
+        return (
+            "", ".dds", True, False,
+            tr("GIMI submits this slot by name, so no texture file is generated"),
+        )
+
+    source_type = str(getattr(item, "source_type", "") or "")
+    object_name, draw_ib = first_hint(upstream_draw_ib_hints(node))
+    slot_token = str(getattr(item, "slot", "") or "").strip().lower().replace("-", "_") or "texture"
+
+    if source_type == 'FILE':
+        source_path = str(getattr(item, "file_path", "") or "").strip()
+        # The preview must show the converted .dds name whenever a capture is
+        # resolved, so it asks the same lookup the status line uses.
+        suffix, suffix_is_certain = predicted_suffix(node, item, source_path)
+        return file_resource_stem(draw_ib, object_name, slot_token) + suffix, suffix, suffix_is_certain, True, ""
+
+    if source_type == 'MARK':
+        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+        submesh_name = _resolve_upstream_submesh_name(node)
+        matched_mark = None
+        for mark_dict in _cached_submesh_mark_dicts(submesh_name):
+            if mark_dict["name"].lower() == mark_name.lower():
+                matched_mark = mark_dict
+                break
+        if not mark_name or matched_mark is None:
+            # Nothing is generated before the user picks a mark.
+            return "", ".dds", True, True, tr("Pick a marked texture to see the generated file name")
+        # A shared marked texture keeps the hash name; a plain Slot mark is
+        # named after its Submesh position, which only export can decide.
+        if str(matched_mark.get("type", "")) == "SharedSlot":
+            generated_name = shared_slot_output_filename(matched_mark.get("hash", ""), matched_mark["name"])
+        else:
+            generated_name = slot_mark_output_filename(draw_ib, INDEX_PLACEHOLDER, matched_mark["name"])
+        suffix, suffix_is_certain = display_suffix(
+            getattr(item, "format_mode", "AUTO"), matched_mark.get("filename", ""),
+        )
+        return generated_name, suffix, suffix_is_certain, True, ""
+
+    # Anything else references an existing resource and creates no file.
+    return (
+        "", ".dds", True, False,
+        tr("This row reuses an existing resource, so no texture file is generated"),
+    )
+
+
 def _texture_bind_mark_name_items(item):
     '''Enum items for the mark name dropdown: marks of the upstream Submesh.'''
     empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
@@ -332,6 +482,10 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
             self.report({'ERROR'}, tr("Upstream Submesh not resolved; set the Submesh on the upstream Object Info node first"))
             return {'CANCELLED'}
 
+        # The user is about to read freshly marked textures; drop the preview
+        # cache so the generated names follow the new marks immediately.
+        invalidate_mark_cache()
+
         # Rows already referencing a mark are kept untouched; the operator
         # only appends what is missing, so it is safe to press repeatedly.
         existing_names = set()
@@ -398,6 +552,10 @@ class MIMINode_Texture_Bind(MIMINodeBase):
     def draw_buttons(self, context, layout):
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
 
+        # A running exact-format batch is global, so its progress is shown at
+        # the top of the node even while the user edits another row.
+        _draw_node_progress(layout)
+
         row = layout.row()
         # The list shows the compact one-line summary of every binding row.
         # The list id must be unique per node: the uiList runtime state
@@ -451,6 +609,15 @@ class MIMINode_Texture_Bind(MIMINodeBase):
                 box.label(text=tr("Upstream Submesh not resolved; mark names unavailable"), icon='ERROR')
         elif source_type == 'FILE':
             box.prop(item, "file_path")
+            # Exact-format conversion controls. Auto matches the captured
+            # original; Manual is the explicit fallback for slots without one.
+            format_row = box.row(align=True)
+            format_row.prop(item, "format_mode", text="")
+            if str(item.format_mode) == 'MANUAL':
+                format_row.prop(item, "manual_format", text="")
+            box.prop(item, "force_original_size")
+            # Detected original format, readiness and the per-row Convert button.
+            _draw_row_controls(box, self, item, index, tree)
         else:
             box.prop(item, "resource_name")
 
@@ -458,6 +625,24 @@ class MIMINode_Texture_Bind(MIMINodeBase):
             # Physical connected slots always restore their captured state.
             # Keep the old RNA field for saved files, but do not offer a leak mode.
             box.label(text='Draw-local binding: always restores after draw')
+
+        # Show the file name this row will produce and let the user rename it.
+        # Every value comes from the shared naming helpers, so the displayed
+        # name is the name the export writes.
+        generated_name, suffix, suffix_is_certain, can_rename, disabled_reason = _slot_row_output_name(self, item)
+        notes = []
+        if len(upstream_draw_ib_hints(self)) > 1:
+            notes.append(tr("One file per object; the first object is shown"))
+        suffix_note = alias_suffix_note(suffix_is_certain)
+        if suffix_note:
+            notes.append(suffix_note)
+        draw_generated_name(box, generated_name, certainty_note=" | ".join(notes))
+        draw_rename_box(
+            box, item, suffix, generated_name,
+            allow_rename=can_rename, disabled_reason=disabled_reason,
+        )
+        if source_type == 'FILE':
+            draw_file_missing_warning(box, item.file_path)
 
         # Early slot format feedback; the export pass validates again and
         # raises a hard error so a typo can never reach the generated INI.
@@ -467,6 +652,10 @@ class MIMINode_Texture_Bind(MIMINodeBase):
 
         active_count = len([row_item for row_item in self.texture_slot_items if row_item.enabled])
         layout.label(text=tr("{count} slot binding(s)").format(count=active_count), icon='TEXTURE')
+
+        # One click prepares every replacement of this node in the background,
+        # so a later Generate Mod only has to copy finished files.
+        _draw_convert_all(layout, self, tree)
 
 
 classes = (

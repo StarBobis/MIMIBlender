@@ -5,7 +5,12 @@ The shared draw writer places defaults below local overrides for all exporters.
 """
 from .gimi_texture_slots import get_gimi_texture_slot
 from .global_config import GlobalConfig
-from ..texcomb.core.dds_match import DDSReplacementStage
+from .texture_output_naming import (
+    alias_output_filename_with_suffix,
+    ensure_ini_encodable,
+    global_slot_output_filename,
+)
+from ..texcomb.core.dds_match import DDSReplacementStage, prepare_replacement_job
 
 
 def collect_global_slots(tree):
@@ -39,7 +44,9 @@ def collect_global_slots(tree):
                     submesh, mark, original = marks[item.identity]
                     rows.append(dict(submesh=submesh, slot=mark['slot'], mark_name=mark['name'],
                                      original_path=original, file_path=__import__('bpy').path.abspath(item.file_path),
-                                     force_original_size=item.force_original_size))
+                                     force_original_size=item.force_original_size,
+                                     # The node's alias renames the generated file.
+                                     output_name=str(getattr(item, 'output_name', '') or '')))
             if node.bl_idname == 'SSMTBlueprintGroupNode':
                 visit(getattr(node, 'node_tree', None))
     visit(tree)
@@ -53,12 +60,17 @@ def apply_global_slots(model, rows):
     # Jobs are attached to this model for the later staged texture-copy pass.
     # Explicit bindings work even when automatic texture output is disabled.
     selected = [row for row in rows if any(sm.submesh_name == row['submesh'] for sm in model.submesh_model_list)]
-    model.exact_texture_jobs = {}
+    # Keep jobs already registered by the Slot and Hash binding resolvers;
+    # replacing the dict here used to erase their exact-format conversions.
+    jobs = getattr(model, 'exact_texture_jobs', None)
+    if not isinstance(jobs, dict):
+        jobs = {}
+        model.exact_texture_jobs = jobs
     # Preflight every image before registering any generated file or resource.
     # Copying happens later through the same exporter-local namespace pipeline.
     with DDSReplacementStage() as stage:
         for row in selected:
-            stage.prepare(row['file_path'], row['original_path'], row['force_original_size'])
+            prepare_replacement_job(stage, row['file_path'], row)
     # GIMI aliases are normalized before checking duplicate ownership.
     # Two labels for one semantic input still conflict within one Submesh.
     # Physical slots use the validated register spelling as their ownership key.
@@ -80,7 +92,19 @@ def apply_global_slots(model, rows):
         # Every generated target is DDS, regardless of replacement extension.
         # The copy stage uses the original metadata recorded in the job.
         resource = 'ResourceGlobalSlot_' + model._object_texture_resource_slug(model.draw_ib, 16) + '_' + str(index)
-        filename = resource + '.dds'
+        # The generated default name comes from the shared naming module, so the
+        # node UI shows exactly the file the export writes.
+        filename = global_slot_output_filename(model.draw_ib, index)
+        # The copy stage always converts to DDS, so an alias is always .dds.
+        alias_name = alias_output_filename_with_suffix(row.get('output_name', ''), '.dds')
+        if alias_name:
+            ensure_ini_encodable(
+                alias_name,
+                "Texture alias '" + str(row.get('output_name', '') or "") + "' of Global Slot Texture Bind",
+            )
+            # Only the file name changes; the resource identity stays unique so
+            # two rows can never claim the same binding slot.
+            filename = alias_name
         model.object_texture_binding_resource_list.append((resource, filename))
         model.object_texture_binding_file_list.append((resource, row['file_path'], filename))
         model.exact_texture_jobs[resource] = row

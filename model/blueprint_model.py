@@ -631,6 +631,8 @@ class BluePrintModel:
                                 "mark_source_file_path": str(getattr(item, "mark_source_file_path", "") or ""),
                                 "mark_slot": str(getattr(item, "mark_source_slot", "") or "").strip().lower(),
                                 "resource_name": str(getattr(item, "resource_name", "") or ""),
+                                # Optional user alias: the generated file is renamed.
+                                "output_name": str(getattr(item, "output_name", "") or ""),
                                 "node_label": node_label,
                             })
 
@@ -666,6 +668,13 @@ class BluePrintModel:
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "restore_after_draw": bool(getattr(item, "restore_after_draw", False)),
+                # Exact-format controls: AUTO follows the captured original,
+                # MANUAL is the explicit fallback when no capture is available.
+                "format_mode": str(getattr(item, "format_mode", "AUTO") or "AUTO").strip().lower(),
+                "manual_format": str(getattr(item, "manual_format", "") or "").strip(),
+                "force_original_size": bool(getattr(item, "force_original_size", False)),
+                # Optional user alias: the generated texture file is renamed.
+                "output_name": str(getattr(item, "output_name", "") or ""),
                 "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Slot Texture Bind"),
             })
         return bindings
@@ -722,6 +731,12 @@ class BluePrintModel:
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "legacy_slotless": bool(getattr(bind_node, "legacy_slotless", False)),
+                # Exact-format controls shared with the Slot Texture Bind node.
+                "format_mode": str(getattr(item, "format_mode", "AUTO") or "AUTO").strip().lower(),
+                "manual_format": str(getattr(item, "manual_format", "") or "").strip(),
+                "force_original_size": bool(getattr(item, "force_original_size", False)),
+                # Optional user alias: the generated texture file is renamed.
+                "output_name": str(getattr(item, "output_name", "") or ""),
                 "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Hash Texture Bind"),
             })
         return bindings
@@ -1130,6 +1145,10 @@ class BluePrintModel:
         Parse a DrawIBModel list out of the current BluePrintModel.
         Intended for games that need several SubMeshes combined into a single exported DrawIB.
         """
+        # Install the conversion cache before any resolver runs, so repeated
+        # conversions of the same image stay cheap for the whole export.
+        from ..common.texture_format_service import ensure_configured
+        ensure_configured()
         drawib_model_list: list[DrawIBModel] = []
         draw_ib_submesh_model_list_dict: dict[str, list[SubMeshModel]] = {}
 
@@ -1169,4 +1188,7 @@ class BluePrintModel:
             None, self.global_hash_texture_binding_list,
             {model.draw_ib: model for model in drawib_model_list}, preflight_only=True,
         )
+        # Convert every Slot/Hash replacement before any output file is opened.
+        # The copy stage repeats this through the cache, so it stays cheap.
+        M_IniHelper.prepare_exact_texture_jobs(drawib_model_list)
         return drawib_model_list

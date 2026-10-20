@@ -131,6 +131,7 @@ def load_real_modules():
         (TEST_PKG + ".common.m_ini_builder", "common/m_ini_builder.py"),
         (TEST_PKG + ".common.m_control_flow", "common/m_control_flow.py"),
         (TEST_PKG + ".common.texture_naming", "common/texture_naming.py"),
+        (TEST_PKG + ".common.texture_output_naming", "common/texture_output_naming.py"),
         (TEST_PKG + ".utils.mmt_error_utils", "utils/mmt_error_utils.py"),
         (TEST_PKG + ".utils.json_utils", "utils/json_utils.py"),
         (TEST_PKG + ".model.draw_call_model", "model/draw_call_model.py"),

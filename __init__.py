@@ -35,6 +35,8 @@ from .ui import ui_panel_mmd
 
 from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_object_list
+# Shared exact-format UI/operators must register before the texture nodes draw.
+from .blueprint import texture_format_widgets
 from .blueprint import blueprint_node_texture
 from .blueprint import blueprint_node_hash_texture
 # Socketless Slot defaults register independently of connected texture nodes.
@@ -121,6 +123,8 @@ def _register_steps():
     yield blueprint_node_obj.register
     # Object List keeps many objects in one collapsible fan-out node.
     yield blueprint_node_object_list.register
+    # Textures register their shared exact-format operators before the nodes.
+    yield texture_format_widgets.register
     # Texture Bind node and its PropertyGroup register right after the base object nodes.
     yield blueprint_node_texture.register
     yield blueprint_node_hash_texture.register
@@ -183,6 +187,7 @@ def unregister():
         blueprint_node_texture.unregister,
         blueprint_node_global_slot.unregister,
         blueprint_node_hash_texture.unregister,
+        texture_format_widgets.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
         ui_func_import_mmt.unregister,

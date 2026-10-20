@@ -6,6 +6,12 @@ from .m_ini_builder import *
 from .m_control_flow import M_ControlFlow
 from .m_key import M_Key
 from .texture_naming import default_texture_resource_name, normalize_texture_role
+from .texture_output_naming import (
+    TextureOutputNameClaims,
+    alias_output_filename_with_suffix,
+    ensure_ini_encodable,
+    normalize_alias_stem,
+)
 from ..model.draw_call_model import DrawCallModel
 from ..model.drawib_model import DrawIBModel
 from ..utils.json_utils import JsonUtils
@@ -20,6 +26,19 @@ from ..workspace.texture_metadata_helper import TextureMetadataResolver, Texture
 _GLOBAL_HASH_FILE_SUFFIXES = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga")
 _GLOBAL_HASH_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 _GLOBAL_RESOURCE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _exact_format_enabled():
+    """Return the global exact-format switch, tolerating lightweight stubs.
+
+    Several INI tests replace MIMIGlobalProperties with a minimal stand-in,
+    so a missing method must mean "enabled" rather than an AttributeError.
+    """
+    getter = getattr(MIMIGlobalProperties, "exact_texture_format_enabled", None)
+    try:
+        return bool(getter()) if callable(getter) else True
+    except Exception:
+        return True
 
 
 class M_IniHelper:
@@ -406,33 +425,38 @@ class M_IniHelper:
                 # Every capture of a managed hash contributes to authority checks.
                 # Missing authority must fail instead of selecting a generic format.
                 # Dimensions and mip metadata disagreements are ambiguous as well.
-                originals = []
-                marked_source = binding.get("mark_source_file_path", "")
-                if marked_source:
-                    originals.append(marked_source)
-                for model in (drawib_drawibmodel_dict or {}).values():
-                    for part, marks in getattr(model, "submesh_texturemarkinfolist_dict", {}).items():
-                        for mark in marks:
-                            if str(mark.mark_hash).lower() == texture_hash:
-                                path = cls._get_slot_texture_source_path(model, part, mark)
-                                if path:
-                                    originals.append(path)
-                # Global scope includes captures outside the selected export.
-                # Conflicting formats there are just as ambiguous as local ones.
-                from ..blueprint.blueprint_node_hash_texture import _load_global_hash_mark_entries
-                originals.extend(entry['source_path'] for entry in _load_global_hash_mark_entries()
-                                 if entry['hash'] == texture_hash and entry['source_path'])
-                if not originals:
-                    raise ValueError("Global Hash Texture Bind: original DDS is unavailable for hash " + texture_hash)
-                from ..texcomb.core.dds_match import read_dds_metadata
-                # Parse originals before creating the global texture output folder.
-                # Comparing immutable metadata makes conflict detection deterministic.
-                # The first path is safe to use only after all paths agree.
-                # Replacement size policy is independent of original-format selection.
-                metadata = [read_dds_metadata(path) for path in originals]
-                if any(value != metadata[0] for value in metadata[1:]):
-                    raise ValueError("Global Hash Texture Bind: conflicting original DDS metadata for hash " + texture_hash)
-                file_suffix = ".dds"
+                original_path = ""
+                file_suffix = os.path.splitext(source_path)[1].lower()
+                if _exact_format_enabled():
+                    originals = []
+                    marked_source = binding.get("mark_source_file_path", "")
+                    if marked_source:
+                        originals.append(marked_source)
+                    for model in (drawib_drawibmodel_dict or {}).values():
+                        for part, marks in getattr(model, "submesh_texturemarkinfolist_dict", {}).items():
+                            for mark in marks:
+                                if str(mark.mark_hash).lower() == texture_hash:
+                                    path = cls._get_slot_texture_source_path(model, part, mark)
+                                    if path:
+                                        originals.append(path)
+                    # Global scope includes captures outside the selected export.
+                    # Conflicting formats there are just as ambiguous as local ones.
+                    from ..blueprint.blueprint_node_hash_texture import _load_global_hash_mark_entries
+                    originals.extend(entry['source_path'] for entry in _load_global_hash_mark_entries()
+                                     if entry['hash'] == texture_hash and entry['source_path'])
+                    if not originals:
+                        raise ValueError("Global Hash Texture Bind: original DDS is unavailable for hash " + texture_hash)
+                    from ..texcomb.core.dds_match import read_dds_metadata
+                    # Parse originals before creating the global texture output folder.
+                    # Comparing immutable metadata makes conflict detection deterministic.
+                    # The first path is safe to use only after all paths agree.
+                    # Replacement size policy is independent of original-format selection.
+                    metadata = [read_dds_metadata(path) for path in originals]
+                    if any(value != metadata[0] for value in metadata[1:]):
+                        raise ValueError("Global Hash Texture Bind: conflicting original DDS metadata for hash " + texture_hash)
+                    # A converted replacement is always written as a DDS file.
+                    original_path = originals[0]
+                    file_suffix = ".dds"
 
                 # Stable hash-based names make the generated texture easy to
                 # find and prevent two source basenames from colliding.
@@ -444,17 +468,36 @@ class M_IniHelper:
                     # describe genuine DDS bytes rather than renamed PNG files.
                     role = normalize_texture_role(binding.get("mark_name", ""))
                     target_filename = texture_hash + "_" + role + file_suffix
+                # A user alias replaces the generated stem; the suffix still
+                # follows the bytes this row really writes.
+                alias_filename = alias_output_filename_with_suffix(
+                    binding.get("output_name", ""), file_suffix,
+                )
+                if alias_filename:
+                    ensure_ini_encodable(
+                        alias_filename,
+                        "Texture alias '" + str(binding.get("output_name", "") or "")
+                        + "' of node '" + node_label + "'",
+                    )
+                    target_filename = alias_filename
                 resolved_rows.append({
                     "texture_hash": texture_hash,
                     "resource_name": resource_name,
                     "target_filename": target_filename,
                     "source_path": source_path,
-                    "original_path": originals[0],
+                    "original_path": original_path,
                     "force_original_size": binding.get("force_original_size", False),
                     "restore_original": restore_original,
                 })
             elif source_type == "RESOURCE":
                 resource_name = str(binding.get("resource_name", "") or "").strip()
+                # An existing resource owns no generated file to rename.
+                if normalize_alias_stem(binding.get("output_name", "")):
+                    raise ValueError(
+                        "Global Hash Texture Bind node '" + node_label + "': hash '" + texture_hash
+                        + "' reuses an existing resource, which generates no texture file to rename; "
+                        + "clear the texture alias or pick a texture file / mark instead."
+                    )
                 if _GLOBAL_RESOURCE_PATTERN.fullmatch(resource_name) is None:
                     raise ValueError(
                         "Global Hash Texture Bind node '" + node_label
@@ -476,6 +519,17 @@ class M_IniHelper:
         if not resolved_rows:
             return
 
+        # Global replacements share the Textures folder with every DrawIB
+        # binding, so their generated names join the same duplicate check.
+        claims = cls._texture_output_name_claims(ini_builder)
+        for row in resolved_rows:
+            if row["target_filename"] and row["source_path"]:
+                claims.claim(
+                    row["target_filename"],
+                    os.path.normcase(os.path.abspath(row["source_path"])),
+                    "global hash group " + str(row["texture_hash"]),
+                )
+
         # Copy explicit global files on every export. A changed source must
         # replace the previous generated copy instead of leaving stale bytes.
         from ..texcomb.core.dds_match import DDSReplacementStage
@@ -486,8 +540,10 @@ class M_IniHelper:
         with DDSReplacementStage() as stage:
             # Validate every conversion before opening the generated folder.
             # Restoration copies original bytes without any recompression.
+            # A disabled exact-format switch leaves rows with no original path,
+            # which are copied unchanged exactly like the historical behaviour.
             for row in resolved_rows:
-                if row["source_path"] and not row.get("restore_original", False):
+                if row["source_path"] and row.get("original_path") and not row.get("restore_original", False):
                     row["source_path"] = stage.prepare(
                         row["source_path"], row["original_path"], row["force_original_size"]
                     )
@@ -996,6 +1052,12 @@ class M_IniHelper:
         if not resource_entries:
             return
 
+        # Every DrawIB of one Mod writes into the same Textures folder, so a
+        # duplicate file name has to be reported once all of them are known.
+        # This method is the one place every exporter calls per DrawIB with the
+        # shared INI builder, which makes it the natural place to check.
+        cls._claim_texture_output_names(ini_builder, draw_ib_model)
+
         resource_texture_section = M_IniSection(M_SectionType.ResourceTexture)
         appended_resource_names = set()
         for resource_name, target_filename in resource_entries:
@@ -1009,6 +1071,43 @@ class M_IniHelper:
             resource_texture_section.new_line()
 
         ini_builder.append_section(resource_texture_section)
+
+    @staticmethod
+    def _texture_output_name_claims(ini_builder):
+        '''Return the claim table shared by every DrawIB of one export.
+
+        The table lives on the INI builder, so it covers all DrawIBs written
+        into the same Textures folder and disappears together with that
+        builder.  The same image may still be shared by several rows, which is
+        why the source path is part of every claim.
+
+        The preflight call passes ``None`` because it writes no INI and no
+        texture; name conflicts there are irrelevant, so it gets an empty,
+        throw-away table instead of an AttributeError.
+        '''
+        if ini_builder is None:
+            return TextureOutputNameClaims()
+        claims = getattr(ini_builder, "_mimi_texture_output_claims", None)
+        if claims is None:
+            claims = TextureOutputNameClaims()
+            ini_builder._mimi_texture_output_claims = claims
+        return claims
+
+    @classmethod
+    def _claim_texture_output_names(cls, ini_builder, draw_ib_model: DrawIBModel):
+        '''Report two different images that would be written under one name.'''
+        claims = cls._texture_output_name_claims(ini_builder)
+        for resource_name, source_path, target_filename in (
+            getattr(draw_ib_model, "object_texture_binding_file_list", None) or []
+        ):
+            description = (
+                "DrawIB " + str(getattr(draw_ib_model, "draw_ib", "") or "?")
+                + " resource " + str(resource_name)
+            )
+            # The normalized absolute path identifies the image, so a repeated
+            # job for the same picture never looks like a conflict.
+            source_key = os.path.normcase(os.path.abspath(str(source_path or "")))
+            claims.claim(target_filename, source_key, description)
 
     @classmethod
     def move_object_texture_binding_files(cls, draw_ib_model: DrawIBModel):
@@ -1024,7 +1123,7 @@ class M_IniHelper:
         if not file_list:
             return
 
-        from ..texcomb.core.dds_match import DDSReplacementStage
+        from ..texcomb.core.dds_match import DDSReplacementStage, prepare_replacement_job
         # Exact jobs are preflighted again here to catch edits since model build.
         # Temporary staged files remain alive until every copy completes.
         with DDSReplacementStage() as stage:
@@ -1033,9 +1132,46 @@ class M_IniHelper:
             for resource, source, filename in file_list:
                 row = jobs.get(resource)
                 if row:
-                    source = stage.prepare(source, row['original_path'], row['force_original_size'])
+                    # The conversion result is always a .dds file; the model
+                    # resolver already named the target accordingly.
+                    source = prepare_replacement_job(stage, source, row)
                 prepared.append((resource, source, filename))
             cls._copy_object_texture_binding_files(draw_ib_model, prepared)
+
+    @classmethod
+    def prepare_exact_texture_jobs(cls, drawib_model_list):
+        """Convert every registered replacement before the exporter writes files.
+
+        The copy stage repeats this work later, but the conversion cache makes
+        that second pass a pure lookup. Doing it up front means a broken
+        capture or an unsupported format stops the export before buffers and
+        INIs are written, instead of leaving a half-generated Mod behind.
+        """
+        from ..texcomb.core.dds_match import DDSReplacementStage, prepare_replacement_job
+        pairs = []
+        for model in drawib_model_list or []:
+            jobs = getattr(model, "exact_texture_jobs", None) or {}
+            if not jobs:
+                continue
+            # The job dict deliberately carries no source path: the file list
+            # is the single place that knows which image a resource reads from.
+            source_by_resource = {
+                resource: source
+                for resource, source, _target in (getattr(model, "object_texture_binding_file_list", None) or [])
+            }
+            for resource, job in jobs.items():
+                source = source_by_resource.get(resource)
+                if source:
+                    pairs.append((source, job))
+        if not pairs:
+            return 0
+        # Staged products stay alive for the whole batch, so no final file is
+        # opened when one of the conversions turns out to be invalid.
+        with DDSReplacementStage() as stage:
+            for source, job in pairs:
+                prepare_replacement_job(stage, source, job)
+        print("M_IniHelper: exact texture format preflight done, jobs: " + str(len(pairs)))
+        return len(pairs)
 
     @classmethod
     def _copy_object_texture_binding_files(cls, draw_ib_model, file_list):
@@ -1062,6 +1198,19 @@ class M_IniHelper:
                 continue
             shutil.copy2(source_path, target_path)
             copied_count += 1
+            # An older export may have written the same resource with the
+            # source extension (for example .png). Only one file may exist for
+            # one generated name, so stale siblings are removed.
+            target_stem = os.path.splitext(target_path)[0]
+            for stale_suffix in _GLOBAL_HASH_FILE_SUFFIXES:
+                stale_path = target_stem + stale_suffix
+                if os.path.normcase(os.path.abspath(stale_path)) == target_key:
+                    continue
+                if os.path.isfile(stale_path):
+                    try:
+                        os.remove(stale_path)
+                    except OSError as error:
+                        print("M_IniHelper: could not remove stale texture " + stale_path + ": " + str(error))
 
         print(
             "M_IniHelper: Texture Bind texture copy done, DrawIB: " + draw_ib_model.draw_ib

@@ -34,6 +34,32 @@ from bpy_extras.io_utils import ImportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
 from .hash_texture_preview import texture_icon, clear_previews
+from ..common.texture_naming import normalize_texture_role
+from ..common.texture_output_naming import (
+    file_resource_stem,
+    hash_mark_output_filename,
+    hash_output_filename,
+    normalize_alias_stem,
+    texture_source_suffix,
+)
+from .texture_output_widgets import (
+    alias_suffix_note,
+    display_suffix,
+    draw_generated_name,
+    draw_rename_box,
+    exact_format_enabled,
+    first_hint,
+    upstream_draw_ib_hints,
+)
+from .texture_format_widgets import (
+    DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
+    draw_convert_all as _draw_convert_all,
+    draw_node_progress as _draw_node_progress,
+    draw_row_controls as _draw_row_controls,
+    format_mode_items as _format_mode_items,
+    manual_format_items as _manual_format_items,
+    predicted_suffix,
+)
 from .blueprint_node_texture import (
     _MARK_NAME_NONE,
     _find_submesh_mark_by_name,
@@ -76,7 +102,12 @@ def _texture_hash_item_refresh_display(item):
         source = str(getattr(item, "resource_name", "") or "").strip() or "?"
     texture_hash = str(getattr(item, "texture_hash", "") or "").strip().lower()
     hash_text = texture_hash[:12] + "..." if len(texture_hash) > 12 else (texture_hash or "?")
+    # A renamed row shows the file name it will produce, so the list itself
+    # says which generated texture belongs to which replacement.
+    alias_stem = normalize_alias_stem(getattr(item, "output_name", ""))
     item.name = "{hash} <- {source}".format(hash=hash_text, source=source)
+    if alias_stem:
+        item.name = item.name + " -> " + alias_stem
 
 
 def _texture_hash_item_file_path_changed(item, context):
@@ -402,6 +433,33 @@ class MIMITextureHashItem(PropertyGroup):
         update=lambda self, context: _texture_hash_item_refresh_display(self),
     ) # type: ignore
 
+    # Exact-format controls. The conditional Hash node exposes them; the
+    # global variant always resolves a captured original, so it keeps AUTO.
+    format_mode: bpy.props.EnumProperty(
+        name=tr("Format Source"),
+        description=tr("Auto follows the format of the captured original texture; Manual applies the format selected below when no original can be resolved"),
+        items=_format_mode_items,
+        # Blender only accepts an integer default when ``items`` is a callback;
+        # index 0 is the 'AUTO' entry the callback returns first.
+        default=0,
+        update=lambda self, context: _texture_hash_item_refresh_display(self),
+    ) # type: ignore
+
+    manual_format: bpy.props.EnumProperty(
+        name=tr("Target Format"),
+        description=tr("DXGI format written by texconv when the format source is Manual"),
+        items=_manual_format_items,
+        # Same rule: a callback based enum list requires an integer index.
+        default=0,
+    ) # type: ignore
+
+    output_name: bpy.props.StringProperty(
+        name=tr("Rename To"),
+        description=tr("Leave empty to keep the generated file name shown above; fill in to rename the generated texture file (the image format suffix stays)"),
+        default="",
+        update=lambda self, context: _texture_hash_item_refresh_display(self),
+    ) # type: ignore
+
 
 def _find_owner_hash_bind_node(item):
     '''Find the Hash Texture Bind node that owns the given collection item.'''
@@ -686,9 +744,66 @@ def _draw_hash_file_picker(layout, item, node, tree, item_index):
     clear_operator.item_index = item_index
 
 
+def _hash_row_output_name(node, item):
+    '''Return how one Hash Texture Bind row names its generated file.
+
+    Returns ``(generated_name, suffix, suffix_is_certain)``.  The two node
+    variants write their files through two different export paths, so each
+    branch here mirrors its own path; both use the helpers from
+    ``common.texture_output_naming`` so the node can never show a name the
+    export does not write.
+    '''
+    texture_hash = str(item.texture_hash or "").strip().lower() or "00000000"
+    # Scanned rows keep their source identity; legacy rows keep their enum value.
+    if bool(item.global_detected):
+        mark_name = str(item.mark_source_name or "").strip()
+    else:
+        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+    mark_slot = str(item.mark_source_slot or "").strip().lower()
+    # The picked replacement describes the format; an untouched scanned row
+    # falls back to the mark's own capture.
+    source_path = str(item.file_path or "").strip() or str(item.mark_source_file_path or "").strip()
+    role = normalize_texture_role(mark_name or mark_slot)
+
+    if node.bl_idname == 'MIMINode_Hash_Texture_Global':
+        # The global node writes its files in
+        # M_IniHelper.generate_hash_style_global_texture_ini: one file per hash,
+        # named after the hash and the mark role, and always DDS when the exact
+        # format conversion is enabled (that path requires a captured original).
+        suffix_is_certain = exact_format_enabled()
+        suffix = ".dds" if suffix_is_certain else texture_source_suffix(source_path)
+        if mark_name or bool(item.global_detected):
+            generated = hash_output_filename(texture_hash, role, "", suffix, False)
+        else:
+            # A row without a detected mark keeps the plain global name.
+            generated = texture_hash + "_global" + suffix
+        return generated, suffix, suffix_is_certain
+
+    # The connected node binds per object, so the generated name carries the
+    # DrawIB of the upstream objects and falls back to placeholders until they
+    # can be resolved.
+    object_name, draw_ib = first_hint(upstream_draw_ib_hints(node))
+    # Same rule as the Slot node: a resolved capture means the file is a DDS.
+    suffix, suffix_is_certain = predicted_suffix(node, item, source_path)
+
+    if mark_slot:
+        # Object scoped rows need their own file, so the DrawIB is part of it.
+        return hash_output_filename(texture_hash, role, draw_ib, suffix, True), suffix, suffix_is_certain
+    if mark_name and not bool(item.global_detected):
+        # Legacy marked row keeps the familiar "<hash>_<mark>.dds" name.
+        return hash_mark_output_filename(texture_hash, mark_name), suffix, suffix_is_certain
+    if mark_name:
+        return hash_output_filename(texture_hash, role, "", suffix, False), suffix, suffix_is_certain
+    # No mark at all: the generated name falls back to the resource name.
+    generated = file_resource_stem(draw_ib, object_name, "hash" + texture_hash[:8]) + suffix
+    return generated, suffix, suffix_is_certain
+
+
 def _draw_hash_replacements(node, context, layout):
     '''Both nodes use the same controls; only the discovery scope differs.'''
     tree = node.id_data
+    # A running exact-format batch is global, so its progress is visible here.
+    _draw_node_progress(layout)
     refresh = layout.operator("mimi.global_hash_refresh", text=tr("Refresh Hash Texture Marks"), icon='FILE_REFRESH')
     refresh.node_name = node.name
     refresh.tree_name = tree.name
@@ -721,9 +836,27 @@ def _draw_hash_replacements(node, context, layout):
     _draw_hash_file_picker(box, item, node, tree, index)
     if node.bl_idname == 'MIMINode_Hash_Texture_Global':
         box.prop(item, 'force_original_size')
+    else:
+        # The conditional node can fall back to an explicit format when the
+        # selected hash has no captured original in the current workspace.
+        format_row = box.row(align=True)
+        format_row.prop(item, 'format_mode', text="")
+        if str(item.format_mode) == 'MANUAL':
+            format_row.prop(item, 'manual_format', text="")
+        box.prop(item, 'force_original_size')
+    # Detected original format, readiness and the per-row Convert button.
+    # Mark rows reuse captured bytes, so only FILE-backed rows show a status.
+    if str(item.source_type) == 'FILE' or node.bl_idname == 'MIMINode_Hash_Texture_Global':
+        _draw_row_controls(box, node, item, index, tree)
     if item.file_path and not os.path.isfile(bpy.path.abspath(item.file_path)):
         box.label(text=tr("Replacement file was not found"), icon='ERROR')
+    # Show the generated file name and let the user rename it.
+    generated_name, suffix, suffix_is_certain = _hash_row_output_name(node, item)
+    draw_generated_name(box, generated_name, certainty_note=alias_suffix_note(suffix_is_certain))
+    draw_rename_box(box, item, suffix, generated_name)
     layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
+    # One click prepares every replacement of this node in the background.
+    _draw_convert_all(layout, node, tree)
 
 
 @translatable

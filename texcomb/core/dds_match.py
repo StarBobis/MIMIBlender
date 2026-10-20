@@ -1,8 +1,21 @@
 """Exact original-format DDS replacement, independent of Blender.
 
-All conversion happens in temporary storage. Callers commit the resulting
-files only after every configured replacement has passed validation.
+All conversion happens in temporary or cache storage. Callers commit the
+resulting files only after every configured replacement has passed validation.
 Unknown formats are errors: a plausible BC7 fallback is not an exact match.
+
+The module is split into four layers so both the export pipeline and the
+node UI can use it without duplicating rules:
+
+1. ``read_dds_metadata`` parses the DDS headers (format detection).
+2. ``build_conversion_plan`` decides what the replacement needs, or returns
+   None when the supplied DDS is already byte-compatible.
+3. ``run_conversion_plan`` executes one texconv call and verifies the output.
+4. ``DDSReplacementStage`` batches plans during one export and can persist
+   results in a content-addressed cache.
+
+No bpy import is allowed here; the Blender layer injects the cache and the
+optional user-configured texconv path through the setters below.
 """
 import os
 import shutil
@@ -81,6 +94,44 @@ LEGACY_MASKS = {
     (16, 0xffff, 0, 0, 0): 56,
     (8, 0, 0, 0, 0xff): 65,
 }
+
+# Resize filters accepted by texconv; the first entry is the pipeline default.
+# POINT keeps hard pixel edges, which is usually wrong for painted textures.
+# FANT is a good general-purpose choice for downscaling atlases.
+RESIZE_FILTERS = ('FANT', 'LINEAR', 'CUBIC', 'BOX', 'TRIANGLE', 'POINT')
+DEFAULT_RESIZE_FILTER = RESIZE_FILTERS[0]
+
+# Defaults injected by the Blender layer. Keeping them in module state lets
+# every helper stay importable (and testable) outside Blender.
+_DEFAULT_CACHE = None
+_DEFAULT_TEXCONV = ""
+
+
+def set_default_cache(cache):
+    """Install the disk cache used by stages that were given no explicit one."""
+    global _DEFAULT_CACHE
+    _DEFAULT_CACHE = cache
+
+
+def get_default_cache():
+    """Return the disk cache currently shared by the export pipeline."""
+    return _DEFAULT_CACHE
+
+
+def set_default_texconv_path(path):
+    """Remember a user-configured texconv.exe path (empty means auto-detect)."""
+    global _DEFAULT_TEXCONV
+    _DEFAULT_TEXCONV = str(path or "")
+
+
+def get_default_texconv_path():
+    """Return the user-configured texconv.exe path, or an empty string."""
+    return _DEFAULT_TEXCONV
+
+
+def _texconv_path(explicit_path=""):
+    """Resolve the texconv path without importing bpy or the scene."""
+    return explicit_path or _DEFAULT_TEXCONV
 
 
 @dataclass(frozen=True)
@@ -209,6 +260,171 @@ def read_dds_metadata(path):
     return metadata
 
 
+def describe_format(metadata):
+    """Return the human readable format name shown in the node panels."""
+    # Unknown IDs stay explicit so a user can report them without guessing.
+    name = DXGI_FORMATS.get(metadata.dxgi)
+    if name is None:
+        return 'DXGI_' + str(metadata.dxgi)
+    # Legacy headers carry no sRGB tag, which is useful information in the UI.
+    return name if metadata.dx10 else name + ' (legacy header)'
+
+
+def describe_metadata(metadata):
+    """Return one compact line describing format, size and mip count."""
+    return '{} {}x{} {} mip(s)'.format(
+        describe_format(metadata), metadata.width, metadata.height, metadata.mip_count,
+    )
+
+
+# Reverse lookup used by the manual format override in the node panels.
+# Building it from DXGI_FORMATS keeps one single source of truth.
+FORMAT_BY_NAME = {name: dxgi for dxgi, name in DXGI_FORMATS.items()}
+
+
+def format_names():
+    """Return every format name a user may pick manually (sorted for the UI)."""
+    return sorted(FORMAT_BY_NAME)
+
+
+def metadata_for_format(format_name, width, height):
+    """Build a synthetic capture header for a manual format override.
+
+    A manual override is used when no original DDS can be resolved at all.
+    There is no captured header to copy, so the assumed layout is the most
+    common game one: a DX10 2D texture with a full mip chain.
+    """
+    dxgi = FORMAT_BY_NAME.get(str(format_name or ''))
+    if dxgi is None:
+        raise ValueError('Unsupported replacement format: ' + str(format_name))
+    width = max(1, int(width))
+    height = max(1, int(height))
+    return DDSMetadata(width, height, max(width, height).bit_length(), dxgi, True)
+
+
+def agree_on_metadata(paths):
+    """Return (metadata, conflict, agreed_path) for one texture's originals.
+
+    Several marks can share one slot or hash. When every readable capture
+    agrees, the format is unambiguous and its path is authoritative.
+    Unreadable candidates are ignored so one broken capture cannot block a
+    replacement that still has a valid one. ``metadata`` is None when nothing
+    could be read, and ``conflict`` is True when the readable captures differ.
+    """
+    readable = []
+    for path in paths or []:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            readable.append((path, read_dds_metadata(path)))
+        except Exception:
+            # A truncated or non-DDS capture simply contributes no authority.
+            continue
+    if not readable:
+        return None, False, ''
+    first = readable[0][1]
+    conflict = any(item != first for _path, item in readable[1:])
+    if conflict:
+        return first, True, ''
+    return first, False, readable[0][0]
+
+
+
+def _png_dimensions(path):
+    """Read width and height from a PNG IHDR chunk."""
+    with open(path, 'rb') as stream:
+        header = stream.read(24)
+    # Signature, IHDR length and chunk type together fill the first 16 bytes.
+    if len(header) < 24 or header[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('Not a PNG file: ' + str(path))
+    return struct.unpack('>II', header[16:24])
+
+
+def _jpeg_dimensions(path):
+    """Walk JPEG markers until the first start-of-frame segment."""
+    # SOF markers carry the real image size; APPn segments must be skipped.
+    # Marker payload lengths include their own two length bytes.
+    start_of_frame = (
+        0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
+        0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+    )
+    with open(path, 'rb') as stream:
+        if stream.read(2) != b'\xff\xd8':
+            raise ValueError('Not a JPEG file: ' + str(path))
+        while True:
+            marker_start = stream.read(1)
+            if not marker_start:
+                raise ValueError('JPEG has no size segment: ' + str(path))
+            if marker_start != b'\xff':
+                continue
+            marker = stream.read(1)
+            # Fill bytes and restart markers carry no length field.
+            while marker == b'\xff':
+                marker = stream.read(1)
+            if not marker:
+                raise ValueError('JPEG has no size segment: ' + str(path))
+            code = marker[0]
+            if code == 0xd8 or code == 0x01 or 0xd0 <= code <= 0xd7:
+                continue
+            length_bytes = stream.read(2)
+            if len(length_bytes) < 2:
+                raise ValueError('Truncated JPEG segment: ' + str(path))
+            length = struct.unpack('>H', length_bytes)[0]
+            if code in start_of_frame:
+                payload = stream.read(5)
+                if len(payload) < 5:
+                    raise ValueError('Truncated JPEG frame header: ' + str(path))
+                # The frame header starts with precision, then height and width.
+                height, width = struct.unpack('>HH', payload[1:5])
+                return (width, height)
+            stream.seek(length - 2, 1)
+
+
+def _bmp_dimensions(path):
+    """Read both axes from a BMP info header (top-down rows use negatives)."""
+    with open(path, 'rb') as stream:
+        header = stream.read(26)
+    if len(header) < 26 or header[:2] != b'BM':
+        raise ValueError('Not a BMP file: ' + str(path))
+    width, height = struct.unpack('<ii', header[18:26])
+    return (abs(width), abs(height))
+
+
+def _tga_dimensions(path):
+    """Read the fixed 18-byte TGA header (width, height, bit depth)."""
+    with open(path, 'rb') as stream:
+        header = stream.read(18)
+    if len(header) < 18:
+        raise ValueError('Not a TGA file: ' + str(path))
+    width, height, depth = struct.unpack('<HHB', header[12:17])
+    # Color-mapped or invalid files would otherwise report a bogus size.
+    if not width or not height or depth not in (8, 16, 24, 32):
+        raise ValueError('Unsupported TGA layout: ' + str(path))
+    return (width, height)
+
+
+def image_dimensions(path):
+    """Return (width, height) for one replacement image without Pillow.
+
+    Texconv is the only heavy dependency of this module, and Pillow is an
+    optional part of the addon, so header parsing keeps conversion available
+    even when the user never installed Pillow.
+    """
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix == '.dds':
+        metadata = read_dds_metadata(path)
+        return (metadata.width, metadata.height)
+    if suffix == '.png':
+        return _png_dimensions(path)
+    if suffix in ('.jpg', '.jpeg'):
+        return _jpeg_dimensions(path)
+    if suffix == '.bmp':
+        return _bmp_dimensions(path)
+    if suffix == '.tga':
+        return _tga_dimensions(path)
+    raise ValueError('Unsupported replacement image type: ' + str(path))
+
+
 def matching_mip_count(original, width, height):
     """Keep one mip, regenerate full chains, or retain an exact partial count."""
     # Replacement size is retained unless the caller explicitly forces capture size.
@@ -225,15 +441,160 @@ def matching_mip_count(original, width, height):
     return original.mip_count
 
 
+@dataclass(frozen=True)
+class ConversionPlan:
+    """Everything one texconv call needs, decided before any file is written.
+
+    The UI uses the same object to preview the target format, so planning and
+    execution can never disagree about dimensions, mips or the header style.
+    """
+    # The source bytes are never modified; only read and copied into staging.
+    source: str
+    # Format spelling is texconv's own DXGI identifier from DXGI_FORMATS.
+    format: str
+    # Output top-level size. With force_original_size it equals the capture.
+    width: int
+    height: int
+    # Exact number of levels required by the original chain policy.
+    mips: int
+    # Legacy headers must stay legacy; BC formats need the DX10 extension.
+    dx10: bool
+    # Straight/opaque/unknown tags are preserved verbatim after conversion.
+    alpha_mode: int
+    # Used by the cache to distinguish conversion products of one source.
+    storage_key: tuple
+    # Resize filter is only meaningful when the output size differs.
+    resize_filter: str = DEFAULT_RESIZE_FILTER
+
+
+def build_conversion_plan(source, original, force_original_size=False,
+                          resize_filter=DEFAULT_RESIZE_FILTER):
+    """Return the plan for one replacement, or None for a byte-identical DDS.
+
+    ``original`` is a parsed DDSMetadata, not a path, so callers can show the
+    detected format first and reuse that header for every later decision.
+    Raising ValueError is the contract for "this replacement cannot be made
+    exact"; callers either surface the message or intentionally fall back.
+    """
+    candidate = None
+    if os.path.splitext(source)[1].lower() == '.dds':
+        # DDS input receives the same validation as the authoritative capture.
+        # Matching storage avoids recompression, including unknown DXGI types.
+        # A header match alone is insufficient when mip or dimensions differ.
+        candidate = read_dds_metadata(source)
+    # Topological DDS resources are byte-preserving only. Their depth and
+    # face/array layout cannot be reconstructed from an ordinary image.
+    # Require identical dimensions and mip topology before returning bytes.
+    if not original.ordinary_2d:
+        if candidate == original:
+            return None
+        raise ValueError('DDS arrays, cubes and volumes require an exactly matching DDS replacement')
+    width, height = original.width, original.height
+    if not force_original_size:
+        # Replacement pixels keep their own size unless the row forces capture size.
+        if candidate is not None:
+            width, height = candidate.width, candidate.height
+        else:
+            width, height = image_dimensions(source)
+    mips = matching_mip_count(original, width, height)
+    if candidate is not None and candidate.storage_key == original.storage_key:
+        if (candidate.width, candidate.height, candidate.mip_count) == (width, height, mips):
+            return None
+    # Unknown DXGI formats can only pass through as exactly matching DDS.
+    # Conversion targets must have both a texconv spelling and alpha semantics.
+    if original.dxgi not in DXGI_FORMATS:
+        raise ValueError('Unsupported exact DDS conversion: ' + original.format)
+    if original.alpha_mode not in (0, 1, 3):
+        raise ValueError(
+            'Unsupported exact DDS conversion: ' + original.format
+            + ' / alpha mode ' + str(original.alpha_mode)
+        )
+    # An unknown filter falls back to the documented default instead of
+    # reaching texconv, which would fail on a typo and abort the export.
+    chosen_filter = resize_filter if resize_filter in RESIZE_FILTERS else DEFAULT_RESIZE_FILTER
+    return ConversionPlan(
+        source=source,
+        format=original.format,
+        width=width,
+        height=height,
+        mips=mips,
+        dx10=original.dx10,
+        alpha_mode=original.alpha_mode,
+        storage_key=original.storage_key,
+        resize_filter=chosen_filter,
+    )
+
+
+def run_conversion_plan(plan, output_dir, explicit_path=""):
+    """Run one texconv call, verify the produced header and return its path."""
+    os.makedirs(output_dir, exist_ok=True)
+    # A private input basename makes texconv output discovery deterministic.
+    # The source is copied so texconv can never touch the user's own file.
+    input_path = os.path.join(output_dir, 'replacement' + os.path.splitext(plan.source)[1].lower())
+    shutil.copy2(plan.source, input_path)
+    args = [
+        '-f', plan.format,
+        # Explicit file type: -f already implies DDS, but being explicit keeps
+        # the behaviour stable if texconv changes its default inference.
+        '-ft', 'dds',
+        # Explicit dimensions and mip count prevent texconv default policies.
+        '-m', str(plan.mips), '-w', str(plan.width), '-h', str(plan.height),
+        # Header style must match the capture, not the replacement extension.
+        '-dx10' if plan.dx10 else '-dx9',
+        # Tag input AND output as sRGB: the bytes pass through unchanged and
+        # the DDS format tag comes solely from -f. Using --ignore-srgb here
+        # would double-apply gamma when the target format is an _SRGB variant.
+        '-srgbi', '-srgbo',
+        '-y', '-o', output_dir,
+    ]
+    # The resize filter only matters when the output size differs from the
+    # source size, and texconv ignores it otherwise.
+    if plan.resize_filter:
+        args += ['-if', plan.resize_filter]
+    args.append(input_path)
+    # A failure stays inside this call and propagates to the caller.
+    _run_texconv(args, _texconv_path(explicit_path))
+    output = os.path.join(output_dir, 'replacement.dds')
+    if not os.path.isfile(output):
+        raise RuntimeError('texconv produced no DDS for ' + plan.source)
+    if plan.dx10:
+        # Straight/opaque/unknown flags describe interpretation, not a
+        # requested premultiplication transform. Preserve the original tag.
+        with open(output, 'r+b') as handle:
+            handle.seek(144)
+            handle.write(struct.pack('<I', plan.alpha_mode))
+    # Verify the produced file instead of trusting a successful process exit.
+    # Legacy output that cannot represent the target is an error, not a fallback.
+    actual = read_dds_metadata(output)
+    if actual.storage_key != plan.storage_key:
+        raise ValueError(
+            'texconv output metadata does not match original DDS requirements: '
+            + plan.format
+        )
+    # Dimensions and mip count are verified separately from the header style:
+    # a successful process exit alone never proves the requested shape.
+    if (actual.width, actual.height, actual.mip_count) != (plan.width, plan.height, plan.mips):
+        raise ValueError(
+            'texconv output shape does not match the conversion plan: '
+            + '{}x{} {} mip(s)'.format(actual.width, actual.height, actual.mip_count)
+        )
+    return output
+
+
 # The stage owns only temporary conversion products, never final export files.
 # Closing it releases those products after callers have copied validated bytes.
 # Passthrough results remain caller-owned source paths and are not removed.
 # One stage can validate a complete batch before any final copy is attempted.
+# A shared disk cache makes repeated exports of unchanged sources free.
 class DDSReplacementStage:
     """One export's temporary conversion/cache lifetime, never user output."""
-    def __init__(self):
+    def __init__(self, cache=None):
         self.directory = tempfile.TemporaryDirectory(prefix='mimi_dds_')
-        self.cache = {}
+        self.cache = cache
+        self.counter = 0
+        # One export often asks for the same image twice (preflight and copy).
+        # A cheap file-stamp key avoids re-reading bytes or running texconv.
+        self.memory = {}
 
     def __enter__(self):
         return self
@@ -241,77 +602,84 @@ class DDSReplacementStage:
     def __exit__(self, *args):
         self.directory.cleanup()
 
-    def prepare(self, source, original_path, force_original_size=False):
-        """Return verified staged bytes, or the untouched matching DDS source."""
-        import hashlib
-        original = read_dds_metadata(original_path)
-        candidate = None
-        if os.path.splitext(source)[1].lower() == '.dds':
-            # DDS input receives the same validation as the authoritative capture.
-            # Matching storage avoids recompression, including unknown DXGI types.
-            # A header match alone is insufficient when mip or dimensions differ.
-            candidate = read_dds_metadata(source)
-        # Unknown DXGI formats can only pass through as exactly matching DDS.
-        # Non-2D resources are never synthesized from an ordinary image.
-        width, height = original.width, original.height
-        if not force_original_size:
-            if candidate:
-                width, height = candidate.width, candidate.height
-            else:
-                from PIL import Image
-                with Image.open(source) as image:
-                    width, height = image.size
-        # Topological DDS resources are byte-preserving only. Their depth and
-        # face/array layout cannot be reconstructed from an ordinary image.
-        # Require identical dimensions and mip topology before returning bytes.
-        if not original.ordinary_2d:
-            if candidate == original:
-                return source
-            raise ValueError('DDS arrays, cubes and volumes require an exactly matching DDS replacement')
-        mips = matching_mip_count(original, width, height)
-        if candidate and candidate.storage_key == original.storage_key:
-            if candidate.width == width and candidate.height == height and candidate.mip_count == mips:
-                return source
-        if not original.ordinary_2d or (candidate and not candidate.ordinary_2d):
-            raise ValueError('DDS arrays, cubes and volumes require an exactly matching DDS replacement')
-        if original.dxgi not in DXGI_FORMATS or original.alpha_mode not in (0, 1, 3):
-            raise ValueError('Unsupported exact DDS conversion: ' + original.format + ' / alpha mode ' + str(original.alpha_mode))
-        # Content hashing prevents stale conversions after an in-place edit.
-        # The cache also separates format, header, mip and size requirements.
-        with open(source, 'rb') as stream:
-            digest = hashlib.sha256(stream.read()).hexdigest()
-        key = (digest, original.storage_key, width, height, mips)
-        if key in self.cache:
-            return self.cache[key]
-        folder = os.path.join(self.directory.name, str(len(self.cache)))
+    def _active_cache(self):
+        # An explicitly injected cache always wins over the module default.
+        return self.cache if self.cache is not None else _DEFAULT_CACHE
+
+    def prepare(self, source, original_path="", force_original_size=False,
+                resize_filter=DEFAULT_RESIZE_FILTER, original_metadata=None):
+        """Return verified staged bytes, or the untouched matching DDS source.
+
+        ``original_metadata`` lets callers that already resolved an agreed
+        capture header (or a manual format) skip re-reading the file.
+        """
+        original = original_metadata
+        if original is None:
+            original = read_dds_metadata(original_path)
+        plan = build_conversion_plan(
+            source, original,
+            force_original_size=force_original_size,
+            resize_filter=resize_filter,
+        )
+        # None means the supplied DDS already satisfies the capture exactly.
+        if plan is None:
+            return source
+        # A file stamp is enough inside one export: the source cannot change
+        # underneath an operation that is already reading it.
+        memory_key = (
+            os.path.normcase(os.path.abspath(plan.source)),
+            os.path.getmtime(plan.source),
+            os.path.getsize(plan.source),
+            plan.storage_key,
+            plan.width, plan.height, plan.mips,
+            plan.resize_filter,
+        )
+        remembered = self.memory.get(memory_key)
+        if remembered:
+            return remembered
+        cache = self._active_cache()
+        cache_key = ''
+        if cache is not None:
+            # The key is content addressed, so an in-place edit misses the old
+            # entry and a re-export of unchanged files stays instantaneous.
+            cache_key = cache.key(plan)
+            cached = cache.get(cache_key, plan)
+            if cached:
+                self.memory[memory_key] = cached
+                return cached
+        folder = os.path.join(self.directory.name, str(self.counter))
+        self.counter += 1
         os.makedirs(folder)
-        # A private input basename makes texconv output discovery deterministic.
-        # No gamma, normal, swizzle or premultiplied-alpha conversion is requested.
-        input_path = os.path.join(folder, 'replacement' + os.path.splitext(source)[1].lower())
-        shutil.copy2(source, input_path)
-        output_folder = os.path.join(folder, 'output')
-        os.makedirs(output_folder)
-        args = ['-f', original.format, '-m', str(mips), '-w', str(width), '-h', str(height),
-                '-dx10' if original.dx10 else '-dx9', '--ignore-srgb', '-y', '-o', output_folder, input_path]
-        # No normal-map, channel-swizzle or premultiply option is requested.
-        # Ignore embedded source sRGB flags rather than introducing gamma edits.
-        # Output sRGB interpretation comes solely from the requested DXGI ID.
-        # Explicit dimensions and mip count prevent texconv default policies.
-        # A failure stays inside the stage and propagates to the exporter.
-        _run_texconv(args)
-        output = os.path.join(output_folder, 'replacement.dds')
-        if original.dx10:
-            # Straight/opaque/unknown flags describe interpretation, not a
-            # requested premultiplication transform. Preserve the original tag.
-            with open(output, 'r+b') as handle:
-                handle.seek(144)
-                handle.write(struct.pack('<I', original.alpha_mode))
-        # Verify the produced file instead of trusting a successful process exit.
-        # Legacy output that cannot represent the target is an error, not a fallback.
-        # Alpha-tag patching changes interpretation metadata, not pixel channels.
-        # Cache only after both topology and output-size policy have passed.
-        actual = read_dds_metadata(output)
-        if actual.storage_key != original.storage_key or (actual.width, actual.height, actual.mip_count) != (width, height, mips):
-            raise ValueError('texconv output metadata does not match original DDS requirements: ' + original.format)
-        self.cache[key] = output
+        output = run_conversion_plan(plan, os.path.join(folder, 'output'))
+        if cache is not None:
+            # Persisting before returning keeps the copy step file-only.
+            output = cache.put(cache_key, output, plan)
+        self.memory[memory_key] = output
         return output
+
+
+def prepare_replacement_job(stage, source, job):
+    """Run one resolver job dict through a stage and return the exact file.
+
+    Jobs are plain dicts so they can travel with the model layer:
+    ``original_path`` (captured DDS), ``manual_format`` (no capture available),
+    ``force_original_size`` and ``resize_filter``.
+    """
+    job = job or {}
+    original_path = str(job.get('original_path', '') or '')
+    manual_format = str(job.get('manual_format', '') or '')
+    if original_path:
+        metadata = read_dds_metadata(original_path)
+    elif manual_format:
+        # A manual override has no captured size, so the replacement's own
+        # dimensions define the full mip chain that is generated.
+        width, height = image_dimensions(source)
+        metadata = metadata_for_format(manual_format, width, height)
+    else:
+        raise ValueError('Replacement job has no original DDS and no manual format')
+    return stage.prepare(
+        source,
+        force_original_size=bool(job.get('force_original_size', False)),
+        resize_filter=str(job.get('resize_filter', '') or DEFAULT_RESIZE_FILTER),
+        original_metadata=metadata,
+    )

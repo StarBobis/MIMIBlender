@@ -7,6 +7,14 @@ from ..common.d3d11_gametype import D3D11GameType
 from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.texture_naming import normalize_texture_role
+from ..common.texture_output_naming import (
+    alias_output_filename_with_suffix,
+    ensure_ini_encodable,
+    file_resource_stem,
+    hash_output_stem,
+    normalize_alias_stem,
+    object_resource_slug,
+)
 from ..common.gimi_texture_slots import get_gimi_texture_slot
 
 from ..utils.json_utils import JsonUtils
@@ -26,7 +34,33 @@ OBJECT_TEXTURE_RESOURCE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # A 3Dmigoto texture hash is 8 hexadecimal characters (a 32-bit hash).
 OBJECT_TEXTURE_HASH_PATTERN = re.compile(r"^[0-9a-f]{8}$")
 # File formats 3Dmigoto can load directly from a [ResourceXXX] filename.
+# They are also the replacement formats the file browser accepts.
 OBJECT_TEXTURE_FILE_SUFFIXES = (".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga")
+
+
+def exact_texture_format_enabled():
+    """Return the global exact-format switch without breaking test stubs.
+
+    The model layer is unit tested with a minimal MIMIGlobalProperties stub,
+    so a missing method means "enabled" instead of an AttributeError.
+    """
+    getter = getattr(MIMIGlobalProperties, "exact_texture_format_enabled", None)
+    try:
+        return bool(getter()) if callable(getter) else True
+    except Exception:
+        return True
+
+
+def exact_texture_resize_filter():
+    """Return the configured resize filter, falling back to the default."""
+    getter = getattr(MIMIGlobalProperties, "exact_texture_resize_filter_name", None)
+    try:
+        value = str(getter() or "") if callable(getter) else ""
+    except Exception:
+        value = ""
+    # Imported lazily so the model layer only pulls the core module on demand.
+    from ..texcomb.core.dds_match import DEFAULT_RESIZE_FILTER
+    return value or DEFAULT_RESIZE_FILTER
 
 @dataclass
 class DrawIBModel:
@@ -84,6 +118,14 @@ class DrawIBModel:
     # filled by resolve_texture_slot_bindings() during __post_init__.
     object_texture_binding_resource_list:list = field(init=False,repr=False,default_factory=list)
     object_texture_binding_file_list:list = field(init=False,repr=False,default_factory=list)
+
+    # Exact-format conversion jobs keyed by generated resource name:
+    # {resource_name: {"original_path": ..., "manual_format": ...,
+    #                  "force_original_size": bool, "resize_filter": str}}
+    # Filled by both binding resolvers and by the global slot pass; consumed
+    # by the export copy stage, which converts before writing the Mod folder.
+    exact_texture_jobs:dict = field(init=False,repr=False,default_factory=dict)
+
 
 
     def __post_init__(self):
@@ -370,10 +412,14 @@ class DrawIBModel:
 
     @staticmethod
     def _object_texture_resource_slug(text: str, limit: int = 24) -> str:
-        '''Turn an arbitrary name into a safe ASCII resource name fragment.'''
-        slug = re.sub(r"[^A-Za-z0-9_]", "_", str(text or ""))
-        slug = re.sub(r"_+", "_", slug).strip("_")
-        return (slug or "obj")[:limit]
+        '''Turn an arbitrary name into a safe ASCII resource name fragment.
+
+        Kept as a thin wrapper because the exporters and the global slot
+        binding call it through the model; the rule itself lives in
+        ``common.texture_output_naming`` so the node UI can show the very same
+        generated name.
+        '''
+        return object_resource_slug(text, limit)
 
     @classmethod
     def resolve_texture_bindings_for_model(cls, model):
@@ -396,6 +442,10 @@ class DrawIBModel:
         resolver.resolve_hash_texture_bindings()
         model.object_texture_binding_resource_list = resolver.object_texture_binding_resource_list
         model.object_texture_binding_file_list = resolver.object_texture_binding_file_list
+        # The exact-format jobs are owned by the resolver; without copying them
+        # the later copy stage would silently skip every conversion for games
+        # that build their model through this adapter (WWMI, for example).
+        model.exact_texture_jobs = getattr(resolver, "exact_texture_jobs", {})
 
     def resolve_texture_slot_bindings(self):
         '''Resolve Texture Bind node rows into ready-made INI lines.
@@ -469,6 +519,14 @@ class DrawIBModel:
                 if is_gimi and binding.get("source_type") == "MARK":
                     logical_slot = get_gimi_texture_slot(binding.get("mark_name"))
                 if logical_slot:
+                    # A GIMI semantic slot is submitted to the game API by name,
+                    # so there is no generated file the alias could rename.
+                    if normalize_alias_stem(binding.get("output_name", "")):
+                        raise ValueError(
+                            "Slot Texture Bind node '" + node_label + "': the GIMI texture slot '" + logical_slot
+                            + "' of object '" + owner_name + "' is submitted by name and generates no texture file, "
+                            + "so it cannot be renamed; clear the texture alias."
+                        )
                     # Captured slots and restore flags do not describe the API's
                     # runtime slots. Re-submitting defaults restores next draws.
                     resource = self._resolve_mark_texture_resource(
@@ -493,14 +551,36 @@ class DrawIBModel:
 
                 source_type = str(binding.get("source_type", "") or "")
                 if source_type == "MARK":
-                    resource_name = self._resolve_mark_texture_resource(binding, markup_list, node_label, owner_name, submesh_model)
+                    if normalize_alias_stem(binding.get("output_name", "")):
+                        # A renamed mark binding must own a file, so the mark's
+                        # captured image is copied under the alias instead of
+                        # sharing the Submesh-wide mark resource.
+                        resource_name = self._resolve_mark_alias_resource(
+                            binding, markup_list, submesh_model, node_label, owner_name,
+                            slot, used_resource_names, file_resource_by_source,
+                        )
+                    else:
+                        resource_name = self._resolve_mark_texture_resource(binding, markup_list, node_label, owner_name, submesh_model)
                 elif source_type == "FILE":
+                    # A slot row has no mark name, so the slot identifies the
+                    # captured original; a missing one keeps the raw copy.
+                    source_path = str(binding.get("file_path", "") or "").strip()
+                    if source_path:
+                        source_path = os.path.normpath(source_path)
+                    replacement_plan = self._plan_replacement(
+                        source_path, binding, markup_list, submesh_model,
+                        slot=slot, node_label=node_label, owner_name=owner_name,
+                    )
                     resource_name = self._resolve_file_texture_resource(
                         binding, node_label, owner_name, slot.replace("-", "_"),
                         used_resource_names, file_resource_by_source,
+                        replacement_plan=replacement_plan,
                     )
                 elif source_type == "RESOURCE":
                     resource_name = str(binding.get("resource_name", "") or "").strip()
+                    # An existing resource points at a file this node does not
+                    # create, so it has no name of its own that could be changed.
+                    self._reject_alias_for_existing_resource(binding, "Slot Texture Bind", node_label, owner_name)
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
                             "Slot Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
@@ -525,8 +605,12 @@ class DrawIBModel:
             draw_model.resolved_texture_slot_lines = before_lines
             draw_model.resolved_texture_slot_restore_lines = after_lines
 
-    def _resolve_mark_texture_resource(self, binding, markup_list, node_label, owner_name, submesh_model) -> str:
-        '''MARK source: reuse the Submesh mark's existing resource name.'''
+    def _find_mark_markup(self, binding, markup_list, node_label, owner_name, submesh_model):
+        '''Return the Slot / SharedSlot mark a MARK row points at.
+
+        Shared by the plain (shared resource) path and the renamed path, so a
+        mark is validated in exactly one place.
+        '''
         mark_name = str(binding.get("mark_name", "") or "").strip()
         if not mark_name:
             raise ValueError(
@@ -551,16 +635,241 @@ class DrawIBModel:
             raise ValueError(
                 "Slot Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
             )
-        return matched_markup.get_resource_name()
+        return matched_markup
 
-    def _resolve_file_texture_resource(self, binding, node_label, owner_name, slug_token, used_resource_names, file_resource_by_source, source_path_override="", target_filename_override="") -> str:
+    def _resolve_mark_texture_resource(self, binding, markup_list, node_label, owner_name, submesh_model) -> str:
+        '''MARK source: reuse the Submesh mark's existing resource name.'''
+        return self._find_mark_markup(binding, markup_list, node_label, owner_name, submesh_model).get_resource_name()
+
+    def _resolve_mark_alias_resource(self, binding, markup_list, submesh_model, node_label, owner_name, slot, used_resource_names, file_resource_by_source) -> str:
+        '''MARK source with a texture alias: copy the mark under the alias.
+
+        A marked texture is normally a resource shared by every object of the
+        Submesh, so it cannot carry a name that belongs to one node row. An
+        alias therefore copies the mark's captured image once and binds that
+        copy, exactly like an external FILE row would.
+        '''
+        matched_markup = self._find_mark_markup(binding, markup_list, node_label, owner_name, submesh_model)
+        # Imported here on purpose: m_ini_helper imports DrawIBModel for its
+        # type hints, so a module-level import would create a cycle.
+        from ..common.m_ini_helper import M_IniHelper
+        source_path = M_IniHelper._get_slot_texture_source_path(
+            draw_ib_model=self,
+            part_name=self.get_submesh_part_name(submesh_model),
+            texture_markup_info=matched_markup,
+        )
+        if not source_path or not os.path.exists(source_path):
+            raise ValueError(
+                "Slot Texture Bind node '" + node_label + "': mark '" + str(binding.get("mark_name", "") or "")
+                + "' cannot be renamed to '" + str(binding.get("output_name", "") or "")
+                + "' because its original texture file was not found in the workspace extract (object '"
+                + owner_name + "'); clear the texture alias to keep using the shared mark resource."
+            )
+        # The format decision runs on the mark's own capture, so a renamed mark
+        # keeps exactly the bytes and format the shared mark pipeline produces.
+        replacement_plan = self._plan_replacement(
+            source_path, binding, markup_list, submesh_model,
+            slot=slot,
+            mark_name=str(binding.get("mark_name", "") or ""),
+            node_label=node_label,
+            owner_name=owner_name,
+        )
+        return self._resolve_file_texture_resource(
+            binding, node_label, owner_name, slot.replace("-", "_"),
+            used_resource_names, file_resource_by_source,
+            source_path_override=source_path,
+            replacement_plan=replacement_plan,
+        )
+
+    @staticmethod
+    def _reject_alias_for_existing_resource(binding, node_title, node_label, owner_name):
+        '''An existing [ResourceXXX] row generates no file, so it cannot be renamed.'''
+        if not normalize_alias_stem(binding.get("output_name", "")):
+            return
+        raise ValueError(
+            node_title + " node '" + node_label + "': object '" + owner_name + "' reuses an existing resource, "
+            + "which generates no texture file to rename; clear the texture alias or select a texture file / mark instead."
+        )
+
+    def _exact_job_dict(self):
+        """Return the per-DrawIB conversion jobs, creating the dict on demand."""
+        # Several tools tests build DrawIBModel with __new__ and never run
+        # __post_init__, so the field may be missing on those stand-ins.
+        jobs = getattr(self, "exact_texture_jobs", None)
+        if not isinstance(jobs, dict):
+            jobs = {}
+            self.exact_texture_jobs = jobs
+        return jobs
+
+    def _resolve_original_candidates(self, markup_list, submesh_model, slot="",
+                                     mark_name="", texture_hash=""):
+        """Return every original DDS path that can describe one replacement.
+
+        The selectors mirror the export rules:
+        - a mark name identifies exactly one mark;
+        - a slot can be shared by several marks of the same Submesh;
+        - a texture hash is global, so a workspace scan is the fallback.
+        """
+        # Imported here to avoid the model -> ini helper import cycle.
+        from ..common.m_ini_helper import M_IniHelper
+        part_name = self.get_submesh_part_name(submesh_model)
+        wanted_name = str(mark_name or "").strip().lower()
+        wanted_slot = str(slot or "").strip().lower()
+        wanted_hash = str(texture_hash or "").strip().lower()
+        candidates = []
+        for markup in markup_list or []:
+            mark = str(getattr(markup, "mark_name", "") or "").strip().lower()
+            mark_slot = str(getattr(markup, "mark_slot", "") or "").strip().lower()
+            mark_hash = str(getattr(markup, "mark_hash", "") or "").strip().lower()
+            # A name is the most specific selector; slot and hash are fallbacks.
+            if wanted_name:
+                if mark != wanted_name:
+                    continue
+            elif wanted_slot:
+                if mark_slot != wanted_slot:
+                    continue
+            elif wanted_hash:
+                if mark_hash != wanted_hash:
+                    continue
+            else:
+                continue
+            path = M_IniHelper._get_slot_texture_source_path(
+                draw_ib_model=self,
+                part_name=part_name,
+                texture_markup_info=markup,
+            )
+            if path:
+                candidates.append(path)
+        if not candidates and wanted_hash:
+            # A hash row without a local mark still has captures elsewhere in
+            # the workspace; the same scan the global node refresh uses.
+            try:
+                from ..blueprint.blueprint_node_hash_texture import _load_global_hash_mark_entries
+                for entry in _load_global_hash_mark_entries():
+                    if entry["hash"] == wanted_hash and entry["source_path"]:
+                        candidates.append(entry["source_path"])
+            except Exception as error:
+                print("DrawIBModel: workspace hash scan unavailable: " + str(error))
+        return candidates
+
+    def _plan_replacement(self, source_path, binding, markup_list, submesh_model,
+                          slot="", mark_name="", texture_hash="",
+                          node_label="", owner_name=""):
+        """Decide whether one replacement must be converted to the capture format.
+
+        The returned dict is the single contract shared by the slot resolver,
+        the hash resolver and the copy stage:
+
+        - convert: True when a texconv job must run before the file is copied;
+        - suffix: generated filename extension (".dds" whenever converting);
+        - signature: identity of the target shape, used to dedupe resources;
+        - job: dict consumed by ``prepare_replacement_job``;
+        - reason/detail: why no conversion happened, for logs and the node UI.
+        """
+        # Imported lazily so the model layer stays importable without texcomb.
+        from ..texcomb.core.dds_match import (
+            agree_on_metadata,
+            build_conversion_plan,
+            describe_format,
+            image_dimensions,
+            metadata_for_format,
+            read_dds_metadata,
+        )
+        source_suffix = os.path.splitext(source_path)[1].lower()
+        plan = {
+            "convert": False,
+            "suffix": source_suffix,
+            "signature": "raw",
+            "job": None,
+            "reason": "",
+            "detail": "",
+        }
+        if not exact_texture_format_enabled():
+            # The global switch restores the historical copy-as-is behaviour.
+            plan["reason"] = "disabled"
+            return plan
+
+        mode = str(binding.get("format_mode", "auto") or "auto").strip().lower()
+        manual_format = str(binding.get("manual_format", "") or "").strip()
+        force_original_size = bool(binding.get("force_original_size", False))
+        resize_filter = exact_texture_resize_filter()
+
+        candidates = self._resolve_original_candidates(
+            markup_list, submesh_model,
+            slot=slot, mark_name=mark_name, texture_hash=texture_hash,
+        )
+        metadata, conflict, agreed_path = agree_on_metadata(candidates)
+        if conflict:
+            # Two captures disagree about the format. Guessing would produce a
+            # plausible but wrong file, so the row keeps its raw copy instead.
+            formats = set()
+            for path in candidates:
+                try:
+                    formats.add(describe_format(read_dds_metadata(path)))
+                except Exception:
+                    continue
+            plan["reason"] = "conflict"
+            plan["detail"] = ", ".join(sorted(formats))
+            print(
+                "DrawIBModel: " + node_label + ": original formats disagree for '"
+                + owner_name + "' (" + plan["detail"] + "); copying the replacement as-is."
+            )
+            return plan
+        if metadata is None and not (mode == "manual" and manual_format):
+            # No usable capture and no manual override: nothing to match.
+            plan["reason"] = "missing" if candidates else "unresolved"
+            return plan
+
+        try:
+            if metadata is not None:
+                # Validate now so an unsupported capture fails before the
+                # exporter writes buffers instead of halfway through copying.
+                build_conversion_plan(source_path, metadata, force_original_size, resize_filter)
+                job = {
+                    "original_path": agreed_path,
+                    "manual_format": "",
+                    "force_original_size": force_original_size,
+                    "resize_filter": resize_filter,
+                }
+                # Header style, topology, alpha mode and size policy all decide
+                # whether two rows may share one generated resource.
+                signature = "exact:" + "|".join(str(value) for value in metadata.storage_key)
+                signature += "|" + str(int(force_original_size))
+            else:
+                width, height = image_dimensions(source_path)
+                synthetic = metadata_for_format(manual_format, width, height)
+                build_conversion_plan(source_path, synthetic, force_original_size, resize_filter)
+                job = {
+                    "original_path": "",
+                    "manual_format": manual_format,
+                    "force_original_size": force_original_size,
+                    "resize_filter": resize_filter,
+                }
+                signature = "manual:" + manual_format + "|" + str(int(force_original_size))
+        except ValueError as error:
+            plan["reason"] = "unsupported"
+            plan["detail"] = str(error)
+            print(
+                "DrawIBModel: " + node_label + ": cannot convert '" + source_path
+                + "' for '" + owner_name + "': " + str(error)
+            )
+            return plan
+
+        plan["convert"] = True
+        plan["suffix"] = ".dds"
+        plan["signature"] = signature
+        plan["job"] = job
+        return plan
+
+    def _resolve_file_texture_resource(self, binding, node_label, owner_name, slug_token, used_resource_names, file_resource_by_source, source_path_override="", target_filename_override="", replacement_plan=None) -> str:
         '''FILE source: build a resource and record its copy job.
 
         ``source_path_override`` lets the Hash Texture Bind MARK source feed
         a workspace-resolved mark file through the same validation, dedupe
         and copy-job registration as a plain FILE row. ``target_filename_override``
         keeps a marked Hash texture's generated filename stable when an
-        external replacement is selected.
+        external replacement is selected. ``replacement_plan`` carries the
+        exact-format decision so this method never re-resolves the original.
         '''
         source_path = str(source_path_override or "").strip() or str(binding.get("file_path", "") or "").strip()
         if not source_path:
@@ -573,11 +882,14 @@ class DrawIBModel:
                 "Slot Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
                 + "' for object '" + owner_name + "'; use one of " + ", ".join(OBJECT_TEXTURE_FILE_SUFFIXES) + "."
             )
-        if target_filename_override and file_suffix != os.path.splitext(target_filename_override)[1].lower():
+        # A converted replacement is always a DDS resource, whatever the
+        # user's source extension was; otherwise the old suffix is kept.
+        target_suffix = str((replacement_plan or {}).get("suffix", "") or file_suffix)
+        if target_filename_override and os.path.splitext(target_filename_override)[1].lower() != target_suffix:
             raise ValueError(
                 "Hash Texture Bind node '" + node_label + "': external file '" + source_path
                 + "' cannot replace marked filename '" + target_filename_override
-                + "' because the file formats differ. Use a DDS source for a marked Hash texture."
+                + "'; the generated resource must end with '" + target_suffix + "'."
             )
         if not os.path.exists(source_path):
             raise ValueError(
@@ -585,22 +897,32 @@ class DrawIBModel:
                 + " (object '" + owner_name + "')."
             )
 
+        # A texture alias replaces the whole generated stem. The suffix always
+        # follows the copied bytes, so a typed extension can never announce the
+        # wrong format; the INI is checked for characters it cannot store.
+        alias_filename = alias_output_filename_with_suffix(binding.get("output_name", ""), target_suffix)
+        if alias_filename:
+            ensure_ini_encodable(
+                alias_filename,
+                "Texture alias '" + str(binding.get("output_name", "") or "") + "' of node '" + node_label + "'",
+            )
+
         source_key = source_path.casefold()
+        # Two rows may legitimately reuse one image for two different target
+        # formats, so the conversion signature belongs in the dedupe key.
+        source_key += "|exact=" + str((replacement_plan or {}).get("signature", "raw"))
         if target_filename_override:
             source_key += "|target=" + str(target_filename_override).casefold()
+        if alias_filename:
+            # Two rows keep one resource per alias, so an alias shared by two
+            # rows of the same image still shares one file.
+            source_key += "|alias=" + alias_filename.casefold()
         existing = file_resource_by_source.get(source_key)
         if existing is not None:
-            # Same file picked by another object: reuse the same resource.
+            # Same file and same target shape: reuse the same resource.
             return existing
 
-        base_name = (
-            "ResourceTex_"
-            + self._object_texture_resource_slug(self.draw_ib, 16)
-            + "_"
-            + self._object_texture_resource_slug(owner_name, 24)
-            + "_"
-            + slug_token
-        )
+        base_name = file_resource_stem(self.draw_ib, owner_name, slug_token)
         resource_name = base_name
         counter = 2
         while resource_name in used_resource_names:
@@ -608,11 +930,15 @@ class DrawIBModel:
             counter += 1
         used_resource_names.add(resource_name)
 
-        target_filename = str(target_filename_override or "").strip() or (resource_name + file_suffix)
+        target_filename = alias_filename or str(target_filename_override or "").strip() or (resource_name + target_suffix)
         file_resource_by_source[source_key] = resource_name
         self.object_texture_binding_file_list.append((resource_name, source_path, target_filename))
         self.object_texture_binding_resource_list.append((resource_name, target_filename))
+        if (replacement_plan or {}).get("convert"):
+            # The copy stage converts before the file lands in the Mod folder.
+            self._exact_job_dict()[resource_name] = dict(replacement_plan["job"])
         return resource_name
+
 
     @staticmethod
     def _allocate_object_target_filename(base_name, suffix, source_key, target_owner_by_name):
@@ -754,6 +1080,19 @@ class DrawIBModel:
                         )
                     bound_slots.add(mark_slot)
 
+                # The exact-format decision must happen before the target name
+                # is allocated: a converted replacement is always a .dds file.
+                replacement_plan = None
+                if source_type in ("MARK", "FILE"):
+                    replacement_plan = self._plan_replacement(
+                        source_path, binding, markup_list, submesh_model,
+                        slot=mark_slot,
+                        mark_name=str(binding.get("mark_name", "") or ""),
+                        texture_hash=texture_hash,
+                        node_label=node_label,
+                        owner_name=owner_name,
+                    )
+
                 target_filename_override = ""
                 if mark_slot:
                     # Object scoped copies need their own filename: the global
@@ -762,11 +1101,11 @@ class DrawIBModel:
                     # allocator keeps one file per distinct image, so every
                     # object that picked the same image reuses one resource.
                     role = normalize_texture_role(binding.get("mark_name", "") or mark_slot)
-                    suffix = os.path.splitext(source_path)[1].lower()
-                    base_name = (
-                        texture_hash
-                        + "_" + role
-                        + "_" + self._object_texture_resource_slug(self.draw_ib, 16)
+                    suffix = (replacement_plan or {}).get("suffix", "") or os.path.splitext(source_path)[1].lower()
+                    # Shared with the node UI, so the displayed name is the
+                    # name this branch really writes.
+                    base_name = hash_output_stem(
+                        texture_hash, role, self.draw_ib, object_scoped=True,
                     )
                     source_key = source_path.casefold() if source_path else ""
                     target_filename_override = self._allocate_object_target_filename(
@@ -778,9 +1117,10 @@ class DrawIBModel:
                 elif binding.get("preserve_mark_filename", False):
                     # Legacy scanned section row keeps the familiar name.
                     if not condition_str:
-                        suffix = os.path.splitext(binding.get("file_path", ""))[1].lower()
+                        suffix = (replacement_plan or {}).get("suffix", "") or os.path.splitext(binding.get("file_path", ""))[1].lower()
                         role = normalize_texture_role(binding.get("mark_name", ""))
-                        target_filename_override = texture_hash + "_" + role + suffix
+                        # Same stem helper as the node UI preview.
+                        target_filename_override = hash_output_stem(texture_hash, role) + suffix
                     # Conditional states need distinct resources/files. Sharing
                     # the marked basename would make the last copied image win
                     # regardless of the active switch state.
@@ -796,6 +1136,9 @@ class DrawIBModel:
 
                 if source_type == "RESOURCE":
                     resource_name = str(binding.get("resource_name", "") or "").strip()
+                    # Same rule as the slot bindings: an existing resource owns
+                    # no generated file, so an alias has nothing to rename.
+                    self._reject_alias_for_existing_resource(binding, "Hash Texture Bind", node_label, owner_name)
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
                             "Hash Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
@@ -808,6 +1151,7 @@ class DrawIBModel:
                         used_resource_names, file_resource_by_source,
                         source_path_override=source_path,
                         target_filename_override=target_filename_override,
+                        replacement_plan=replacement_plan,
                     )
 
                 if mark_slot:

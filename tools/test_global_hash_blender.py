@@ -430,10 +430,17 @@ class GlobalHashTests(unittest.TestCase):
         self.assertTrue(call.resolved_texture_slot_lines[1].startswith('ps-t0 = ResourceTex_'))
         self.assertEqual(len(call.resolved_texture_slot_restore_lines), 1)
         output_path = self.root / 'Textures'
-        object_target = output_path / '6077b727_DiffuseMap_94517393.png'
+        # The replacement is converted to the captured DXGI format, so the
+        # generated resource is a real DDS rather than a renamed PNG.
+        object_target = output_path / '6077b727_DiffuseMap_94517393.dds'
         with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output_path)):
             M_IniHelper.move_object_texture_binding_files(model)
-        self.assertEqual(object_target.read_bytes(), self.image_path.read_bytes())
+        from MIMIBlender.texcomb.core.dds_match import read_dds_metadata
+        produced = read_dds_metadata(str(object_target))
+        original_meta = read_dds_metadata(original_path)
+        self.assertEqual(produced.storage_key, original_meta.storage_key)
+        # Converted bytes are never the original PNG bytes.
+        self.assertNotEqual(object_target.read_bytes(), self.image_path.read_bytes())
 
         # Clearing a scanned row drops the local replacement, so the object
         # falls back to the global replacement of that hash.

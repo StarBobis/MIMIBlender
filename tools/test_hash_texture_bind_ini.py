@@ -427,6 +427,93 @@ def test_resolve_hash_slot_bindings(modules, source_dir):
     print("test_resolve_hash_slot_bindings OK")
 
 
+def test_hash_output_alias(modules, source_dir):
+    """The row alias renames the generated hash texture file."""
+    draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
+    naming_mod = sys.modules[TEST_PKG + ".common.texture_output_naming"]
+
+    source_file = os.path.join(source_dir, "alias_source.png")
+    with open(source_file, "wb") as file:
+        file.write(b"alias bytes")
+
+    # 1. Object scoped row: the alias wins over the generated hash name, and
+    #    the real image suffix is kept so the INI matches the copied bytes.
+    call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+    call.hash_texture_binding_list = [
+        make_binding(
+            "FILE", HASH_RED, file_path=source_file,
+            mark_name="DiffuseMap", mark_slot="ps-t0", output_name="HairDiffuse",
+        ),
+    ]
+    model = make_drawib(modules, "94517393", [FakeSubmeshModel("94517393-0", [call])], {})
+    model.resolve_hash_texture_bindings()
+    assert len(model.object_texture_binding_file_list) == 1, model.object_texture_binding_file_list
+    resource_name, _source, target_filename = model.object_texture_binding_file_list[0]
+    assert target_filename == "HairDiffuse.png", target_filename
+    # The draw binds the resource this row generated, not the old hash name.
+    assert call.resolved_texture_slot_lines[1] == "ps-t0 = " + resource_name, call.resolved_texture_slot_lines
+
+    # 2. The node preview shows this exact name when the row has no alias.
+    preview = naming_mod.hash_output_filename(
+        HASH_RED, "DiffuseMap", "94517393", ".dds", True,
+    )
+    plain_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+    plain_call.hash_texture_binding_list = [
+        make_binding("FILE", HASH_RED, file_path=source_file, mark_name="DiffuseMap", mark_slot="ps-t0"),
+    ]
+    plain_model = make_drawib(modules, "94517393", [FakeSubmeshModel("94517393-0", [plain_call])], {})
+    plain_model.resolve_hash_texture_bindings()
+    default_target = plain_model.object_texture_binding_file_list[0][2]
+    # The test source is a PNG, so the preview suffix is the source suffix.
+    assert default_target == preview.replace(".dds", ".png"), (default_target, preview)
+
+    # 3. A row that reuses an existing resource has nothing to rename.
+    resource_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+    resource_call.hash_texture_binding_list = [
+        make_binding("RESOURCE", HASH_BLUE, resource_name="ResourceSharedBlue", output_name="MyName"),
+    ]
+    resource_model = make_drawib(
+        modules, "94517393", [FakeSubmeshModel("94517393-0", [resource_call])], {},
+    )
+    try:
+        resource_model.resolve_hash_texture_bindings()
+    except ValueError as error:
+        assert "generates no texture file" in str(error), str(error)
+    else:
+        raise AssertionError("expected an error for an alias on an existing resource")
+
+    # 4. Two different images may not share one generated file name.
+    other_file = os.path.join(source_dir, "alias_other.png")
+    with open(other_file, "wb") as file:
+        file.write(b"other alias bytes")
+    ini_builder = modules[TEST_PKG + ".common.m_ini_builder"].M_IniBuilder()
+    ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+        ini_builder=ini_builder, draw_ib_model=model,
+    )
+    conflict_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+    conflict_call.hash_texture_binding_list = [
+        make_binding(
+            "FILE", HASH_BLUE, file_path=other_file,
+            mark_name="DiffuseMap", mark_slot="ps-t0", output_name="HairDiffuse",
+        ),
+    ]
+    conflict_model = make_drawib(
+        modules, "94517393", [FakeSubmeshModel("94517393-0", [conflict_call])], {},
+    )
+    conflict_model.resolve_hash_texture_bindings()
+    try:
+        ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+            ini_builder=ini_builder, draw_ib_model=conflict_model,
+        )
+    except ValueError as error:
+        assert "conflict" in str(error), str(error)
+    else:
+        raise AssertionError("expected a texture file name conflict")
+
+    print("test_hash_output_alias OK")
+
+
 def test_resolve_hash_validation(modules, source_dir):
     """Invalid rows fail loudly instead of reaching the generated INI."""
     draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
@@ -628,6 +715,22 @@ def test_global_hash_override(modules, texture_root):
     )
     assert managed == {HASH_BLUE, HASH_RED}, managed
 
+    # A texture alias renames the generated global file. The resource section
+    # must reference the new name and the copy must really land under it.
+    alias_rows = [dict(global_rows[0], output_name="GlobalHair")]
+    alias_builder = ini_builder_mod.M_IniBuilder()
+    ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
+        ini_builder=alias_builder,
+        global_hash_texture_binding_list=alias_rows,
+    )
+    alias_ini_path = os.path.join(texture_root, "global_hash_alias.ini")
+    alias_builder.save_to_file(alias_ini_path)
+    with open(alias_ini_path, "r", encoding="utf-8") as file:
+        alias_text = file.read()
+    assert "filename = Textures\\GlobalHair.dds" in alias_text, alias_text
+    assert "[ResourceHashGlobal_" + HASH_BLUE + "]" in alias_text, alias_text
+    assert os.path.exists(os.path.join(texture_root, "global", "GlobalHair.dds")), alias_text
+
     # One section per hash: the global replacement is the default and the
     # object scoped switch states override it inside that same section. Two
     # sections for one hash would make 3Dmigoto report a duplicate hash
@@ -775,6 +878,7 @@ def main():
         os.makedirs(source_dir, exist_ok=True)
         test_resolve_hash_bindings(modules, source_dir)
         test_resolve_hash_slot_bindings(modules, source_dir)
+        test_hash_output_alias(modules, source_dir)
         test_resolve_hash_validation(modules, source_dir)
         test_global_hash_override(modules, temp_dir)
         test_section_generation(modules, temp_dir)

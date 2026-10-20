@@ -255,6 +255,35 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
     def _instance(cls):
         return bpy.context.scene.mimi_global_properties
 
+    # Exact-format conversion settings. The switch exists so a user can fall
+    # back to the historical copy-as-is behaviour without editing nodes.
+    exact_texture_format: bpy.props.BoolProperty(
+        name=tr("Exact Texture Format Conversion"),
+        description=tr("Convert every replacement texture to the exact DXGI format, header style and mip policy of the original game texture before it is copied into the generated Mod"),
+        default=True,
+    ) # type: ignore
+
+    exact_texture_resize_filter: bpy.props.EnumProperty(
+        name=tr("Replacement Resize Filter"),
+        description=tr("Filter used when a replacement must be resized to the original resolution"),
+        items=[
+            ('FANT', "Fant", tr("Smooth general-purpose filter; the default for downscaled textures")),
+            ('LINEAR', "Linear", tr("Simple bilinear filter")),
+            ('CUBIC', "Cubic", tr("Sharper bicubic filter")),
+            ('BOX', "Box", tr("Average of the pixels covered by the target pixel")),
+            ('TRIANGLE', "Triangle", tr("Triangle filter")),
+            ('POINT', "Point", tr("Nearest neighbour; keeps hard pixel edges")),
+        ],
+        default='FANT',
+    ) # type: ignore
+
+    texture_format_cache_folder: bpy.props.StringProperty(
+        name=tr("Texture Conversion Cache Folder"),
+        description=tr("Converted replacement textures are stored in this folder; leave empty to use the default location"),
+        default="",
+        subtype='DIR_PATH',
+    ) # type: ignore
+
     @classmethod
     def open_mod_folder_after_generate_mod(cls):
         return cls._instance().open_mod_folder_after_generate_mod
@@ -284,6 +313,23 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
     def simulate_xxmi_tail_comments(cls) -> bool:
         """Whether generated INIs end with the simulated XXMI tail comments."""
         return bool(cls._instance().simulate_xxmi_tail_comments)
+
+    @classmethod
+    def exact_texture_format_enabled(cls) -> bool:
+        """Whether replacement textures are converted to the captured format."""
+        try:
+            return bool(cls._instance().exact_texture_format)
+        except Exception:
+            # Background tooling has no scene; conversion stays enabled there.
+            return True
+
+    @classmethod
+    def exact_texture_resize_filter_name(cls) -> str:
+        """Resize filter name passed to texconv (FANT when unavailable)."""
+        try:
+            return str(cls._instance().exact_texture_resize_filter or "FANT")
+        except Exception:
+            return "FANT"
 
     @classmethod
     def generate_mod_folder_path(cls):

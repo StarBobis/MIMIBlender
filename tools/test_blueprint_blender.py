@@ -23,6 +23,23 @@ groups = addon.blueprint_node_group
 lists = addon.blueprint_node_object_list
 
 
+class _FakeLayout:
+    """Minimal UILayout stand-in so node draw code can run without a window.
+
+    Every attribute call returns another fake layout, which lets one test call
+    ``draw_buttons`` on a real node and collect the texts it would show.
+    """
+
+    def __init__(self, calls=None):
+        self.calls = calls if calls is not None else []
+
+    def __getattr__(self, name):
+        def call(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            return _FakeLayout(self.calls)
+        return call
+
+
 class BlueprintTests(unittest.TestCase):
     def setUp(self):
         # Each case owns its trees; a failure must not contaminate later cases.
@@ -806,6 +823,83 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual(copied.slot, 'ps-t2')
         self.assertFalse(copied.enabled)
         self.assertTrue(copied.restore_after_draw)
+
+    def test_generated_texture_names_and_alias_draw(self):
+        # Every texture replacement node shows the generated file name and an
+        # alias field; draw both states so a bad RNA field cannot break the
+        # node editor. The name itself must match the exporter's naming rules.
+        from MIMIBlender.blueprint import blueprint_node_texture, blueprint_node_hash_texture
+        from MIMIBlender.blueprint import texture_output_widgets
+
+        info = self.tree.nodes.new('MIMINode_Object_Info')
+        info.object_name = '94517393-0.Hair_A'
+        info.submesh_name = '94517393-0'
+        bind = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.tree.links.new(info.outputs[0], bind.inputs[0])
+        source = Path(tempfile.gettempdir()) / "mimi_alias_ui.png"
+        source.write_bytes(b"alias ui test bytes")
+        try:
+            item = bind.texture_slot_items.add()
+            item.source_type = 'FILE'
+            item.slot = 'ps-t0'
+            item.file_path = str(source)
+
+            generated, suffix, certain, can_rename, _reason = (
+                blueprint_node_texture._slot_row_output_name(bind, item)
+            )
+            # The generated name contains the DrawIB and the object name, and it
+            # keeps the source image suffix because the file is a real PNG.
+            self.assertEqual(generated, 'ResourceTex_94517393_94517393_0_Hair_A_ps_t0.png')
+            self.assertEqual(suffix, '.png')
+            self.assertFalse(certain)
+            self.assertTrue(can_rename)
+
+            layout = _FakeLayout()
+            bind.draw_buttons(bpy.context, layout)
+            self.assertIn(generated, "".join(
+                kwargs.get("text", "") for name, _args, kwargs in layout.calls if name == "label"
+            ))
+
+            # The alias replaces the whole stem and keeps the real suffix.
+            item.output_name = 'MyHair'
+            self.assertEqual(texture_output_widgets.alias_preview(item, suffix), 'MyHair.png')
+            alias_layout = _FakeLayout()
+            bind.draw_buttons(bpy.context, alias_layout)
+            self.assertIn('MyHair.png', "".join(
+                kwargs.get("text", "") for name, _args, kwargs in alias_layout.calls if name == "label"
+            ))
+
+            # Global Hash Texture Bind names one file per hash and always DDS
+            # while the exact format conversion is enabled.
+            global_hash = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+            hash_item = global_hash.texture_hash_items.add()
+            hash_item.texture_hash = '6077b727'
+            hash_item.global_detected = True
+            hash_item.mark_source_name = 'DiffuseMap'
+            hash_item.mark_source_slot = 'ps-t0'
+            hash_item.file_path = str(source)
+            hash_name, hash_suffix, _hash_certain = blueprint_node_hash_texture._hash_row_output_name(
+                global_hash, hash_item
+            )
+            self.assertEqual(hash_name, '6077b727_DiffuseMap.dds')
+            self.assertEqual(hash_suffix, '.dds')
+            global_hash.draw_buttons(bpy.context, _FakeLayout())
+
+            # Global Slot Texture Bind shows the DrawIB and a placeholder row
+            # index, because the index is decided by the export pass.
+            global_slot = self.tree.nodes.new('MIMINode_Texture_Global')
+            row = global_slot.items.add()
+            row.submesh = '94517393-0'
+            row.slot = 'ps-t0'
+            row.mark_name = 'DiffuseMap'
+            row.file_path = str(source)
+            slot_layout = _FakeLayout()
+            global_slot.draw_buttons(bpy.context, slot_layout)
+            self.assertIn('ResourceGlobalSlot_94517393_<N>.dds', "".join(
+                kwargs.get("text", "") for name, _args, kwargs in slot_layout.calls if name == "label"
+            ))
+        finally:
+            source.unlink(missing_ok=True)
 
     def test_ungroup_failure_preserves_original(self):
         # An exception after creating a clone must remove only temporary nodes.

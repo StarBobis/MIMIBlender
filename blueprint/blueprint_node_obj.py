@@ -594,6 +594,34 @@ class MIMINode_Result_Output(MIMINodeBase):
         # closing lines XXMI Tools writes.
         layout.prop(context.scene.mimi_global_properties, "simulate_xxmi_tail_comments", text=tr("Simulate XXMI Tail Comments"))
 
+        # Exact replacement texture formats. These are global settings because
+        # every replacement node follows the same captured format rule.
+        from ..common import texture_format_service as texture_format
+        from . import texture_format_widgets
+        properties = context.scene.mimi_global_properties
+        format_box = layout.box()
+        format_box.label(text=tr("Texture Format Conversion"), icon='TEXTURE')
+        texture_format_widgets.draw_node_progress(format_box)
+        format_box.prop(properties, "exact_texture_format", text=tr("Exact Texture Format Conversion"))
+        format_box.prop(properties, "exact_texture_resize_filter")
+        format_box.prop(properties, "texture_format_cache_folder")
+        format_box.label(
+            text=tr("Texture conversion cache: {size}").format(
+                size=texture_format_widgets.format_size(texture_format.cache_size()),
+            ),
+            icon='DISK_DRIVE',
+        )
+        format_box.operator("mimi.texture_format_clear_cache", text=tr("Clear Cache"), icon='TRASH')
+        # The whole blueprint can be prepared without opening every node.
+        convert_all = format_box.operator(
+            "mimi.texture_format_convert",
+            text=tr("Convert All Replacements in this Blueprint"),
+            icon='FILE_REFRESH',
+        )
+        convert_all.node_name = ""
+        convert_all.tree_name = self.id_data.name if self.id_data else ""
+        convert_all.row_index = -1
+
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:
             self.inputs.new('MIMISocketObject', "Group {count}".format(count=len(self.inputs) + 1))

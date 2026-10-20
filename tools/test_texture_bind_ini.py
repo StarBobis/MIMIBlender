@@ -15,7 +15,10 @@ checks that:
 3. invalid rows (bad slot, duplicate slot, missing mark, missing file)
    raise ValueError instead of reaching the generated INI;
 4. the [ResourceXXX] sections and the file copies of FILE sources are
-   emitted even when forbid_auto_texture_ini is on (explicit user intent).
+   emitted even when forbid_auto_texture_ini is on (explicit user intent);
+5. the optional output alias renames the generated file, keeps the real image
+   suffix, survives a shared image, fails on a duplicate name and is refused
+   for rows that generate no file at all.
 """
 
 # Physical slot restoration is mandatory even for old saved checkbox settings.
@@ -478,6 +481,137 @@ def test_resource_sections_and_copy(modules, texture_root):
     print("test_resource_sections_and_copy OK")
 
 
+def _write_placeholder(path, payload=b"fake image bytes"):
+    """Create a small stand-in image so the export path finds a real file."""
+    with open(path, "wb") as file:
+        file.write(payload)
+    return path
+
+
+def test_output_alias(modules, source_dir, texture_root):
+    """The node alias renames the generated texture file of one row."""
+    draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
+    ini_builder_mod = modules[TEST_PKG + ".common.m_ini_builder"]
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
+    naming_mod = sys.modules[TEST_PKG + ".common.texture_output_naming"]
+    config_mod = sys.modules[TEST_PKG + ".common.global_config"]
+    config_mod.GlobalConfig._texture_root = texture_root
+
+    source_file = _write_placeholder(os.path.join(source_dir, "alias_source.png"))
+
+    def resolve_one(binding, markup_dict=None):
+        """Resolve a single FILE row and return the model that owns the jobs."""
+        call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+        call.texture_slot_binding_list = [binding]
+        model = make_drawib(
+            modules, "94517393",
+            [FakeSubmeshModel("94517393-0", [call])],
+            markup_dict or {},
+        )
+        model.resolve_texture_slot_bindings()
+        return model, call
+
+    # 1. Plain rename: the alias replaces the generated stem and keeps the
+    #    source image suffix, so the INI never announces the wrong format.
+    model, call = resolve_one(
+        make_binding("FILE", slot="ps-t0", file_path=source_file, output_name="MyHair")
+    )
+    alias_model = model
+    assert len(model.object_texture_binding_file_list) == 1, model.object_texture_binding_file_list
+    resource_name, source_path, target_filename = model.object_texture_binding_file_list[0]
+    assert target_filename == "MyHair.png", target_filename
+    assert source_path == source_file
+    # The resource section points at the renamed file, not at the old name.
+    ini_builder = ini_builder_mod.M_IniBuilder()
+    ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+        ini_builder=ini_builder, draw_ib_model=model,
+    )
+    ini_path = os.path.join(texture_root, "alias.ini")
+    ini_builder.save_to_file(ini_path)
+    with open(ini_path, "r", encoding="utf-8") as file:
+        ini_text = file.read()
+    assert "[" + resource_name + "]" in ini_text, ini_text
+    assert "filename = Textures\\MyHair.png" in ini_text, ini_text
+    # The draw still binds the generated resource, unchanged.
+    assert call.resolved_texture_slot_lines[1] == "ps-t0 = " + resource_name, call.resolved_texture_slot_lines
+    # The copy really lands under the new name.
+    ini_helper_mod.M_IniHelper.move_object_texture_binding_files(draw_ib_model=model)
+    copied_path = os.path.join(texture_root, "94517393", "MyHair.png")
+    assert os.path.exists(copied_path), copied_path
+
+    # 2. A typed extension is ignored (the real suffix wins), a pasted path
+    #    keeps only its file part, and unsupported characters become
+    #    underscores instead of breaking the generated file name.
+    model, _call = resolve_one(
+        make_binding("FILE", slot="ps-t0", file_path=source_file, output_name="folder/bad:name.v2.dds")
+    )
+    assert model.object_texture_binding_file_list[0][2] == "bad_name.v2.png", model.object_texture_binding_file_list
+    model, _call = resolve_one(
+        make_binding("FILE", slot="ps-t0", file_path=source_file, output_name="bad:name")
+    )
+    assert model.object_texture_binding_file_list[0][2] == "bad_name.png", model.object_texture_binding_file_list
+
+    # 3. The shown default name and the real default name are the same string.
+    model, _call = resolve_one(make_binding("FILE", slot="ps-t0", file_path=source_file))
+    default_target = model.object_texture_binding_file_list[0][2]
+    preview_target = naming_mod.file_resource_stem("94517393", "94517393-0.Hair_A", "ps_t0") + ".png"
+    assert default_target == preview_target, (default_target, preview_target)
+
+    # 4. The same image may be renamed the same way by several rows, because
+    #    they share one file; two different images under one name may not.
+    shared_builder = ini_builder_mod.M_IniBuilder()
+    ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+        ini_builder=shared_builder, draw_ib_model=alias_model,
+    )
+    ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+        ini_builder=shared_builder, draw_ib_model=alias_model,
+    )
+    other_source = _write_placeholder(os.path.join(source_dir, "other_source.png"), b"other bytes")
+    other_model, _call = resolve_one(
+        make_binding("FILE", slot="ps-t0", file_path=other_source, output_name="MyHair")
+    )
+    try:
+        ini_helper_mod.M_IniHelper.add_object_texture_binding_resource_sections(
+            ini_builder=shared_builder, draw_ib_model=other_model,
+        )
+    except ValueError as error:
+        assert "conflict" in str(error), str(error)
+    else:
+        raise AssertionError("expected a texture file name conflict")
+
+    # 5. A row that reuses an existing resource generates no file, so an alias
+    #    would be a promise the export cannot keep.
+    try:
+        resolve_one(make_binding("RESOURCE", slot="ps-t0", resource_name="ResourceShared", output_name="MyHair"))
+    except ValueError as error:
+        assert "generates no texture file" in str(error), str(error)
+    else:
+        raise AssertionError("expected an error for an alias on an existing resource")
+
+    # 6. A renamed mark binding copies the mark's captured image under the new
+    #    name and binds that copy instead of the shared mark resource.
+    mark_source = _write_placeholder(os.path.join(source_dir, "DiffuseMap.dds"))
+    original_lookup = ini_helper_mod.M_IniHelper._get_slot_texture_source_path
+    ini_helper_mod.M_IniHelper._get_slot_texture_source_path = (
+        lambda draw_ib_model=None, part_name="", texture_markup_info=None: mark_source
+    )
+    try:
+        model, call = resolve_one(
+            make_binding("MARK", slot="ps-t0", mark_name="DiffuseMap", output_name="HairDiffuse"),
+            {"94517393-0": [FakeMarkup("DiffuseMap", "Slot")]},
+        )
+    finally:
+        ini_helper_mod.M_IniHelper._get_slot_texture_source_path = original_lookup
+    assert len(model.object_texture_binding_file_list) == 1, model.object_texture_binding_file_list
+    _resource, _source, target_filename = model.object_texture_binding_file_list[0]
+    assert target_filename == "HairDiffuse.dds", target_filename
+    # The draw now binds the dedicated resource, not the shared mark resource.
+    assert "Resource-DiffuseMap" not in call.resolved_texture_slot_lines[1], call.resolved_texture_slot_lines
+    assert call.resolved_texture_slot_lines[1].startswith("ps-t0 = ResourceTex_"), call.resolved_texture_slot_lines
+
+    print("test_output_alias OK")
+
+
 def main():
     ensure_parent_packages()
     install_stubs()
@@ -494,6 +628,7 @@ def main():
         test_resolve_validation(modules, source_dir)
         test_drawindexed_line_emission(modules)
         test_resource_sections_and_copy(modules, temp_dir)
+        test_output_alias(modules, source_dir, temp_dir)
 
     print("ALL TEXTURE BIND TESTS PASSED")
 

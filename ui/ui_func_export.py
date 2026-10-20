@@ -8,6 +8,7 @@ from ..utils.format_utils import Fatal
 
 from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
+from ..common import texture_format_service as texture_format
 
 from ..games import get_exporter_class
 
@@ -150,6 +151,89 @@ class MMTGenerateModBlueprint(I18nOperator):
 
     node_name: bpy.props.StringProperty()  # type: ignore
     tree_name: bpy.props.StringProperty()  # type: ignore
+
+    def _resolve_target(self, context):
+        """Return (tree, output node) for this invocation, or (None, None)."""
+        tree = bpy.data.node_groups.get(self.tree_name) if self.tree_name else None
+        tree = tree or BlueprintExportHelper.get_current_blueprint_tree(context=context)
+        if not tree:
+            return None, None
+        if not self.node_name:
+            return tree, None
+        return tree, tree.nodes.get(self.node_name)
+
+    @staticmethod
+    def _pending_jobs(tree):
+        """Return the replacement rows that still need a conversion.
+
+        Planning reads headers only, so this stays cheap even for a blueprint
+        with many rows. A job that cannot be planned is kept, because the
+        runner reports the precise error before the export starts.
+        """
+        try:
+            jobs = texture_format.collect_tree_jobs(tree)
+        except Exception as error:
+            print("Generate Mod: could not collect texture format jobs: " + str(error))
+            return []
+        pending = []
+        for job in jobs:
+            try:
+                if texture_format.plan_for_job(job) is not None:
+                    pending.append(job)
+            except Exception:
+                pending.append(job)
+        return pending
+
+    def invoke(self, context, event):
+        # Prepare every replacement texture in the background first, then run
+        # the normal synchronous export. Without pending jobs the behaviour is
+        # exactly the historical one.
+        tree, output_node = self._resolve_target(context)
+        if tree is None or output_node is None:
+            return self.execute(context)
+        jobs = self._pending_jobs(tree)
+        if not jobs:
+            return self.execute(context)
+        started = texture_format.start_conversion(jobs)
+        if not started:
+            return self.execute(context)
+        self.operation_timer = context.window_manager.event_timer_add(0.2, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        self.report({'INFO'}, tr("{count} replacement texture(s) need conversion before export").format(count=started))
+        return {'RUNNING_MODAL'}
+
+    def _stop_timer(self, context):
+        """Remove the modal timer once the preparation phase has ended."""
+        timer = getattr(self, "operation_timer", None)
+        if timer is None:
+            return
+        try:
+            context.window_manager.event_timer_remove(timer)
+        except Exception:
+            pass
+        self.operation_timer = None
+
+    def modal(self, context, event):
+        if event.type == 'ESC':
+            texture_format.cancel_conversion()
+            self._stop_timer(context)
+            self.report({'WARNING'}, tr("Texture format conversion cancelled"))
+            return {'CANCELLED'}
+        if event.type != 'TIMER':
+            return {'PASS_THROUGH'}
+        if texture_format.is_running():
+            return {'RUNNING_MODAL'}
+        self._stop_timer(context)
+        errors = texture_format.progress_snapshot().get("errors") or []
+        if errors:
+            # Converting is mandatory: exporting the wrong DXGI format would
+            # silently produce a broken mod, so stop with the first reason.
+            self.report(
+                {'ERROR'},
+                tr("Replacement texture conversion failed; export stopped") + ": " + str(errors[0]),
+            )
+            return {'CANCELLED'}
+        return self.execute(context)
 
     def execute(self, context):
         # Resolve the requested blueprint before selecting its output.
