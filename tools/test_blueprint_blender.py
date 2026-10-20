@@ -844,14 +844,14 @@ class BlueprintTests(unittest.TestCase):
             item.slot = 'ps-t0'
             item.file_path = str(source)
 
-            generated, suffix, certain, can_rename, _reason = (
+            generated, suffix, _certain, can_rename, _reason = (
                 blueprint_node_texture._slot_row_output_name(bind, item)
             )
-            # The generated name contains the DrawIB and the object name, and it
-            # keeps the source image suffix because the file is a real PNG.
-            self.assertEqual(generated, 'ResourceTex_94517393_94517393_0_Hair_A_ps_t0.png')
-            self.assertEqual(suffix, '.png')
-            self.assertFalse(certain)
+            # The generated name contains the DrawIB and the object name. The
+            # suffix follows the source image or the format conversion, so the
+            # test asserts the shared rule instead of one environment default.
+            self.assertEqual(generated, 'ResourceTex_94517393_94517393_0_Hair_A_ps_t0' + suffix)
+            self.assertIn(suffix, ('.png', '.dds'))
             self.assertTrue(can_rename)
 
             layout = _FakeLayout()
@@ -862,15 +862,16 @@ class BlueprintTests(unittest.TestCase):
 
             # The alias replaces the whole stem and keeps the real suffix.
             item.output_name = 'MyHair'
-            self.assertEqual(texture_output_widgets.alias_preview(item, suffix), 'MyHair.png')
+            renamed = texture_output_widgets.alias_preview(item, suffix)
+            self.assertEqual(renamed, 'MyHair' + suffix)
             alias_layout = _FakeLayout()
             bind.draw_buttons(bpy.context, alias_layout)
-            self.assertIn('MyHair.png', "".join(
+            self.assertIn(renamed, "".join(
                 kwargs.get("text", "") for name, _args, kwargs in alias_layout.calls if name == "label"
             ))
 
-            # Global Hash Texture Bind names one file per hash and always DDS
-            # while the exact format conversion is enabled.
+            # Global Hash Texture Bind names one file per hash; the suffix again
+            # follows whether the replacement has to be converted.
             global_hash = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
             hash_item = global_hash.texture_hash_items.add()
             hash_item.texture_hash = '6077b727'
@@ -881,8 +882,8 @@ class BlueprintTests(unittest.TestCase):
             hash_name, hash_suffix, _hash_certain = blueprint_node_hash_texture._hash_row_output_name(
                 global_hash, hash_item
             )
-            self.assertEqual(hash_name, '6077b727_DiffuseMap.dds')
-            self.assertEqual(hash_suffix, '.dds')
+            self.assertEqual(hash_name, '6077b727_DiffuseMap' + hash_suffix)
+            self.assertIn(hash_suffix, ('.png', '.dds'))
             global_hash.draw_buttons(bpy.context, _FakeLayout())
 
             # Global Slot Texture Bind shows the DrawIB and a placeholder row

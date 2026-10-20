@@ -56,6 +56,10 @@ def new_blueprint():
     model._time_key_index = 0
     model._time_node_key_names = {}
     model._group_instance_stack = []
+    # parse_drawib_model_list applies the texture layers collected by the
+    # constructor; a hand-built model has to provide the same empty lists.
+    model.global_slot_texture_binding_list = []
+    model.global_hash_texture_binding_list = []
 
     # Leaf conversion is unrelated to clock provenance; build real DrawCalls.
     # Copy the condition chain exactly as normal object-node parsing does.
