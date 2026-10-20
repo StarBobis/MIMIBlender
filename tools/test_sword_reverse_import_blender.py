@@ -152,6 +152,98 @@ def build_importable_group(group_path, drawib='a1b2c3d4', broken_type=False):
     return group_path
 
 
+def build_blend16_group(group_path, drawib='c0ffee16'):
+    """Write one reverse DrawIB folder whose Blend buffer holds 16-bit bone ids.
+
+    MMT writes this layout when the original WWMI mod remaps bone ids above 255
+    (Blend.buf keeps component-local 8-bit ids, BlendRemapVertexVG.buf holds the
+    real ones). The importer must read BLENDINDICES as 16-bit values, otherwise
+    every id collapses into the low range and weights land on wrong bones.
+    """
+    os.makedirs(group_path, exist_ok=True)
+    index_name = drawib + '.ib'
+    position_name = drawib + '-Position.buf'
+    blend_name = drawib + '-Blend.buf'
+
+    # Index buffer: one quad, two triangles, 16-bit indices like the reverse.
+    index_data = struct.pack('<%dH' % len(_QUAD_INDICES), *_QUAD_INDICES)
+    position_data = struct.pack('<%df' % (len(_QUAD_POSITIONS) * 3),
+                                *[value for vertex in _QUAD_POSITIONS for value in vertex])
+
+    # Per vertex: four 16-bit ids followed by four 16-bit UNORM weights.
+    # The first vertex carries ids far above 255 with a normalized 40000/25535
+    # split, the remaining vertices keep a single id 7 at full weight.
+    blend_data = struct.pack('<8H', 300, 301, 302, 0, 40000, 25535, 0, 0)
+    for _ in range(len(_QUAD_POSITIONS) - 1):
+        blend_data += struct.pack('<8H', 7, 0, 0, 0, 65535, 0, 0, 0)
+
+    _write_bytes(os.path.join(group_path, index_name), index_data)
+    _write_bytes(os.path.join(group_path, position_name), position_data)
+    _write_bytes(os.path.join(group_path, blend_name), blend_data)
+
+    data_type = {
+        'GamePreset': 'WWMI',
+        'WorkGameType': 'GPU_P12_TA4_N4_C4_C1-4_BI16x4_BW16x4_T4_T1-4_T2-4_',
+        'IndexOffset': 0,
+        'IndexCount': len(_QUAD_INDICES),
+        'IndexBufferList': [
+            {
+                'DXGI_FORMAT': 'DXGI_FORMAT_R16_UINT',
+                'FileName': index_name,
+                'IndexOffset': 0,
+                'IndexCount': len(_QUAD_INDICES),
+            }
+        ],
+        'CategoryBufferList': [
+            {
+                'FileName': position_name,
+                'Type': 'Normal',
+                'D3D11ElementList': [
+                    {
+                        'SemanticName': 'POSITION',
+                        'SemanticIndex': '0',
+                        'Format': 'R32G32B32_FLOAT',
+                        'ByteWidth': '12',
+                        'ExtractSlot': 'vb0',
+                        'ExtractTechnique': 'trianglelist',
+                        'Category': 'Position',
+                        'DrawCategory': 'Position',
+                    }
+                ],
+            },
+            {
+                'FileName': blend_name,
+                'Type': 'Normal',
+                'D3D11ElementList': [
+                    {
+                        'SemanticName': 'BLENDINDICES',
+                        'SemanticIndex': '0',
+                        'Format': 'R16G16B16A16_UINT',
+                        'ByteWidth': '8',
+                        'ExtractSlot': 'vb4',
+                        'ExtractTechnique': 'trianglelist',
+                        'Category': 'Blend',
+                        'DrawCategory': 'Blend',
+                    },
+                    {
+                        'SemanticName': 'BLENDWEIGHT',
+                        'SemanticIndex': '0',
+                        'Format': 'R16G16B16A16_UNORM',
+                        'ByteWidth': '8',
+                        'ExtractSlot': 'vb4',
+                        'ExtractTechnique': 'trianglelist',
+                        'Category': 'Blend',
+                        'DrawCategory': 'Blend',
+                    },
+                ],
+            },
+        ],
+    }
+    with open(os.path.join(group_path, 'Blend16.json'), 'w', encoding='utf-8') as handle:
+        json.dump(data_type, handle)
+    return group_path
+
+
 class FakeLayout:
     """Stand-in for a Blender UI layout that records the drawn text."""
 
@@ -231,6 +323,13 @@ class ReverseImportTests(unittest.TestCase):
                 col.name for col in new_collections
                 if len(col.objects) == 0 and len(col.children) == 0
             ],
+            # Numeric vertex group names are the bone ids of the reversed mesh;
+            # keeping them here proves 16-bit ids survived the import.
+            'vertex_group_ids': {
+                obj.name: sorted(int(group.name) for group in obj.vertex_groups
+                                 if group.name.isdigit())
+                for obj in new_objects if obj.type == 'MESH'
+            },
             'message': message,
         }
         # Clean up whatever the import created, so tests stay independent.
@@ -613,6 +712,28 @@ AlignedByteOffset: 12
         result = self.run_import(root)
         self.assertEqual(result['object_names'], [])
         self.assertEqual(result['collection_names'], [])
+
+    def test_reverse_import_keeps_16_bit_bone_ids(self):
+        # Regression: MMT reverse output can now carry a 16-bit Blend layout
+        # (BLENDINDICES R16G16B16A16_UINT). Reading it as bytes truncates every
+        # id, so the imported vertex groups must still be named 300 / 301 / 302
+        # and the 8-bit ids of the same buffer must not leak in.
+        root = self.folder('blend16')
+        drawib = 'c0ffee16'
+        build_blend16_group(os.path.join(root, drawib), drawib)
+        result = self.run_import(root)
+
+        self.assertEqual(len(result['object_names']), 1, result['message'])
+        self.assertEqual(result['empty_leaf_names'], [])
+        # The importer allocates one group per id up to the mesh maximum, so the
+        # contract is the highest id and the presence of the 16-bit ids, not the
+        # exact group count.
+        group_ids = result['vertex_group_ids'][result['object_names'][0]]
+        self.assertEqual(max(group_ids), 302,
+                         'vertex groups must keep the real 16-bit bone ids')
+        for expected_id in (300, 301, 302):
+            self.assertIn(expected_id, group_ids,
+                          'bone id %d must survive the import' % expected_id)
 
 
 def main():
