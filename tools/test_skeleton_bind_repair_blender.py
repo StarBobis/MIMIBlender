@@ -302,6 +302,38 @@ class PaletteConflictTests(unittest.TestCase):
         self.assertEqual([group.name for group in first.vertex_groups], ["Root"])
         self.assertEqual([group.name for group in second.vertex_groups], ["Arm"])
 
+    def test_forced_mode_warns_and_names_the_drawibs(self):
+        # The panel can say "Rename Bones" and still get group names back. That
+        # is unavoidable for two palettes on one armature, but it must never be
+        # silent: the warning names the DrawIBs so the user can import one alone.
+        bones = [
+            {"Name": "Root", "Parent": -1, "Rest": rest_matrix(), "Length": 0.2},
+            {"Name": "Arm", "Parent": 0, "Rest": rest_matrix(x=0.3), "Length": 0.2},
+        ]
+        first = make_mesh("warningA-Component 0", [("0", [0, 1, 2])])
+        second = make_mesh("warningB-Component 0", [("0", [0, 1, 2])])
+        warnings = []
+        summary = SkeletonHelper.apply_groups(
+            "BONE_TO_GROUP",
+            {"warningA": [first], "warningB": [second]},
+            "",
+            "NONE",
+            import_mirror=False,
+            skeletons={
+                # Same skeleton hash, so both DrawIBs share one armature.
+                "warningA": drawib_block(bones, {"0": "Root", "1": "Arm"}, hash_value="warn"),
+                "warningB": drawib_block(bones, {"0": "Arm", "1": "Root"}, hash_value="warn"),
+            },
+            warnings=warnings,
+        )
+        self.assertIn("forced: DrawIB palettes differ", summary)
+        forced = [message for message in warnings if "number different bones" in message]
+        self.assertTrue(forced, warnings)
+        self.assertIn("warningA", forced[0])
+        self.assertIn("warningB", forced[0])
+        # The advice has to be actionable, not just a diagnosis.
+        self.assertIn("single DrawIB", forced[0])
+
 
 class BoneStructureTests(unittest.TestCase):
     """Bone collections and the Deform flag must reach the armature."""

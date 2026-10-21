@@ -325,6 +325,78 @@ class SkeletonSettingsTests(unittest.TestCase):
         skeleton_ui.draw_skeleton_binding(layout, self.scene, "")
         self.assertIn("Last bind: QingYi (2 bones, 1 meshes)", layout.labels)
 
+    def test_draw_block_warns_before_a_forced_naming_mode(self):
+        # One palette per DrawIB is legal, but two disagreeing palettes of one
+        # character make "Rename Bones" impossible. The panel must say that
+        # before the import instead of leaving the user with renamed groups.
+        with tempfile.TemporaryDirectory() as folder:
+            payload = {
+                "NamingMode": "boneToGroup",
+                "Characters": [
+                    {
+                        "Id": "conflict",
+                        "Name": "Conflict",
+                        "Bones": [
+                            {"Name": "Root", "Parent": -1, "Rest": rest_matrix((0.0, 0.0, 0.0)), "Length": 0.2},
+                            {"Name": "Arm", "Parent": 0, "Rest": rest_matrix((0.0, 0.0, 0.2)), "Length": 0.2},
+                        ],
+                        "BoneMap": {"0": "Root", "1": "Arm"},
+                    }
+                ],
+                "DrawIBs": [
+                    {"DrawIB": "aaaa1111", "CharacterId": "conflict", "BoneMap": {"0": "Root", "1": "Arm"}},
+                    {"DrawIB": "bbbb2222", "CharacterId": "conflict", "BoneMap": {"0": "Arm", "1": "Root"}},
+                ],
+            }
+            with open(os.path.join(folder, "skeleton.json"), "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            # The summary is cached per mtime, so a reused temp path must not
+            # serve the payload of a previous test.
+            skeleton_ui.clear_sidecar_cache()
+
+            hint = skeleton_ui.tr(
+                "DrawIBs of {names} number different bones; the import renames the vertex groups instead of the bones"
+            ).format(names="Conflict")
+
+            # "Follow MMT" resolves to the numeric mode this sidecar asks for.
+            layout = FakeLayout()
+            skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
+            self.assertIn(hint, layout.labels)
+
+            # Obvious choice: asking for group names is what the import does
+            # anyway, so there is nothing to warn about.
+            self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_GROUP_TO_BONE
+            layout = FakeLayout()
+            skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
+            self.assertNotIn(hint, layout.labels)
+
+    def test_draw_block_wraps_a_long_bind_report(self):
+        # A long report used to be shortened in the middle, which hid the one
+        # detail that explains an unexpected naming mode.
+        report = (
+            "Skeleton: Jane Doe, naming Rename Vertex Groups "
+            "[forced: DrawIB palettes differ], confidence 0.42, palette 94/94, "
+            "2 slot(s) without a bone (80, 82) -> 4 weights in bind pose"
+        )
+        skeleton_ui.remember_bind_report(self.scene, report)
+        layout = FakeLayout()
+        skeleton_ui.draw_skeleton_binding(layout, self.scene, "")
+        self.assertTrue(layout.labels)
+        # The report is the last block of the panel, so its first line is the
+        # first label that carries the "Last bind" caption.
+        start = next(
+            index
+            for index, label in enumerate(layout.labels)
+            if label.startswith("Last bind: Skeleton: Jane Doe")
+        )
+        report_lines = [label.strip() for label in layout.labels[start:]]
+        self.assertGreater(len(report_lines), 1)
+        # Joining the lines restores the sentences the wrap split apart.
+        self.assertIn("forced: DrawIB palettes differ", " ".join(report_lines))
+        self.assertLessEqual(len(layout.labels[start]), skeleton_ui.REPORT_LINE_WIDTH)
+        for label in layout.labels[start + 1:]:
+            self.assertLessEqual(len(label), skeleton_ui.REPORT_LINE_WIDTH + 2)
+
 
 def main():
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(SkeletonSettingsTests)

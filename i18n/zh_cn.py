@@ -392,6 +392,8 @@ TRANSLATIONS_ZH_CN = {
     "Skeleton file found: the import will bind the character armature": "找到骨骼文件：导入时会绑定角色骨架",
     "No skeleton.json next to this folder; the import uses the skeleton embedded in each Json when it has one": "此目录旁没有 skeleton.json；导入时如果 Json 内嵌了骨架，会使用该骨架",
     "Skeleton binding is off; the import creates no armature": "骨骼绑定已关闭，导入时不会创建骨架",
+    "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones": "这个骨架按组件分别编号，导入时会改为重命名顶点组而不是骨骼",
+    "DrawIBs of {names} number different bones; the import renames the vertex groups instead of the bones": "{names} 的各个 DrawIB 对同一编号对应不同骨骼，导入时会改为重命名顶点组而不是骨骼",
     "Optional skeleton.json path; empty searches the reverse output folder": "可选的 skeleton.json 路径；留空则在逆向输出目录中查找",
     "Rename Bones": "重命名骨骼",
     "Rename Vertex Groups": "重命名顶点组",

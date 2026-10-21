@@ -33,6 +33,7 @@ from .skeleton_helper import (
     NAMING_BONE_TO_GROUP,
     NAMING_GROUP_TO_BONE,
     NAMING_SIDECAR,
+    SkeletonHelper,
 )
 
 # Property names are also the keys stored inside the blend file, so renaming
@@ -194,6 +195,68 @@ def remember_bind_report(scene, summary):
         pass
 
 
+def _conflicting_characters(payload):
+    """Characters whose DrawIBs number different bones with the same numbers.
+
+    "Rename Bones" turns the palette numbers into bone names, and one armature
+    can only carry one numbering. A character whose DrawIBs disagree therefore
+    cannot be renamed at all; the bind falls back to group names. The panel
+    shows that before the import instead of after it, so the choice is not
+    experienced as an ignored dropdown.
+    """
+    character_names = {}
+    character_maps = {}
+    for character in payload.get("Characters") or []:
+        key = str(character.get("Id", ""))
+        character_names[key] = str(character.get("Name") or character.get("Id") or "")
+        character_maps[key] = character.get("BoneMap") or {}
+
+    # Mirror SkeletonHelper.drawib_map(): a DrawIB map wins, the character map
+    # is only the fallback for sidecars written before the per-DrawIB table.
+    palettes = {}
+    for entry in payload.get("DrawIBs") or []:
+        key = str(entry.get("CharacterId", ""))
+        mapping = entry.get("BoneMap") or character_maps.get(key) or {}
+        if not mapping:
+            continue
+        palettes.setdefault(key, []).append(
+            {str(index): str(name) for index, name in mapping.items()}
+        )
+
+    conflicts = []
+    for key, maps in palettes.items():
+        if len(maps) > 1 and SkeletonHelper.palettes_conflict(maps):
+            conflicts.append(character_names.get(key) or key)
+    return conflicts
+
+
+def _forced_naming_message(info, naming):
+    """Hint for a naming choice this skeleton cannot honor, or an empty string.
+
+    "Follow MMT" counts as numeric bones when the sidecar asks for them, so the
+    hint also appears for the default setting; otherwise the user would only
+    learn about the fallback once the vertex groups are already renamed.
+    """
+    if info is None:
+        return ""
+    wants_numbers = str(naming or "") == NAMING_BONE_TO_GROUP or (
+        str(naming or "") == NAMING_SIDECAR
+        and str(info.get("naming") or "") == NAMING_BONE_TO_GROUP
+    )
+    if not wants_numbers:
+        return ""
+    if info.get("components"):
+        return tr(
+            "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones"
+        )
+    conflicts = info.get("conflicts") or []
+    if conflicts:
+        return tr(
+            "DrawIBs of {names} number different bones; the import renames the vertex groups instead of the bones"
+        ).format(names=", ".join(conflicts[:3]))
+    return ""
+
+
 def sidecar_info(folder):
     """Summarize ``<folder>/skeleton.json`` or return None when it is missing.
 
@@ -225,6 +288,11 @@ def sidecar_info(folder):
         "path": path,
         "draw_ibs": len(payload.get("DrawIBs") or []),
         "characters": characters,
+        # The two facts that make "Rename Bones" impossible for this skeleton.
+        # Computing them once per file modification keeps the redraw cheap.
+        "naming": SkeletonHelper.normalize_naming_mode(payload.get("NamingMode", "")),
+        "conflicts": _conflicting_characters(payload),
+        "components": any(entry.get("Components") for entry in payload.get("DrawIBs") or []),
     }
     _SIDECAR_CACHE[path] = (modified, info)
     return info
@@ -233,6 +301,46 @@ def sidecar_info(folder):
 def clear_sidecar_cache():
     """Forget cached sidecar summaries (tests and explicit folder changes)."""
     _SIDECAR_CACHE.clear()
+
+
+# The side panel is narrow, so a bind report has to be split into lines that
+# actually fit. One line that is too long is shortened in the middle, which hid
+# the forced-naming note of every long report.
+REPORT_LINE_WIDTH = 38
+REPORT_MAX_LINES = 8
+
+
+def wrap_bind_report(text, width=REPORT_LINE_WIDTH, max_lines=REPORT_MAX_LINES):
+    """Split a bind report into panel width lines, never into more than max_lines.
+
+    Words are kept whole when possible; a word longer than the width is left on
+    its own line instead of being broken, because path-like tokens are easier to
+    read that way. A report that does not fit is marked with "..." so a cut
+    result is never mistaken for a complete one.
+    """
+    words = str(text or "").split()
+    lines = []
+    current = ""
+    index = 0
+    while index < len(words) and len(lines) < max_lines:
+        word = words[index]
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= width:
+            current = current + " " + word
+        else:
+            lines.append(current)
+            current = word
+        index += 1
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    if index < len(words) and lines:
+        # The remaining words did not fit; say so instead of dropping them.
+        lines[-1] = lines[-1][: max(0, width - 3)] + "..."
+    if not lines:
+        # An empty input still gives the caller one drawable line.
+        return [""]
+    return lines
 
 
 def draw_skeleton_binding(layout, scene, folder):
@@ -253,6 +361,13 @@ def draw_skeleton_binding(layout, scene, folder):
         box.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
         info = sidecar_info(folder)
         if info is not None:
+            # The warning belongs right under the dropdown it overrules: the
+            # user then sees the fallback before pressing the import button.
+            forced_message = _forced_naming_message(
+                info, str(getattr(scene, NAMING_PROPERTY, NAMING_SIDECAR) or NAMING_SIDECAR)
+            )
+            if forced_message:
+                box.label(text=forced_message, icon='ERROR')
             box.label(
                 text=tr("Skeleton file found: the import will bind the character armature"),
                 icon='ARMATURE_DATA',
@@ -276,7 +391,14 @@ def draw_skeleton_binding(layout, scene, folder):
 
     report = str(getattr(scene, REPORT_PROPERTY, "") or "")
     if report:
-        box.label(text=tr("Last bind: {summary}").format(summary=report), icon='CHECKMARK')
+        # A single label shortens a long text in the middle, which used to hide
+        # exactly the part that explains a forced naming mode. Wrapping the
+        # report keeps every reason readable inside the narrow side panel.
+        header = tr("Last bind: {summary}").format(summary=report)
+        lines = wrap_bind_report(header)
+        box.label(text=lines[0], icon='CHECKMARK')
+        for line in lines[1:]:
+            box.label(text="  " + line)
 
 
 @bpy.app.handlers.persistent

@@ -834,6 +834,38 @@ class SkeletonHelper:
         """Apply the sidecar to one group of meshes (manual operator entry point)."""
         return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
 
+    @staticmethod
+    def forced_naming_warning(character_name, reason, sources):
+        """Explain one naming mode that the palettes made impossible.
+
+        A forced mode looks exactly like an ignored dropdown, so the import has
+        to say what happened and what the user can do about it. The two reasons
+        need different advice: a DrawIB palette conflict disappears when one
+        DrawIB is bound on its own, while per-component palettes belong to the
+        character itself and cannot be avoided by importing less.
+        """
+        if reason == "component palettes":
+            cause = "its components each carry their own bone numbering"
+            advice = "the vertex groups keep the bone names"
+        else:
+            listing = ", ".join(str(name) for name in sources[:4] if name)
+            if len(sources) > 4:
+                listing += ", ..."
+            if listing:
+                cause = "the DrawIBs " + listing + " number different bones with the same numbers"
+            else:
+                cause = "its DrawIBs number different bones with the same numbers"
+            # Binding a single DrawIB is the supported way to keep numeric
+            # bones, because one palette then describes the whole armature.
+            advice = (
+                "the vertex groups keep the bone names; "
+                "import a single DrawIB alone if you need numeric bones"
+            )
+        return (
+            "Skeleton " + str(character_name) + ": " + cause
+            + ", so one armature cannot carry a single numbering; " + advice + "."
+        )
+
     @classmethod
     def _plan_from_block(cls, block, meshes):
         """Build a binding plan from the skeleton embedded in a SubmeshJson."""
@@ -1001,6 +1033,10 @@ class SkeletonHelper:
         # the next left one of them pointing at no bone at all.
         plans = []
         palettes = {}
+        # DrawIB names per character. A forced naming mode must be able to name
+        # the DrawIBs that disagree, otherwise the warning only says "palettes
+        # differ" and the user has no way to find the offending parts.
+        palette_sources = {}
         for draw_ib_name, objects in groups.items():
             meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
             if not meshes:
@@ -1023,6 +1059,13 @@ class SkeletonHelper:
                 continue
             key = plan["key"]
             palettes.setdefault(key, []).extend(plan["maps"])
+            # The group key is empty for the manual operator, which binds the
+            # selected meshes as one unnamed group; such a source is skipped so
+            # the warning never contains an empty name.
+            source_name = str(draw_ib_name or "")
+            sources = palette_sources.setdefault(key, [])
+            if source_name and source_name not in sources:
+                sources.append(source_name)
             plans.append(plan)
 
         if not plans:
@@ -1200,6 +1243,13 @@ class SkeletonHelper:
             reason = override_reason.get(key)
             if reason:
                 mode_detail += " [forced: " + reason + "]"
+                # The summary alone is not enough: it is one INFO line that the
+                # next report overwrites, and the panel shortens it in the
+                # middle. The user must be told that the dropdown was overruled
+                # and which DrawIBs caused it.
+                warning_list.append(
+                    cls.forced_naming_warning(character_name, reason, palette_sources.get(key) or [])
+                )
             details.append(mode_detail)
 
             row = quality.get(key) or {}
@@ -1250,15 +1300,19 @@ class SkeletonHelper:
                     + "; check the rig before editing"
                 )
 
+            # The effective mode comes first: the panel shortens a long line in
+            # the middle, so a mode hidden behind the bone and mesh counts was
+            # invisible exactly when it mattered (a forced fallback).
             summaries.append(
                 "Skeleton: "
                 + character_name
+                + ", "
+                + ", ".join(details)
                 + " ("
                 + str(len(armature_obj.data.bones))
                 + " bones, "
                 + str(bound_counts.get(key, 0))
-                + " meshes), "
-                + ", ".join(details)
+                + " meshes)"
             )
 
             if removed_count:
