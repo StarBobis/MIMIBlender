@@ -1100,20 +1100,18 @@ class SkeletonHelper:
             if group_mode[key] and naming_by_key.get(key) != NAMING_GROUP_TO_BONE:
                 override_reason[key] = "component palettes"
 
-        # One armature carries one numbering, but one character may legally have
-        # several: two DrawIBs that index different bones under the same numbers
-        # cannot share numeric bone names. Each palette then gets its own
-        # armature, so every mesh keeps its numeric groups and still deforms
-        # through the bones its palette names. Equal palettes share one rig.
+        # One armature can only carry one numbering, and every part should be
+        # manageable on its own, so each palette gets its own armature in both
+        # naming modes. Numeric naming needs the split to give every mesh the
+        # bones its own numbers name; with readable bone names the split keeps
+        # the parts independent (each rig can be posed and cleaned alone).
+        # Equal palettes still share one rig, so a normal character keeps one.
         palettes_per_character = {}
         armature_labels = {}
         armature_character = {}
         for plan in plans:
             key = plan["key"]
-            if group_mode.get(key) or naming_by_key.get(key) != NAMING_BONE_TO_GROUP:
-                armature_key = key
-            else:
-                armature_key = key + "|" + cls.palette_signature(plan["fallback"])
+            armature_key = key + "|" + cls.palette_signature(plan["fallback"])
             plan["armature_key"] = armature_key
             palettes_per_character.setdefault(key, set()).add(armature_key)
             armature_character.setdefault(armature_key, key)

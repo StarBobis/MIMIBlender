@@ -363,12 +363,12 @@ class SkeletonSettingsTests(unittest.TestCase):
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
             self.assertIn(hint, layout.labels)
 
-            # Obvious choice: asking for group names is what the import does
-            # anyway, so there is nothing to warn about.
+            # The split happens in both naming modes, so the hint must not
+            # disappear when the user picks readable bone names.
             self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_GROUP_TO_BONE
             layout = FakeLayout()
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
-            self.assertNotIn(hint, layout.labels)
+            self.assertIn(hint, layout.labels)
 
     def test_draw_block_wraps_a_long_bind_report(self):
         # A long report used to be shortened in the middle, which hid the one

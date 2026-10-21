@@ -92,7 +92,8 @@ def get_naming_items(self=None, context=None):
         (
             NAMING_GROUP_TO_BONE,
             tr("Rename Vertex Groups"),
-            tr("Rename mesh vertex groups to the skeleton bone names"),
+            tr("Rename mesh vertex groups to the skeleton bone names; "
+               "every bone palette still gets its own armature"),
         ),
     ]
 
@@ -230,27 +231,35 @@ def _conflicting_characters(payload):
     return conflicts
 
 
-def _naming_hint(info, naming):
-    """Hint for what a naming choice will really produce, or an empty string.
+def _wants_numeric_bones(info, naming):
+    """Whether this naming choice asks for numeric bone names.
 
-    Numeric bones are possible for a character with several palettes: the bind
-    gives each palette its own armature. Only per-component tables still force
-    group names. "Follow MMT" counts as numeric bones when the sidecar asks for
-    them, so the hint also appears for the default setting; otherwise the user
-    would only learn about it once the import is already done.
+    "Follow MMT" counts as numeric bones when the sidecar asks for them, so the
+    hints also appear for the default setting; otherwise the user would only
+    learn about the result once the import is already done.
     """
-    if info is None:
-        return ""
-    wants_numbers = str(naming or "") == NAMING_BONE_TO_GROUP or (
+    return str(naming or "") == NAMING_BONE_TO_GROUP or (
         str(naming or "") == NAMING_SIDECAR
         and str(info.get("naming") or "") == NAMING_BONE_TO_GROUP
     )
-    if not wants_numbers:
+
+
+def _naming_hint(info, naming):
+    """Hint for what a naming choice will really produce, or an empty string.
+
+    Every distinct palette gets its own armature in both naming modes, so a
+    palette conflict is shown regardless of the choice. Only per-component
+    tables change the naming itself: they keep bone names because the export
+    addresses the components through one merged table.
+    """
+    if info is None:
         return ""
     if info.get("components"):
-        return tr(
-            "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones"
-        )
+        if _wants_numeric_bones(info, naming):
+            return tr(
+                "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones"
+            )
+        return ""
     conflicts = info.get("conflicts") or []
     if conflicts:
         return tr(
