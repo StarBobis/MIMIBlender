@@ -325,10 +325,11 @@ class SkeletonSettingsTests(unittest.TestCase):
         skeleton_ui.draw_skeleton_binding(layout, self.scene, "")
         self.assertIn("Last bind: QingYi (2 bones, 1 meshes)", layout.labels)
 
-    def test_draw_block_warns_before_a_split_naming_mode(self):
-        # One palette per DrawIB is legal, and two disagreeing palettes of one
-        # character mean one armature per palette. The panel must say that
-        # before the import instead of leaving the user with several rigs.
+    def test_draw_block_warns_only_before_a_numeric_split(self):
+        # One palette per DrawIB is legal, and two disagreeing palettes force
+        # one armature per palette only while the bones carry the numbers.
+        # "Rename Vertex Groups" renames object-local groups, so it keeps one
+        # armature and must not promise a split.
         with tempfile.TemporaryDirectory() as folder:
             payload = {
                 "NamingMode": "boneToGroup",
@@ -363,12 +364,12 @@ class SkeletonSettingsTests(unittest.TestCase):
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
             self.assertIn(hint, layout.labels)
 
-            # The split happens in both naming modes, so the hint must not
-            # disappear when the user picks readable bone names.
+            # The split is numeric-only, so readable bone names drop the hint:
+            # the whole character stays on one armature.
             self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_GROUP_TO_BONE
             layout = FakeLayout()
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
-            self.assertIn(hint, layout.labels)
+            self.assertNotIn(hint, layout.labels)
 
     def test_draw_block_wraps_a_long_bind_report(self):
         # A long report used to be shortened in the middle, which hid the one

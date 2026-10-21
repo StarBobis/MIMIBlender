@@ -92,8 +92,7 @@ def get_naming_items(self=None, context=None):
         (
             NAMING_GROUP_TO_BONE,
             tr("Rename Vertex Groups"),
-            tr("Rename mesh vertex groups to the skeleton bone names; "
-               "every bone palette still gets its own armature"),
+            tr("Rename mesh vertex groups to the skeleton bone names"),
         ),
     ]
 
@@ -204,6 +203,7 @@ def _conflicting_characters(payload):
     can only carry one numbering. Such a character therefore gets one armature
     per palette, which changes the Outliner and the posing workflow; the panel
     says so before the import instead of letting the user discover it after.
+    "Rename Vertex Groups" needs no hint: object-local groups keep one armature.
     """
     character_names = {}
     character_maps = {}
@@ -247,10 +247,12 @@ def _wants_numeric_bones(info, naming):
 def _naming_hint(info, naming):
     """Hint for what a naming choice will really produce, or an empty string.
 
-    Every distinct palette gets its own armature in both naming modes, so a
-    palette conflict is shown regardless of the choice. Only per-component
-    tables change the naming itself: they keep bone names because the export
-    addresses the components through one merged table.
+    Only numeric bone names need a warning: one bone can carry one number, so a
+    character whose DrawIBs disagree gets several armatures. Renaming the vertex
+    groups keeps one armature, because every object renames its own groups, so
+    that mode has nothing to warn about. Per-component tables still change the
+    naming itself: they keep bone names because the export addresses the
+    components through one merged table.
     """
     if info is None:
         return ""
@@ -261,7 +263,7 @@ def _naming_hint(info, naming):
             )
         return ""
     conflicts = info.get("conflicts") or []
-    if conflicts:
+    if conflicts and _wants_numeric_bones(info, naming):
         return tr(
             "DrawIBs of {names} number different bones; the import creates one armature per palette"
         ).format(names=", ".join(conflicts[:3]))

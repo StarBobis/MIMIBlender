@@ -313,16 +313,18 @@ class PaletteConflictTests(unittest.TestCase):
         self.assertAlmostEqual(first_rig.data.bones["0"].head_local.x, 0.0, places=5)
         self.assertAlmostEqual(second_rig.data.bones["0"].head_local.x, 0.3, places=5)
 
-    def test_group_naming_also_splits_the_armature(self):
-        # Renaming the vertex groups makes both rigs use the same bone names,
-        # but each part must still be a unit of its own: one rig per palette, so
-        # a part can be posed and cleaned without touching the others.
+    def test_group_naming_shares_one_armature(self):
+        # Vertex groups are object-local: each DrawIB renames its own groups
+        # through its own palette, so two meshes never collide on a group name.
+        # The character therefore keeps the single armature it owns; splitting
+        # it would only make the user pose two rigs that carry the same bones.
         bones = [
             {"Name": "Root", "Parent": -1, "Rest": rest_matrix(), "Length": 0.2},
             {"Name": "Arm", "Parent": 0, "Rest": rest_matrix(x=0.3), "Length": 0.2},
         ]
         first = make_mesh("groupA-Component 0", [("0", [0, 1, 2])])
         second = make_mesh("groupB-Component 0", [("0", [0, 1, 2])])
+        warnings = []
         summary = SkeletonHelper.apply_groups(
             "GROUP_TO_BONE",
             {"groupA": [first], "groupB": [second]},
@@ -333,17 +335,21 @@ class PaletteConflictTests(unittest.TestCase):
                 "groupA": drawib_block(bones, {"0": "Root", "1": "Arm"}, hash_value="g"),
                 "groupB": drawib_block(bones, {"0": "Arm", "1": "Root"}, hash_value="g"),
             },
+            warnings=warnings,
         )
         self.assertIn("naming Rename Vertex Groups", summary)
-        self.assertIn("groupA", summary)
-        self.assertIn("groupB", summary)
+        # Each object resolves the same slot through its own palette, so the
+        # two meshes end up with different bone names.
         self.assertEqual([group.name for group in first.vertex_groups], ["Root"])
         self.assertEqual([group.name for group in second.vertex_groups], ["Arm"])
-        first_rig = bound_armature(first)
-        second_rig = bound_armature(second)
-        self.assertIsNot(first_rig, second_rig)
-        self.assertEqual(sorted(bone.name for bone in first_rig.data.bones), ["Arm", "Root"])
-        self.assertEqual(sorted(bone.name for bone in second_rig.data.bones), ["Arm", "Root"])
+        # One armature for the whole character, shared by both meshes.
+        armature = bound_armature(first)
+        self.assertIs(bound_armature(second), armature)
+        self.assertEqual(sorted(bone.name for bone in armature.data.bones), ["Arm", "Root"])
+        # No split means no "pose them together" warning either.
+        self.assertFalse(
+            [message for message in warnings if "pose them together" in message], warnings
+        )
 
     def test_split_warns_once_and_names_the_drawibs(self):
         # Several rigs are a workflow change, so it must never be silent: one

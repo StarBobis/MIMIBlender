@@ -14,7 +14,8 @@ Two naming modes exist because the two namespaces have different owners:
 One armature can carry only one numbering, but one character can have several
 palettes (the body and the hair of a pack may index different bones under the
 same numbers). Numeric naming therefore builds one armature per palette, so every
-mesh can keep its own numbers; readable bone names stay on one shared armature.
+mesh can keep its own numbers. Readable bone names stay on one shared armature:
+renaming vertex groups is object-local and never collides between DrawIBs.
 """
 
 import json
@@ -987,10 +988,11 @@ class SkeletonHelper:
         naming_mode may also be NAMING_SIDECAR: the embedded block (or the
         legacy sidecar) then decides, which is what the shared import settings
         default to. An explicit mode always wins over the block. One armature
-        carries one numbering, so a character whose DrawIBs disagree gets one
-        armature per palette when numeric bones are requested; per-component
-        palettes still fall back to bone names because the export addresses them
-        through one merged table.
+        carries one numbering, so numeric bones give a character whose DrawIBs
+        disagree one armature per palette. Renaming the vertex groups keeps one
+        armature instead: those groups are object-local, so two palettes never
+        collide. Per-component palettes still fall back to bone names because the
+        export addresses them through one merged table.
         import_mirror: whether this import baked the non-mirrored workflow's X
         reflection into the meshes. The one-click imports pass the scene mode;
         None falls back to the per-object marker (manual binding of objects an
@@ -1059,9 +1061,9 @@ class SkeletonHelper:
                 plan = cls._plan_from_sidecar(sidecar, draw_ib_name, meshes)
             if plan is None:
                 continue
-            # The DrawIB name is kept on the plan: a character with several bone
-            # palettes needs one armature per palette, and each rig has to say
-            # which DrawIBs it serves.
+            # The DrawIB name is kept on the plan: numeric naming builds one
+            # armature per palette, and each of those rigs has to say which
+            # DrawIBs it serves.
             plan["group"] = str(draw_ib_name or "")
             key = plan["key"]
             palettes.setdefault(key, []).extend(plan["maps"])
@@ -1100,18 +1102,29 @@ class SkeletonHelper:
             if group_mode[key] and naming_by_key.get(key) != NAMING_GROUP_TO_BONE:
                 override_reason[key] = "component palettes"
 
-        # One armature can only carry one numbering, and every part should be
-        # manageable on its own, so each palette gets its own armature in both
-        # naming modes. Numeric naming needs the split to give every mesh the
-        # bones its own numbers name; with readable bone names the split keeps
-        # the parts independent (each rig can be posed and cleaned alone).
-        # Equal palettes still share one rig, so a normal character keeps one.
+        # The naming mode also decides how many armatures a character needs.
+        # "Rename Bones" writes a palette number into the bone name, and a bone
+        # can carry only one name: two DrawIBs that number different bones
+        # therefore need one armature each. "Rename Vertex Groups" renames the
+        # groups of each object, and vertex groups are object-local, so every
+        # palette of one character fits on its single armature. Equal palettes
+        # share one rig in both modes, so a normal character always keeps one.
+        effective_naming = {}
+        for key in palettes:
+            if group_mode.get(key):
+                effective_naming[key] = NAMING_GROUP_TO_BONE
+            else:
+                effective_naming[key] = naming_by_key.get(key, default_naming)
+
         palettes_per_character = {}
         armature_labels = {}
         armature_character = {}
         for plan in plans:
             key = plan["key"]
-            armature_key = key + "|" + cls.palette_signature(plan["fallback"])
+            if effective_naming.get(key) == NAMING_BONE_TO_GROUP:
+                armature_key = key + "|" + cls.palette_signature(plan["fallback"])
+            else:
+                armature_key = key
             plan["armature_key"] = armature_key
             palettes_per_character.setdefault(key, set()).add(armature_key)
             armature_character.setdefault(armature_key, key)
@@ -1146,9 +1159,7 @@ class SkeletonHelper:
             armature_key = plan["armature_key"]
             character = plan["character"]
             meshes = plan["meshes"]
-            effective_naming = (
-                NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_by_key.get(key, default_naming)
-            )
+            effective_mode = effective_naming.get(key, default_naming)
             if armature_key not in armatures:
                 # The mesh and the skeleton share one orientation; the armature
                 # follows the X reflection this import baked into the mesh. A
@@ -1179,7 +1190,7 @@ class SkeletonHelper:
                 )
                 if armature_obj is None:
                     continue
-                if effective_naming == NAMING_BONE_TO_GROUP:
+                if effective_mode == NAMING_BONE_TO_GROUP:
                     # Every rig carries exactly one numbering, so its bones are
                     # renamed once, when it is created.
                     cls.rename_bones_to_groups(
@@ -1190,11 +1201,11 @@ class SkeletonHelper:
                         bone_map=merged_palettes.get(armature_key),
                     )
                 armatures[armature_key] = (armature_obj, final_names, original_names, character)
-                modes[armature_key] = effective_naming
+                modes[armature_key] = effective_mode
                 bound_counts[armature_key] = 0
                 armature_meshes[armature_key] = []
             armature_obj, final_names, original_names, character = armatures[armature_key]
-            if effective_naming == NAMING_BONE_TO_GROUP:
+            if effective_mode == NAMING_BONE_TO_GROUP:
                 bindable = meshes
             else:
                 by_original = {}
