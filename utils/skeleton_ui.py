@@ -385,7 +385,12 @@ def draw_skeleton_binding(layout, scene, folder, panel_id="mimi_skeleton_binding
     header.use_property_split = False
     header.label(text=tr("Skeleton Binding"), icon='ARMATURE_DATA')
     # Push the checkbox to the right edge; it stays reachable while collapsed.
-    header.separator_spacer()
+    # A layout that does not accept spacers in a header still keeps the checkbox
+    # next to the title instead of failing the whole panel.
+    try:
+        header.separator_spacer()
+    except (AttributeError, RuntimeError, TypeError):
+        pass
     header.prop(scene, BIND_PROPERTY, text="")
     if body is None:
         return

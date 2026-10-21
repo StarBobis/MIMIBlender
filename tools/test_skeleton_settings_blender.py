@@ -368,6 +368,9 @@ class SkeletonSettingsTests(unittest.TestCase):
             "Skeleton file found: the import will bind the character armature",
             layout.labels,
         )
+        # The import reads the same Scene property, so collapsing the block
+        # cannot change what the next import does.
+        self.assertTrue(skeleton_ui.read_bind_settings(self.scene).bind)
 
     def test_draw_block_uses_the_caller_panel_id(self):
         layout = FakeLayout()
