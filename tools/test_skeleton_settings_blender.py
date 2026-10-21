@@ -325,10 +325,10 @@ class SkeletonSettingsTests(unittest.TestCase):
         skeleton_ui.draw_skeleton_binding(layout, self.scene, "")
         self.assertIn("Last bind: QingYi (2 bones, 1 meshes)", layout.labels)
 
-    def test_draw_block_warns_before_a_forced_naming_mode(self):
-        # One palette per DrawIB is legal, but two disagreeing palettes of one
-        # character make "Rename Bones" impossible. The panel must say that
-        # before the import instead of leaving the user with renamed groups.
+    def test_draw_block_warns_before_a_split_naming_mode(self):
+        # One palette per DrawIB is legal, and two disagreeing palettes of one
+        # character mean one armature per palette. The panel must say that
+        # before the import instead of leaving the user with several rigs.
         with tempfile.TemporaryDirectory() as folder:
             payload = {
                 "NamingMode": "boneToGroup",
@@ -355,7 +355,7 @@ class SkeletonSettingsTests(unittest.TestCase):
             skeleton_ui.clear_sidecar_cache()
 
             hint = skeleton_ui.tr(
-                "DrawIBs of {names} number different bones; the import renames the vertex groups instead of the bones"
+                "DrawIBs of {names} number different bones; the import creates one armature per palette"
             ).format(names="Conflict")
 
             # "Follow MMT" resolves to the numeric mode this sidecar asks for.
@@ -372,10 +372,10 @@ class SkeletonSettingsTests(unittest.TestCase):
 
     def test_draw_block_wraps_a_long_bind_report(self):
         # A long report used to be shortened in the middle, which hid the one
-        # detail that explains an unexpected naming mode.
+        # detail that explains why a character got several armatures.
         report = (
-            "Skeleton: Jane Doe, naming Rename Vertex Groups "
-            "[forced: DrawIB palettes differ], confidence 0.42, palette 94/94, "
+            "Skeleton: Jane Doe [ba4255a5], naming Rename Bones, "
+            "armature janedoe_Armature_ba4255a5, confidence 0.42, palette 94/94, "
             "2 slot(s) without a bone (80, 82) -> 4 weights in bind pose"
         )
         skeleton_ui.remember_bind_report(self.scene, report)
@@ -391,8 +391,8 @@ class SkeletonSettingsTests(unittest.TestCase):
         )
         report_lines = [label.strip() for label in layout.labels[start:]]
         self.assertGreater(len(report_lines), 1)
-        # Joining the lines restores the sentences the wrap split apart.
-        self.assertIn("forced: DrawIB palettes differ", " ".join(report_lines))
+        # Joining the lines restores the words the wrap split apart.
+        self.assertIn("janedoe_Armature_ba4255a5", " ".join(report_lines))
         self.assertLessEqual(len(layout.labels[start]), skeleton_ui.REPORT_LINE_WIDTH)
         for label in layout.labels[start + 1:]:
             self.assertLessEqual(len(label), skeleton_ui.REPORT_LINE_WIDTH + 2)

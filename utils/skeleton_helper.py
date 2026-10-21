@@ -10,6 +10,11 @@ Two naming modes exist because the two namespaces have different owners:
   bone palette indices used by the mod's Blend buffer, so the model stays
   exportable) and rename the armature bones to the same numbers.
 * GROUP_TO_BONE: keep readable bone names and rename the vertex groups instead.
+
+One armature can carry only one numbering, but one character can have several
+palettes (the body and the hair of a pack may index different bones under the
+same numbers). Numeric naming therefore builds one armature per palette, so every
+mesh can keep its own numbers; readable bone names stay on one shared armature.
 """
 
 import json
@@ -405,19 +410,24 @@ class SkeletonHelper:
 
     @staticmethod
     def build_armature(character, space_scale=1.0, space_rotation_z=0.0,
-                       mirror_x=False, collection=None, alignment=None):
+                       mirror_x=False, collection=None, alignment=None, suffix=""):
         """Create the armature of one character in the mesh's own space.
 
         ``collection`` receives the armature object. Passing it explicitly keeps
         the rig inside the collection tree the import created instead of
         ``bpy.context.collection``, which is often the scene root during a
         one-click import.
+        ``suffix`` names the rig after the DrawIB it serves when one character
+        needs more than one armature (one per bone palette).
         """
         bones = character.get("Bones") or []
         if not bones:
             return None, [], []
 
-        armature = bpy.data.armatures.new(str(character.get("Id", "Skeleton")) + "_Armature")
+        armature_name = str(character.get("Id", "Skeleton")) + "_Armature"
+        if suffix:
+            armature_name += "_" + str(suffix)
+        armature = bpy.data.armatures.new(armature_name)
         armature_obj = bpy.data.objects.new(armature.name, armature)
         target_collection = collection or bpy.context.collection or bpy.context.scene.collection
         target_collection.objects.link(armature_obj)
@@ -506,6 +516,17 @@ class SkeletonHelper:
                     return True
                 seen[index] = name
         return False
+
+    @staticmethod
+    def palette_signature(mapping):
+        """Stable text identity of one bone palette.
+
+        DrawIBs that write the same index -> bone pairs can share one armature,
+        so the identity is the sorted content of the map, not its length or the
+        order the desktop app happened to use.
+        """
+        pairs = sorted(str(index) + ":" + str(name) for index, name in (mapping or {}).items())
+        return "|".join(pairs)
 
     @classmethod
     def rename_bones_to_groups(cls, character, armature_obj, original_names, final_names, bone_map=None):
@@ -835,35 +856,18 @@ class SkeletonHelper:
         return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
 
     @staticmethod
-    def forced_naming_warning(character_name, reason, sources):
-        """Explain one naming mode that the palettes made impossible.
+    def forced_naming_warning(character_name):
+        """Explain the one naming mode the component palettes still overrule.
 
         A forced mode looks exactly like an ignored dropdown, so the import has
-        to say what happened and what the user can do about it. The two reasons
-        need different advice: a DrawIB palette conflict disappears when one
-        DrawIB is bound on its own, while per-component palettes belong to the
-        character itself and cannot be avoided by importing less.
+        to say what happened. Per-component palettes are the reason left: the
+        export addresses them through one merged table, so the rig keeps bone
+        names although numeric bones were requested.
         """
-        if reason == "component palettes":
-            cause = "its components each carry their own bone numbering"
-            advice = "the vertex groups keep the bone names"
-        else:
-            listing = ", ".join(str(name) for name in sources[:4] if name)
-            if len(sources) > 4:
-                listing += ", ..."
-            if listing:
-                cause = "the DrawIBs " + listing + " number different bones with the same numbers"
-            else:
-                cause = "its DrawIBs number different bones with the same numbers"
-            # Binding a single DrawIB is the supported way to keep numeric
-            # bones, because one palette then describes the whole armature.
-            advice = (
-                "the vertex groups keep the bone names; "
-                "import a single DrawIB alone if you need numeric bones"
-            )
         return (
-            "Skeleton " + str(character_name) + ": " + cause
-            + ", so one armature cannot carry a single numbering; " + advice + "."
+            "Skeleton " + str(character_name) + ": its components each carry their own "
+            "bone numbering, so one armature cannot carry a single numbering; "
+            "the vertex groups keep the bone names."
         )
 
     @classmethod
@@ -977,14 +981,16 @@ class SkeletonHelper:
         collection=None,
         warnings=None,
     ):
-        """Bind several DrawIB groups at once, one armature per skeleton.
+        """Bind several DrawIB groups at once, one armature per numbering.
 
         groups: {drawib_folder_name: [mesh objects]}
         naming_mode may also be NAMING_SIDECAR: the embedded block (or the
         legacy sidecar) then decides, which is what the shared import settings
-        default to. An explicit mode always wins over the block; only a palette
-        conflict may override it, because one armature cannot carry two
-        different numberings at the same time.
+        default to. An explicit mode always wins over the block. One armature
+        carries one numbering, so a character whose DrawIBs disagree gets one
+        armature per palette when numeric bones are requested; per-component
+        palettes still fall back to bone names because the export addresses them
+        through one merged table.
         import_mirror: whether this import baked the non-mirrored workflow's X
         reflection into the meshes. The one-click imports pass the scene mode;
         None falls back to the per-object marker (manual binding of objects an
@@ -1027,16 +1033,12 @@ class SkeletonHelper:
         if sidecar is None and not embedded:
             return ""
 
-        # Resolve every group before touching the scene. One armature serves a
-        # whole skeleton, so the naming mode has to be chosen once per armature:
+        # Resolve every group before touching the scene. The naming mode and the
+        # number of armatures are decided from the complete list of palettes:
         # renaming bones to numbers for one DrawIB and groups to bone names for
         # the next left one of them pointing at no bone at all.
         plans = []
         palettes = {}
-        # DrawIB names per character. A forced naming mode must be able to name
-        # the DrawIBs that disagree, otherwise the warning only says "palettes
-        # differ" and the user has no way to find the offending parts.
-        palette_sources = {}
         for draw_ib_name, objects in groups.items():
             meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
             if not meshes:
@@ -1057,23 +1059,20 @@ class SkeletonHelper:
                 plan = cls._plan_from_sidecar(sidecar, draw_ib_name, meshes)
             if plan is None:
                 continue
+            # The DrawIB name is kept on the plan: a character with several bone
+            # palettes needs one armature per palette, and each rig has to say
+            # which DrawIBs it serves.
+            plan["group"] = str(draw_ib_name or "")
             key = plan["key"]
             palettes.setdefault(key, []).extend(plan["maps"])
-            # The group key is empty for the manual operator, which binds the
-            # selected meshes as one unnamed group; such a source is skipped so
-            # the warning never contains an empty name.
-            source_name = str(draw_ib_name or "")
-            sources = palette_sources.setdefault(key, [])
-            if source_name and source_name not in sources:
-                sources.append(source_name)
             plans.append(plan)
 
         if not plans:
             return ""
 
-        # "Follow MMT" is decided once per armature: the embedded blocks each
+        # "Follow MMT" is decided once per character: the embedded blocks each
         # carry the app's choice, the legacy sidecar carries it globally. An
-        # explicit choice from the panel is respected for every armature.
+        # explicit choice from the panel is respected for every character.
         if requested_mode == NAMING_SIDECAR:
             default_naming = cls.naming_from_sidecar(sidecar) if sidecar else NAMING_BONE_TO_GROUP
         else:
@@ -1086,27 +1085,54 @@ class SkeletonHelper:
             else:
                 naming_by_key.setdefault(key, requested_mode)
 
-        # Several palettes cannot be expressed by renaming one armature, so such
-        # a character always binds through group names. The reason is reported,
-        # because this overrides a mode the user may have picked on purpose.
+        # Per-component palettes are internal to one DrawIB and the export
+        # addresses them through one merged table, so such a character keeps one
+        # armature with bone names. Splitting it per component would change the
+        # export architecture, not fix a naming problem.
+        component_mode = {}
+        for key in palettes:
+            component_mode[key] = any(plan["key"] == key and plan["components"] for plan in plans)
+
         group_mode = {}
         override_reason = {}
-        for key, mappings in palettes.items():
-            declares_components = any(plan["key"] == key and plan["components"] for plan in plans)
-            conflict = bool(not declares_components and cls.palettes_conflict(mappings))
-            group_mode[key] = bool(declares_components or conflict)
+        for key in palettes:
+            group_mode[key] = bool(component_mode.get(key))
             if group_mode[key] and naming_by_key.get(key) != NAMING_GROUP_TO_BONE:
-                override_reason[key] = (
-                    "component palettes" if declares_components else "DrawIB palettes differ"
-                )
+                override_reason[key] = "component palettes"
 
-        # BONE_TO_GROUP can name a bone only once, so the armature is renamed
-        # with the union of every palette that shares it. Renaming with only the
-        # first DrawIB's map would leave the extra slots of a second DrawIB
-        # without a bone and silently freeze their weights.
+        # One armature carries one numbering, but one character may legally have
+        # several: two DrawIBs that index different bones under the same numbers
+        # cannot share numeric bone names. Each palette then gets its own
+        # armature, so every mesh keeps its numeric groups and still deforms
+        # through the bones its palette names. Equal palettes share one rig.
+        palettes_per_character = {}
+        armature_labels = {}
+        armature_character = {}
+        for plan in plans:
+            key = plan["key"]
+            if group_mode.get(key) or naming_by_key.get(key) != NAMING_BONE_TO_GROUP:
+                armature_key = key
+            else:
+                armature_key = key + "|" + cls.palette_signature(plan["fallback"])
+            plan["armature_key"] = armature_key
+            palettes_per_character.setdefault(key, set()).add(armature_key)
+            armature_character.setdefault(armature_key, key)
+            label = armature_labels.setdefault(armature_key, [])
+            if plan["group"] and plan["group"] not in label:
+                label.append(plan["group"])
+
+        # Only a character that really received several rigs needs the DrawIB
+        # label; a normal import keeps clean names.
+        split_characters = set()
+        for key, armature_keys in palettes_per_character.items():
+            if len(armature_keys) > 1:
+                split_characters.add(key)
+
+        # BONE_TO_GROUP can name a bone only once per armature, so every rig is
+        # renamed with the palette of the DrawIBs it serves.
         merged_palettes = {}
         for plan in plans:
-            merged = merged_palettes.setdefault(plan["key"], {})
+            merged = merged_palettes.setdefault(plan["armature_key"], {})
             for index, name in (plan["fallback"] or {}).items():
                 merged.setdefault(str(index), str(name))
 
@@ -1119,12 +1145,13 @@ class SkeletonHelper:
         armature_meshes = {}
         for plan in plans:
             key = plan["key"]
+            armature_key = plan["armature_key"]
             character = plan["character"]
             meshes = plan["meshes"]
             effective_naming = (
                 NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_by_key.get(key, default_naming)
             )
-            if key not in armatures:
+            if armature_key not in armatures:
                 # The mesh and the skeleton share one orientation; the armature
                 # follows the X reflection this import baked into the mesh. A
                 # block from an older, mirror-matched build still reports it, so
@@ -1138,6 +1165,11 @@ class SkeletonHelper:
                 else:
                     mesh_flipped = bool(import_mirror)
                 mirror_x = mesh_flipped != match_mirror_x
+                # A split character names every rig after the DrawIB it serves,
+                # so the Outliner never shows two indistinguishable armatures.
+                suffix = ""
+                if key in split_characters:
+                    suffix = (armature_labels.get(armature_key) or [""])[0]
                 armature_obj, final_names, original_names = cls.build_armature(
                     character,
                     space_scale=space_scale,
@@ -1145,25 +1177,25 @@ class SkeletonHelper:
                     mirror_x=mirror_x,
                     collection=collection,
                     alignment=space.get("Alignment"),
+                    suffix=suffix,
                 )
                 if armature_obj is None:
                     continue
                 if effective_naming == NAMING_BONE_TO_GROUP:
-                    # One armature can only carry one numbering, so the bones are
-                    # renamed once, when the rig is created, instead of once per
-                    # DrawIB that shares the rig.
+                    # Every rig carries exactly one numbering, so its bones are
+                    # renamed once, when it is created.
                     cls.rename_bones_to_groups(
                         character,
                         armature_obj,
                         original_names,
                         final_names,
-                        bone_map=merged_palettes.get(key),
+                        bone_map=merged_palettes.get(armature_key),
                     )
-                armatures[key] = (armature_obj, final_names, original_names, character)
-                modes[key] = effective_naming
-                bound_counts[key] = 0
-                armature_meshes[key] = []
-            armature_obj, final_names, original_names, character = armatures[key]
+                armatures[armature_key] = (armature_obj, final_names, original_names, character)
+                modes[armature_key] = effective_naming
+                bound_counts[armature_key] = 0
+                armature_meshes[armature_key] = []
+            armature_obj, final_names, original_names, character = armatures[armature_key]
             if effective_naming == NAMING_BONE_TO_GROUP:
                 bindable = meshes
             else:
@@ -1186,8 +1218,8 @@ class SkeletonHelper:
                         cls.rename_groups_with_map([mesh], mapping, by_original)
                     bindable.append(mesh)
             cls.bind(bindable, armature_obj)
-            bound_counts[key] = bound_counts.get(key, 0) + len(bindable)
-            armature_meshes.setdefault(key, []).extend(bindable)
+            bound_counts[armature_key] = bound_counts.get(armature_key, 0) + len(bindable)
+            armature_meshes.setdefault(armature_key, []).extend(bindable)
 
         if skipped_meshes:
             message = (
@@ -1199,10 +1231,10 @@ class SkeletonHelper:
             warning_list.append(message)
 
         # Binding quality is aggregated per armature: the worst confidence of a
-        # character's DrawIBs and the palette coverage the desktop app reported.
+        # rig's DrawIBs and the palette coverage the desktop app reported.
         quality = {}
         for plan in plans:
-            row = quality.setdefault(plan["key"], {"confidence": None, "used": None, "mapped": None})
+            row = quality.setdefault(plan["armature_key"], {"confidence": None, "used": None, "mapped": None})
             if plan.get("confidence") is not None:
                 value = float(plan["confidence"])
                 row["confidence"] = value if row["confidence"] is None else min(row["confidence"], value)
@@ -1213,15 +1245,35 @@ class SkeletonHelper:
 
         summaries = []
         cleanup_notes = []
-        for key, (armature_obj, final_names, _, character) in armatures.items():
-            meshes = armature_meshes.get(key, [])
+        # A split character reports one rig per palette; the confidence warning
+        # is about the character, so it must not be repeated for every rig.
+        warned_confidence = set()
+        # Several rigs are a workflow change, not a cosmetic detail: they have to
+        # be posed together, so the user is told once per character.
+        split_groups = {}
+        character_names = {}
+        for plan in plans:
+            key = plan["key"]
+            character_names.setdefault(key, str(plan["character"].get("Name") or key))
+            if key in split_characters and plan["group"]:
+                split_groups.setdefault(key, [])
+                if plan["group"] not in split_groups[key]:
+                    split_groups[key].append(plan["group"])
+        for key, names in split_groups.items():
+            warning_list.append(
+                "Skeleton " + character_names[key] + ": its DrawIBs " + ", ".join(names)
+                + " number different bones, so every palette got its own armature; "
+                + "pose them together."
+            )
+        for armature_key, (armature_obj, final_names, _, character) in armatures.items():
+            meshes = armature_meshes.get(armature_key, [])
             bone_names = {bone.name for bone in armature_obj.data.bones}
             # One weight pass per armature serves the cleanup and the report.
             # It runs before the cleanup so the report describes the geometry
             # the user actually has, not the bones that survived it.
             scan = cls.scan_weights(meshes, bone_names)
-            # Cleanup runs after every DrawIB of this character is bound, so a
-            # bone used by a later mesh is never deleted too early.
+            # Cleanup runs after every DrawIB that uses this armature is bound,
+            # so a bone used by a later mesh is never deleted too early.
             removed_count, hidden_count = cls.cleanup_bones(
                 armature_obj, meshes, cleanup_mode, scan=scan
             )
@@ -1229,30 +1281,37 @@ class SkeletonHelper:
             # every note names the skeleton it belongs to. One line per armature
             # keeps the panel hint readable instead of repeating the name five
             # times, which also survived the 512 character panel limit.
-            character_name = str(character.get("Name", "") or key)
+            character_key = armature_character.get(armature_key, armature_key)
+            character_name = str(character.get("Name", "") or character_key)
+            split = character_key in split_characters
+            if split:
+                # Two rigs of one character must be distinguishable in the
+                # Outliner and in the report.
+                character_name += " [" + ", ".join(armature_labels.get(armature_key) or []) + "]"
             details = []
 
             # The effective mode is part of the result: it explains why a
             # character unexpectedly carries bone names instead of numbers.
             mode_text = (
                 "Rename Vertex Groups"
-                if modes.get(key) == NAMING_GROUP_TO_BONE
+                if modes.get(armature_key) == NAMING_GROUP_TO_BONE
                 else "Rename Bones"
             )
             mode_detail = "naming " + mode_text
-            reason = override_reason.get(key)
+            reason = override_reason.get(character_key)
             if reason:
                 mode_detail += " [forced: " + reason + "]"
                 # The summary alone is not enough: it is one INFO line that the
                 # next report overwrites, and the panel shortens it in the
-                # middle. The user must be told that the dropdown was overruled
-                # and which DrawIBs caused it.
-                warning_list.append(
-                    cls.forced_naming_warning(character_name, reason, palette_sources.get(key) or [])
-                )
+                # middle. The user must be told that the dropdown was overruled.
+                warning_list.append(cls.forced_naming_warning(character_name))
             details.append(mode_detail)
+            if split:
+                # The rig name is the only way to tell the two armatures apart
+                # in the Outliner after the import.
+                details.append("armature " + armature_obj.name)
 
-            row = quality.get(key) or {}
+            row = quality.get(armature_key) or {}
             if row.get("confidence") is not None:
                 details.append("confidence " + format(float(row["confidence"]), ".2f"))
             if row.get("mapped") is not None and row.get("used") is not None:
@@ -1292,13 +1351,15 @@ class SkeletonHelper:
                 details.append(str(scan["unnormalized"]) + " vertex(es) with weights not summing to 1")
 
             if row.get("confidence") is not None and float(row["confidence"]) < LOW_CONFIDENCE:
-                warning_list.append(
-                    "Skeleton "
-                    + character_name
-                    + " was matched with low confidence "
-                    + format(float(row["confidence"]), ".2f")
-                    + "; check the rig before editing"
-                )
+                if character_key not in warned_confidence:
+                    warned_confidence.add(character_key)
+                    warning_list.append(
+                        "Skeleton "
+                        + character_name
+                        + " was matched with low confidence "
+                        + format(float(row["confidence"]), ".2f")
+                        + "; check the rig before editing"
+                    )
 
             # The effective mode comes first: the panel shortens a long line in
             # the middle, so a mode hidden behind the bone and mesh counts was
@@ -1311,7 +1372,7 @@ class SkeletonHelper:
                 + " ("
                 + str(len(armature_obj.data.bones))
                 + " bones, "
-                + str(bound_counts.get(key, 0))
+                + str(bound_counts.get(armature_key, 0))
                 + " meshes)"
             )
 

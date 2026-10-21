@@ -86,7 +86,8 @@ def get_naming_items(self=None, context=None):
         (
             NAMING_BONE_TO_GROUP,
             tr("Rename Bones"),
-            tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable)"),
+            tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable); "
+               "a character whose DrawIBs use different palettes gets one armature per palette"),
         ),
         (
             NAMING_GROUP_TO_BONE,
@@ -199,10 +200,9 @@ def _conflicting_characters(payload):
     """Characters whose DrawIBs number different bones with the same numbers.
 
     "Rename Bones" turns the palette numbers into bone names, and one armature
-    can only carry one numbering. A character whose DrawIBs disagree therefore
-    cannot be renamed at all; the bind falls back to group names. The panel
-    shows that before the import instead of after it, so the choice is not
-    experienced as an ignored dropdown.
+    can only carry one numbering. Such a character therefore gets one armature
+    per palette, which changes the Outliner and the posing workflow; the panel
+    says so before the import instead of letting the user discover it after.
     """
     character_names = {}
     character_maps = {}
@@ -230,12 +230,14 @@ def _conflicting_characters(payload):
     return conflicts
 
 
-def _forced_naming_message(info, naming):
-    """Hint for a naming choice this skeleton cannot honor, or an empty string.
+def _naming_hint(info, naming):
+    """Hint for what a naming choice will really produce, or an empty string.
 
-    "Follow MMT" counts as numeric bones when the sidecar asks for them, so the
-    hint also appears for the default setting; otherwise the user would only
-    learn about the fallback once the vertex groups are already renamed.
+    Numeric bones are possible for a character with several palettes: the bind
+    gives each palette its own armature. Only per-component tables still force
+    group names. "Follow MMT" counts as numeric bones when the sidecar asks for
+    them, so the hint also appears for the default setting; otherwise the user
+    would only learn about it once the import is already done.
     """
     if info is None:
         return ""
@@ -252,7 +254,7 @@ def _forced_naming_message(info, naming):
     conflicts = info.get("conflicts") or []
     if conflicts:
         return tr(
-            "DrawIBs of {names} number different bones; the import renames the vertex groups instead of the bones"
+            "DrawIBs of {names} number different bones; the import creates one armature per palette"
         ).format(names=", ".join(conflicts[:3]))
     return ""
 
@@ -361,13 +363,15 @@ def draw_skeleton_binding(layout, scene, folder):
         box.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
         info = sidecar_info(folder)
         if info is not None:
-            # The warning belongs right under the dropdown it overrules: the
-            # user then sees the fallback before pressing the import button.
-            forced_message = _forced_naming_message(
+            # The hint belongs right under the dropdown it explains: the user
+            # then knows how many rigs to expect before pressing the button.
+            hint = _naming_hint(
                 info, str(getattr(scene, NAMING_PROPERTY, NAMING_SIDECAR) or NAMING_SIDECAR)
             )
-            if forced_message:
-                box.label(text=forced_message, icon='ERROR')
+            if hint:
+                # A per-component fallback really changes the naming mode, while
+                # one armature per palette is the documented numeric behaviour.
+                box.label(text=hint, icon='ERROR' if info.get("components") else 'INFO')
             box.label(
                 text=tr("Skeleton file found: the import will bind the character armature"),
                 icon='ARMATURE_DATA',

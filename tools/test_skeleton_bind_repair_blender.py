@@ -13,7 +13,7 @@ Every case locks one defect that used to fail silently on real reverse output:
 - a workspace object is named ``LOD0.<DrawIB>-<N>``, so the "Component N" text
   the binder used to parse is gone and every mesh was skipped from the binding;
 - two DrawIBs of one character can carry completely different palettes, which
-  forces group renaming but never said so.
+  used to force silent group renaming; each palette now gets its own armature.
 
 The fixtures are synthetic so this file runs on every machine; the optional real
 pack test at the end is skipped when the folder is unavailable.
@@ -275,9 +275,9 @@ class ComponentIdentityTests(unittest.TestCase):
 
 
 class PaletteConflictTests(unittest.TestCase):
-    """One rig cannot carry two numberings, and the user must be told."""
+    """One rig cannot carry two numberings, so each palette gets its own rig."""
 
-    def test_conflicting_palettes_force_group_names(self):
+    def test_conflicting_palettes_get_one_armature_each(self):
         first = make_mesh("conflictA-Component 0", [("0", [0, 1, 2])])
         second = make_mesh("conflictB-Component 0", [("0", [0, 1, 2])])
         first_block = drawib_block(
@@ -298,14 +298,24 @@ class PaletteConflictTests(unittest.TestCase):
             import_mirror=False,
             skeletons={"conflictA": first_block, "conflictB": second_block},
         )
-        self.assertIn("forced: DrawIB palettes differ", summary)
-        self.assertEqual([group.name for group in first.vertex_groups], ["Root"])
-        self.assertEqual([group.name for group in second.vertex_groups], ["Arm"])
+        # Numeric naming, because each mesh keeps its own palette on its own rig.
+        self.assertIn("naming Rename Bones", summary)
+        # Groups stay numeric: they are the export identity of the DrawIB.
+        self.assertEqual([group.name for group in first.vertex_groups], ["0"])
+        self.assertEqual([group.name for group in second.vertex_groups], ["0"])
+        first_rig = bound_armature(first)
+        second_rig = bound_armature(second)
+        self.assertIsNot(first_rig, second_rig)
+        self.assertEqual(sorted(bone.name for bone in first_rig.data.bones), ["0", "1"])
+        self.assertEqual(sorted(bone.name for bone in second_rig.data.bones), ["0", "1"])
+        # Slot 0 is Root in the first palette and Arm in the second one, which
+        # the rest height makes visible.
+        self.assertAlmostEqual(first_rig.data.bones["0"].head_local.x, 0.0, places=5)
+        self.assertAlmostEqual(second_rig.data.bones["0"].head_local.x, 0.3, places=5)
 
-    def test_forced_mode_warns_and_names_the_drawibs(self):
-        # The panel can say "Rename Bones" and still get group names back. That
-        # is unavoidable for two palettes on one armature, but it must never be
-        # silent: the warning names the DrawIBs so the user can import one alone.
+    def test_split_warns_once_and_names_the_drawibs(self):
+        # Several rigs are a workflow change, so it must never be silent: one
+        # warning per character names the DrawIBs that disagree.
         bones = [
             {"Name": "Root", "Parent": -1, "Rest": rest_matrix(), "Length": 0.2},
             {"Name": "Arm", "Parent": 0, "Rest": rest_matrix(x=0.3), "Length": 0.2},
@@ -313,26 +323,24 @@ class PaletteConflictTests(unittest.TestCase):
         first = make_mesh("warningA-Component 0", [("0", [0, 1, 2])])
         second = make_mesh("warningB-Component 0", [("0", [0, 1, 2])])
         warnings = []
-        summary = SkeletonHelper.apply_groups(
+        SkeletonHelper.apply_groups(
             "BONE_TO_GROUP",
             {"warningA": [first], "warningB": [second]},
             "",
             "NONE",
             import_mirror=False,
             skeletons={
-                # Same skeleton hash, so both DrawIBs share one armature.
+                # Same skeleton hash, two palettes: the rig has to split.
                 "warningA": drawib_block(bones, {"0": "Root", "1": "Arm"}, hash_value="warn"),
                 "warningB": drawib_block(bones, {"0": "Arm", "1": "Root"}, hash_value="warn"),
             },
             warnings=warnings,
         )
-        self.assertIn("forced: DrawIB palettes differ", summary)
-        forced = [message for message in warnings if "number different bones" in message]
-        self.assertTrue(forced, warnings)
-        self.assertIn("warningA", forced[0])
-        self.assertIn("warningB", forced[0])
-        # The advice has to be actionable, not just a diagnosis.
-        self.assertIn("single DrawIB", forced[0])
+        split = [message for message in warnings if "armature" in message]
+        self.assertEqual(len(split), 1, warnings)
+        self.assertIn("warningA", split[0])
+        self.assertIn("warningB", split[0])
+        self.assertIn("pose them together", split[0])
 
 
 class BoneStructureTests(unittest.TestCase):

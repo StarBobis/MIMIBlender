@@ -10,19 +10,19 @@ same number ("0", "1", ...) can mean a different bone in each of them.
 
 The desktop app therefore writes one ``BoneMap`` per DrawIB inside
 ``skeleton.json``. The Blender side must use the map that belongs to the DrawIB
-it is binding, and it must decide the naming mode **once per character**:
+it is binding, and one armature can carry only one numbering:
 
-* ``BONE_TO_GROUP`` renames *bones* to the numbers the vertex groups have. That
-  is correct for a mod that shares one numbering (the normal case) and is what
-  keeps a later mod export working.
-* ``GROUP_TO_BONE`` renames *vertex groups* to the bone names. That is the only
-  option when the DrawIBs disagree, because one armature cannot be renamed to
-  two different numberings at the same time.
+* ``BONE_TO_GROUP`` renames *bones* to the numbers the vertex groups have. A
+  character with several palettes gets one armature per palette, so every mesh
+  keeps its numeric groups and still deforms through the bones its own palette
+  names. This is the mode that keeps a later mod export working.
+* ``GROUP_TO_BONE`` renames *vertex groups* to the bone names and needs only one
+  armature, because the bone names are the same in every palette.
 
-The bug this test locks down: the mode used to be chosen per DrawIB, so the
-first DrawIB renamed the bones to numbers while the next renamed its groups to
-the *old* bone names. Those names no longer existed, every weight of that
-DrawIB was dead, and no error was reported.
+The bug this test locks down: the mode used to be chosen per DrawIB while the
+character shared one armature, so the first DrawIB renamed the bones to numbers
+while the next renamed its groups to the *old* bone names. Those names no
+longer existed, every weight of that DrawIB was dead, and no error was reported.
 
 Fixtures never touch a user scene: the armature and the meshes are created in
 the current (factory start-up) file and the sidecar is written to ``tmp/``.
@@ -130,31 +130,31 @@ summary = SkeletonHelper.apply_groups(
 )
 print("SUMMARY:", summary)
 
-# One armature per character: the two DrawIBs must share it, otherwise the
-# model ends up with two skeletons again.
+# The sidecar asks for numeric bones, and numeric bones are possible because
+# every palette gets its own armature. One shared rig would have to name one
+# number twice.
 armatures = [obj for obj in bpy.data.objects if obj.type == "ARMATURE"]
-assert len(armatures) == 1, "one armature per character, got %d" % len(armatures)
+assert len(armatures) == 2, "one armature per palette, got %d" % len(armatures)
+assert "naming Rename Bones" in summary, summary
+assert "paletteA" in summary and "paletteB" in summary, summary
 
-# Both meshes must be bound although the sidecar asks for numeric bone names:
-# the conflict forces group-to-bone naming for the whole character.
+# Both meshes must be bound, each one to the rig of its own palette, and the
+# numeric groups must survive unchanged: they are the export identity.
+rigs = []
 for obj in (first, second):
-    assert any(mod.type == "ARMATURE" for mod in obj.modifiers), obj.name + " not bound"
-    assert {group.name for group in obj.vertex_groups} == {"Pelvis", "Arm"}, (
-        obj.name + " groups were not renamed: " + str([g.name for g in obj.vertex_groups])
+    modifiers = [mod for mod in obj.modifiers if mod.type == "ARMATURE"]
+    assert len(modifiers) == 1, obj.name + " not bound exactly once"
+    rigs.append(modifiers[0].object)
+    assert {group.name for group in obj.vertex_groups} == {"0", "1"}, (
+        obj.name + " groups changed: " + str([g.name for g in obj.vertex_groups])
     )
+assert rigs[0] is not rigs[1], "both meshes share one rig"
 
-# Group "0" of each mesh must name the bone its own DrawIB declared. If the two
-# meshes ended up with the same names, the second map was ignored.
-first_zero = next(g for g in first.vertex_groups if g.name == "Pelvis")
-second_zero = next(g for g in second.vertex_groups if g.name == "Arm")
-assert first_zero.name == "Pelvis"
-assert second_zero.name == "Arm"
+# The same number must mean the bone the mesh's own palette declared. The rest
+# heights identify the bones after the rename: Pelvis sits at 0.0, Arm at 0.1.
+first_heights = {bone.name: round(bone.head_local.z, 5) for bone in rigs[0].data.bones}
+second_heights = {bone.name: round(bone.head_local.z, 5) for bone in rigs[1].data.bones}
+assert first_heights == {"0": 0.0, "1": 0.1}, first_heights
+assert second_heights == {"0": 0.1, "1": 0.0}, second_heights
 
-# Nothing may keep a numeric group: those would match no bone and silently stay
-# in rest position.
-for obj in (first, second):
-    assert not [g for g in obj.vertex_groups if g.name.isdigit()], (
-        obj.name + " kept numeric groups: " + str([g.name for g in obj.vertex_groups])
-    )
-
-print("PASS: per-DrawIB palettes bind through group names")
+print("PASS: conflicting palettes get one numeric armature each")
