@@ -261,8 +261,11 @@ def draw_skeleton_binding(layout, scene, folder):
                 names = ", ".join(info["characters"][:3])
                 box.label(text=tr("Character: {names}").format(names=names))
         else:
+            # The sidecar is only one of the two skeleton sources now: every
+            # SubmeshJson can carry its own embedded block, so this hint must not
+            # promise that no armature will be created.
             box.label(
-                text=tr("No skeleton.json next to this folder; no armature will be created"),
+                text=tr("No skeleton.json next to this folder; the import uses the skeleton embedded in each Json when it has one"),
                 icon='INFO',
             )
     else:

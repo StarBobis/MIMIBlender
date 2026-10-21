@@ -319,7 +319,7 @@ class SkeletonSettingsTests(unittest.TestCase):
         layout = FakeLayout()
         with tempfile.TemporaryDirectory() as folder:
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
-        self.assertIn("No skeleton.json next to this folder; no armature will be created", layout.labels)
+        self.assertIn("No skeleton.json next to this folder; the import uses the skeleton embedded in each Json when it has one", layout.labels)
         skeleton_ui.remember_bind_report(self.scene, "QingYi (2 bones, 1 meshes)")
         layout = FakeLayout()
         skeleton_ui.draw_skeleton_binding(layout, self.scene, "")

@@ -12,7 +12,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
-from ..utils.skeleton_helper import SkeletonHelper
+from ..utils.skeleton_helper import COMPONENT_INDEX_PROPERTY, SkeletonHelper
 from ..utils.skeleton_ui import ensure_bind_settings, remember_bind_report
 from ..utils.timer_utils import TimerUtils
 
@@ -474,12 +474,14 @@ def _read_embedded_skeleton(json_file_path):
         return None
 
 
-def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None):
+def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None, collection=None):
     """Bind a workspace import from the skeletons embedded in its SubmeshJson.
 
     Older workspaces have no embedded block; they keep working through the
     legacy skeleton.json at the workspace root. Having neither is a normal
     state (a texture-only workspace), never a warning.
+    ``collection`` is the workspace collection the armature belongs to, so the
+    rig does not end up in whatever collection the Outliner had active.
     """
     if not drawib_objects:
         return
@@ -492,6 +494,9 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None):
     sidecar_path = os.path.join(GlobalConfig.path_workspace_folder(), "skeleton.json")
     if not any(skeletons.values()) and not os.path.isfile(sidecar_path):
         return
+    # The helper reports binding problems as plain strings, so this operator can
+    # raise them at WARNING level instead of hiding them inside one INFO line.
+    binding_warnings = []
     try:
         # Same rule as the reverse import: the armature follows the workflow
         # mode this import used, because the sidecar names bones in the pack's
@@ -503,10 +508,14 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None):
             settings.cleanup,
             import_mirror=MIMIGlobalProperties.use_mirror_workflow(),
             skeletons=skeletons,
+            collection=collection,
+            warnings=binding_warnings,
         )
     except Exception as error:  # noqa: BLE001 - binding must never break the import
         print("Skeleton binding failed:", error)
         return
+    for message in binding_warnings:
+        operator.report({'WARNING'}, message)
     if summary:
         remember_bind_report(bpy.context.scene, summary)
         operator.report({'INFO'}, summary)
@@ -579,6 +588,11 @@ def ImprotFromWorkSpaceFull(self, context):
                         if imported_obj is not None:
                             imported_obj.name = display_name
                             imported_obj.data.name = imported_obj.name
+                            # Record the Component number while it is still
+                            # known here. The object name no longer contains the
+                            # word "Component", so the binder cannot parse it
+                            # back and reads this property instead.
+                            imported_obj[COMPONENT_INDEX_PROPERTY] = int(comp_index)
                             role = _read_submesh_role(json_file_path)
                             imported_obj[_SUBMESH_ROLE_PROPERTY] = role
                             _apply_submesh_role_rendering(imported_obj, role, json_file_path)
@@ -604,7 +618,7 @@ def ImprotFromWorkSpaceFull(self, context):
         self.report({'ERROR'}, tr("No models were successfully imported from the current workspace; blueprint generation was skipped."))
         return
 
-    _auto_bind_workspace_skeleton(self, drawib_imported_objects, drawib_skeletons)
+    _auto_bind_workspace_skeleton(self, drawib_imported_objects, drawib_skeletons, workspace_collection)
 
     # Save the workspace-level Import.json selection record (using new-format keys)
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
@@ -868,6 +882,10 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
                     if imported_obj is not None:
                         imported_obj.name = display_name
                         imported_obj.data.name = imported_obj.name
+                        # Keep the Component number on the mesh: the display name
+                        # cannot carry it, and a later skeleton binding needs it
+                        # to pick the right palette entry.
+                        imported_obj[COMPONENT_INDEX_PROPERTY] = int(comp_index)
                         role = _read_submesh_role(json_file_path)
                         imported_obj[_SUBMESH_ROLE_PROPERTY] = role
                         _apply_submesh_role_rendering(imported_obj, role, json_file_path)

@@ -37,7 +37,7 @@ def character(unit):
 # Explicit lengths are authoritative, even when larger than one source unit.
 for unit, scale in [(1.0, 1.0), (100.0, 0.01)]:
     fixture = character(unit)
-    armature, _, _ = helper.build_armature(fixture, "BONE_TO_GROUP", space_scale=scale, space_rotation_z=180.0)
+    armature, _, _ = helper.build_armature(fixture, space_scale=scale, space_rotation_z=180.0)
     for bone, source in zip(armature.data.bones, fixture["Bones"]):
         assert abs(bone.length - source["Length"] * scale) < 1e-5
         assert abs(bone.head_local.z - source["Rest"][11] * scale) < 1e-5
