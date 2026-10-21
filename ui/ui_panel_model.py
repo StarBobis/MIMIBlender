@@ -939,7 +939,13 @@ class ApplySkeletonSidecarOperator(I18nOperator):
             return {'CANCELLED'}
         summary = SkeletonHelper.apply(self.naming_mode, objects, self.skeleton_file)
         if not summary:
-            self.report({'ERROR'}, tr("No skeleton.json found for the reverse output."))
+            # An empty result now has two reasons: no sidecar at all, or a
+            # sidecar whose DrawIBs cannot be identified from these meshes. The
+            # helper refuses to guess instead of binding the first character.
+            if self.skeleton_file:
+                self.report({'ERROR'}, tr("No DrawIB of this skeleton matches the selected meshes; select meshes that belong to one reverse output."))
+            else:
+                self.report({'ERROR'}, tr("No skeleton.json found for the reverse output."))
             return {'CANCELLED'}
         self.report({'INFO'}, summary)
         return {'FINISHED'}

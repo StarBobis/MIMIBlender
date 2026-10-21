@@ -399,6 +399,7 @@ TRANSLATIONS_ZH_CN = {
     "Rename mesh vertex groups to the skeleton bone names": "把网格顶点组改名为骨骼名",
     "Select at least one mesh object.": "请至少选择一个网格物体。",
     "No skeleton.json found for the reverse output.": "逆向输出中没有找到 skeleton.json。",
+    "No DrawIB of this skeleton matches the selected meshes; select meshes that belong to one reverse output.": "这套骨架里没有能匹配所选网格的 DrawIB；请选择属于同一次逆向输出的网格。",
     "Renames the vertex groups of each mesh using the model name as a prefix, so that same-named vertex groups will not conflict once the parts are merged into one object, which makes one-click rigging easier later.": "以模型名称为前缀重命名每个网格的顶点组，使各部件合并为同一物体后同名顶点组不会冲突，便于之后一键绑骨。",
     "Reset Model Location on X, Y, Z to 0": "模型 X、Y、Z 位置归零",
     "Reset Model Rotation on X, Y, Z to 0": "模型 X、Y、Z 旋转归零",
