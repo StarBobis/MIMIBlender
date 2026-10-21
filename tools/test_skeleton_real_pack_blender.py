@@ -132,6 +132,31 @@ class RealPackTests(unittest.TestCase):
         # either: before the fix every bone stayed below 0.15.
         self.assertGreater(max(bone.length for bone in armature.data.bones), 0.35)
 
+        # The caption only proves the length. The rest frame needs its own check:
+        # the pack stores a full matrix per bone (direction and roll, not just a
+        # head), and Blender 5.2 keeps only the translation when EditBone.matrix
+        # is assigned to the zero-length bone that edit_bones.new creates. That
+        # defect left every bone pointing straight up while the heads stayed
+        # correct, and these assertions turn red on it.
+        source_bones = {bone["Name"]: bone for bone in block["Bones"]}
+        group_names = {str(index): name for index, name in (block.get("BoneMap") or {}).items()}
+        checked = 0
+        for bone in armature.data.bones:
+            source = source_bones.get(group_names.get(bone.name, bone.name))
+            if source is None:
+                continue
+            rest = numpy.array(source["Rest"], dtype=float).reshape(4, 4)
+            actual = numpy.array(bone.matrix_local)[:3, :3]
+            for axis in range(3):
+                got = actual[:, axis] / numpy.linalg.norm(actual[:, axis])
+                want = rest[:3, axis] / numpy.linalg.norm(rest[:3, axis])
+                self.assertLess(numpy.linalg.norm(got - want), 1e-3,
+                                "%s: rest axis %d differs from the sidecar" % (bone.name, axis))
+            head_error = numpy.linalg.norm(numpy.array(bone.head_local) - rest[:3, 3])
+            self.assertLess(head_error, 1e-4, "%s: head moved" % bone.name)
+            checked += 1
+        self.assertGreater(checked, 100, "the orientation check found no bones")
+
         # The body palette has a slot without a bone, which must be reported.
         self.assertIn("without a bone", summary)
         self.assertTrue(warnings)
