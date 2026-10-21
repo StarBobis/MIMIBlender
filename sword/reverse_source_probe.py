@@ -18,6 +18,12 @@ This module answers one question for the panel and for the import operator:
     "Can this folder be imported, which reverse format does it hold, and how
      many DrawIB groups / data types does it contain?"
 
+Only the current ``ssmt_fmt`` output is imported. The older ``ib_vb_fmt``
+layout (a .fmt descriptor per data type) is no longer produced by MMT and its
+importer was deleted; such a folder is still recognised and refused with a
+clear reason, so a user who picks an old result learns what happened instead of
+reading "nothing to import".
+
 Design rules:
 
 - No Blender import at all, so the check can also run in plain Python tests and
@@ -31,21 +37,20 @@ Design rules:
 import os
 import json
 
-# The two reverse output formats MMT knows about.
-# ssmt_fmt: <DrawIB>/<DataType>.json + the .buf / .ib buffers (current output).
-# ib_vb_fmt: <DrawIB>/<DataType>.fmt + the .ib / .vb buffers (legacy output).
+# The only reverse output format the importer still understands.
+# ssmt_fmt: <DrawIB>/<DataType>.json + the .buf / .ib buffers it references.
 SSMT_FMT = "ssmt_fmt"
-IB_VB_FMT = "ib_vb_fmt"
 
 # Status values returned by probe_reverse_folder().
-# ok           : importable, at least one DrawIB group carries data files
-# no_path      : the caller did not provide any folder yet
-# missing      : the folder does not exist (or is a file, not a folder)
-# unreadable   : the folder exists but could not be listed (permissions)
-# no_data      : no reverse data files anywhere near the selected folder
-# no_buffer    : data files exist, but not a single buffer file came with them
-# too_deep     : the selected folder is a DrawIB folder, not the output root
-# too_shallow  : the selected folder holds workspaces, not DrawIB folders
+# ok            : importable, at least one DrawIB group carries usable data
+# no_path       : the caller did not provide any folder yet
+# missing       : the folder does not exist (or is a file, not a folder)
+# unreadable    : the folder exists but could not be listed (permissions)
+# no_data       : no reverse data files anywhere near the selected folder
+# no_buffer     : data files exist, but not a single one has complete buffers
+# too_deep      : the selected folder is a DrawIB folder, not the output root
+# too_shallow   : the selected folder holds workspaces, not DrawIB folders
+# legacy_format : an old ib_vb_fmt result; the importer no longer supports it
 STATUS_OK = "ok"
 STATUS_NO_PATH = "no_path"
 STATUS_MISSING = "missing"
@@ -54,13 +59,12 @@ STATUS_NO_DATA = "no_data"
 STATUS_NO_BUFFER = "no_buffer"
 STATUS_TOO_DEEP = "too_deep"
 STATUS_TOO_SHALLOW = "too_shallow"
+STATUS_LEGACY_FORMAT = "legacy_format"
 
-# File extensions of the data files and of the buffer files they need.
+# File extensions of the data files. Only .json is imported now; .fmt is still
+# scanned so an old reverse output can be reported as legacy instead of empty.
 _JSON_EXT = ".json"
-_FMT_EXT = ".fmt"
-# ssmt_fmt buffers are copied per category plus the index buffer; legacy
-# ib_vb_fmt keeps one .ib / .vb pair per data type.
-_BUFFER_EXTS = (".buf", ".ib", ".vb")
+_LEGACY_FMT_EXT = ".fmt"
 
 # Hard limits for one check. The panel runs the check again whenever the
 # selected folder changes, so the work per check must stay small even when the
@@ -88,12 +92,13 @@ def normalize_folder_path(raw_path):
 
 
 def _scan_folder_files(folder_path):
-    """Count markers without mistaking folders for data files.
+    """Count the data descriptors of one folder without loading any of them.
 
     Scandir and entry stat calls can both fail when a folder disappears or loses
     permissions. Keep the context manager open while reading entry metadata.
     """
-    json_count = fmt_count = buffer_count = 0
+    json_count = 0
+    fmt_count = 0
     names = []
     try:
         with os.scandir(folder_path) as entries:
@@ -105,65 +110,48 @@ def _scan_folder_files(folder_path):
                 if extension == _JSON_EXT:
                     json_count += 1
                     names.append(stem)
-                elif extension == _FMT_EXT:
+                elif extension == _LEGACY_FMT_EXT:
                     fmt_count += 1
                     names.append(stem)
-                elif extension in _BUFFER_EXTS:
-                    buffer_count += 1
     except OSError:
         # A disappearing or unreadable child contributes no candidates.
-        return 0, 0, 0, []
-    return json_count, fmt_count, buffer_count, names
+        return 0, 0, []
+    return json_count, fmt_count, names
 
 
-def _usable_candidates(folder_path, extension):
-    """Check the actual buffer references, not merely any sibling buffer.
+def _usable_json_candidates(folder_path):
+    """Count Json files whose declared buffers really exist and are nonempty.
 
     This is a preflight, not a promise about vertex layout or rendered quality.
-    JSON must carry nonempty IB/category tables with existing nonempty files.
-    Legacy FMT follows its prefix and the importer-compatible VB suffix lookup.
-    No buffer payload is loaded during the check.
+    A Json must carry nonempty IB and category tables, and every referenced
+    buffer file must exist and hold data. No buffer payload is loaded.
     """
     usable = 0
     try:
         with os.scandir(folder_path) as entries:
             files = {entry.name: entry.path for entry in entries if entry.is_file()}
         for name, path in files.items():
-            if not name.lower().endswith(extension):
+            if not name.lower().endswith(_JSON_EXT):
                 continue
             try:
-                if extension == _JSON_EXT:
-                    with open(path, encoding='utf-8-sig') as handle:
-                        data = json.load(handle)
-                    if not isinstance(data, dict):
-                        continue
-                    indices = data.get('IndexBufferList', [])
-                    categories = data.get('CategoryBufferList', [])
-                    if not isinstance(indices, list) or not indices:
-                        continue
-                    if not isinstance(categories, list) or not categories:
-                        continue
-                    references = indices + categories
-                    valid = all(
-                        isinstance(item, dict) and isinstance(item.get('FileName'), str)
-                        and bool(item['FileName'])
-                        and os.path.isfile(os.path.join(folder_path, item['FileName']))
-                        and os.path.getsize(os.path.join(folder_path, item['FileName'])) > 0
-                        for item in references
-                    )
-                else:
-                    # Explicit prefixes can differ from the FMT filename.
-                    prefix = os.path.splitext(name)[0]
-                    with open(path, encoding='utf-8-sig') as handle:
-                        for line in handle:
-                            key, separator, value = line.partition(':')
-                            if separator and key.strip() == 'prefix' and value.strip():
-                                prefix = value.strip()
-                    ib = os.path.join(folder_path, prefix + '.ib')
-                    vb = [file_path for file_name, file_path in files.items()
-                          if file_name.lower().startswith((prefix + '.vb').lower())]
-                    valid = os.path.isfile(ib) and os.path.getsize(ib) > 0
-                    valid = valid and any(os.path.getsize(file_path) > 0 for file_path in vb)
+                with open(path, encoding='utf-8-sig') as handle:
+                    data = json.load(handle)
+                if not isinstance(data, dict):
+                    continue
+                indices = data.get('IndexBufferList', [])
+                categories = data.get('CategoryBufferList', [])
+                if not isinstance(indices, list) or not indices:
+                    continue
+                if not isinstance(categories, list) or not categories:
+                    continue
+                references = indices + categories
+                valid = all(
+                    isinstance(item, dict) and isinstance(item.get('FileName'), str)
+                    and bool(item['FileName'])
+                    and os.path.isfile(os.path.join(folder_path, item['FileName']))
+                    and os.path.getsize(os.path.join(folder_path, item['FileName'])) > 0
+                    for item in references
+                )
                 if valid:
                     usable += 1
             except (OSError, ValueError, TypeError):
@@ -193,11 +181,11 @@ def probe_reverse_folder(folder_path):
 
         status           one of the STATUS_* values above
         folder_path      the normalized path that was checked
-        format           SSMT_FMT / IB_VB_FMT / "" when nothing was detected
-        group_count      DrawIB folders that carry data files
-        data_type_count  .json / .fmt files inside those DrawIB folders
+        format           SSMT_FMT / "" when nothing importable was detected
+        group_count      DrawIB folders that carry usable data files
+        data_type_count  usable .json files inside those DrawIB folders
         json_count       .json files found in the DrawIB folders
-        fmt_count        .fmt files found in the DrawIB folders
+        fmt_count        .fmt files found in the DrawIB folders (legacy output)
         incomplete_groups DrawIB folder names that hold data but no buffers
         suggested_folders workspace names worth selecting (too_shallow only)
         suggested_total  how many workspaces hold data (too_shallow only)
@@ -216,7 +204,6 @@ def probe_reverse_folder(folder_path):
         "suggested_folders": [],
         "suggested_total": 0,
         "group_names": [],
-        "format_stats": {},
     }
     if not normalized_path:
         return result
@@ -233,47 +220,46 @@ def probe_reverse_folder(folder_path):
     # Inspect every direct group: silently truncating after 200 directories
     # could refuse a valid folder or show counts different from the import.
     # Only the deeper diagnostic search is capped; it never controls import.
-    stats = {SSMT_FMT: {'groups': 0, 'types': 0, 'incomplete': []},
-             IB_VB_FMT: {'groups': 0, 'types': 0, 'incomplete': []}}
-    raw_json = raw_fmt = 0
+    groups = 0
+    data_types = 0
+    incomplete = []
+    json_total = 0
+    fmt_total = 0
     for child in child_directories:
-        json_count, fmt_count, _buffers, _names = _scan_folder_files(child.path)
-        raw_json += json_count
-        raw_fmt += fmt_count
-        for output_format, extension, count in (
-                (SSMT_FMT, _JSON_EXT, json_count), (IB_VB_FMT, _FMT_EXT, fmt_count)):
-            if count <= 0:
-                continue
-            usable = _usable_candidates(child.path, extension)
-            stats[output_format]['types'] += usable
-            if usable:
-                stats[output_format]['groups'] += 1
-                if child.name not in result['group_names']:
-                    result['group_names'].append(child.name)
-            if usable < count:
-                stats[output_format]['incomplete'].append(child.name)
+        json_count, fmt_count, _names = _scan_folder_files(child.path)
+        json_total += json_count
+        fmt_total += fmt_count
+        if json_count <= 0:
+            continue
+        usable = _usable_json_candidates(child.path)
+        data_types += usable
+        if usable:
+            groups += 1
+            if child.name not in result["group_names"]:
+                result["group_names"].append(child.name)
+        if usable < json_count:
+            incomplete.append(child.name)
 
-    result['json_count'] = raw_json
-    result['fmt_count'] = raw_fmt
-    result['format_stats'] = stats
-    if raw_json or raw_fmt:
-        # Prefer current SSMT only when it has usable descriptors. A stale global
-        # format marker must never override the actual selected folder.
-        output_format = SSMT_FMT if stats[SSMT_FMT]['types'] else IB_VB_FMT
-        selected = stats[output_format]
-        result['format'] = output_format
-        result['group_count'] = selected['groups']
-        result['data_type_count'] = selected['types']
-        result['incomplete_groups'] = selected['incomplete']
-        result['status'] = STATUS_OK if selected['types'] else STATUS_NO_BUFFER
-        if not selected['types']:
-            result['incomplete_groups'] = sorted(set(
-                stats[SSMT_FMT]['incomplete'] + stats[IB_VB_FMT]['incomplete']))
+    result["json_count"] = json_total
+    result["fmt_count"] = fmt_total
+    if json_total:
+        # The current format describes its buffers inside the Json, so a copy
+        # that lost them is reported instead of being imported as empty meshes.
+        result["format"] = SSMT_FMT
+        result["group_count"] = groups
+        result["data_type_count"] = data_types
+        result["incomplete_groups"] = incomplete
+        result["status"] = STATUS_OK if data_types else STATUS_NO_BUFFER
+        return result
+    if fmt_total:
+        # Old ib_vb_fmt output. The importer no longer handles it, but the panel
+        # must say why instead of claiming there is nothing to import.
+        result["status"] = STATUS_LEGACY_FORMAT
         return result
 
     # No DrawIB group was found. Explain why, so the user can fix the pick
     # instead of staring at an empty collection.
-    own_json, own_fmt, _own_buffers, _own_names = _scan_folder_files(normalized_path)
+    own_json, own_fmt, _own_names = _scan_folder_files(normalized_path)
     if own_json > 0 or own_fmt > 0:
         # The selected folder itself holds the data files: it is one DrawIB
         # folder, so its parent folder is the reverse output root.
@@ -295,7 +281,7 @@ def probe_reverse_folder(folder_path):
             if scanned_nested >= _MAX_SCANNED_NESTED_GROUPS:
                 break
             scanned_nested += 1
-            nested_json, nested_fmt, _buffers, _names = _scan_folder_files(nested.path)
+            nested_json, nested_fmt, _names = _scan_folder_files(nested.path)
             if nested_json > 0 or nested_fmt > 0:
                 suggested.append(child.name)
                 break

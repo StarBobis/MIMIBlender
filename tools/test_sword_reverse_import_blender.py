@@ -420,7 +420,8 @@ class ReverseImportTests(unittest.TestCase):
         self.assertEqual(probe.normalize_folder_path(''), '')
 
     def test_probe_detects_legacy_format(self):
-        # Legacy ib_vb_fmt folders are recognized by their .fmt data files.
+        # A legacy ib_vb_fmt folder is recognised, but it is no longer imported:
+        # the check must refuse it with a reason instead of saying "ok".
         root = self.folder('legacy')
         group_path = os.path.join(root, 'Body')
         os.makedirs(group_path)
@@ -428,8 +429,9 @@ class ReverseImportTests(unittest.TestCase):
             with open(os.path.join(group_path, name), 'w', encoding='utf-8') as handle:
                 handle.write('x')
         result = probe.probe_reverse_folder(root)
-        self.assertEqual(result['format'], probe.IB_VB_FMT)
-        self.assertEqual(result['status'], probe.STATUS_OK)
+        self.assertEqual(result['status'], probe.STATUS_LEGACY_FORMAT)
+        self.assertEqual(result['format'], '')
+        self.assertEqual(result['fmt_count'], 1)
 
     # --------------------------------------------------------------- importing
     def test_import_imports_valid_folder(self):
@@ -462,17 +464,12 @@ class ReverseImportTests(unittest.TestCase):
             self.assertEqual(result['collection_names'], [], case_name)
             self.assertTrue(result['message'], case_name)
 
-    def test_import_uses_folder_format_not_stale_config(self):
-        # Older installs still record ib_vb_fmt in the global config. The folder
-        # content must decide, otherwise a valid folder imported nothing.
-        root = self.folder('stale_config')
+    def test_import_uses_folder_content(self):
+        # The folder content decides which layout is imported; there is no
+        # global format marker any more, so one valid ssmt_fmt folder imports.
+        root = self.folder('folder_content')
         build_importable_group(os.path.join(root, 'a1b2c3d4'))
-        original_reader = global_config.GlobalConfig.reverse_output_format
-        global_config.GlobalConfig.reverse_output_format = staticmethod(lambda: probe.IB_VB_FMT)
-        try:
-            result = self.run_import(root)
-        finally:
-            global_config.GlobalConfig.reverse_output_format = original_reader
+        result = self.run_import(root)
         self.assertTrue(result['object_names'], result['message'])
         self.assertTrue(any(name.startswith('a1b2c3d4') for name in result['collection_names']),
                         result['collection_names'])
@@ -595,18 +592,13 @@ class ReverseImportTests(unittest.TestCase):
         self.assertEqual(result['status'], probe.STATUS_OK)
         self.assertEqual(result['group_count'], 1)
 
-    def test_mixed_formats_ignore_stale_config(self):
-        # Invalid FMT and a stale format marker must not hide a valid JSON type.
+    def test_mixed_formats_import_the_json_type(self):
+        # A leftover .fmt next to a valid .json must not hide the JSON type.
         root = self.folder('mixed_format')
         group = build_importable_group(os.path.join(root, 'a1b2c3d4'))
         with open(os.path.join(group, 'Bad.fmt'), 'w') as handle:
             handle.write('prefix: missing')
-        original = global_config.GlobalConfig.reverse_output_format
-        global_config.GlobalConfig.reverse_output_format = staticmethod(lambda: probe.IB_VB_FMT)
-        try:
-            result = self.run_import(root)
-        finally:
-            global_config.GlobalConfig.reverse_output_format = original
+        result = self.run_import(root)
         self.assertTrue(result['object_names'], result['message'])
 
     def test_language_cache_and_blender_relative_paths(self):
@@ -687,43 +679,18 @@ class ReverseImportTests(unittest.TestCase):
         self.assertEqual(result['object_names'], [])
         self.assertEqual(result['collection_names'], [])
 
-    def test_legacy_import_and_rollback(self):
-        # Exercise real FMT parsing, not only marker detection.
+    def test_legacy_folder_is_refused_without_collections(self):
+        # The old ib_vb_fmt importer is gone. Picking such a folder must still be
+        # explained, and it must leave the outliner untouched.
         root = self.folder('legacy_real')
         group = os.path.join(root, 'Body')
         os.makedirs(group)
-        vertices = [position + texcoord for position, texcoord in
-                    zip(_QUAD_POSITIONS, _QUAD_TEXCOORDS)]
-        _write_bytes(os.path.join(group, 'Body.vb'), struct.pack('<20f',
-                     *[value for vertex in vertices for value in vertex]))
-        _write_bytes(os.path.join(group, 'Body.ib'), struct.pack('<6H', *_QUAD_INDICES))
-        fmt = """stride: 20
-format: R16_UINT
-topology: trianglelist
-prefix: Body
-logic_name: GIMI
-gametypename: Position-Texcoord
-element[0]:
-SemanticName: POSITION
-SemanticIndex: 0
-Format: R32G32B32_FLOAT
-AlignedByteOffset: 0
-element[1]:
-SemanticName: TEXCOORD
-SemanticIndex: 0
-Format: R32G32_FLOAT
-AlignedByteOffset: 12
-"""
-        with open(os.path.join(group, 'Body.fmt'), 'w') as handle:
-            handle.write(fmt)
-        result = self.run_import(root)
-        self.assertTrue(result['object_names'], result['message'])
-        self.assertEqual(result['empty_leaf_names'], [])
-        # Once buffers disappear, refusal must leave no collections behind.
-        os.remove(os.path.join(group, 'Body.vb'))
+        with open(os.path.join(group, 'Body.fmt'), 'w', encoding='utf-8') as handle:
+            handle.write('prefix: Body\n')
         result = self.run_import(root)
         self.assertEqual(result['object_names'], [])
         self.assertEqual(result['collection_names'], [])
+        self.assertIn('ib_vb_fmt', result['message'])
 
     def test_reverse_import_follows_mirror_workflow(self):
         # The workspace import already honored the mirror workflow; the reverse
