@@ -461,13 +461,25 @@ def _deselect_imported_shader_nodes(imported_objects):
                 clear_tree(material.node_tree)
 
 
-def _auto_bind_workspace_skeleton(operator, drawib_objects):
-    """Bind a workspace import when the folder carries a skeleton sidecar.
+def _read_embedded_skeleton(json_file_path):
+    """Skeleton block the desktop app writes into every SubmeshJson.
 
-    The extraction pass mirrors skeleton.json into the workspace root, and a
-    reverse result copied into a workspace keeps it too, so the same one-click
-    import can build the armature. A missing sidecar is a normal state, never a
-    warning.
+    A workspace can mix LODs and characters, so each DrawIB carries its own
+    binding instead of sharing one workspace-level sidecar.
+    """
+    try:
+        return JsonUtils.LoadFromFile(json_file_path).get("Skeleton") or None
+    except Exception as error:  # noqa: BLE001 - a broken JSON fails its own import
+        print("Embedded skeleton cannot be read:", error)
+        return None
+
+
+def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None):
+    """Bind a workspace import from the skeletons embedded in its SubmeshJson.
+
+    Older workspaces have no embedded block; they keep working through the
+    legacy skeleton.json at the workspace root. Having neither is a normal
+    state (a texture-only workspace), never a warning.
     """
     if not drawib_objects:
         return
@@ -476,8 +488,9 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects):
     settings = ensure_bind_settings(bpy.context.scene)
     if not settings.bind:
         return
+    skeletons = skeletons or {}
     sidecar_path = os.path.join(GlobalConfig.path_workspace_folder(), "skeleton.json")
-    if not os.path.isfile(sidecar_path):
+    if not any(skeletons.values()) and not os.path.isfile(sidecar_path):
         return
     try:
         # Same rule as the reverse import: the armature follows the workflow
@@ -489,6 +502,7 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects):
             sidecar_path,
             settings.cleanup,
             import_mirror=MIMIGlobalProperties.use_mirror_workflow(),
+            skeletons=skeletons,
         )
     except Exception as error:  # noqa: BLE001 - binding must never break the import
         print("Skeleton binding failed:", error)
@@ -517,9 +531,10 @@ def ImprotFromWorkSpaceFull(self, context):
     oldfoldername_jsonpath_dict = {}
     all_submesh_display_names = []
     successful_import_count = 0
-    # DrawIB -> imported meshes, so a workspace that also holds a reverse
-    # skeleton sidecar can be bound in the same one-click pass.
+    # DrawIB -> imported meshes, and DrawIB -> the skeleton block embedded in
+    # its SubmeshJson, so the one-click import binds each DrawIB to its own rig.
     drawib_imported_objects = {}
+    drawib_skeletons = {}
 
     for lod_name in sorted(ws_model.lod_components.keys()):
         # Create a blue sub-collection per LOD, linked under the workspace collection
@@ -571,6 +586,10 @@ def ImprotFromWorkSpaceFull(self, context):
                             all_submesh_display_names.append(display_name)
                             successful_import_count += 1
                             drawib_imported_objects.setdefault(draw_ib, []).append(imported_obj)
+                            if draw_ib not in drawib_skeletons:
+                                skeleton_block = _read_embedded_skeleton(json_file_path)
+                                if skeleton_block:
+                                    drawib_skeletons[draw_ib] = skeleton_block
 
                         foldername_gametypename_dict[new_submesh_name] = gametype_name
                         oldfoldername_jsonpath_dict[old_folder_name] = json_file_path
@@ -585,7 +604,7 @@ def ImprotFromWorkSpaceFull(self, context):
         self.report({'ERROR'}, tr("No models were successfully imported from the current workspace; blueprint generation was skipped."))
         return
 
-    _auto_bind_workspace_skeleton(self, drawib_imported_objects)
+    _auto_bind_workspace_skeleton(self, drawib_imported_objects, drawib_skeletons)
 
     # Save the workspace-level Import.json selection record (using new-format keys)
     save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")

@@ -567,6 +567,66 @@ class SkeletonHelper:
         return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
 
     @classmethod
+    def _plan_from_block(cls, block, meshes):
+        """Build a binding plan from the skeleton embedded in a SubmeshJson."""
+        bones = block.get("Bones") or []
+        if not bones:
+            return None
+        bone_map = block.get("BoneMap") or {}
+        character = {
+            "Id": str(block.get("CharacterId") or block.get("Hash") or "skeleton"),
+            "Name": str(block.get("CharacterName") or ""),
+            "Bones": bones,
+            # The block's map is the DrawIB palette, which is also what a
+            # bone-to-group rename must use.
+            "BoneMap": bone_map,
+        }
+        components = block.get("Components") or []
+        draw_ib = {"BoneMap": bone_map, "Components": components}
+        fallback = cls.drawib_map(draw_ib, character)
+        component_maps = [entry.get("BoneMap") or {} for entry in components if entry.get("BoneMap")]
+        maps = [mapping for mapping in component_maps if mapping] or [fallback]
+        return {
+            "key": str(block.get("Hash") or character["Id"]),
+            "draw_ib": draw_ib,
+            "character": character,
+            "meshes": meshes,
+            "components": components,
+            "fallback": fallback,
+            "maps": maps,
+            "space": block.get("Space") or {},
+            "naming": str(block.get("NamingMode") or ""),
+        }
+
+    @classmethod
+    def _plan_from_sidecar(cls, sidecar, draw_ib_name, meshes):
+        """Build a binding plan from a legacy skeleton.json entry."""
+        draw_ib = cls.pick_drawib(sidecar, [obj.name for obj in meshes], draw_ib_name)
+        if draw_ib is None:
+            return None
+        character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
+        if character is None:
+            return None
+        components = draw_ib.get("Components") or []
+        fallback = cls.drawib_map(draw_ib, character)
+        # A DrawIB with declared components may still carry meshes without a
+        # component identity (whole-buffer recovery parts); those keep the
+        # DrawIB palette instead of being dropped from the binding.
+        component_maps = [entry.get("BoneMap") or {} for entry in components if entry.get("BoneMap")]
+        maps = [mapping for mapping in component_maps if mapping] or [fallback]
+        return {
+            "key": str(character.get("Id", "")),
+            "draw_ib": draw_ib,
+            "character": character,
+            "meshes": meshes,
+            "components": components,
+            "fallback": fallback,
+            "maps": maps,
+            "space": sidecar.get("Space") or {},
+            "naming": "",
+        }
+
+    @classmethod
     def apply_groups(
         cls,
         naming_mode,
@@ -574,80 +634,76 @@ class SkeletonHelper:
         sidecar_path="",
         cleanup_mode=BONE_CLEANUP_NONE,
         import_mirror=None,
+        skeletons=None,
     ):
-        """Bind several DrawIB groups at once, one armature per character.
+        """Bind several DrawIB groups at once, one armature per skeleton.
 
         groups: {drawib_folder_name: [mesh objects]}
-        naming_mode may also be NAMING_SIDECAR: the sidecar then decides, which
-        is what the shared import settings default to.
+        naming_mode may also be NAMING_SIDECAR: the embedded block (or the
+        legacy sidecar) then decides, which is what the shared import settings
+        default to.
         import_mirror: whether this import baked the non-mirrored workflow's X
         reflection into the meshes. The one-click imports pass the scene mode;
         None falls back to the per-object marker (manual binding of objects an
         earlier session imported).
+        skeletons: {drawib_folder_name: "Skeleton" block}. The desktop app writes
+        one into every SubmeshJson, so a workspace that mixes LODs or characters
+        binds each DrawIB to its own rig; identical blocks share one armature via
+        their hash. Missing entries fall back to the legacy skeleton.json.
         """
         if str(naming_mode or "").upper() == "NONE":
             return ""
-        path = sidecar_path or cls.find_sidecar()
-        if not path or not os.path.isfile(path):
-            return ""
-        try:
-            sidecar = cls.load_sidecar(path)
-        except Exception as error:  # noqa: BLE001 - a broken sidecar must not break the import
-            print("Skeleton sidecar cannot be read:", error)
-            return ""
 
-        # Resolve "follow the desktop app" after the sidecar is loaded, so the
-        # rest of the binding only has to know the two concrete modes.
-        if str(naming_mode or "").upper() == NAMING_SIDECAR:
-            naming_mode = cls.naming_from_sidecar(sidecar)
-
-        space = sidecar.get("Space") or {}
-        space_scale = float(space.get("Scale", 1.0) or 1.0)
-        space_rotation_z = float(space.get("RotationZ", 0.0) or 0.0)
-        # The desktop app mirrors the model in X before matching because the
-        # packs are stored non-mirrored, so a mirror-matched map names bones in
-        # that non-mirrored frame. Sidecars written before the flag existed are
-        # not mirror-matched and keep the historical armature placement.
-        match_mirror_x = bool(space.get("MatchMirrorX", False))
+        embedded = {
+            str(name): block
+            for name, block in (skeletons or {}).items()
+            if isinstance(block, dict) and block.get("Bones")
+        }
+        follow_sidecar = str(naming_mode or "").upper() == NAMING_SIDECAR
+        sidecar = None
+        if follow_sidecar or not embedded:
+            path = sidecar_path or cls.find_sidecar()
+            if path and os.path.isfile(path):
+                try:
+                    sidecar = cls.load_sidecar(path)
+                except Exception as error:  # noqa: BLE001 - a broken sidecar must not break the import
+                    print("Skeleton sidecar cannot be read:", error)
+            if sidecar is None and not embedded:
+                return ""
 
         # Resolve every group before touching the scene. One armature serves a
-        # whole character, so the naming mode has to be chosen once for that
-        # character: renaming bones to numbers for one DrawIB and groups to bone
-        # names for the next left one of them pointing at no bone at all.
+        # whole skeleton, so the naming mode has to be chosen once per armature:
+        # renaming bones to numbers for one DrawIB and groups to bone names for
+        # the next left one of them pointing at no bone at all.
         plans = []
         palettes = {}
         for draw_ib_name, objects in groups.items():
             meshes = [obj for obj in objects if obj is not None and getattr(obj, "type", "") == "MESH"]
             if not meshes:
                 continue
-            draw_ib = cls.pick_drawib(sidecar, [obj.name for obj in meshes], draw_ib_name)
-            if draw_ib is None:
+            plan = None
+            block = embedded.get(str(draw_ib_name))
+            if block:
+                plan = cls._plan_from_block(block, meshes)
+            elif sidecar is not None:
+                plan = cls._plan_from_sidecar(sidecar, draw_ib_name, meshes)
+            if plan is None:
                 continue
-            character = cls.character_by_id(sidecar, draw_ib.get("CharacterId"))
-            if character is None:
-                continue
-            components = draw_ib.get("Components") or []
-            fallback = cls.drawib_map(draw_ib, character)
-            # A DrawIB with declared components may still carry meshes without a
-            # component identity (whole-buffer recovery parts); those keep the
-            # DrawIB palette instead of being dropped from the binding.
-            component_maps = [entry.get("BoneMap") or {} for entry in components if entry.get("BoneMap")]
-            maps = [mapping for mapping in component_maps if mapping] or [fallback]
-            key = str(character.get("Id", ""))
-            palettes.setdefault(key, []).extend(maps)
-            plans.append(
-                {
-                    "key": key,
-                    "draw_ib": draw_ib,
-                    "character": character,
-                    "meshes": meshes,
-                    "components": components,
-                    "fallback": fallback,
-                }
-            )
+            key = plan["key"]
+            palettes.setdefault(key, []).extend(plan["maps"])
+            plans.append(plan)
 
         if not plans:
             return ""
+
+        # "Follow MMT" is decided once per armature: the embedded blocks each
+        # carry the app's choice, the legacy sidecar carries it globally.
+        if follow_sidecar:
+            naming_mode = cls.naming_from_sidecar(sidecar) if sidecar else NAMING_BONE_TO_GROUP
+        naming_by_key = {}
+        for plan in plans:
+            key = plan["key"]
+            naming_by_key.setdefault(key, plan.get("naming") or naming_mode)
 
         # Several palettes cannot be expressed by renaming one armature, so such
         # a character always binds through group names.
@@ -668,14 +724,18 @@ class SkeletonHelper:
             character = plan["character"]
             draw_ib = plan["draw_ib"]
             meshes = plan["meshes"]
-            effective_naming = NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_mode
+            effective_naming = (
+                NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_by_key.get(key, naming_mode)
+            )
             if key not in armatures:
-                # The pack stores bones in the non-mirrored orientation while
-                # the game's buffers are mirrored. A mirror-matched sidecar
-                # names bones in that non-mirrored frame, so the armature must
-                # be reflected exactly when the imported mesh was *not*.
-                # Without the sidecar flag both sides keep the historical
-                # placement: the armature follows the mesh's X reflection.
+                # The mesh and the skeleton share one orientation; the armature
+                # follows the X reflection this import baked into the mesh. A
+                # block from an older, mirror-matched build still reports it, so
+                # its bones stay on the side that build intended.
+                space = plan.get("space") or {}
+                space_scale = float(space.get("Scale", 1.0) or 1.0)
+                space_rotation_z = float(space.get("RotationZ", 0.0) or 0.0)
+                match_mirror_x = bool(space.get("MatchMirrorX", False))
                 if import_mirror is None:
                     mesh_flipped = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
                 else:

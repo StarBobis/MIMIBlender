@@ -29,6 +29,7 @@ from .reverse_source_probe import (
 )
 
 from ..utils.collection_utils import CollectionUtils,CollectionColor
+from ..utils.json_utils import JsonUtils
 from ..utils.material_texture_utils import apply_image_texture_to_material
 from ..utils.skeleton_helper import SkeletonHelper
 from ..utils.skeleton_ui import (
@@ -549,11 +550,13 @@ class SwordImportAllReversed(I18nOperator):
         ordered_ranges = sorted(match_ranges, key=lambda match_range: (match_range[1], match_range[0]))
         return {match_range: component_index for component_index, match_range in enumerate(ordered_ranges)}
 
-    def _bind_skeleton(self, context, reverse_output_folder_path, drawib_objects):
-        """Bind every imported DrawIB group to its character armature.
+    def _bind_skeleton(self, context, reverse_output_folder_path, drawib_objects, skeletons=None):
+        """Bind every imported DrawIB group to the skeleton it carries.
 
-        The reverse pass writes skeleton.json next to the DrawIB folders; when it
-        is missing (texture-only mods, mods without skin data, older outputs) the
+        The reverse pass embeds a skeleton block in every SubmeshJson, so each
+        DrawIB binds to its own rig even when a mod mixes characters. Older
+        outputs keep working through skeleton.json next to the DrawIB folders;
+        when neither exists (texture-only mods, mods without skin data) the
         import simply finishes without an armature.
         """
         # One shared settings object decides whether to bind at all and which
@@ -561,8 +564,9 @@ class SwordImportAllReversed(I18nOperator):
         settings = ensure_bind_settings(context.scene)
         if not settings.bind or not drawib_objects:
             return
+        skeletons = skeletons or {}
         sidecar_path = os.path.join(reverse_output_folder_path, "skeleton.json")
-        if not os.path.isfile(sidecar_path):
+        if not any(skeletons.values()) and not os.path.isfile(sidecar_path):
             return
         try:
             # The armature must follow this import's mirror workflow mode, not
@@ -575,6 +579,7 @@ class SwordImportAllReversed(I18nOperator):
                 sidecar_path,
                 settings.cleanup,
                 import_mirror=MIMIGlobalProperties.use_mirror_workflow(),
+                skeletons=skeletons,
             )
         except Exception as error:  # noqa: BLE001 - binding must never break the import
             self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))
@@ -632,6 +637,8 @@ class SwordImportAllReversed(I18nOperator):
         # DrawIB folder name -> every mesh object imported for it, so the
         # character armature can be bound once after the whole import.
         drawib_objects = {}
+        # DrawIB folder name -> the skeleton block embedded in its SubmeshJson.
+        drawib_skeletons = {}
         for subfolder_path in subfolder_path_list:
 
             # The subfolder name is the DrawIB this group of meshes belongs to
@@ -715,6 +722,14 @@ class SwordImportAllReversed(I18nOperator):
 
                 imported_data_type_count += 1
                 drawib_objects.setdefault(drawib_folder_name, []).extend(list(datatype_collection.objects))
+                if drawib_folder_name not in drawib_skeletons:
+                    try:
+                        block = JsonUtils.LoadFromFile(json_filepath).get("Skeleton")
+                    except Exception as error:  # noqa: BLE001 - a broken JSON fails its own import
+                        print("Embedded skeleton cannot be read:", error)
+                        block = None
+                    if block:
+                        drawib_skeletons[drawib_folder_name] = block
 
         if imported_data_type_count == 0:
             # Every data type failed. Remove the empty collection tree that the
@@ -727,9 +742,9 @@ class SwordImportAllReversed(I18nOperator):
         # A DrawIB whose every data type failed only has empty children left.
         prune_empty_collections(reverse_collection)
 
-        # Skeleton binding is part of the one-click import: when the reverse pass
-        # wrote skeleton.json, the character armature is rebuilt and bound now.
-        self._bind_skeleton(context, reverse_output_folder_path, drawib_objects)
+        # Skeleton binding is part of the one-click import: every SubmeshJson
+        # carries its own skeleton block, so each DrawIB gets the right rig.
+        self._bind_skeleton(context, reverse_output_folder_path, drawib_objects, drawib_skeletons)
 
         # Summarize the result so the user knows every candidate data type was
         # imported into its own collection and can now compare them one by one.
