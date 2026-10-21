@@ -138,6 +138,11 @@ if (-not (Test-Path -LiteralPath $InitPyPath)) {
     Fail "Run this script from the repository root ($InitPyPath not found, cwd: $(Get-Location))"
 }
 $repoRoot = (Get-Location).Path
+# Resolve the staging folder against the repository root: PowerShell's location
+# and the process working directory can differ (the caller may have changed the
+# location only), which made `git archive -o tmp/...` and .NET's relative file
+# APIs disagree and the script fail with "Could not find file ...tmp\....zip".
+$TmpDir = Join-Path $repoRoot 'tmp'
 Write-Ok "repository root $repoRoot"
 
 # Read bl_info version from __init__.py: the single version source of truth.
@@ -345,7 +350,7 @@ $payloadObject = [ordered]@{
     make_latest      = if ($Draft) { 'false' } else { 'true' }
 }
 # Pass the body via a UTF-8 file: inline JSON strings hit encoding pitfalls.
-$payloadPath = Join-Path $repoRoot "$TmpDir/release-payload.json"
+$payloadPath = Join-Path $TmpDir 'release-payload.json'
 $payloadObject | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $payloadPath -Encoding utf8
 
 function Send-ReleaseRequest {
