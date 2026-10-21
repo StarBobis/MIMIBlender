@@ -906,6 +906,7 @@ class MIMISword_ImageMaterialPanel(Panel):
             layout,
             scene,
             "" if skeleton_error else skeleton_folder,
+            "mimi_skeleton_binding_reverse",
         )
 
         # Folder selection button

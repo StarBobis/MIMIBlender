@@ -7,8 +7,9 @@ choice belongs to the current blend file, therefore the state lives on the
 Scene; this module is the only owner of that state:
 
 * ``register`` / ``unregister`` define and remove the properties.
-* ``draw_skeleton_binding`` renders the block, so the two panels cannot drift
-  apart into two slightly different sets of controls.
+* ``draw_skeleton_binding`` renders the collapsible block (collapsed by
+  default, with the bind checkbox in its header), so the two panels cannot
+  drift apart into two slightly different sets of controls.
 * ``ensure_bind_settings`` migrates files saved before the settings were split
   and returns the values an import has to use.
 * ``remember_bind_report`` keeps the last binding result visible in the panel.
@@ -32,7 +33,6 @@ from .skeleton_helper import (
     BONE_CLEANUP_NONE,
     NAMING_BONE_TO_GROUP,
     NAMING_GROUP_TO_BONE,
-    NAMING_SIDECAR,
     SkeletonHelper,
 )
 
@@ -47,7 +47,9 @@ LEGACY_MODE_PROPERTY = "mimi_sword_skeleton_mode"
 # The migration marker is a plain ID property, not an RNA property: it only
 # has to say "this file was already converted", nothing else reads it.
 SETTINGS_VERSION_KEY = "mimi_skeleton_settings_version"
-SETTINGS_VERSION = 1
+# Version 2 removed the "Follow MMT" choice: the add-on decides the naming mode
+# now, so a stored SIDECAR value has to become Rename Bones.
+SETTINGS_VERSION = 2
 
 SIDECAR_FILE_NAME = "skeleton.json"
 
@@ -63,7 +65,7 @@ class BindSettings:
 
     def __init__(self, bind, naming, cleanup):
         self.bind = bool(bind)
-        self.naming = str(naming or NAMING_SIDECAR)
+        self.naming = str(naming or NAMING_BONE_TO_GROUP)
         self.cleanup = str(cleanup or BONE_CLEANUP_NONE)
 
     def __iter__(self):
@@ -74,25 +76,22 @@ class BindSettings:
 def get_naming_items(self=None, context=None):
     """Translated naming choices; called by Blender on every dropdown draw.
 
-    ``Follow MMT`` is first on purpose: a dynamic items callback only accepts
-    an integer default, so index 0 is the default of a fresh scene.
+    The add-on owns the decision now, so the mode the desktop app stored is not
+    offered any more. ``Rename Bones`` is first on purpose: a dynamic items
+    callback only accepts an integer default, so index 0 is the default of a
+    fresh scene, and it is the mode the mod workflow needs.
     """
     return [
         (
-            NAMING_SIDECAR,
-            tr("Follow MMT"),
-            tr("Use the naming mode that the desktop app stored in skeleton.json"),
-        ),
-        (
             NAMING_BONE_TO_GROUP,
-            tr("Rename Bones"),
+            tr("Rename Bones (mod workflow)"),
             tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable); "
                "a character whose DrawIBs use different palettes gets one armature per palette"),
         ),
         (
             NAMING_GROUP_TO_BONE,
-            tr("Rename Vertex Groups"),
-            tr("Rename mesh vertex groups to the skeleton bone names"),
+            tr("Rename Vertex Groups (other purposes)"),
+            tr("Rename mesh vertex groups to the skeleton bone names; the whole character stays on one armature"),
         ),
     ]
 
@@ -118,20 +117,30 @@ def get_cleanup_items(self=None, context=None):
     ]
 
 
+def _concrete_naming(value):
+    """Return one of the two modes the add-on offers.
+
+    A file saved while ``Follow MMT`` existed still carries ``SIDECAR`` in its
+    scene; that value no longer exists and becomes the add-on default.
+    """
+    if str(value or "") == NAMING_GROUP_TO_BONE:
+        return NAMING_GROUP_TO_BONE
+    return NAMING_BONE_TO_GROUP
+
+
 def _legacy_bind_settings(scene):
     """Map the old single enum onto the split settings.
 
-    ``BONE_TO_GROUP`` used to be the default for everybody, so it becomes
-    ``Follow MMT`` as well: a user who never touched the dropdown keeps the new
-    default, while a sidecar that asks for rename-vertex-groups finally wins.
-    ``GROUP_TO_BONE`` and ``NONE`` were explicit choices and are preserved.
+    ``BONE_TO_GROUP`` used to be the default for everybody and is the add-on's
+    default again, so it becomes ``Rename Bones``. ``GROUP_TO_BONE`` and
+    ``NONE`` were explicit choices and are preserved.
     """
     legacy = str(getattr(scene, LEGACY_MODE_PROPERTY, "") or "")
     if legacy == "NONE":
-        return False, NAMING_SIDECAR
+        return False, NAMING_BONE_TO_GROUP
     if legacy == NAMING_GROUP_TO_BONE:
         return True, NAMING_GROUP_TO_BONE
-    return True, NAMING_SIDECAR
+    return True, NAMING_BONE_TO_GROUP
 
 
 def read_bind_settings(scene):
@@ -142,12 +151,14 @@ def read_bind_settings(scene):
     reports its legacy values instead of the defaults of the new properties.
     """
     cleanup = str(getattr(scene, CLEANUP_PROPERTY, BONE_CLEANUP_NONE) or BONE_CLEANUP_NONE)
-    if _settings_version(scene) < SETTINGS_VERSION:
+    if _settings_version(scene) == 0:
         bind, naming = _legacy_bind_settings(scene)
         return BindSettings(bind, naming, cleanup)
+    # Version 1 already had the split properties but could store the removed
+    # SIDECAR mode; the read path resolves it without writing to the scene.
     return BindSettings(
         getattr(scene, BIND_PROPERTY, True),
-        getattr(scene, NAMING_PROPERTY, NAMING_SIDECAR),
+        _concrete_naming(getattr(scene, NAMING_PROPERTY, "")),
         cleanup,
     )
 
@@ -166,9 +177,18 @@ def ensure_scene_settings(scene):
     Returns True when this call changed the scene. Operators and the load
     handler may write, so this is the only place that converts old values.
     """
-    if scene is None or _settings_version(scene) >= SETTINGS_VERSION:
+    if scene is None:
         return False
-    bind, naming = _legacy_bind_settings(scene)
+    version = _settings_version(scene)
+    if version >= SETTINGS_VERSION:
+        return False
+    if version == 0:
+        bind, naming = _legacy_bind_settings(scene)
+    else:
+        # Version 1 already had the split properties; only the naming value can
+        # still name the removed mode.
+        bind = bool(getattr(scene, BIND_PROPERTY, True))
+        naming = _concrete_naming(getattr(scene, NAMING_PROPERTY, ""))
     try:
         setattr(scene, BIND_PROPERTY, bind)
         setattr(scene, NAMING_PROPERTY, naming)
@@ -231,17 +251,9 @@ def _conflicting_characters(payload):
     return conflicts
 
 
-def _wants_numeric_bones(info, naming):
-    """Whether this naming choice asks for numeric bone names.
-
-    "Follow MMT" counts as numeric bones when the sidecar asks for them, so the
-    hints also appear for the default setting; otherwise the user would only
-    learn about the result once the import is already done.
-    """
-    return str(naming or "") == NAMING_BONE_TO_GROUP or (
-        str(naming or "") == NAMING_SIDECAR
-        and str(info.get("naming") or "") == NAMING_BONE_TO_GROUP
-    )
+def _wants_numeric_bones(naming):
+    """Whether the chosen mode renames the bones to the palette numbers."""
+    return _concrete_naming(naming) == NAMING_BONE_TO_GROUP
 
 
 def _naming_hint(info, naming):
@@ -257,13 +269,13 @@ def _naming_hint(info, naming):
     if info is None:
         return ""
     if info.get("components"):
-        if _wants_numeric_bones(info, naming):
+        if _wants_numeric_bones(naming):
             return tr(
                 "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones"
             )
         return ""
     conflicts = info.get("conflicts") or []
-    if conflicts and _wants_numeric_bones(info, naming):
+    if conflicts and _wants_numeric_bones(naming):
         return tr(
             "DrawIBs of {names} number different bones; the import creates one armature per palette"
         ).format(names=", ".join(conflicts[:3]))
@@ -303,7 +315,6 @@ def sidecar_info(folder):
         "characters": characters,
         # The two facts that make "Rename Bones" impossible for this skeleton.
         # Computing them once per file modification keeps the redraw cheap.
-        "naming": SkeletonHelper.normalize_naming_mode(payload.get("NamingMode", "")),
         "conflicts": _conflicting_characters(payload),
         "components": any(entry.get("Components") for entry in payload.get("DrawIBs") or []),
     }
@@ -356,50 +367,60 @@ def wrap_bind_report(text, width=REPORT_LINE_WIDTH, max_lines=REPORT_MAX_LINES):
     return lines
 
 
-def draw_skeleton_binding(layout, scene, folder):
+def draw_skeleton_binding(layout, scene, folder, panel_id="mimi_skeleton_binding"):
     """Draw the shared skeleton block under an import button.
+
+    The block is a collapsible sub-panel that starts collapsed. The bind
+    checkbox lives in the header, so the user can switch binding on or off
+    without opening it, and the import reads the same Scene property either
+    way: how the block is drawn never changes what the import does.
 
     ``folder`` is the folder this panel's import reads its sidecar from, so
     both panels can show a hint about their own source instead of a generic
     message that may belong to the other panel.
+    ``panel_id`` keeps the open/closed state of the two panels apart; the same
+    id would open both blocks together.
     """
-    box = layout.box()
-    box.label(text=tr("Skeleton Binding"), icon='ARMATURE_DATA')
-    # ``text`` overrides the RNA name so the caption follows a language switch
-    # even though the property was registered in the startup language.
-    box.prop(scene, BIND_PROPERTY, text=tr("Bind Skeleton"))
+    header, body = layout.panel(panel_id, default_closed=True)
+    header.use_property_split = False
+    header.label(text=tr("Skeleton Binding"), icon='ARMATURE_DATA')
+    # Push the checkbox to the right edge; it stays reachable while collapsed.
+    header.separator_spacer()
+    header.prop(scene, BIND_PROPERTY, text="")
+    if body is None:
+        return
     bound = bool(getattr(scene, BIND_PROPERTY, True))
     if bound:
-        box.prop(scene, NAMING_PROPERTY, text=tr("Skeleton Naming"))
-        box.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
+        body.prop(scene, NAMING_PROPERTY, text=tr("Skeleton Naming"))
+        body.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
         info = sidecar_info(folder)
         if info is not None:
             # The hint belongs right under the dropdown it explains: the user
             # then knows how many rigs to expect before pressing the button.
             hint = _naming_hint(
-                info, str(getattr(scene, NAMING_PROPERTY, NAMING_SIDECAR) or NAMING_SIDECAR)
+                info, _concrete_naming(getattr(scene, NAMING_PROPERTY, ""))
             )
             if hint:
                 # A per-component fallback really changes the naming mode, while
                 # one armature per palette is the documented numeric behaviour.
-                box.label(text=hint, icon='ERROR' if info.get("components") else 'INFO')
-            box.label(
+                body.label(text=hint, icon='ERROR' if info.get("components") else 'INFO')
+            body.label(
                 text=tr("Skeleton file found: the import will bind the character armature"),
                 icon='ARMATURE_DATA',
             )
             if info["characters"]:
                 names = ", ".join(info["characters"][:3])
-                box.label(text=tr("Character: {names}").format(names=names))
+                body.label(text=tr("Character: {names}").format(names=names))
         else:
             # The sidecar is only one of the two skeleton sources now: every
             # SubmeshJson can carry its own embedded block, so this hint must not
             # promise that no armature will be created.
-            box.label(
+            body.label(
                 text=tr("No skeleton.json next to this folder; the import uses the skeleton embedded in each Json when it has one"),
                 icon='INFO',
             )
     else:
-        box.label(
+        body.label(
             text=tr("Skeleton binding is off; the import creates no armature"),
             icon='INFO',
         )
@@ -409,11 +430,11 @@ def draw_skeleton_binding(layout, scene, folder):
         # A single label shortens a long text in the middle, which used to hide
         # exactly the part that explains a forced naming mode. Wrapping the
         # report keeps every reason readable inside the narrow side panel.
-        header = tr("Last bind: {summary}").format(summary=report)
-        lines = wrap_bind_report(header)
-        box.label(text=lines[0], icon='CHECKMARK')
+        caption = tr("Last bind: {summary}").format(summary=report)
+        lines = wrap_bind_report(caption)
+        body.label(text=lines[0], icon='CHECKMARK')
         for line in lines[1:]:
-            box.label(text="  " + line)
+            body.label(text="  " + line)
 
 
 @bpy.app.handlers.persistent
@@ -441,7 +462,7 @@ def register():
         default=True,
     )
     # Dynamic items keep the dropdown translated when the UI language changes;
-    # index 0 ("Follow MMT") is therefore the default of a fresh scene.
+    # index 0 ("Rename Bones") is therefore the default of a fresh scene.
     bpy.types.Scene.mimi_sword_skeleton_naming = EnumProperty(
         name=tr("Skeleton Naming"),
         description=tr("How the imported meshes and the armature reconcile their two name spaces"),

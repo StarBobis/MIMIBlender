@@ -13,9 +13,11 @@ Coverage notes:
   the old default value.
 - Panel draw functions must not write Scene properties in Blender 5.2, so the
   read-only resolver is checked separately from the migrating one.
-- ``Follow MMT`` resolves the naming mode from the sidecar after it is loaded.
+- The add-on owns the naming decision now: only Rename Bones and Rename Vertex
+  Groups are offered, and the removed ``Follow MMT`` value becomes Rename Bones.
 - The shared draw helper is exercised with a fake layout for both panels: found
-  sidecar, missing sidecar, disabled binding and the stored last report.
+  sidecar, missing sidecar, disabled binding, the stored last report and the
+  collapsed default (the bind checkbox must stay reachable in the header).
 - The runner raises on failure so --python-exit-code reports a failing job.
 """
 
@@ -98,17 +100,32 @@ def write_sidecar(folder, naming_mode, characters=None):
 
 
 class FakeLayout:
-    """Stand-in for a Blender layout that records what the block draws."""
+    """Stand-in for a Blender layout that records what the block draws.
 
-    def __init__(self):
+    ``panel_open`` controls what ``panel()`` returns: an open sub-panel gives a
+    body to draw into, a collapsed one returns ``None`` like Blender does, so
+    the collapsed default can be checked without a UI.
+    """
+
+    def __init__(self, panel_open=True):
         self.labels = []
         self.properties = []
+        self.panels = []
+        self.panel_open = panel_open
+        self.use_property_split = True
 
     def box(self):
         return self
 
     def row(self, align=True):
         return self
+
+    def panel(self, idname, default_closed=False):
+        self.panels.append((idname, default_closed))
+        return self, (self if self.panel_open else None)
+
+    def separator_spacer(self):
+        return None
 
     def label(self, text='', icon=''):
         self.labels.append(text)
@@ -129,7 +146,7 @@ class SkeletonSettingsTests(unittest.TestCase):
         # so every test starts from an explicit, known state instead of the
         # leftovers of the previous test.
         self.scene.mimi_sword_bind_skeleton = True
-        self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_SIDECAR
+        self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_BONE_TO_GROUP
         self.scene.mimi_sword_skeleton_cleanup = skeleton_helper.BONE_CLEANUP_NONE
         self.scene.mimi_sword_skeleton_last_report = ""
         # Mark the scene as migrated so the setup above is not overwritten by
@@ -155,9 +172,11 @@ class SkeletonSettingsTests(unittest.TestCase):
             skeleton_ui.REPORT_PROPERTY,
         ):
             self.assertTrue(hasattr(bpy.types.Scene, property_name), property_name)
-        # A fresh scene follows MMT and keeps every bone.
+        # A fresh scene renames the bones (the mod workflow) and keeps every bone.
         self.assertTrue(self.scene.mimi_sword_bind_skeleton)
-        self.assertEqual(self.scene.mimi_sword_skeleton_naming, skeleton_helper.NAMING_SIDECAR)
+        self.assertEqual(
+            self.scene.mimi_sword_skeleton_naming, skeleton_helper.NAMING_BONE_TO_GROUP
+        )
         self.assertEqual(self.scene.mimi_sword_skeleton_cleanup, skeleton_helper.BONE_CLEANUP_NONE)
         skeleton_ui.unregister()
         self.assertFalse(hasattr(bpy.types.Scene, skeleton_ui.BIND_PROPERTY))
@@ -244,11 +263,11 @@ class SkeletonSettingsTests(unittest.TestCase):
 
     def test_legacy_values_are_migrated(self):
         cases = {
-            "NONE": (False, skeleton_helper.NAMING_SIDECAR),
+            "NONE": (False, skeleton_helper.NAMING_BONE_TO_GROUP),
             "GROUP_TO_BONE": (True, skeleton_helper.NAMING_GROUP_TO_BONE),
-            # The old default was BONE_TO_GROUP for everybody, so it becomes
-            # the new default and lets the sidecar decide.
-            "BONE_TO_GROUP": (True, skeleton_helper.NAMING_SIDECAR),
+            # The old default was BONE_TO_GROUP for everybody and is the
+            # add-on default again.
+            "BONE_TO_GROUP": (True, skeleton_helper.NAMING_BONE_TO_GROUP),
         }
         for legacy_value, expected in cases.items():
             self.reset_legacy(legacy_value)
@@ -261,6 +280,36 @@ class SkeletonSettingsTests(unittest.TestCase):
             # The migration marks the scene, so a second call is a no-op.
             self.assertFalse(skeleton_ui.ensure_scene_settings(self.scene))
             self.assertEqual(self.scene[skeleton_ui.SETTINGS_VERSION_KEY], skeleton_ui.SETTINGS_VERSION)
+
+    def test_naming_items_offer_only_the_two_addon_modes(self):
+        items = skeleton_ui.get_naming_items()
+        self.assertEqual(
+            [item[0] for item in items],
+            [skeleton_helper.NAMING_BONE_TO_GROUP, skeleton_helper.NAMING_GROUP_TO_BONE],
+        )
+
+    def test_removed_follow_mmt_value_becomes_rename_bones(self):
+        # A file saved while the choice existed stores SIDECAR; the read path
+        # resolves it to the add-on default without writing to the scene.
+        self.assertEqual(
+            skeleton_ui._concrete_naming(skeleton_helper.NAMING_SIDECAR),
+            skeleton_helper.NAMING_BONE_TO_GROUP,
+        )
+        self.assertEqual(
+            skeleton_ui._concrete_naming(skeleton_helper.NAMING_GROUP_TO_BONE),
+            skeleton_helper.NAMING_GROUP_TO_BONE,
+        )
+
+    def test_v1_explicit_group_choice_survives_the_upgrade(self):
+        # Version 1 already had the split properties, so the upgrade must not
+        # re-read the legacy enum and reset an explicit choice.
+        self.scene[skeleton_ui.SETTINGS_VERSION_KEY] = 1
+        self.scene.mimi_sword_skeleton_naming = skeleton_helper.NAMING_GROUP_TO_BONE
+        settings = skeleton_ui.ensure_bind_settings(self.scene)
+        self.assertEqual(settings.naming, skeleton_helper.NAMING_GROUP_TO_BONE)
+        self.assertEqual(
+            self.scene[skeleton_ui.SETTINGS_VERSION_KEY], skeleton_ui.SETTINGS_VERSION
+        )
 
     def test_read_does_not_write_before_migration(self):
         self.reset_legacy("NONE")
@@ -303,6 +352,29 @@ class SkeletonSettingsTests(unittest.TestCase):
         self.assertIn(skeleton_ui.BIND_PROPERTY, layout.properties)
         self.assertIn(skeleton_ui.NAMING_PROPERTY, layout.properties)
         self.assertIn(skeleton_ui.CLEANUP_PROPERTY, layout.properties)
+
+    def test_draw_block_is_collapsed_by_default(self):
+        layout = FakeLayout(panel_open=False)
+        with tempfile.TemporaryDirectory() as folder:
+            write_sidecar(folder, "boneToGroup")
+            skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
+        self.assertEqual(layout.panels, [("mimi_skeleton_binding", True)])
+        # The bind checkbox sits in the header, so it is still drawn while the
+        # body is hidden and the import reads the same Scene property.
+        self.assertIn(skeleton_ui.BIND_PROPERTY, layout.properties)
+        self.assertNotIn(skeleton_ui.NAMING_PROPERTY, layout.properties)
+        self.assertNotIn(skeleton_ui.CLEANUP_PROPERTY, layout.properties)
+        self.assertNotIn(
+            "Skeleton file found: the import will bind the character armature",
+            layout.labels,
+        )
+
+    def test_draw_block_uses_the_caller_panel_id(self):
+        layout = FakeLayout()
+        skeleton_ui.draw_skeleton_binding(
+            layout, self.scene, "", "mimi_skeleton_binding_reverse"
+        )
+        self.assertEqual(layout.panels, [("mimi_skeleton_binding_reverse", True)])
 
     def test_draw_block_hides_choices_when_unbound(self):
         self.scene.mimi_sword_bind_skeleton = False

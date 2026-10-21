@@ -105,7 +105,12 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
         # The workspace import binds the skeleton sidecar that extraction mirrors
         # into the workspace root, so its settings belong under this button too.
         # The same block is drawn in the Mod Reverse panel for the reverse output.
-        draw_skeleton_binding(layout, context.scene, GlobalConfig.path_workspace_folder())
+        draw_skeleton_binding(
+            layout,
+            context.scene,
+            GlobalConfig.path_workspace_folder(),
+            "mimi_skeleton_binding_workspace",
+        )
 
         # MMT blueprint dropdown list
         blueprint_row = layout.row(align=True)
