@@ -452,10 +452,24 @@ class SkeletonHelper:
                     matrix = SkeletonHelper._mirrored_matrix(matrix)
                 if space_matrix is not None:
                     matrix = space_matrix @ matrix
-                edit_bone.matrix = matrix
-                # The matrix setter also rewrites the tail from the current
-                # length, so the display length must be applied after it.
-                edit_bone.length = lengths[index] * (space_scale if space_matrix is not None else 1.0)
+                # A bone created by ``edit_bones.new`` has zero length, and
+                # ``EditBone.matrix`` on such a bone keeps only the translation:
+                # head and tail stay on the same point, so the rest rotation is
+                # dropped. Extending that bone afterwards (``length``) grows it
+                # along Blender's fallback +Z axis, which turned every imported
+                # bone vertical once display lengths were restored.
+                # Set head, tail and roll from the matrix explicitly instead.
+                rotation = matrix.to_3x3()
+                direction = rotation @ Vector((0.0, 1.0, 0.0))
+                if direction.length <= 1e-9:
+                    # A degenerate rest matrix still needs a valid bone axis.
+                    direction = Vector((0.0, 0.0, 1.0))
+                display_length = lengths[index] * (space_scale if space_matrix is not None else 1.0)
+                edit_bone.head = matrix.translation
+                edit_bone.tail = edit_bone.head + direction.normalized() * max(display_length, 1e-5)
+                roll_axis = rotation @ Vector((0.0, 0.0, 1.0))
+                if roll_axis.length > 1e-9:
+                    edit_bone.align_roll(roll_axis)
                 edit_bones.append(edit_bone)
                 created.append(edit_bone.name)
                 originals.append(original_name)
