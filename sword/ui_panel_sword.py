@@ -8,6 +8,7 @@ import bpy.utils.previews
 from .mesh_import_helper import MigotoBinaryFile, MeshImportHelper
 from ..common.global_config import GlobalConfig
 from ..common.mmt_import_helper import MMTImportHelper
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..i18n.i18n import I18nOperator, tr, translatable, get_language
 from ..workspace.submesh_json import SubmeshJson
 
@@ -564,8 +565,16 @@ class SwordImportAllReversed(I18nOperator):
         if not os.path.isfile(sidecar_path):
             return
         try:
+            # The armature must follow this import's mirror workflow mode, not
+            # only the per-object marker: a mirrored import needs a reflected
+            # skeleton, the non-mirrored one already baked the reflection into
+            # the mesh. Both one-click imports pass the same value.
             summary = SkeletonHelper.apply_groups(
-                settings.naming, drawib_objects, sidecar_path, settings.cleanup
+                settings.naming,
+                drawib_objects,
+                sidecar_path,
+                settings.cleanup,
+                import_mirror=MIMIGlobalProperties.use_mirror_workflow(),
             )
         except Exception as error:  # noqa: BLE001 - binding must never break the import
             self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))

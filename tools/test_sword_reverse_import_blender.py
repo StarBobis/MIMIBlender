@@ -330,6 +330,18 @@ class ReverseImportTests(unittest.TestCase):
                                  if group.name.isdigit())
                 for obj in new_objects if obj.type == 'MESH'
             },
+            # The one-click import must follow the mirror workflow mode: the
+            # default keeps the game's mirrored orientation, the non-mirrored
+            # workflow bakes an X reflection into the mesh.
+            'x_ranges': {
+                obj.name: (min(vertex.co.x for vertex in obj.data.vertices),
+                           max(vertex.co.x for vertex in obj.data.vertices))
+                for obj in new_objects if obj.type == 'MESH'
+            },
+            'mirror_markers': {
+                obj.name: bool(obj.get('MIMI:MirrorWorkflowApplied', False))
+                for obj in new_objects if obj.type == 'MESH'
+            },
             'message': message,
         }
         # Clean up whatever the import created, so tests stay independent.
@@ -712,6 +724,34 @@ AlignedByteOffset: 12
         result = self.run_import(root)
         self.assertEqual(result['object_names'], [])
         self.assertEqual(result['collection_names'], [])
+
+    def test_reverse_import_follows_mirror_workflow(self):
+        # The workspace import already honored the mirror workflow; the reverse
+        # import must produce the same orientation for the same mode, because
+        # the skeleton armature is placed relative to that orientation.
+        root = self.folder('mirror_workflow')
+        build_importable_group(os.path.join(root, 'a1b2c3d4'))
+        properties = self.scene.mimi_global_properties
+        original_mode = properties.mirror_workflow_mode
+        try:
+            properties.mirror_workflow_mode = 'MIRRORED'
+            mirrored = self.run_import(root)
+            properties.mirror_workflow_mode = 'NON_MIRRORED'
+            non_mirrored = self.run_import(root)
+        finally:
+            properties.mirror_workflow_mode = original_mode
+
+        self.assertTrue(mirrored['object_names'], mirrored['message'])
+        self.assertTrue(non_mirrored['object_names'], non_mirrored['message'])
+        for name, x_range in mirrored['x_ranges'].items():
+            # The fixture quad spans X 0..1 in game space.
+            self.assertAlmostEqual(x_range[0], 0.0, places=5, msg=name)
+            self.assertAlmostEqual(x_range[1], 1.0, places=5, msg=name)
+            self.assertFalse(mirrored['mirror_markers'][name], name)
+        for name, x_range in non_mirrored['x_ranges'].items():
+            self.assertAlmostEqual(x_range[0], -1.0, places=5, msg=name)
+            self.assertAlmostEqual(x_range[1], 0.0, places=5, msg=name)
+            self.assertTrue(non_mirrored['mirror_markers'][name], name)
 
     def test_reverse_import_keeps_16_bit_bone_ids(self):
         # Regression: MMT reverse output can now carry a 16-bit Blend layout

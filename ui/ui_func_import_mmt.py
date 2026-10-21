@@ -17,6 +17,7 @@ from ..utils.skeleton_ui import ensure_bind_settings, remember_bind_report
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
+from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.mmt_import_helper import MMTImportHelper
 from ..games.gimi.material import GIMIHighFidelityMaterial
 from ..workspace.mmt_workspace import MMTWorkSpace, WorkSpaceModel
@@ -479,8 +480,15 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects):
     if not os.path.isfile(sidecar_path):
         return
     try:
+        # Same rule as the reverse import: the armature follows the workflow
+        # mode this import used, because the sidecar names bones in the pack's
+        # non-mirrored frame.
         summary = SkeletonHelper.apply_groups(
-            settings.naming, drawib_objects, sidecar_path, settings.cleanup
+            settings.naming,
+            drawib_objects,
+            sidecar_path,
+            settings.cleanup,
+            import_mirror=MIMIGlobalProperties.use_mirror_workflow(),
         )
     except Exception as error:  # noqa: BLE001 - binding must never break the import
         print("Skeleton binding failed:", error)

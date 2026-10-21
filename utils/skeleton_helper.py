@@ -567,12 +567,23 @@ class SkeletonHelper:
         return cls.apply_groups(naming_mode, {str(draw_ib_name or ""): list(objects)}, sidecar_path)
 
     @classmethod
-    def apply_groups(cls, naming_mode, groups, sidecar_path="", cleanup_mode=BONE_CLEANUP_NONE):
+    def apply_groups(
+        cls,
+        naming_mode,
+        groups,
+        sidecar_path="",
+        cleanup_mode=BONE_CLEANUP_NONE,
+        import_mirror=None,
+    ):
         """Bind several DrawIB groups at once, one armature per character.
 
         groups: {drawib_folder_name: [mesh objects]}
         naming_mode may also be NAMING_SIDECAR: the sidecar then decides, which
         is what the shared import settings default to.
+        import_mirror: whether this import baked the non-mirrored workflow's X
+        reflection into the meshes. The one-click imports pass the scene mode;
+        None falls back to the per-object marker (manual binding of objects an
+        earlier session imported).
         """
         if str(naming_mode or "").upper() == "NONE":
             return ""
@@ -593,6 +604,11 @@ class SkeletonHelper:
         space = sidecar.get("Space") or {}
         space_scale = float(space.get("Scale", 1.0) or 1.0)
         space_rotation_z = float(space.get("RotationZ", 0.0) or 0.0)
+        # The desktop app mirrors the model in X before matching because the
+        # packs are stored non-mirrored, so a mirror-matched map names bones in
+        # that non-mirrored frame. Sidecars written before the flag existed are
+        # not mirror-matched and keep the historical armature placement.
+        match_mirror_x = bool(space.get("MatchMirrorX", False))
 
         # Resolve every group before touching the scene. One armature serves a
         # whole character, so the naming mode has to be chosen once for that
@@ -654,10 +670,17 @@ class SkeletonHelper:
             meshes = plan["meshes"]
             effective_naming = NAMING_GROUP_TO_BONE if group_mode.get(key) else naming_mode
             if key not in armatures:
-                # A non-mirrored workflow bakes an X reflection into the imported
-                # mesh; the armature must receive the same reflection or bones
-                # land on the wrong side of the model.
-                mirror_x = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
+                # The pack stores bones in the non-mirrored orientation while
+                # the game's buffers are mirrored. A mirror-matched sidecar
+                # names bones in that non-mirrored frame, so the armature must
+                # be reflected exactly when the imported mesh was *not*.
+                # Without the sidecar flag both sides keep the historical
+                # placement: the armature follows the mesh's X reflection.
+                if import_mirror is None:
+                    mesh_flipped = any(bool(obj.get(MIRROR_MARKER, False)) for obj in meshes)
+                else:
+                    mesh_flipped = bool(import_mirror)
+                mirror_x = mesh_flipped != match_mirror_x
                 armature_obj, final_names, original_names = cls.build_armature(
                     character, effective_naming, mirror_x, space_scale, space_rotation_z
                 )
