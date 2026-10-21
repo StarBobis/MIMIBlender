@@ -119,9 +119,14 @@ class RealPackTests(unittest.TestCase):
             self.assertIn(name, bone_names)
             self.assertGreater(lengths[bone_names.index(name)], minimum, name)
 
-        # One DrawIB, one palette: the app asks for numeric bones.
+        # One DrawIB, one palette: the app asks for numeric bones. The expected
+        # count follows the palette the pack wrote, because a hard-coded number
+        # goes stale as soon as the pack gains or loses a slot.
+        palette_names = {str(name) for name in (block["BoneMap"] or {}).values()}
+        expected_numeric = {name for name in palette_names if name in bone_names}
         numeric = [bone.name for bone in armature.data.bones if bone.name.isdigit()]
-        self.assertEqual(len(numeric), 93)
+        self.assertTrue(expected_numeric)
+        self.assertEqual(len(numeric), len(expected_numeric))
         self.assertTrue(all(group.name.isdigit() for obj in objects for group in obj.vertex_groups))
         # The longest bone proves the placeholder did not win in the armature
         # either: before the fix every bone stayed below 0.15.
