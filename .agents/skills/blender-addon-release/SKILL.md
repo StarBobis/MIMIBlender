@@ -1,6 +1,6 @@
 ---
 name: blender-addon-release
-description: Publish and verify a MIMIBlender add-on release using the existing archive pipeline and non-destructive draft promotion.
+description: Publish a MIMIBlender add-on release: bump the version, package with the existing archive pipeline, publish with a short description.
 ---
 
 # Blender Add-on Release
@@ -9,24 +9,22 @@ description: Publish and verify a MIMIBlender add-on release using the existing 
 
 - The version source is `bl_info.version` in `__init__.py`. Increment the patch independently of MMT.
 - The public title is `MIMIBlender <version>`. Preserve `v<version>` tags and `MIMIBlenderV<digits>.zip` asset/wrapper names.
-- Explicitly provide the project-mandated fixed body with `-Notes`. Never use the script's historical automatic compare/changelog default.
+- The release body is a short description passed with `-Notes`. Default body: `修复了部分已知问题`.
+  Never use the script's automatic compare/changelog default.
 - Commit and push before packaging. The updater downloads GitHub tag zipballs; unpushed local changes are not an update.
-- Keep temporary packages, extracted test roots and logs under `tmp/`. Never touch a live Blender scene or saved preferences during release checks.
 
-## Safe publication
+## Release steps (this is the whole flow)
 
-1. Read `release.ps1` and check the latest authenticated release metadata before selecting an unused patch.
-2. Update only the version tuple, commit with an English message, and push. Run the existing preflight with `-DryRun -Notes <fixed-body>`.
-3. Run `release.ps1 -Draft -Notes <fixed-body>` without another bump. It uses `git archive` and uploads one manual-install ZIP.
-4. Verify the archive wrapper, version, all Python syntax and source content. Run skeleton unit/cleanup/settings suites from the extracted package in separate factory-startup Blender processes. Exercise registration steps directly so the fault-tolerant wrapper cannot conceal errors; repeat register/unregister.
-5. Verify every remote asset size and SHA256 against the local approved file using an authenticated GitHub API request.
-6. Record asset IDs and digests. Promote through `PATCH /repos/StarBobis/MIMIBlender/releases/{id}` with the explicit fixed title/body, `draft: false`, `prerelease: false`, and `make_latest: "true"`.
-7. Re-read release metadata and assert public/latest status plus unchanged asset IDs/digests. Do not rerun the upload script merely to promote: it deletes same-named uploads.
-8. Download the manual ZIP publicly and verify its exact SHA256. Fetch the updater tag zipball and compare all Python members to the approved manual package. Verify the tag resolves to the pushed version-bump commit.
+1. Update only the version tuple in `__init__.py`, commit `chore(release): version X.Y.Z`, push.
+2. Run `.\release.ps1 -Notes "<description>"`.
+   The script is idempotent: it packs `git archive` of HEAD into `MIMIBlenderV<digits>.zip`,
+   creates the public `v<version>` release, uploads the single manual-install asset and
+   checks the wrapper folder, packed version and uploaded size itself.
+3. Report the release URL.
 
-## Observed pitfalls
+## Do not
 
-- Local `git archive` can export CRLF through Git configuration, while committed blobs and GitHub zipballs use LF. Normalize only CRLF to LF for source-content comparisons; never normalize the ZIP bytes used for integrity hashes.
-- A draft asset URL can include an `untagged-*` placeholder. After promotion, refresh release metadata before using `browser_download_url`; cached draft URLs can return 404 even when the real public asset is healthy.
-- Keep GitHub tokens in memory. Strip Authorization on redirects to a different host, and use unauthenticated direct public download URLs to prove user accessibility.
-- Use a fresh staging directory for each archive test. A failed pre-extraction assertion does not create it; a later failed test does. Do not delete or overwrite a previous test root just to retry.
+- Do not use `-Draft` plus a manual promote round trip; the script publishes directly.
+- Do not add archive extraction, syntax sweeps, test-suite gates, SHA256 or tag-zipball parity
+  checks to the release. Those belong to normal development, not to shipping a version.
+- Do not re-run the upload script to fix release metadata: it deletes same-named assets.
