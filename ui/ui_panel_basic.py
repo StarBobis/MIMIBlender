@@ -7,7 +7,7 @@ from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable, get_preferences
-from ..utils.skeleton_ui import draw_skeleton_binding
+from ..utils.skeleton_ui import EXPAND_PROPERTY_WORKSPACE, draw_skeleton_binding
 
 from .ui_func_export import MMTGenerateSelectedBlueprintMod
 from .ui_func_import_mmt import MMTImportAllFromCurrentWorkSpaceBlueprint, MMTImportRaw
@@ -109,7 +109,7 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
             layout,
             context.scene,
             GlobalConfig.path_workspace_folder(),
-            "mimi_skeleton_binding_workspace",
+            EXPAND_PROPERTY_WORKSPACE,
         )
 
         # MMT blueprint dropdown list

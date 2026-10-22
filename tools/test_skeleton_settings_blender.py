@@ -18,6 +18,10 @@ Coverage notes:
 - The shared draw helper is exercised with a fake layout for both panels: found
   sidecar, missing sidecar, disabled binding, the stored last report and the
   collapsed default (the bind checkbox must stay reachable in the header).
+- The block header is a plain row now, not a nested sub-panel, because every
+  ``layout.panel()`` sub-panel is indented by Blender and looked misaligned next
+  to the buttons of the same panel. One open flag per panel replaces the two
+  sub-panel ids, so the two blocks still collapse independently.
 - The runner raises on failure so --python-exit-code reports a failing job.
 """
 
@@ -102,17 +106,20 @@ def write_sidecar(folder, naming_mode, characters=None):
 class FakeLayout:
     """Stand-in for a Blender layout that records what the block draws.
 
-    ``panel_open`` controls what ``panel()`` returns: an open sub-panel gives a
-    body to draw into, a collapsed one returns ``None`` like Blender does, so
-    the collapsed default can be checked without a UI.
+    The block is a plain header row plus a body column now, so the fake only
+    records the calls it makes. Whether the body is drawn depends on the Scene
+    open/closed flag of the caller, exactly like inside Blender.
     """
 
-    def __init__(self, panel_open=True):
+    def __init__(self):
         self.labels = []
         self.properties = []
-        self.panels = []
-        self.panel_open = panel_open
+        # (property name, drawn text) pairs: the block title travels through a
+        # property button, so a plain property list no longer says what is drawn.
+        self.prop_texts = []
         self.use_property_split = True
+        # Rows may be left aligned; the fake only has to accept the assignment.
+        self.alignment = 'EXPAND'
 
     def box(self):
         return self
@@ -120,9 +127,11 @@ class FakeLayout:
     def row(self, align=True):
         return self
 
-    def panel(self, idname, default_closed=False):
-        self.panels.append((idname, default_closed))
-        return self, (self if self.panel_open else None)
+    def column(self, align=True):
+        return self
+
+    def split(self, factor=0.5, align=True):
+        return self
 
     def separator_spacer(self):
         return None
@@ -130,8 +139,9 @@ class FakeLayout:
     def label(self, text='', icon=''):
         self.labels.append(text)
 
-    def prop(self, data, name, text=''):
+    def prop(self, data, name, text='', icon='', emboss=True):
         self.properties.append(name)
+        self.prop_texts.append((name, text))
 
 
 class SkeletonSettingsTests(unittest.TestCase):
@@ -152,6 +162,10 @@ class SkeletonSettingsTests(unittest.TestCase):
         # Mark the scene as migrated so the setup above is not overwritten by
         # the legacy values a previous test may have stored.
         self.scene[skeleton_ui.SETTINGS_VERSION_KEY] = skeleton_ui.SETTINGS_VERSION
+        # Most tests look at the body of the block, so the sections start open;
+        # the collapsed default has its own test that closes them again.
+        for property_name in skeleton_ui.EXPAND_PROPERTIES:
+            setattr(self.scene, property_name, True)
 
     def tearDown(self):
         skeleton_ui.unregister()
@@ -170,7 +184,7 @@ class SkeletonSettingsTests(unittest.TestCase):
             skeleton_ui.NAMING_PROPERTY,
             skeleton_ui.CLEANUP_PROPERTY,
             skeleton_ui.REPORT_PROPERTY,
-        ):
+        ) + tuple(skeleton_ui.EXPAND_PROPERTIES):
             self.assertTrue(hasattr(bpy.types.Scene, property_name), property_name)
         # A fresh scene renames the bones (the mod workflow) and keeps every bone.
         self.assertTrue(self.scene.mimi_sword_bind_skeleton)
@@ -179,6 +193,8 @@ class SkeletonSettingsTests(unittest.TestCase):
         )
         self.assertEqual(self.scene.mimi_sword_skeleton_cleanup, skeleton_helper.BONE_CLEANUP_NONE)
         skeleton_ui.unregister()
+        for property_name in skeleton_ui.EXPAND_PROPERTIES:
+            self.assertFalse(hasattr(bpy.types.Scene, property_name), property_name)
         self.assertFalse(hasattr(bpy.types.Scene, skeleton_ui.BIND_PROPERTY))
         # tearDown unregisters again; both calls must stay safe.
         skeleton_ui.register()
@@ -346,7 +362,11 @@ class SkeletonSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             write_sidecar(folder, "boneToGroup")
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
-        self.assertIn("Skeleton Binding", layout.labels)
+        # The title is a property button now, so it is recorded with its text.
+        self.assertIn(
+            (skeleton_ui.EXPAND_PROPERTY_WORKSPACE, "Skeleton Binding"),
+            layout.prop_texts,
+        )
         self.assertIn("Skeleton file found: the import will bind the character armature", layout.labels)
         self.assertIn("Character: QingYi", layout.labels)
         self.assertIn(skeleton_ui.BIND_PROPERTY, layout.properties)
@@ -354,14 +374,22 @@ class SkeletonSettingsTests(unittest.TestCase):
         self.assertIn(skeleton_ui.CLEANUP_PROPERTY, layout.properties)
 
     def test_draw_block_is_collapsed_by_default(self):
-        layout = FakeLayout(panel_open=False)
+        # A fresh scene stores no open flag: the registered default has to be
+        # False so a new file shows the block collapsed.
+        high_level = bpy.types.Scene.bl_rna.properties[
+            skeleton_ui.EXPAND_PROPERTY_WORKSPACE
+        ]
+        self.assertFalse(high_level.default)
+        for property_name in skeleton_ui.EXPAND_PROPERTIES:
+            setattr(self.scene, property_name, False)
+        layout = FakeLayout()
         with tempfile.TemporaryDirectory() as folder:
             write_sidecar(folder, "boneToGroup")
             skeleton_ui.draw_skeleton_binding(layout, self.scene, folder)
-        self.assertEqual(layout.panels, [("mimi_skeleton_binding", True)])
         # The bind checkbox sits in the header, so it is still drawn while the
         # body is hidden and the import reads the same Scene property.
         self.assertIn(skeleton_ui.BIND_PROPERTY, layout.properties)
+        self.assertIn(skeleton_ui.EXPAND_PROPERTY_WORKSPACE, layout.properties)
         self.assertNotIn(skeleton_ui.NAMING_PROPERTY, layout.properties)
         self.assertNotIn(skeleton_ui.CLEANUP_PROPERTY, layout.properties)
         self.assertNotIn(
@@ -372,12 +400,23 @@ class SkeletonSettingsTests(unittest.TestCase):
         # cannot change what the next import does.
         self.assertTrue(skeleton_ui.read_bind_settings(self.scene).bind)
 
-    def test_draw_block_uses_the_caller_panel_id(self):
+    def test_draw_block_uses_the_caller_open_flag(self):
+        # The two panels own one flag each: opening the reverse block must not
+        # open the workspace block, which the shared sub-panel id would have.
+        self.scene.mimi_sword_skeleton_expanded_workspace = False
+        self.scene.mimi_sword_skeleton_expanded_reverse = True
         layout = FakeLayout()
         skeleton_ui.draw_skeleton_binding(
-            layout, self.scene, "", "mimi_skeleton_binding_reverse"
+            layout, self.scene, "", skeleton_ui.EXPAND_PROPERTY_REVERSE
         )
-        self.assertEqual(layout.panels, [("mimi_skeleton_binding_reverse", True)])
+        self.assertIn(skeleton_ui.EXPAND_PROPERTY_REVERSE, layout.properties)
+        self.assertIn(skeleton_ui.NAMING_PROPERTY, layout.properties)
+        # The same scene keeps the workspace block collapsed.
+        layout = FakeLayout()
+        skeleton_ui.draw_skeleton_binding(
+            layout, self.scene, "", skeleton_ui.EXPAND_PROPERTY_WORKSPACE
+        )
+        self.assertNotIn(skeleton_ui.NAMING_PROPERTY, layout.properties)
 
     def test_draw_block_hides_choices_when_unbound(self):
         self.scene.mimi_sword_bind_skeleton = False

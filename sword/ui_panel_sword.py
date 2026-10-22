@@ -33,6 +33,7 @@ from ..utils.json_utils import JsonUtils
 from ..utils.material_texture_utils import apply_image_texture_to_material
 from ..utils.skeleton_helper import SkeletonHelper
 from ..utils.skeleton_ui import (
+    EXPAND_PROPERTY_REVERSE,
     draw_skeleton_binding,
     ensure_bind_settings,
     remember_bind_report,
@@ -906,7 +907,7 @@ class MIMISword_ImageMaterialPanel(Panel):
             layout,
             scene,
             "" if skeleton_error else skeleton_folder,
-            "mimi_skeleton_binding_reverse",
+            EXPAND_PROPERTY_REVERSE,
         )
 
         # Folder selection button

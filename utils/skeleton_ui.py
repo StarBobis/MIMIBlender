@@ -9,7 +9,10 @@ Scene; this module is the only owner of that state:
 * ``register`` / ``unregister`` define and remove the properties.
 * ``draw_skeleton_binding`` renders the collapsible block (collapsed by
   default, with the bind checkbox in its header), so the two panels cannot
-  drift apart into two slightly different sets of controls.
+  drift apart into two slightly different sets of controls. The block is drawn
+  from plain rows, not as a nested sub-panel: Blender indents every sub-panel
+  created with ``layout.panel()``, which made the block sit a few pixels to the
+  right of the buttons of the very panel that contains it.
 * ``ensure_bind_settings`` migrates files saved before the settings were split
   and returns the values an import has to use.
 * ``remember_bind_report`` keeps the last binding result visible in the panel.
@@ -43,6 +46,12 @@ NAMING_PROPERTY = "mimi_sword_skeleton_naming"
 CLEANUP_PROPERTY = "mimi_sword_skeleton_cleanup"
 REPORT_PROPERTY = "mimi_sword_skeleton_last_report"
 LEGACY_MODE_PROPERTY = "mimi_sword_skeleton_mode"
+# One open/closed flag per import panel. The two panels must collapse
+# independently, so a single shared flag would open both blocks at once; the
+# names mirror the sub-panel ids the block used before it became a plain row.
+EXPAND_PROPERTY_WORKSPACE = "mimi_sword_skeleton_expanded_workspace"
+EXPAND_PROPERTY_REVERSE = "mimi_sword_skeleton_expanded_reverse"
+EXPAND_PROPERTIES = (EXPAND_PROPERTY_WORKSPACE, EXPAND_PROPERTY_REVERSE)
 
 # The migration marker is a plain ID property, not an RNA property: it only
 # has to say "this file was already converted", nothing else reads it.
@@ -367,33 +376,49 @@ def wrap_bind_report(text, width=REPORT_LINE_WIDTH, max_lines=REPORT_MAX_LINES):
     return lines
 
 
-def draw_skeleton_binding(layout, scene, folder, panel_id="mimi_skeleton_binding"):
+def draw_skeleton_binding(layout, scene, folder, expand_property=EXPAND_PROPERTY_WORKSPACE):
     """Draw the shared skeleton block under an import button.
 
-    The block is a collapsible sub-panel that starts collapsed. The bind
-    checkbox lives in the header, so the user can switch binding on or off
-    without opening it, and the import reads the same Scene property either
-    way: how the block is drawn never changes what the import does.
+    The block is collapsible and starts collapsed. The bind checkbox lives in
+    the header, so the user can switch binding on or off without opening it, and
+    the import reads the same Scene property either way: how the block is drawn
+    never changes what the import does.
+
+    The header is a plain row, not a nested sub-panel. ``layout.panel()`` draws
+    every sub-panel indented by a fixed few pixels, so a block created that way
+    starts right of the buttons of the panel that owns it and looks misaligned
+    in the narrow side panel. A boolean property with an arrow icon gives the
+    same open/close behaviour without that indentation, which is the pattern
+    the texture combiner panel already uses for its collapsible sections.
 
     ``folder`` is the folder this panel's import reads its sidecar from, so
     both panels can show a hint about their own source instead of a generic
     message that may belong to the other panel.
-    ``panel_id`` keeps the open/closed state of the two panels apart; the same
-    id would open both blocks together.
+    ``expand_property`` is the Scene flag that stores this panel's open state;
+    separate flags keep the two blocks from opening together.
     """
-    header, body = layout.panel(panel_id, default_closed=True)
-    header.use_property_split = False
-    header.label(text=tr("Skeleton Binding"), icon='ARMATURE_DATA')
-    # Push the checkbox to the right edge; it stays reachable while collapsed.
-    # A layout that does not accept spacers in a header still keeps the checkbox
-    # next to the title instead of failing the whole panel.
-    try:
-        header.separator_spacer()
-    except (AttributeError, RuntimeError, TypeError):
-        pass
-    header.prop(scene, BIND_PROPERTY, text="")
-    if body is None:
+    expanded = bool(getattr(scene, expand_property, False))
+    header = layout.row(align=True)
+    # The split keeps the checkbox on the right edge; the title sits in a left
+    # aligned sub row, because a property button that spans the whole row
+    # centers its text instead of starting at the left margin. The whole title
+    # stays clickable, so collapsing does not depend on hitting a small arrow.
+    split = header.split(factor=0.88, align=True)
+    title_row = split.row(align=True)
+    title_row.alignment = 'LEFT'
+    title_row.prop(
+        scene,
+        expand_property,
+        text=tr("Skeleton Binding"),
+        icon='TRIA_DOWN' if expanded else 'TRIA_RIGHT',
+        emboss=False,
+    )
+    split.prop(scene, BIND_PROPERTY, text="")
+    if not expanded:
+        # A collapsed block draws nothing besides its header, exactly like the
+        # sub-panel it replaced; the import still reads the same properties.
         return
+    body = layout.column(align=True)
     bound = bool(getattr(scene, BIND_PROPERTY, True))
     if bound:
         body.prop(scene, NAMING_PROPERTY, text=tr("Skeleton Naming"))
@@ -483,6 +508,19 @@ def register():
         description=tr("Result of the last import that bound a skeleton"),
         default="",
     )
+    # Open/closed flags of the two collapsible blocks. They are stored on the
+    # Scene so a file reopens with the section the user left open, and they are
+    # plain booleans so the header can toggle them without an extra operator.
+    for property_name in EXPAND_PROPERTIES:
+        setattr(
+            bpy.types.Scene,
+            property_name,
+            BoolProperty(
+                name=tr("Skeleton Binding Expanded"),
+                description=tr("Whether the skeleton binding settings are expanded"),
+                default=False,
+            ),
+        )
     # Hidden legacy property: old files restore their value into it, the
     # migration reads it once and the UI never shows it again.
     bpy.types.Scene.mimi_sword_skeleton_mode = EnumProperty(
@@ -509,7 +547,7 @@ def unregister():
         "mimi_sword_skeleton_naming",
         "mimi_sword_bind_skeleton",
         "mimi_sword_skeleton_mode",
-    ):
+    ) + tuple(EXPAND_PROPERTIES):
         if hasattr(bpy.types.Scene, property_name):
             delattr(bpy.types.Scene, property_name)
     if migrate_loaded_scene in bpy.app.handlers.load_post:
