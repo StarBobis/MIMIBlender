@@ -6,7 +6,7 @@ CS path by checking GlobalConfig.logic_name at runtime.  The registry now
 maps every LogicName straight to the right variant, so the runtime check
 is gone:
 
-- UnityVsExporter: CPU pre-skinning games (GF2, HIMI).
+- UnityVsExporter: CPU pre-skinning presets (CPUSkinning, HIMI).
 - UnityCsExporter: GPU pre-skinning games (NarakaM, AILIMIT).
 
 All section builders live in games/base/sections.py; this file only

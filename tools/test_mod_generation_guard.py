@@ -26,7 +26,7 @@ class GenerationGuardTests(unittest.TestCase):
         # Mocks capture generation side effects without writing any files.
         # The first four presets are the restored generation targets.
         # The remaining presets protect previously available generation paths.
-        self.presets = ("GIMI", "SRMI", "HIMI", "ZZMI", "ZZMIDX12", "WWMI", "GF2")
+        self.presets = ("GIMI", "SRMI", "HIMI", "ZZMI", "ZZMIDX12", "WWMI", "CPUSkinning")
         self.config = Mock(logic_name="GIMI")
         self.config.get_workspace_name.return_value = "workspace"
         self.timer = Mock()

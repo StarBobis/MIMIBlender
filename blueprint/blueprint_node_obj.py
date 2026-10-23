@@ -568,7 +568,7 @@ class MIMINode_Result_Output(MIMINodeBase):
             layout.prop(context.scene.mimi_global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
             layout.prop(context.scene.mimi_global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
 
-        if GlobalConfig.logic_name != LogicName.GF2:
+        if GlobalConfig.logic_name != LogicName.CPUSkinning:
             layout.prop(context.scene.mimi_global_properties,
                         "recalculate_tangent",text=tr("Store Vector-Normalized Normals in TANGENT (Global)"))
 

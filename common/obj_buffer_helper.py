@@ -969,7 +969,7 @@ class ObjBufferHelper:
     @staticmethod
     def average_normal_tangent(obj,indexed_vertices,d3d11_game_type,dtype):
         '''
-        Nico: every miHoYo/HoYoverse game can use this, as can the old GPU-PreSkinning GF2; except HI3 2.0's new characters.
+        Nico: every miHoYo/HoYoverse game can use this, as can the old CPU-pre-skinning presets; except HI3 2.0's new characters.
         Although it can achieve a similar effect, it still cannot perfectly recover the model's own TANGENT data; body outlines only reach about 99% similarity.
         Tests show that hair outlines are neither a simple vector normalization nor an arithmetic-average normalization.
         '''
@@ -1254,20 +1254,20 @@ class ObjBufferHelper:
 
 
     @staticmethod
-    def calc_index_vertex_buffer_girlsfrontline2(
+    def calc_index_vertex_buffer_cpu_preskinning(
         mesh:bpy.types.Mesh, 
         element_vertex_ndarray:numpy.ndarray, 
         d3d11_game_type:D3D11GameType,
         dtype:numpy.dtype):
         '''
-        [Special mode: Girls' Frontline 2 (GF2) only] Forced index-alignment mode
+        [Special mode: CPU pre-skinning presets only] Forced index-alignment mode
         --------------------------------------------------
         Core logic:
         - Force "game engine vertex count" == "Blender vertex count".
         - Ignore splits caused by hard edges and UV seams; merge them forcibly.
         
         Use cases:
-        - GF2's special render pipeline, or models that are already preprocessed (where every hard edge/UV seam truly is a physically split vertex).
+        - Games whose render pipeline was captured as already-deformed geometry, or models that are already preprocessed (where every hard edge/UV seam truly is a physically split vertex).
         - Generating ShapeKeys is extremely simple in this mode, since indices are one-to-one.
         
         Drawbacks:
@@ -1278,7 +1278,7 @@ class ObjBufferHelper:
         3. While iterating loops, write the real data into the matching slot; slots no loop references keep a dummy (coordinates set correctly, everything else 0).
         4. Finally, pack the slots in order into a byte array; its length necessarily equals len(mesh.vertices), so the exported count matches Blender's status bar exactly.
         '''
-        print("calc ivb gf2")
+        print("calc ivb cpu preskinning")
 
         loops = mesh.loops
         v_cnt = len(mesh.vertices)

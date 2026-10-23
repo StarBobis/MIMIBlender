@@ -33,7 +33,11 @@ class LogicName:
     # Note: if a game has a native mod method, 3Dmigoto should not be used for mod making
     # A path against the mainstream only raises maintenance cost too high and ends up forgotten by the world
     # If only a small minority of people are served, the maintenance cost must be considered
-    GF2 = "GF2" # Girls' Frontline 2, or a CPU-PreSkinning type game; the representative way of forcing modifications with 3Dmigoto
+    # Technique preset, not a game: any Unity title whose skinning runs on the
+    # CPU (dumps carry already-deformed vertices and no blend payload) is
+    # exported through this logic. The representative way of forcing
+    # modifications with 3Dmigoto.
+    CPUSkinning = "CPUSkinning"
     IdentityV = "IdentityV" # Identity V (Neox3 engine); kept only to serve some abstract fan-made video creators
     AILIMIT = "AILIMIT" # A small game from a small studio, but Hongxi still runs a fan group, so keep it for his followers for now
     DOAV = "DOAV" # An antique game, the root of all evil; even adding it serves little purpose, keeping it is just a tribute

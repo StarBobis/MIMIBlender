@@ -49,7 +49,7 @@ _LOGIC_EXPORTER_DICT = {
     # The old ExportUnity picked the VS/CS path by checking logic_name at
     # runtime; the registry now maps every preset straight to its variant.
     LogicName.NarakaM: UnityCsExporter,
-    LogicName.GF2: UnityVsExporter,
+    LogicName.CPUSkinning: UnityVsExporter,
     LogicName.AILIMIT: UnityCsExporter,
 }
 

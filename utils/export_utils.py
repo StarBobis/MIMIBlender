@@ -173,10 +173,10 @@ class ExportUtils:
         dtype: numpy.dtype,
     ):
         if (
-            GlobalConfig.logic_name == LogicName.GF2
+            GlobalConfig.logic_name == LogicName.CPUSkinning
             and "TANGENT" in d3d11_game_type.OrderedFullElementList
         ):
-            return ObjBufferHelper.calc_index_vertex_buffer_girlsfrontline2(
+            return ObjBufferHelper.calc_index_vertex_buffer_cpu_preskinning(
                 mesh=mesh,
                 element_vertex_ndarray=element_vertex_ndarray,
                 d3d11_game_type=d3d11_game_type,

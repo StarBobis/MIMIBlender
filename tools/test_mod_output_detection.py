@@ -81,7 +81,7 @@ class OutputDetectionTests(unittest.TestCase):
     def test_other_presets_keep_workspace_named_output(self):
         # Standard exporters already use the exact workspace filename.
         # Keep this behavior unchanged for a non-WWMI supported preset.
-        self.config.logic_name = "GF2"
+        self.config.logic_name = "CPUSkinning"
         with TemporaryDirectory() as folder:
             result = self.export_files(folder, ["workspace.ini"])
             self.assertEqual(result, [os.path.join(folder, "workspace.ini")])
