@@ -244,8 +244,12 @@ class SubMeshModel:
         if (GlobalConfig.logic_name == LogicName.SRMI
             or GlobalConfig.logic_name == LogicName.GIMI
             or GlobalConfig.logic_name == LogicName.HIMI
+            or GlobalConfig.logic_name == LogicName.GF2
             or GlobalConfig.logic_name == LogicName.YYSLS
             or GlobalConfig.logic_name == LogicName.IdentityV):
+            # Unity games whose dumped vertex buffers are Y-up: Blender is
+            # Z-up, so the exported mod must be rotated back into game space.
+            # GF2 belongs here for the same reason GIMI/HIMI do.
             ObjUtils.select_obj(temp_obj)
             temp_obj.rotation_euler[0] = math.radians(-90)
             temp_obj.rotation_euler[1] = 0
