@@ -26,7 +26,7 @@ class GenerationGuardTests(unittest.TestCase):
         # Mocks capture generation side effects without writing any files.
         # The first four presets are the restored generation targets.
         # The remaining presets protect previously available generation paths.
-        self.presets = ("GIMI", "SRMI", "HIMI", "ZZMI", "ZZMIDX12", "WWMI", "CPUSkinning", "GF2")
+        self.presets = ("GIMI", "SRMI", "HIMI", "ZZMI", "ZZMIDX12", "WWMI", "CPUSkinning", "GF2", "PGR")
         self.config = Mock(logic_name="GIMI")
         self.config.get_workspace_name.return_value = "workspace"
         self.timer = Mock()
@@ -44,8 +44,14 @@ class GenerationGuardTests(unittest.TestCase):
             "CommandUtils": self.command,
             "BluePrintModel": Mock(),
             "FaceModExportError": type("FaceModExportError", (Exception,), {}),
-            "I18nOperator": object,
-            "bpy": SimpleNamespace(props=SimpleNamespace(StringProperty=lambda: None)),
+            # Operator bases must stay distinct classes: two WWMI-only
+            # operators inherit bpy.types.Operator next to I18nOperator, and
+            # Python rejects the same class object in both positions.
+            "I18nOperator": type("I18nOperator", (), {}),
+            "bpy": SimpleNamespace(
+                props=SimpleNamespace(StringProperty=lambda: None),
+                types=SimpleNamespace(Operator=type("Operator", (), {})),
+            ),
             "tr": lambda text: text,
             "_OUTPUT_NODE_IDS": {"MIMINode_Result_Output", "MIMINode_Face_Mod_Export"},
             "export_face_mod_from_node": Mock(),
@@ -177,7 +183,10 @@ class GenerationGuardTests(unittest.TestCase):
         # These four mappings must stay registered after removing the UI gate.
         # The real dispatch function must instantiate and run each exporter.
         expected = {"GIMI": "GimiExporter", "SRMI": "ExportSRMI",
-                    "HIMI": "UnityVsExporter", "ZZMI": "ExportZZMI"}
+                    "HIMI": "UnityVsExporter", "ZZMI": "ExportZZMI",
+                    # PGR owns a copy of the Naraka exporter; the dispatch
+                    # must construct that copy, never the Naraka class.
+                    "PGR": "PGRExporter"}
         for preset, name in expected.items():
             with self.subTest(preset=preset):
                 self.config.logic_name = preset

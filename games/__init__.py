@@ -21,6 +21,7 @@ from .gimi.exporter import Exporter as GimiExporter
 from .identityv import ExportIdentityV
 from .naraka.exporter import Exporter as NarakaExporter
 from .ntemi.exporter import Exporter as NtemiExporter
+from .pgr.exporter import PGRExporter
 from .snowbreak import ExportSnowBreak
 from .srmi import ExportSRMI
 from .unity import UnityVsExporter, UnityCsExporter
@@ -50,6 +51,10 @@ _LOGIC_EXPORTER_DICT = {
     LogicName.SnowBreak: ExportSnowBreak,
     LogicName.YYSLS: ExportYYSLS,
     LogicName.Naraka: NarakaExporter,
+    # PGR keeps its own copy of the Naraka exporter (games/pgr/) because it
+    # pre-skins through the same compute-shader path but must be free to
+    # diverge. Never point this entry back at the Naraka exporter.
+    LogicName.PGR: PGRExporter,
     # The old ExportUnity picked the VS/CS path by checking logic_name at
     # runtime; the registry now maps every preset straight to its variant.
     LogicName.NarakaM: UnityCsExporter,

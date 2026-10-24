@@ -46,6 +46,10 @@ class LogicName:
     YYSLS = "YYSLS" # Where Winds Meet: huge marketing budget, yet still very few players
     Naraka = "Naraka" # Using mods can cause frame drops / 30-day account ban / permanent ban
     NarakaM = "NarakaM" # Using mods can cause frame drops / 30-day account ban / permanent ban
+    # Punishing: Gray Raven. Unity 2022.3 with the same GPU pre-skinning
+    # compute-shader shape as Naraka, so its mod layout starts on a copy of
+    # the Naraka exporter (games/pgr/) that is free to diverge later.
+    PGR = "PGR"
     
     NTEMI = "NTEMI" # Neverness to Everness; testing only
     

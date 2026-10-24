@@ -266,7 +266,12 @@ class SubMeshModel:
             temp_obj.rotation_euler[2] = math.radians(180)
             bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
 
-        elif GlobalConfig.logic_name == LogicName.EFMI or GlobalConfig.logic_name == LogicName.Naraka:
+        elif (GlobalConfig.logic_name == LogicName.EFMI
+              or GlobalConfig.logic_name == LogicName.Naraka
+              or GlobalConfig.logic_name == LogicName.PGR):
+            # PGR dumps its Position data in Z-up model space, exactly like
+            # Naraka, so the import never rotated it and the export must not
+            # rotate it back either; only the object transform is baked in.
             ObjUtils.select_obj(temp_obj)
             temp_obj.rotation_euler[0] = 0
             temp_obj.rotation_euler[1] = 0

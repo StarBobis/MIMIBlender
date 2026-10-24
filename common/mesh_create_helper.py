@@ -325,7 +325,11 @@ class MeshCreateHelper:
             obj.scale = (0.01, 0.01, 0.01)
 
         print("Model import completed: " + logic_name)
-        if LogicName.is_zzmi_family(logic_name) or logic_name == LogicName.Naraka:
+        if LogicName.is_zzmi_family(logic_name) or logic_name == LogicName.Naraka or logic_name == LogicName.PGR:
+            # These presets dump their Position data in Z-up model space, so
+            # the Y-up-to-Z-up conversion applied when the object was created
+            # has to be cancelled; otherwise the model lies on its back. The
+            # exporter inverts exactly this decision (it never rotates back).
             obj.rotation_euler[0] = 0
             obj.rotation_euler[1] = 0
             obj.rotation_euler[2] = 0

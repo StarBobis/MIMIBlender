@@ -30,8 +30,17 @@ class OutputDetectionTests(unittest.TestCase):
             "LogicName": SimpleNamespace(WWMI="WWMI"),
             "BlueprintExportHelper": self.helper,
             "BluePrintModel": Mock(return_value=self.model),
-            "I18nOperator": object,
-            "bpy": SimpleNamespace(props=SimpleNamespace(StringProperty=lambda: None)),
+            # Operator bases must stay distinct classes: two WWMI-only
+            # operators inherit bpy.types.Operator next to I18nOperator, and
+            # Python rejects the same class object in both positions.
+            "I18nOperator": type("I18nOperator", (), {}),
+            "bpy": SimpleNamespace(
+                props=SimpleNamespace(StringProperty=lambda: None),
+                types=SimpleNamespace(Operator=type("Operator", (), {})),
+            ),
+            # The export cleanup asks whether the merged (Unico) component
+            # mode is on; this suite exports plain workspace INIs only.
+            "MIMIGlobalProperties": SimpleNamespace(is_unico_component=lambda: False),
             "tr": lambda text: text,
         }
         exec(compile(harness.module, str(harness.SOURCE), "exec"), self.namespace)

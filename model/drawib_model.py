@@ -1376,7 +1376,7 @@ class DrawIBModel:
             )
         # GPU pre-skinning support depends on WHERE the skinning compute
         # reads its positions from:
-        # - Unity CS path (Naraka, NarakaM, AILIMIT) and ZZMIDX12 re-read
+        # - Unity CS path (Naraka, NarakaM, AILIMIT, PGR) and ZZMIDX12 re-read
         #   "cs-t0 = Resource<drawib>Position" at every dispatch, so a
         #   per-frame copy into that resource flows through skinning fine.
         # - SRMI/ZZMI route skinned draws through an extra PositionCS
@@ -1386,6 +1386,9 @@ class DrawIBModel:
             from ..common.global_config import LogicName
             supported_preskinning_logics = (
                 LogicName.Naraka, LogicName.NarakaM, LogicName.AILIMIT, LogicName.ZZMIDX12,
+                # PGR copies the Naraka compute pipeline, so the same
+                # per-frame resource copy reaches its skinning dispatch.
+                LogicName.PGR,
             )
             if GlobalConfig.logic_name not in supported_preskinning_logics:
                 raise ValueError(
