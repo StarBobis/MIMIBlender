@@ -412,7 +412,17 @@ class MeshCreateHelper:
             elif dim == 2:
                 components_list = ('xy',)
             else:
-                raise Fatal(f'Unhandled TEXCOORD dimension: {dim}')
+                # A Blender uv layer always holds exactly two components and the
+                # export writes the width the data type declares, so any other
+                # width cannot be carried. Game presets therefore describe such a
+                # field as ordinary two-component uv sets (PGR's 12-byte game
+                # payload is R32G32 + R16G16). Seeing one element this wide means
+                # the workspace still uses an outdated data type.
+                raise Fatal(
+                    f'TEXCOORD has {dim} components, which a Blender uv layer cannot hold. '
+                    'This workspace was extracted with an outdated data type; '
+                    're-extract the model with the current MMT build.'
+                )
 
             cmap = {'x': 0, 'y': 1, 'z': 2, 'w': 3}
 
