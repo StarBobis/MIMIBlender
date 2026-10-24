@@ -16,6 +16,7 @@ if/elif chain, and every preset is free to pick its internal structure:
 from ..common.global_config import LogicName
 
 from .efmi import ExportEFMI
+from .gf2.exporter import GF2Exporter
 from .gimi.exporter import Exporter as GimiExporter
 from .identityv import ExportIdentityV
 from .naraka.exporter import Exporter as NarakaExporter
@@ -32,6 +33,9 @@ from .zzmidx12 import ExportZZMIDX12
 # "not yet supported" error in the export UI.
 _LOGIC_EXPORTER_DICT = {
     LogicName.EFMI: ExportEFMI,
+    # GF2 keeps its own copy of the Genshin exporter (games/gf2/) so its mod
+    # layout can diverge without touching GIMI.
+    LogicName.GF2: GF2Exporter,
     LogicName.GIMI: GimiExporter,
     # HIMI's generated INI is byte-identical to the Unity VS variant, so it
     # shares the class; if HIMI ever needs its own logic again, create a

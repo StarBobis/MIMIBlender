@@ -38,6 +38,7 @@ class LogicName:
     # exported through this logic. The representative way of forcing
     # modifications with 3Dmigoto.
     CPUSkinning = "CPUSkinning"
+    GF2 = "GF2" # Girls' Frontline 2: GPU pre-skinning (point-list pass) once GF2Core enables Unity's gpuSkinning; mods start on the Genshin layout
     IdentityV = "IdentityV" # Identity V (Neox3 engine); kept only to serve some abstract fan-made video creators
     AILIMIT = "AILIMIT" # A small game from a small studio, but Hongxi still runs a fan group, so keep it for his followers for now
     DOAV = "DOAV" # An antique game, the root of all evil; even adding it serves little purpose, keeping it is just a tribute
