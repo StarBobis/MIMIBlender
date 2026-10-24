@@ -248,7 +248,7 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
     simulate_xxmi_tail_comments: bpy.props.BoolProperty(
         name=tr("Simulate XXMI Tail Comments"),
         description=tr("When enabled, the generated INI ends with the same closing comments that XXMI Tools writes, so the file looks like one produced by that tool; the sha256 line stays the last line"),
-        default=False,
+        default=True,
     ) # type: ignore
 
     @classmethod
