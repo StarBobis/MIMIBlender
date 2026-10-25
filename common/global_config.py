@@ -81,6 +81,10 @@ class GlobalConfig:
     workspacename = ""
     cache_location = ""
     current_game_migoto_folder = ""
+    # Absolute mods root the host app resolved (GIMI: `Stuffs`). The host writes
+    # it into Games/<game>/Config.json next to installDir; an empty value means
+    # the host predates that field and the add-on must read d3dx.ini itself.
+    mods_location = ""
     logic_name = ""
 
     '''
@@ -153,6 +157,10 @@ class GlobalConfig:
 
             game_config_json = GlobalConfig._load_json_dict(game_config_json_path)
             cls.current_game_migoto_folder = game_config_json.get("installDir", "")
+            # Written by the host from the same d3dx.ini resolver the Mod page
+            # uses, so the add-on never has to guess between `Mods` and the
+            # host's fixed layout (`Stuffs` for GIMI).
+            cls.mods_location = str(game_config_json.get("modsDir", "") or "").strip()
             cls.logic_name = game_config_json.get("gamePreset", "")
         except Exception as e:
             print(e)
@@ -299,9 +307,10 @@ class GlobalConfig:
 
         Priority rule: d3dx.ini may configure several include_recursive
         folders (either on separate lines or comma-separated), e.g. ``Core``
-        and ``Mods``.  When a folder named ``Mods`` is present, it always
-        wins because that is where users actually manage their mods;
-        otherwise the first configured folder is kept (previous behavior).
+        and ``Mods``.  Folders that actually exist on disk win over folders
+        the ini only mentions, and among those a folder named ``Mods`` wins
+        because that is where mod authors normally put their work; otherwise
+        the first configured folder is kept (previous behavior).
         """
         if not cls.current_game_migoto_folder:
             return "Mods"
@@ -328,19 +337,36 @@ class GlobalConfig:
                 if not mod_folder_list:
                     return "Mods"
 
+                # Only prefer folders that exist: the host may have renamed the
+                # configured one (GIMI keeps `Stuffs`), leaving the stock entry
+                # pointing at a folder nobody uses.
+                existing_folders = [
+                    mod_folder
+                    for mod_folder in mod_folder_list
+                    if os.path.isdir(os.path.join(cls.current_game_migoto_folder, mod_folder))
+                ]
+                candidates = existing_folders or mod_folder_list
+
                 # Prefer the folder literally named "Mods" (the last path
                 # segment is compared so subpaths like "SomeDir\\Mods" also match).
-                for mod_folder in mod_folder_list:
+                for mod_folder in candidates:
                     last_segment = mod_folder.replace("/", "\\").split("\\")[-1]
                     if last_segment.lower() == "mods":
                         return mod_folder
 
-                return mod_folder_list[0]
+                return candidates[0]
         except (OSError, UnicodeDecodeError):
             return "Mods"
 
     @classmethod
     def path_mods_folder(cls):
+        # The host resolves the mods root from the same d3dx.ini the game reads
+        # (GIMI renames the stock `Mods` folder to `Stuffs`) and publishes it in
+        # Games/<game>/Config.json. Trust that answer first: a stale stock
+        # d3dx.ini left behind by a package install would otherwise send the
+        # export into a `Mods` folder the game no longer loads.
+        if cls.mods_location and os.path.isdir(cls.mods_location):
+            return cls.mods_location + "\\"
         mod_folder = cls._read_d3dx_ini_mod_folder_name()
         return os.path.join(cls.current_game_migoto_folder, mod_folder + "\\")
 
