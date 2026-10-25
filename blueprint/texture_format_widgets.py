@@ -11,6 +11,8 @@ The conversion itself never runs here. The work is delegated to
 ``common.texture_format_service`` so the node draw code stays short and every
 node reports the same state.
 """
+import os
+
 import bpy
 
 from ..common import texture_format_service as service
@@ -48,6 +50,44 @@ def format_mode_items(self, context):
         ('MANUAL', tr("Manual format"),
          tr("Convert the replacement to the format selected below, even when no original can be resolved")),
     ]
+
+
+def color_space_items(self, context):
+    """How a replacement's pixels are interpreted (see dds_match.colour_flags)."""
+    return [
+        ('AUTO', tr("Auto"),
+         tr("Follow the source file's own format and the mark role: colour maps are gamma-corrected, normal/mask roles are copied unchanged")),
+        ('SRGB', tr("sRGB"),
+         tr("The replacement pixels are sRGB-encoded; convert them to the target colour space")),
+        ('LINEAR', tr("Linear"),
+         tr("The replacement pixels are linear (light/HDR data); convert them to the target colour space")),
+        ('DATA', tr("Data"),
+         tr("Vector or mask data such as a normal or roughness map; never gamma-convert")),
+    ]
+
+
+def _row_data_hint(item, selectors, source):
+    """Return the role text AUTO uses to recognise vector/mask data."""
+    return " ".join(part for part in (
+        str(selectors.get("mark_name", "") or ""),
+        str(selectors.get("slot", "") or ""),
+        os.path.basename(str(source or "")),
+    ) if part)
+
+
+def color_space_note(node, item):
+    """Return the short colour-conversion note of one row, or ""."""
+    source = service._row_file_path(item)
+    if not source:
+        return ""
+    target, state, _detail = row_target_format(node, item)
+    if not target:
+        return ""
+    selectors = service.row_selectors(node, item)
+    mode = str(getattr(item, "color_space", "AUTO") or "AUTO").upper()
+    return dds_match.describe_colour_conversion(
+        source, dds_match.format_dxgi(target), mode, _row_data_hint(item, selectors, source),
+    )
 
 
 def _row_owns_image(node, item):
@@ -130,12 +170,16 @@ def row_status(node, item):
         return 'ERROR', tr("Original formats disagree: {formats}").format(formats=detail)
     if not target:
         return 'INFO', tr("Original format unknown; the replacement is copied unchanged")
+    # Name the colour-space treatment next to the format, because a wrong
+    # choice here changes brightness without changing the file header.
+    note = color_space_note(node, item)
+    note_suffix = " (" + note + ")" if note else ""
     cached = service.get_cache().lookup(source)
     if cached and str(cached.get("format", "")) == target:
-        return 'CHECKMARK', tr("Converted: {format}").format(format=target)
+        return 'CHECKMARK', tr("Converted: {format}").format(format=target) + note_suffix
     if service.is_running():
-        return 'TIME', tr("Waiting for conversion: {format}").format(format=target)
-    return 'INFO', tr("Needs conversion to {format}").format(format=target)
+        return 'TIME', tr("Waiting for conversion: {format}").format(format=target) + note_suffix
+    return 'INFO', tr("Needs conversion to {format}").format(format=target) + note_suffix
 
 
 def draw_row_status(layout, node, item):

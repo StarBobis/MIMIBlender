@@ -61,13 +61,63 @@ the two draws differ only in their condition and their slot lines. `downstream_s
 in the node file reads that wiring back so the node can show "state 2 of 2" instead of leaving
 the user guessing whether the key is connected.
 
+## Colour space of a replacement (texconv)
+
+A replacement is converted to the capture's DXGI format, width/mips and header style. The
+colour space is a separate decision and the historical bug was to pass both `-srgbi` and
+`-srgbo` unconditionally: texconv then declares both ends sRGB, performs **no** conversion and
+only re-tags the bytes. Measured with the bundled texconv:
+
+| Source | Target | Flags | Stored value for sRGB 16..112 |
+|---|---|---|---|
+| sRGB PNG | BC7_UNORM_SRGB | `-srgbi -srgbo` | unchanged (correct) |
+| sRGB PNG | BC6H_UF16 | `-srgbi` | linear `0.0052` (correct); with both flags `0.0627`, ~12x too bright |
+| linear DDS | BC7_UNORM_SRGB | `-srgbo` | encoded back to `16..112`; with both flags stays dark |
+| normal/mask data | any | `-srgbi -srgbo` | values untouched |
+
+Rules in `texcomb/core/dds_match.py`:
+
+- `source_color_space()`: DDS from its DXGI format; PNG/JPEG/BMP/TGA are sRGB.
+- `colour_flags()`: AUTO by default; `DATA_ROLE_TOKENS` (normal, mask, roughness, metallic,
+  occlusion, specular, gloss, smoothness, height, displacement, materialmap, aomap) mean data.
+- `run_conversion_plan()` emits both flags only when the spaces are equal or the row is data;
+  otherwise exactly `-srgbi` or `-srgbo`. `ConversionPlan` carries the decision and
+  `ConversionCache` keys it (bump `CACHE_VERSION` when the flags change).
+- The row has a `Color Space` override (`AUTO/SRGB/LINEAR/DATA`) for a DDS whose editor dropped
+  the sRGB tag; the node status shows the treatment, e.g. `Needs conversion to BC6H_UF16
+  (sRGB -> linear)`.
+
+## Regenerating must refresh, not skip
+
+`M_IniHelper._refresh_generated_texture()` compares the bytes (`filecmp.cmp(shallow=False)`) and
+copies only when the source changed. The old "target exists -> skip" rule kept yesterday's
+picture after an edit or a re-extract, while the bind copy was refreshed, so one slot showed two
+different pictures. The automatic Slot, Hash and SharedSlot copy sites all use the helper.
+
+## Mark identity is a string, not an enum index
+
+Blender persists a dynamic `EnumProperty` as an **integer index**. The mark dropdown is rebuilt
+from the Submesh JSON, so re-extracting, re-marking or switching the active workspace silently
+rebound rows to another mark (exactly "the generated texture is not the one I specified").
+`MIMITextureSlotItem` / `MIMITextureHashItem` now store `mark_name_value` (the identifier) and
+`mark_name_of(item)` is the only reader; the enum is just the picker and its update callback
+writes the string. Old rows migrate on first read. Never read `item.mark_name` directly again.
+
 ## Verification
 
 ```
 python tools/test_texture_bind_ini.py                 # resolver, aliases, switch states
+python tools/test_hash_texture_bind_ini.py            # hash rows, shared slot copy
+python tools/test_texture_format_color_space.py       # real texconv colour matrix (no Blender)
+python tools/test_texture_format_conversion.py        # exact-format end-to-end (needs Pillow)
 python tools/check_i18n.py                            # every tr() msgid has a zh_CN entry
 python tools/run_blueprint_checks.py <blender.exe>     # real Blender suites
 ```
+
+A headless export of a user blend is the fastest end-to-end check: point
+`scene.mimi_global_properties` at a `CUSTOM` workspace, set `generate_mod_folder_path` to a temp
+folder, call `ui_func_export.generate_mod_from_output_node`, then decode the produced
+`Textures/*.dds` with the bundled texconv and compare the values with the source image.
 
 `tools/test_blueprint_blender.py::test_wwmi_connected_hash_file_export` fails on a clean
 checkout too (its `WWMIInfoHelper` stub has no `shapekeys`); do not read that as a regression

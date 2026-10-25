@@ -24,7 +24,8 @@ from .dds_match import read_dds_metadata
 
 # Bump this whenever conversion flags or the key composition change, so a
 # previous release's cached files can never be mistaken for current output.
-CACHE_VERSION = 1
+# 2: colour-space flags are now derived per plan (they used to be fixed).
+CACHE_VERSION = 2
 
 # One megabyte per read keeps hashing fast without huge allocations.
 _CHUNK_SIZE = 1024 * 1024
@@ -90,6 +91,8 @@ class ConversionCache:
         # Storage key covers format, header style, topology and alpha mode.
         # Dimensions and mip count cover the output shape policy.
         # The resize filter changes pixels without changing the header.
+        # The colour-space flags change the pixel values too, so two rows that
+        # share one source but interpret it differently must not share a key.
         parts = (
             str(self.version),
             digest,
@@ -97,6 +100,9 @@ class ConversionCache:
             str(plan.width), str(plan.height), str(plan.mips),
             plan.format,
             plan.resize_filter or '',
+            'srgb-in=' + str(int(bool(getattr(plan, 'srgb_in', False)))),
+            'srgb-out=' + str(int(bool(getattr(plan, 'srgb_out', False)))),
+            'ignore-srgb=' + str(int(bool(getattr(plan, 'ignore_srgb', False)))),
         )
         return hashlib.sha256('~'.join(parts).encode('utf-8')).hexdigest()
 

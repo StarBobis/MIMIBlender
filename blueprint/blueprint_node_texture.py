@@ -49,6 +49,7 @@ from ..common.texture_output_naming import (
 )
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
+    color_space_items as _color_space_items,
     draw_convert_all as _draw_convert_all,
     draw_node_progress as _draw_node_progress,
     draw_row_controls as _draw_row_controls,
@@ -88,7 +89,7 @@ def _texture_slot_item_refresh_display(item):
     '''Rebuild the one-line display name shown inside the list widget.'''
     source_type = str(getattr(item, "source_type", "") or "")
     if source_type == 'MARK':
-        source = str(getattr(item, "mark_name", "") or "").strip() or "?"
+        source = mark_name_of(item) or "?"
         # A row with its own image differs from the plain mark reuse, so the
         # list has to reveal that difference without opening the row.
         replacement_image = bpy.path.basename(str(getattr(item, "mark_file_path", "") or "").strip())
@@ -150,6 +151,12 @@ class MIMITextureSlotItem(PropertyGroup):
         update=lambda self, context: _texture_slot_item_mark_changed(self),
     ) # type: ignore
 
+    mark_name_value: bpy.props.StringProperty(
+        name=tr("Stored Mark Name"),
+        description=tr("Durable mark identity written by the dropdown above. It keeps the row bound to the same mark even when the mark list order changes, which an enum value alone cannot do"),
+        default="",
+    ) # type: ignore
+
     file_path: bpy.props.StringProperty(
         name=tr("Texture File"),
         description=tr("Image file (dds, png, jpg, bmp or tga) copied into the generated mod at export time"),
@@ -195,6 +202,15 @@ class MIMITextureSlotItem(PropertyGroup):
         name=tr("Force Original Resolution"),
         description=tr("Resize the replacement to the captured texture resolution instead of keeping its own size"),
         default=False,
+    ) # type: ignore
+
+    color_space: bpy.props.EnumProperty(
+        name=tr("Color Space"),
+        description=tr("How the replacement's pixels are interpreted. Auto follows the source file format and the mark role (normal/mask roles are data); the target format always follows the original texture"),
+        items=_color_space_items,
+        # Callback based enum lists persist an integer index; keep the item
+        # order stable or old rows would silently change their meaning.
+        default=0,
     ) # type: ignore
 
     output_name: bpy.props.StringProperty(
@@ -348,7 +364,7 @@ def _load_submesh_mark_dicts(submesh_name, dedupe_names=True):
 def _find_submesh_mark_by_name(item, find_owner_node):
     '''Locate the mark dict matching the row's mark name ("" when missing).'''
     try:
-        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+        mark_name = mark_name_of(item)
         if not mark_name:
             return None
         node = find_owner_node(item)
@@ -366,6 +382,9 @@ def _find_submesh_mark_by_name(item, find_owner_node):
 
 def _texture_slot_item_mark_changed(item):
     '''Picking a mark fills the slot from the mark's own MarkSlot value.'''
+    # Persist the identifier itself before anything reads the row: the enum
+    # index is only a position in the current dropdown list.
+    item.mark_name_value = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
     mark_dict = _find_submesh_mark_by_name(item, _find_owner_bind_node)
     if mark_dict and mark_dict["slot"]:
         item.slot = mark_dict["slot"]
@@ -432,7 +451,7 @@ def _slot_row_output_name(node, item):
         return file_resource_stem(draw_ib, object_name, slot_token) + suffix, suffix, suffix_is_certain, True, ""
 
     if source_type == 'MARK':
-        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+        mark_name = mark_name_of(item)
         submesh_name = _resolve_upstream_submesh_name(node)
         matched_mark = None
         for mark_dict in _cached_submesh_mark_dicts(submesh_name):
@@ -480,7 +499,7 @@ def _selected_mark_type(node, item):
     whether the mark owns a shared [Resource...] section or is bound by file
     name.  An unresolvable mark keeps the plain reuse wording.
     '''
-    mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+    mark_name = mark_name_of(item)
     if not mark_name:
         return ""
     try:
@@ -502,6 +521,9 @@ def _draw_image_format_controls(box, node, item, index, tree):
     if str(item.format_mode) == 'MANUAL':
         format_row.prop(item, "manual_format", text="")
     box.prop(item, "force_original_size")
+    # Colour-space interpretation: AUTO derives it from the source format and
+    # the mark role; a mis-tagged DDS can be corrected per row.
+    box.prop(item, "color_space")
     # Detected original format, readiness and the per-row Convert button.
     _draw_row_controls(box, node, item, index, tree)
 
@@ -527,6 +549,30 @@ def normalize_mark_name_enum_value(value):
     '''Map the dropdown placeholder back to an empty mark name at export.'''
     text = str(value or "").strip()
     return "" if text == _MARK_NAME_NONE else text
+
+
+def mark_name_of(item):
+    '''Return the durable mark name of one row, migrating legacy enum values.
+
+    Blender persists an EnumProperty as an integer index. An old row therefore
+    silently changed meaning whenever the mark list order changed (extract,
+    re-mark, workspace switch), which is the "the generated texture is not the
+    one I specified" report. ``mark_name_value`` stores the identifier itself;
+    the enum stays only as the picker. The first read of an old row copies the
+    still-valid enum identifier into the string field.
+    '''
+    value = str(getattr(item, "mark_name_value", "") or "").strip()
+    if value:
+        return value
+    legacy = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+    if legacy:
+        try:
+            item.mark_name_value = legacy
+        except Exception:
+            # A read-only stand-in (tests, adapters) still resolves the name.
+            pass
+        return legacy
+    return ""
 
 
 class MMT_OT_TexBindAddItem(I18nOperator):
@@ -615,7 +661,7 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
         existing_names = set()
         for row_item in node.texture_slot_items:
             if str(row_item.source_type or "") == 'MARK':
-                existing_names.add(normalize_mark_name_enum_value(row_item.mark_name).lower())
+                existing_names.add(mark_name_of(row_item).lower())
 
         added_count = 0
         skipped_count = 0
@@ -640,6 +686,7 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
             row_item.slot = mark_dict["slot"]
             row_item.source_type = 'MARK'
             row_item.mark_name = mark_dict["name"]
+            row_item.mark_name_value = mark_dict["name"]
             _texture_slot_item_refresh_display(row_item)
             added_count += 1
             existing_names.add(mark_dict["name"].lower())

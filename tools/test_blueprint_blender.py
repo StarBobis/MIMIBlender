@@ -1014,6 +1014,51 @@ class BlueprintTests(unittest.TestCase):
         for actual, expected in zip(node.color, original):
             self.assertAlmostEqual(actual, expected)
 
+    def test_texture_bind_mark_identity_uses_string_field(self):
+        # The dropdown enum is an index into a dynamic list; only the stored
+        # string may identify the mark after the list order changes.
+        texture = addon.blueprint_node_texture
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+        node = self.tree.nodes.new("MIMINode_Texture_Bind")
+        row = node.texture_slot_items.add()
+        row.source_type = 'MARK'
+        # The dropdown starts at "(none)"; the durable value is what must win.
+        row.mark_name_value = "NormalMap"
+        bindings = BluePrintModel._collect_texture_bindings(node)
+        self.assertEqual(bindings[0]["mark_name"], "NormalMap")
+
+        class _LegacyRow:
+            mark_name = "DiffuseMap"
+            mark_name_value = ""
+
+        legacy = _LegacyRow()
+        self.assertEqual(texture.mark_name_of(legacy), "DiffuseMap")
+        # The first read migrates the old enum value into the durable field,
+        # so a later empty dropdown cannot change the row's meaning.
+        self.assertEqual(legacy.mark_name_value, "DiffuseMap")
+        legacy.mark_name = ""
+        self.assertEqual(texture.mark_name_of(legacy), "DiffuseMap")
+
+    def test_generated_texture_refreshes_when_source_changed(self):
+        # Re-generating must follow the current capture, not keep the file a
+        # previous export wrote under the same name.
+        from MIMIBlender.common.m_ini_helper import M_IniHelper
+        helper = M_IniHelper._refresh_generated_texture
+        source = Path(tempfile.gettempdir()) / "mimi_refresh_source.dds"
+        target = Path(tempfile.gettempdir()) / "mimi_refresh_target.dds"
+        try:
+            source.write_bytes(b"first")
+            self.assertEqual(helper(str(source), str(target)), "copied")
+            self.assertEqual(target.read_bytes(), b"first")
+            self.assertEqual(helper(str(source), str(target)), "unchanged")
+            source.write_bytes(b"second")
+            self.assertEqual(helper(str(source), str(target)), "copied")
+            self.assertEqual(target.read_bytes(), b"second")
+        finally:
+            for path in (source, target):
+                if path.exists():
+                    path.unlink()
+
 
 if __name__ == "__main__":
     # Blender's --python-exit-code turns failed assertions into a failing job.

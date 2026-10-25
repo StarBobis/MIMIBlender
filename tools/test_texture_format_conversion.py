@@ -25,6 +25,10 @@ import tempfile
 import types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Plain `python tools/test_texture_format_conversion.py` starts with the tools
+# folder on sys.path; the add-on packages live one level up.
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 TEST_PKG = "texture_format_conversion_test_pkg"
 
 HASH_RED = "0123abcd"

@@ -327,8 +327,8 @@ def _mark_row_name(item):
     import would close the cycle.
     """
     try:
-        from ..blueprint.blueprint_node_texture import normalize_mark_name_enum_value
-        return str(normalize_mark_name_enum_value(getattr(item, "mark_name", "")) or "")
+        from ..blueprint.blueprint_node_texture import mark_name_of
+        return str(mark_name_of(item) or "")
     except Exception:
         return ""
 
@@ -411,8 +411,8 @@ def _hash_row_mark_name(item):
     if detected_name:
         return detected_name
     try:
-        from ..blueprint.blueprint_node_texture import normalize_mark_name_enum_value
-        return str(normalize_mark_name_enum_value(getattr(item, "mark_name", "")) or "")
+        from ..blueprint.blueprint_node_texture import mark_name_of
+        return str(mark_name_of(item) or "")
     except Exception:
         return ""
 
@@ -491,6 +491,11 @@ def _make_job(source, item, submesh="", slot="", mark_name="", texture_hash="",
         "force_original_size": bool(getattr(item, "force_original_size", False)),
         "resize_filter": _resize_filter(),
         "label": _job_label(label, os.path.basename(source)),
+        # Per-row colour-space override plus the role hint used by AUTO.
+        "color_mode": str(getattr(item, "color_space", "AUTO") or "AUTO").upper(),
+        "data_hint": " ".join(part for part in (
+            str(mark_name or ""), str(slot or ""), os.path.basename(source or ""),
+        ) if part),
     }
 
 
@@ -510,6 +515,8 @@ def plan_for_job(job):
         source, metadata,
         force_original_size=bool(job.get("force_original_size", False)),
         resize_filter=job.get("resize_filter", dds_match.DEFAULT_RESIZE_FILTER),
+        color_mode=job.get("color_mode", "AUTO"),
+        data_hint=job.get("data_hint", ""),
     )
 
 

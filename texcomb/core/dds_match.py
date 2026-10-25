@@ -95,6 +95,29 @@ LEGACY_MASKS = {
     (8, 0, 0, 0, 0xff): 65,
 }
 
+# Formats whose pixels are sRGB-encoded: the hardware decodes them to linear
+# when sampled. Every other entry is linear or vector/mask data. Keeping this
+# as a derived set means a new DXGI_FORMATS row cannot forget its colour space.
+SRGB_FORMATS = frozenset(name for name in DXGI_FORMATS.values() if name.endswith('_SRGB'))
+
+# Mark roles that carry vectors or masks instead of colour. Gamma-converting
+# these corrupts the values (a normal map is not a photograph), so their bytes
+# are copied verbatim regardless of the target format. Tokens are deliberately
+# specific: a bare "ao"/"rough"/"metal" would also match unrelated file names.
+DATA_ROLE_TOKENS = (
+    'normal', 'mask', 'roughness', 'metallic', 'occlusion',
+    'specular', 'gloss', 'smoothness', 'height', 'displacement',
+    'materialmap', 'aomap', 'ao_map',
+)
+
+# Per-row colour-space override. AUTO follows the source file's own format and
+# the mark role; the other values let a user correct a mis-tagged DDS.
+COLOR_MODE_AUTO = 'AUTO'
+COLOR_MODE_SRGB = 'SRGB'
+COLOR_MODE_LINEAR = 'LINEAR'
+COLOR_MODE_DATA = 'DATA'
+COLOR_MODES = (COLOR_MODE_AUTO, COLOR_MODE_SRGB, COLOR_MODE_LINEAR, COLOR_MODE_DATA)
+
 # Resize filters accepted by texconv; the first entry is the pipeline default.
 # POINT keeps hard pixel edges, which is usually wrong for painted textures.
 # FANT is a good general-purpose choice for downscaling atlases.
@@ -425,6 +448,82 @@ def image_dimensions(path):
     raise ValueError('Unsupported replacement image type: ' + str(path))
 
 
+def format_is_srgb(format_name):
+    """Return True when a DXGI format name stores sRGB-encoded pixels."""
+    return str(format_name or '') in SRGB_FORMATS
+
+
+def format_dxgi(format_name):
+    """Return the numeric DXGI id of a format name, or 0 when unknown."""
+    return FORMAT_BY_NAME.get(str(format_name or ''), 0)
+
+
+def source_color_space(path):
+    """Return 'srgb' or 'linear' from the file's own colour-space information.
+
+    A DDS declares its colour space through the DXGI format. PNG/JPEG/BMP/TGA
+    have no reliable tag of their own (WIC assumes sRGB), which is also how
+    every paint program writes them.
+    """
+    suffix = os.path.splitext(str(path or ''))[1].lower()
+    if suffix == '.dds':
+        try:
+            return 'srgb' if format_is_srgb(read_dds_metadata(path).format) else 'linear'
+        except Exception:
+            # An unreadable DDS is rejected by the caller's validation; for the
+            # colour decision assume the artist's working space.
+            return 'srgb'
+    return 'srgb'
+
+
+def is_data_role(text):
+    """Return True when a mark or file role names vector or mask data."""
+    lowered = str(text or '').lower()
+    return any(token in lowered for token in DATA_ROLE_TOKENS)
+
+
+def colour_flags(source, target_dxgi, color_mode=COLOR_MODE_AUTO, data_hint=''):
+    """Return (srgb_in, srgb_out, ignore_srgb) for one replacement conversion.
+
+    texconv only converts between colour spaces when the input and output
+    declarations disagree. Passing both ``-srgbi`` and ``-srgbo``
+    unconditionally (the historical behaviour) suppressed every conversion and
+    merely re-tagged the bytes: an sRGB image written into BC6H came out about
+    12x too bright in linear light and a linear DDS written into
+    BC7_UNORM_SRGB came out correspondingly dark.
+
+    - sRGB -> sRGB: both flags (declared equal, so the bytes pass through).
+    - sRGB -> linear: ``-srgbi`` (decode before encoding).
+    - linear -> sRGB: ``-srgbo`` (encode after filtering).
+    - data textures: both flags (never convert the values).
+    """
+    mode = str(color_mode or COLOR_MODE_AUTO).upper()
+    if mode not in COLOR_MODES:
+        mode = COLOR_MODE_AUTO
+    target_srgb = format_is_srgb(DXGI_FORMATS.get(int(target_dxgi or 0), ''))
+    if mode == COLOR_MODE_DATA:
+        return False, target_srgb, True
+    if mode == COLOR_MODE_SRGB:
+        source_srgb = True
+    elif mode == COLOR_MODE_LINEAR:
+        source_srgb = False
+    else:
+        source_srgb = source_color_space(source) == 'srgb'
+        if is_data_role(data_hint):
+            return source_srgb, target_srgb, True
+    return source_srgb, target_srgb, False
+
+
+def describe_colour_conversion(source, target_dxgi, color_mode=COLOR_MODE_AUTO, data_hint=''):
+    """Return the short 'sRGB -> linear' note shown next to one row."""
+    srgb_in, srgb_out, ignore = colour_flags(source, target_dxgi, color_mode, data_hint)
+    if ignore:
+        return 'data (bytes kept)'
+    if srgb_in == srgb_out:
+        return 'sRGB kept' if srgb_in else 'linear kept'
+    return 'sRGB -> linear' if srgb_in else 'linear -> sRGB'
+
+
 def matching_mip_count(original, width, height):
     """Keep one mip, regenerate full chains, or retain an exact partial count."""
     # Replacement size is retained unless the caller explicitly forces capture size.
@@ -465,14 +564,24 @@ class ConversionPlan:
     storage_key: tuple
     # Resize filter is only meaningful when the output size differs.
     resize_filter: str = DEFAULT_RESIZE_FILTER
+    # Colour-space decision; the texconv flags are derived from these fields.
+    # ``ignore_srgb`` means vector/mask data whose values must not be gamma
+    # converted (normal maps, masks).
+    srgb_in: bool = False
+    srgb_out: bool = False
+    ignore_srgb: bool = False
+    color_mode: str = COLOR_MODE_AUTO
 
 
 def build_conversion_plan(source, original, force_original_size=False,
-                          resize_filter=DEFAULT_RESIZE_FILTER):
+                          resize_filter=DEFAULT_RESIZE_FILTER,
+                          color_mode=COLOR_MODE_AUTO, data_hint=''):
     """Return the plan for one replacement, or None for a byte-identical DDS.
 
     ``original`` is a parsed DDSMetadata, not a path, so callers can show the
     detected format first and reuse that header for every later decision.
+    ``color_mode`` is the per-row override; AUTO follows the source file's own
+    colour space and ``data_hint`` (mark name, slot, file stem).
     Raising ValueError is the contract for "this replacement cannot be made
     exact"; callers either surface the message or intentionally fall back.
     """
@@ -512,6 +621,9 @@ def build_conversion_plan(source, original, force_original_size=False,
     # An unknown filter falls back to the documented default instead of
     # reaching texconv, which would fail on a typo and abort the export.
     chosen_filter = resize_filter if resize_filter in RESIZE_FILTERS else DEFAULT_RESIZE_FILTER
+    srgb_in, srgb_out, ignore_srgb = colour_flags(
+        source, original.dxgi, color_mode=color_mode, data_hint=data_hint,
+    )
     return ConversionPlan(
         source=source,
         format=original.format,
@@ -522,6 +634,10 @@ def build_conversion_plan(source, original, force_original_size=False,
         alpha_mode=original.alpha_mode,
         storage_key=original.storage_key,
         resize_filter=chosen_filter,
+        srgb_in=srgb_in,
+        srgb_out=srgb_out,
+        ignore_srgb=ignore_srgb,
+        color_mode=str(color_mode or COLOR_MODE_AUTO).upper(),
     )
 
 
@@ -541,12 +657,17 @@ def run_conversion_plan(plan, output_dir, explicit_path=""):
         '-m', str(plan.mips), '-w', str(plan.width), '-h', str(plan.height),
         # Header style must match the capture, not the replacement extension.
         '-dx10' if plan.dx10 else '-dx9',
-        # Tag input AND output as sRGB: the bytes pass through unchanged and
-        # the DDS format tag comes solely from -f. Using --ignore-srgb here
-        # would double-apply gamma when the target format is an _SRGB variant.
-        '-srgbi', '-srgbo',
-        '-y', '-o', output_dir,
     ]
+    # A conversion only happens when the two declarations disagree. Equal
+    # spaces (and data textures) pass both flags so texconv cannot "fix" an
+    # untagged PNG by guessing; differing spaces pass exactly one.
+    if plan.ignore_srgb or plan.srgb_in == plan.srgb_out:
+        args += ['-srgbi', '-srgbo']
+    elif plan.srgb_in:
+        args.append('-srgbi')
+    else:
+        args.append('-srgbo')
+    args += ['-y', '-o', output_dir]
     # The resize filter only matters when the output size differs from the
     # source size, and texconv ignores it otherwise.
     if plan.resize_filter:
@@ -607,7 +728,8 @@ class DDSReplacementStage:
         return self.cache if self.cache is not None else _DEFAULT_CACHE
 
     def prepare(self, source, original_path="", force_original_size=False,
-                resize_filter=DEFAULT_RESIZE_FILTER, original_metadata=None):
+                resize_filter=DEFAULT_RESIZE_FILTER, original_metadata=None,
+                color_mode=COLOR_MODE_AUTO, data_hint=""):
         """Return verified staged bytes, or the untouched matching DDS source.
 
         ``original_metadata`` lets callers that already resolved an agreed
@@ -620,6 +742,8 @@ class DDSReplacementStage:
             source, original,
             force_original_size=force_original_size,
             resize_filter=resize_filter,
+            color_mode=color_mode,
+            data_hint=data_hint,
         )
         # None means the supplied DDS already satisfies the capture exactly.
         if plan is None:
@@ -633,6 +757,7 @@ class DDSReplacementStage:
             plan.storage_key,
             plan.width, plan.height, plan.mips,
             plan.resize_filter,
+            plan.srgb_in, plan.srgb_out, plan.ignore_srgb,
         )
         remembered = self.memory.get(memory_key)
         if remembered:
@@ -663,7 +788,8 @@ def prepare_replacement_job(stage, source, job):
 
     Jobs are plain dicts so they can travel with the model layer:
     ``original_path`` (captured DDS), ``manual_format`` (no capture available),
-    ``force_original_size`` and ``resize_filter``.
+    ``force_original_size``, ``resize_filter`` and the colour-space decision
+    (``color_mode`` / ``data_hint``).
     """
     job = job or {}
     original_path = str(job.get('original_path', '') or '')
@@ -682,4 +808,6 @@ def prepare_replacement_job(stage, source, job):
         force_original_size=bool(job.get('force_original_size', False)),
         resize_filter=str(job.get('resize_filter', '') or DEFAULT_RESIZE_FILTER),
         original_metadata=metadata,
+        color_mode=str(job.get('color_mode', '') or COLOR_MODE_AUTO),
+        data_hint=str(job.get('data_hint', '') or ''),
     )

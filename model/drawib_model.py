@@ -852,6 +852,7 @@ class DrawIBModel:
         """
         # Imported lazily so the model layer stays importable without texcomb.
         from ..texcomb.core.dds_match import (
+            COLOR_MODE_AUTO,
             agree_on_metadata,
             build_conversion_plan,
             describe_format,
@@ -860,6 +861,12 @@ class DrawIBModel:
             read_dds_metadata,
         )
         source_suffix = os.path.splitext(source_path)[1].lower()
+        # How the row's pixels are interpreted: an explicit per-row override,
+        # AUTO by default. The hint drives the normal/mask detection.
+        color_mode = str(binding.get("color_space", COLOR_MODE_AUTO) or COLOR_MODE_AUTO).upper()
+        data_hint = " ".join(part for part in (
+            str(mark_name or ""), str(slot or ""), os.path.basename(source_path or ""),
+        ) if part)
         plan = {
             "convert": False,
             "suffix": source_suffix,
@@ -908,28 +915,42 @@ class DrawIBModel:
             if metadata is not None:
                 # Validate now so an unsupported capture fails before the
                 # exporter writes buffers instead of halfway through copying.
-                build_conversion_plan(source_path, metadata, force_original_size, resize_filter)
+                build_conversion_plan(
+                    source_path, metadata, force_original_size, resize_filter,
+                    color_mode=color_mode, data_hint=data_hint,
+                )
                 job = {
                     "original_path": agreed_path,
                     "manual_format": "",
                     "force_original_size": force_original_size,
                     "resize_filter": resize_filter,
+                    "color_mode": color_mode,
+                    "data_hint": data_hint,
                 }
                 # Header style, topology, alpha mode and size policy all decide
-                # whether two rows may share one generated resource.
+                # whether two rows may share one generated resource. The colour
+                # interpretation belongs to that identity as well: one image
+                # used as colour and as data must not share a file.
                 signature = "exact:" + "|".join(str(value) for value in metadata.storage_key)
                 signature += "|" + str(int(force_original_size))
+                signature += "|color=" + color_mode + "|hint=" + data_hint
             else:
                 width, height = image_dimensions(source_path)
                 synthetic = metadata_for_format(manual_format, width, height)
-                build_conversion_plan(source_path, synthetic, force_original_size, resize_filter)
+                build_conversion_plan(
+                    source_path, synthetic, force_original_size, resize_filter,
+                    color_mode=color_mode, data_hint=data_hint,
+                )
                 job = {
                     "original_path": "",
                     "manual_format": manual_format,
                     "force_original_size": force_original_size,
                     "resize_filter": resize_filter,
+                    "color_mode": color_mode,
+                    "data_hint": data_hint,
                 }
                 signature = "manual:" + manual_format + "|" + str(int(force_original_size))
+                signature += "|color=" + color_mode + "|hint=" + data_hint
         except ValueError as error:
             plan["reason"] = "unsupported"
             plan["detail"] = str(error)

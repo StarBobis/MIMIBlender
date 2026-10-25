@@ -1,3 +1,4 @@
+import filecmp
 import os
 import re
 import shutil
@@ -831,9 +832,11 @@ class M_IniHelper:
                     resource_texture_section.new_line()
                     ini_builder.append_section(resource_texture_section)
 
-                    # Copy the texture file (do not overwrite existing ones, keeping manual replacements)
-                    if not os.path.exists(target_texture_file_path):
-                        shutil.copy2(original_texture_file_path, target_texture_file_path)
+                    # Refresh the copy when the capture changed. The old rule
+                    # ("skip when the target exists") kept a texture from a
+                    # previous export forever, so editing or re-extracting a
+                    # capture produced a Mod that mixed old and new pictures.
+                    cls._refresh_generated_texture(original_texture_file_path, target_texture_file_path)
 
     @classmethod
     def generate_shared_slot_style_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict[str, DrawIBModel]):
@@ -919,13 +922,12 @@ class M_IniHelper:
                             + ".dds"
                         )
 
-                        # Copy the file (dedupe)
+                        # Copy the file (dedupe); identical bytes stay untouched.
                         target_texture_file_path = (
                             GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib)
                             + hash_style_texture_filename
                         )
-                        if not os.path.exists(target_texture_file_path):
-                            shutil.copy2(original_texture_file_path, target_texture_file_path)
+                        cls._refresh_generated_texture(original_texture_file_path, target_texture_file_path)
 
                         hash_filename_cache[texture_markup_info.mark_hash] = hash_style_texture_filename
                         repeat_hash_list.append(texture_markup_info.mark_hash)
@@ -953,6 +955,28 @@ class M_IniHelper:
         """
         prefix = draw_ib_model.draw_ib_alias or draw_ib_model.draw_ib
         return f"{prefix}-{submesh_index}-{texture_markup_info.mark_name}.dds"
+
+    @staticmethod
+    def _refresh_generated_texture(source_path: str, target_path: str) -> str:
+        """Copy one capture into the generated Mod unless the bytes are equal.
+
+        The historical "skip when the target exists" rule kept a texture from a
+        previous export forever, so re-extracting the workspace or editing a
+        capture produced a Mod that mixed old and new pictures. Comparing the
+        bytes keeps a hand-edited output file from being clobbered only when it
+        really is identical; a changed source always wins, which is what
+        "Generate Mod" must mean.
+
+        Returns ``copied``, ``unchanged`` or ``missing``.
+        """
+        # ``exists`` (not ``isfile``) is deliberate: the copy tests patch the
+        # exists probe only, and a directory source fails loudly in copy2.
+        if not source_path or not os.path.exists(source_path):
+            return "missing"
+        if os.path.isfile(target_path) and filecmp.cmp(source_path, target_path, shallow=False):
+            return "unchanged"
+        shutil.copy2(source_path, target_path)
+        return "copied"
 
     @classmethod
     def move_slot_style_textures(cls,draw_ib_model:DrawIBModel):
@@ -1013,25 +1037,26 @@ class M_IniHelper:
                 print("[TRACE] source_path exists: " + str(os.path.exists(source_path) if source_path else "N/A (empty string)"))
                 print("[TRACE] target_path exists: " + str(os.path.exists(target_path)))
 
-                if os.path.exists(target_path):
-                    print("[TRACE] Slot texture target already exists, skip copy: " + target_path)
+                if source_path == "":
+                    print("[TRACE] Slot texture source_path is empty, skip! mark_filename=" + texture_markup_info.mark_filename)
+                    slot_skipped_no_source += 1
+                    continue
+                if not os.path.exists(source_path):
+                    print("[TRACE] Slot texture source_path file does not exist, skip! source_path=" + source_path)
+                    slot_skipped_no_source += 1
+                    continue
+                # Refresh when the capture changed; identical bytes are kept.
+                if os.path.exists(target_path) and filecmp.cmp(source_path, target_path, shallow=False):
+                    print("[TRACE] Slot texture unchanged, skip copy: " + target_path)
                     slot_skipped_exists += 1
-                else:
-                    if source_path == "":
-                        print("[TRACE] Slot texture source_path is empty, skip! mark_filename=" + texture_markup_info.mark_filename)
-                        slot_skipped_no_source += 1
-                        continue
-                    if not os.path.exists(source_path):
-                        print("[TRACE] Slot texture source_path file does not exist, skip! source_path=" + source_path)
-                        slot_skipped_no_source += 1
-                        continue
-                    print("[TRACE] >>> Executing shutil.copy2: " + source_path + " -> " + target_path)
-                    try:
-                        shutil.copy2(source_path,target_path)
-                        print("[TRACE] <<< shutil.copy2 succeeded: " + target_path)
-                        slot_copied += 1
-                    except Exception as e:
-                        print("[TRACE] <<< shutil.copy2 failed! Exception: " + str(e))
+                    continue
+                print("[TRACE] >>> Executing shutil.copy2: " + source_path + " -> " + target_path)
+                try:
+                    shutil.copy2(source_path, target_path)
+                    print("[TRACE] <<< shutil.copy2 succeeded: " + target_path)
+                    slot_copied += 1
+                except Exception as e:
+                    print("[TRACE] <<< shutil.copy2 failed! Exception: " + str(e))
 
         print("[TRACE] move_slot_style_textures() summary - DrawIB: " + draw_ib_model.draw_ib)
         print("[TRACE]   Slot copied: " + str(slot_copied))

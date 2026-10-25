@@ -18,7 +18,10 @@ from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
 from ..blueprint.blueprint_node_obj import MIMINode_Object_Group, MIMINode_SwitchKey, MIMINode_Object_Info, MIMINode_Result_Output
 from ..blueprint.blueprint_node_object_list import MIMINode_Object_List
-from ..blueprint.blueprint_node_texture import MIMINode_Texture_Bind, normalize_mark_name_enum_value
+from ..blueprint.blueprint_node_texture import (
+    MIMINode_Texture_Bind,
+    mark_name_of,
+)
 from ..blueprint.blueprint_node_hash_texture import (
     MIMINode_Hash_Texture_Bind,
     MIMINode_Hash_Texture_Global,
@@ -686,7 +689,7 @@ class BluePrintModel:
                 "enabled": bool(getattr(item, "enabled", True)),
                 "slot": str(getattr(item, "slot", "") or ""),
                 "source_type": str(getattr(item, "source_type", "") or ""),
-                "mark_name": normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "mark_name": mark_name_of(item),
                 "mark_file_path": mark_file_path,
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
@@ -696,6 +699,10 @@ class BluePrintModel:
                 "format_mode": str(getattr(item, "format_mode", "AUTO") or "AUTO").strip().lower(),
                 "manual_format": str(getattr(item, "manual_format", "") or "").strip(),
                 "force_original_size": bool(getattr(item, "force_original_size", False)),
+                # Colour-space interpretation of the replacement pixels. AUTO
+                # follows the source format and the mark role; the row may
+                # override it for a mis-tagged DDS.
+                "color_space": str(getattr(item, "color_space", "AUTO") or "AUTO").upper(),
                 # Optional user alias: the generated texture file is renamed.
                 "output_name": str(getattr(item, "output_name", "") or ""),
                 "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Slot Texture Bind"),
@@ -747,7 +754,7 @@ class BluePrintModel:
                 "enabled": True if restore_original else bool(getattr(item, "enabled", True)),
                 "texture_hash": str(getattr(item, "texture_hash", "") or "").strip().lower(),
                 "source_type": "FILE" if detected else str(getattr(item, "source_type", "") or ""),
-                "mark_name": item.mark_source_name if detected else normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "mark_name": item.mark_source_name if detected else mark_name_of(item),
                 "mark_slot": str(getattr(item, "mark_source_slot", "") or "").strip().lower(),
                 "preserve_mark_filename": detected,
                 "restore_original": restore_original,

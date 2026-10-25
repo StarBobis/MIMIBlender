@@ -65,6 +65,7 @@ from .blueprint_node_texture import (
     _find_submesh_mark_by_name,
     _load_submesh_mark_dicts,
     _resolve_upstream_submesh_name,
+    mark_name_of,
     normalize_mark_name_enum_value,
 )
 
@@ -95,7 +96,7 @@ def _texture_hash_item_refresh_display(item):
     '''Rebuild the one-line display name shown inside the list widget.'''
     source_type = str(getattr(item, "source_type", "") or "")
     if source_type == 'MARK':
-        source = str(getattr(item, "mark_name", "") or "").strip() or "?"
+        source = mark_name_of(item) or "?"
     elif source_type == 'FILE':
         source = bpy.path.basename(str(getattr(item, "file_path", "") or "").strip()) or "?"
     else:
@@ -399,6 +400,12 @@ class MIMITextureHashItem(PropertyGroup):
         update=lambda self, context: _texture_hash_item_mark_changed(self),
     ) # type: ignore
 
+    mark_name_value: bpy.props.StringProperty(
+        name=tr("Stored Mark Name"),
+        description=tr("Durable mark identity written by the dropdown above. It keeps the row bound to the same mark even when the mark list order changes, which an enum value alone cannot do"),
+        default="",
+    ) # type: ignore
+
     # Global mark selections keep their source identity separately because the
     # same mark label can occur in many Submeshes in one workspace.
     mark_source_submesh: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
@@ -468,9 +475,12 @@ def _find_owner_hash_bind_node(item):
 
 def _texture_hash_item_mark_changed(item):
     '''Picking a mark fills the hash and source metadata automatically.'''
+    # Persist the identifier before reading it: the enum index only describes a
+    # position in the current dropdown list and drifts when marks are reordered.
+    item.mark_name_value = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
     owner = _find_owner_hash_bind_node(item)
     if getattr(owner, "bl_idname", "") == 'MIMINode_Hash_Texture_Global':
-        global_mark = _find_global_hash_mark_by_identifier(item.mark_name)
+        global_mark = _find_global_hash_mark_by_identifier(item.mark_name_value)
         if global_mark:
             item.texture_hash = global_mark["hash"]
             item.mark_source_submesh = global_mark["submesh_name"]
@@ -682,7 +692,7 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
         existing_names = set()
         for row_item in node.texture_hash_items:
             if str(row_item.source_type or "") == 'MARK':
-                existing_names.add(normalize_mark_name_enum_value(row_item.mark_name).lower())
+                existing_names.add(mark_name_of(row_item).lower())
 
         added_count = 0
         skipped_count = 0
@@ -707,6 +717,7 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
             row_item.texture_hash = mark_dict["hash"]
             row_item.source_type = 'MARK'
             row_item.mark_name = mark_dict["name"]
+            row_item.mark_name_value = mark_dict["name"]
             _texture_hash_item_refresh_display(row_item)
             added_count += 1
             existing_names.add(mark_dict["name"].lower())
@@ -754,11 +765,11 @@ def _hash_row_output_name(node, item):
     export does not write.
     '''
     texture_hash = str(item.texture_hash or "").strip().lower() or "00000000"
-    # Scanned rows keep their source identity; legacy rows keep their enum value.
+    # Scanned rows keep their source identity; legacy rows use the durable name.
     if bool(item.global_detected):
         mark_name = str(item.mark_source_name or "").strip()
     else:
-        mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+        mark_name = mark_name_of(item)
     mark_slot = str(item.mark_source_slot or "").strip().lower()
     # The picked replacement describes the format; an untouched scanned row
     # falls back to the mark's own capture.
