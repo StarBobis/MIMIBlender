@@ -12,6 +12,7 @@ from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
+from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
 from .base.standard_exporter import StandardExporter
 from .base import sections
 from . import yysls_cloth
@@ -81,6 +82,15 @@ class ExportYYSLS(StandardExporter):
             texture_override_ib_section.append("; Disabled mods leave the game draw untouched.")
             texture_override_ib_section.append("if $costume_mods")
             texture_override_ib_section.append("handling = skip")
+
+            # Skip Draw: hide this Submesh inside the same costume_mods gate,
+            # so a disabled mod still leaves the game draw untouched. The
+            # gate must be closed here because no later command may run.
+            if is_submesh_skipped(submesh_model):
+                append_skip_draw_comment(texture_override_ib_section, submesh_model)
+                texture_override_ib_section.append("endif")
+                texture_override_ib_section.new_line()
+                continue
 
             # An empty index buffer means the submesh is hidden: null the IB out.
             ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)

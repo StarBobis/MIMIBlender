@@ -9,6 +9,7 @@ from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.buffer_export_helper import BufferExportHelper
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
+from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.mmt_workspace import MMTWorkSpace
 
@@ -96,6 +97,13 @@ class ExportEFMI:
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
             texture_override_ib_section.append("match_index_count = " + str(submesh_model.match_index_count))
             texture_override_ib_section.append("handling = skip")
+
+            # Skip Draw: this Submesh is hidden. The original draw stays
+            # skipped and neither textures nor instanced draws are re-issued.
+            if drawib_model is not None and is_submesh_skipped(submesh_model):
+                append_skip_draw_comment(texture_override_ib_section, submesh_model)
+                texture_override_ib_section.new_line()
+                continue
 
             texture_override_ib_section.append("run = CommandList\\EFMIv1\\OverrideTextures")
 

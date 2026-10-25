@@ -17,6 +17,7 @@ from ...common.global_config import GlobalConfig
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
+from ...common.skip_draw import append_skip_draw_comment, is_submesh_skipped
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
 from .shapekeys import (
@@ -165,6 +166,14 @@ class Exporter(StandardExporter):
                         texture_override_ib_section.append("checktextureoverride = " + texture_markup_info.mark_slot)
 
             texture_override_ib_section.append("handling = skip")
+
+            # Skip Draw: the Submesh is hidden, so its VB bindings, texture
+            # slots and draws are never written. Cross-IB participants are
+            # rejected before export, so no guest block can depend on it.
+            if is_submesh_skipped(submesh_model):
+                append_skip_draw_comment(texture_override_ib_section, submesh_model)
+                texture_override_ib_section.new_line()
+                continue
 
             # An empty index buffer means the submesh is hidden: leave it skipped.
             ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)

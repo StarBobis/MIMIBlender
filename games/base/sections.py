@@ -20,6 +20,7 @@ from ...common.global_config import GlobalConfig
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
+from ...common.skip_draw import append_skip_draw_comment, is_submesh_skipped
 
 
 # ----------------------------------------------------------------------
@@ -77,6 +78,13 @@ def add_unity_vs_texture_override_ib_sections(ini_builder: M_IniBuilder, drawib_
         texture_override_ib_section.append("hash = " + draw_ib)
         texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
         texture_override_ib_section.append("handling = skip")
+
+        # Skip Draw: the Submesh is hidden, so the original draw stays skipped
+        # and nothing is bound or redrawn after this point.
+        if is_submesh_skipped(submesh_model):
+            append_skip_draw_comment(texture_override_ib_section, submesh_model)
+            texture_override_ib_section.new_line()
+            continue
 
         # An empty index buffer means the submesh is hidden: null the IB out.
         ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)
@@ -263,6 +271,14 @@ def add_unity_cs_texture_override_ib_sections(ini_builder: M_IniBuilder, drawib_
                     texture_override_ib_section.append("checktextureoverride = " + texture_markup_info.mark_slot)
 
         texture_override_ib_section.append("handling = skip")
+
+        # Skip Draw: keep the matched draw skipped and never redraw it. The
+        # checktextureoverride gates above are intentionally kept, so hiding
+        # stays limited to the original resources like every other override.
+        if is_submesh_skipped(submesh_model):
+            append_skip_draw_comment(texture_override_ib_section, submesh_model)
+            texture_override_ib_section.new_line()
+            continue
 
         # An empty index buffer means the submesh is hidden: leave it skipped.
         ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)

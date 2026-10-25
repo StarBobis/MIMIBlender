@@ -9,6 +9,7 @@ resource sections and the whole export pipeline come from the shared base.
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
+from ..common.skip_draw import append_hidden_submesh_section, is_submesh_skipped
 from .base.standard_exporter import StandardExporter
 from .base import sections
 
@@ -33,6 +34,18 @@ class ExportSnowBreak(StandardExporter):
             texture_override_name_suffix = drawib_model.get_submesh_texture_override_suffix(submesh_model)
             ib_resource_name = drawib_model.get_submesh_ib_resource_name(submesh_model)
             backup_resource_name = "Resource_IB_" + drawib_model.get_submesh_texture_override_suffix(submesh_model) + "_Bak"
+
+            # Skip Draw: a hidden Submesh is never drawn, so it needs neither
+            # the IB backup nor any binding; only the matched skip remains.
+            if is_submesh_skipped(submesh_model):
+                append_hidden_submesh_section(
+                    texture_override_ib_section,
+                    draw_ib,
+                    texture_override_name_suffix,
+                    submesh_model.match_first_index,
+                    submesh_model,
+                )
+                continue
 
             texture_override_ib_section.append("[" + backup_resource_name + "]")
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")

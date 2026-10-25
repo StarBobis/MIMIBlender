@@ -9,6 +9,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..common.global_config import GlobalConfig, LogicName
 from ..i18n.i18n import I18nOperator, tr, translatable
+from ..utils.log_utils import LOG
 from ..utils.gimi_face_mod import FACE_VERTEX_STRIDE, FaceModPart, build_key_bytes, gimi_face_local_to_game_positions, parse_face_index_hashes, slice_face_base_buffer, write_face_mod
 from ..workspace.mmt_workspace import MMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
@@ -100,6 +101,15 @@ def _build_face_part(object_node) -> FaceModPart:
     submesh_name = object_node._get_effective_parse_name()
     if not submesh_name:
         raise FaceModExportError(tr("Object '{name}' has no associated Submesh.").format(name=obj.name))
+
+    # Skip Draw and a Face Mod contradict each other: the main mod hides the
+    # whole Submesh, so the face edit can never be seen. The Face Mod itself
+    # still exports normally, hence a warning instead of an error.
+    if bool(getattr(object_node, "skip_draw", False)):
+        LOG.warning(
+            "Skip Draw is enabled for Submesh '" + submesh_name
+            + "', so the Face Mod of object '" + obj.name + "' will not be visible in game"
+        )
 
     source_path = MMTWorkSpace.check_and_get_submesh_json_path(submesh_name)
     submesh_json = SubmeshJson(source_path)

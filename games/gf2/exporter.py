@@ -19,6 +19,7 @@ sections) comes from the shared base in games/base/.
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
+from ...common.skip_draw import append_hidden_submesh_section, is_submesh_skipped
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
 from ...common.gimi_texture_slots import collect_gimi_texture_bindings, gimi_texture_lines
@@ -60,6 +61,19 @@ class GF2Exporter(StandardExporter):
         for submesh_model in drawib_model.submesh_model_list:
             texture_override_name_suffix = drawib_model.get_submesh_texture_override_suffix(submesh_model)
             ib_resource_name = drawib_model.get_submesh_ib_resource_name(submesh_model)
+
+            # Skip Draw: the DrawIB level section above already skips the whole
+            # original IB, so a hidden Submesh only needs its own matched skip
+            # section and must not submit textures or draws.
+            if is_submesh_skipped(submesh_model):
+                append_hidden_submesh_section(
+                    texture_override_ib_section,
+                    draw_ib,
+                    texture_override_name_suffix,
+                    submesh_model.match_first_index,
+                    submesh_model,
+                )
+                continue
 
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)

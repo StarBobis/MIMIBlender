@@ -15,6 +15,12 @@ class DrawCallModel:
     # bindings switched in. Its own switch conditions always travel with it.
     cross_render_at_submesh:str = ""
 
+    # Set by the Object Info / Object List "Skip Draw" checkbox. The INI acts
+    # per Submesh, so SubMeshModel folds every draw call of one Submesh into a
+    # single state: a hidden Submesh keeps handling = skip and is never
+    # redrawn with the mod's index buffer.
+    skip_draw:bool = False
+
     # After obj_name is passed in, resolve these attributes for later use
     match_draw_ib:str = field(init=False,repr=False,default="") # DrawIB used for matching
     match_index_count:str = field(init=False,repr=False,default="") # IndexCount used for matching

@@ -33,6 +33,7 @@ from ...common.d3d11_gametype import D3D11GameType
 from ...model.blueprint_model import BluePrintModel
 from ...model.draw_call_model import DrawCallModel
 from ...model.drawib_model import DrawIBModel
+from ...common.skip_draw import aggregate_skip_draw
 from ...workspace.submesh_json import SubmeshJson
 from ...workspace.texture_metadata_helper import TextureMetadataResolver
 from .merged_component import GLOBAL_GROUP_NAME, localize_blendindices
@@ -213,17 +214,25 @@ class DrawIBModelWWMI:
             submesh_seen[submesh_name] = mfi_int
 
         for submesh_name, mfi_int in sorted(submesh_seen.items(), key=lambda item: item[1]):
+            # Collect this Submesh's draw calls once: the component section and
+            # the Skip Draw state must read exactly the same list.
+            submesh_drawcall_model_list = [
+                draw for draw in self.ordered_drawcall_model_list
+                if draw.match_submesh_name == submesh_name
+            ]
+            # Fold Skip Draw exactly like SubMeshModel does, so the WWMI
+            # component section and the shared export validation agree.
+            submesh_skip_draw, _, _ = aggregate_skip_draw(submesh_drawcall_model_list)
             self.submesh_model_list.append(SimpleNamespace(
                 submesh_name=submesh_name,
                 display_str=submesh_name,  # initially equals submesh_name, later overridden by apply_alias_dict
                 match_first_index=mfi_int,
                 d3d11_game_type=self.d3d11_game_type,
+                # Blueprint hiding request for this Submesh (see skip_draw.py).
+                skip_draw=submesh_skip_draw,
                 # Preserve the original objects, including their node bindings
                 # and switch conditions, for the shared texture export pass.
-                drawcall_model_list=[
-                    draw for draw in self.ordered_drawcall_model_list
-                    if draw.match_submesh_name == submesh_name
-                ],
+                drawcall_model_list=submesh_drawcall_model_list,
             ))
 
         if self.submesh_model_list:

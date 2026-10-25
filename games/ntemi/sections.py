@@ -14,6 +14,7 @@ from ...common.m_ini_helper import M_IniHelper
 from ...common.m_control_flow import M_ControlFlow
 from ...common.m_ini_builder import get_xxmi_tail_comment_lines
 from ...common.global_config import GlobalConfig
+from ...common.skip_draw import SKIP_DRAW_COMMENT, is_submesh_skipped
 from .parts import resource_token, part_name
 
 # NTMIv1 compute shader slot bindings (standard for the NTMIv1 skinning framework)
@@ -347,6 +348,13 @@ def append_draw_overrides(lines: list[str], drawib_model_list,
         for part_index, submesh_model in enumerate(drawib_model.submesh_model_list):
             name = part_name(drawib_model, part_index, submesh_model)
             token = resource_token(name)
+
+            # Skip Draw: this DrawIB is skipped as one range above, so a hidden
+            # part must not be rebound or redrawn here; only a comment marks
+            # why it is missing from the replacement block.
+            if is_submesh_skipped(submesh_model):
+                lines.append(SKIP_DRAW_COMMENT + " part " + name + " is not drawn by this mod")
+                continue
 
             lines.extend([
                 f"; [part:{name}] [vertex_count:{get_vertex_count(submesh_model)}]",

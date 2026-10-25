@@ -380,6 +380,14 @@ class MIMINode_Object_Info(MIMINodeBase):
     original_object_name: bpy.props.StringProperty(name=tr("Original Object Name"), default="") #type: ignore
     component: bpy.props.StringProperty(name=tr("Component"), default="") #type: ignore
     submesh_name: bpy.props.StringProperty(name=tr("Submesh"), default="", update=update_submesh_name) #type: ignore
+    # Skip Draw hides the whole Submesh this node resolves to. The flag lives
+    # on the node, but the INI works per Submesh, so one marked object is
+    # enough and every other object of that Submesh stops being drawn too.
+    skip_draw: bpy.props.BoolProperty(
+        name=tr("Skip Draw"),
+        description=tr("Hide this whole Submesh: the generated INI keeps handling = skip and never redraws it"),
+        default=False,
+    ) #type: ignore
     index_count_display: bpy.props.StringProperty(name="IndexCount", default="") #type: ignore
     first_index_display: bpy.props.StringProperty(name="FirstIndex", default="") #type: ignore
 
@@ -410,6 +418,18 @@ class MIMINode_Object_Info(MIMINodeBase):
 
             if self.submesh_name and self.submesh_name not in BlueprintExportHelper.get_tree_submesh_names(tree=tree):
                 layout.label(text=tr("Current Submesh is not in the list; export will fall back to object name resolution"), icon='ERROR')
+
+        # Skip Draw only means something when this node resolves to a Submesh.
+        # The effective name is shown so a node without a dropdown value (it
+        # falls back to the object name rule) still explains what is hidden.
+        if self.object_name or self.submesh_name:
+            row = layout.row(align=True)
+            row.prop(self, "skip_draw", text=tr("Skip Draw (this Submesh)"))
+            if self.skip_draw:
+                layout.label(
+                    text=tr("Hidden Submesh: {name}").format(name=self._get_effective_parse_name()),
+                    icon='HIDE_ON',
+                )
 
 
 

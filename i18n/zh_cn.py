@@ -823,6 +823,14 @@ TRANSLATIONS_ZH_CN = {
     "Optional Submesh override, same semantics as the Object Info node": "可选的Submesh覆盖，语义与物体信息节点相同",
     "Blender object of this entry; parse falls back to object name resolution when the Submesh is empty": "该条目对应的Blender物体；Submesh留空时解析回退到按物体名解析",
     "Object": "物体",
+    # ---- Skip Draw: hide a whole Submesh from the generated mod ----
+    # The checkbox lives on the Object Info node and on every Object List row.
+    "Skip Draw": "跳过绘制",
+    "Skip Draw (this Submesh)": "跳过绘制（整个子网格）",
+    "Hide this whole Submesh: the generated INI keeps handling = skip and never redraws it": "隐藏这个子网格：生成的 INI 只保留 handling = skip，不再重画",
+    "Hidden Submesh: {name}": "已隐藏的子网格：{name}",
+    "This entry hides its whole Submesh.": "该条目会隐藏它所属的整个子网格。",
+    "{count} skipped": "{count} 个已跳过",
     # Auto fill from the SSMT5 texture marks of the upstream Submesh.
     "Auto Fill From Marks": "从标记自动填充",
     "Auto fill done: {added} row(s) added, {skipped} skipped": "自动填充完成：新增 {added} 行，跳过 {skipped} 行",

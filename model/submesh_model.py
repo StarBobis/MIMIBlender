@@ -45,6 +45,13 @@ class SubMeshModel:
     # DrawIBModel.apply_alias_dict() updates it to "{lod_prefix}.{alias}" before export.
     display_str:str = field(init=False, default="")
 
+    # Blueprint "Skip Draw" state, folded from the draw calls of this Submesh.
+    # The INI works per Submesh, so one marked object hides the whole Submesh;
+    # the owner lists keep the export warning and the INI comment accurate.
+    skip_draw:bool = field(init=False, default=False)
+    skip_draw_owner_list:list = field(init=False,repr=False,default_factory=list)
+    skip_draw_unmarked_owner_list:list = field(init=False,repr=False,default_factory=list)
+
     ib:list = field(init=False,repr=False,default_factory=list)
     category_buffer_dict:dict = field(init=False,repr=False,default_factory=dict)
     index_vertex_id_dict:dict = field(init=False,repr=False,default_factory=dict)
@@ -70,7 +77,15 @@ class SubMeshModel:
         
         # display_str defaults to submesh_name; apply_alias_dict can override it before export
         self.display_str = self.submesh_name
-        
+
+        # Fold the blueprint "Skip Draw" flags into the one state the INI can
+        # express. This runs before calc_buffer() so the state is available to
+        # every later reader, including the buffer export.
+        from ..common.skip_draw import aggregate_skip_draw
+        self.skip_draw, self.skip_draw_owner_list, self.skip_draw_unmarked_owner_list = aggregate_skip_draw(
+            self.drawcall_model_list
+        )
+
         self.calc_buffer()
 
     def fix_indices_from_workspace(self, workspace_model):

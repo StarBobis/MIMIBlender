@@ -359,9 +359,29 @@ class Exporter:
                 else []
             )
             drawindexed_str_list = M_IniHelper.get_drawindexed_str_list(drawcall_model_list)
+
+            # Skip Draw: the blueprint hides this Submesh. The component keeps
+            # its section and metadata (component numbering must never drift),
+            # but it re-issues no draw, exactly like a component without any
+            # exported object.
+            component_skip_draw = any(
+                bool(getattr(drawcall_model, "skip_draw", False))
+                for drawcall_model in drawcall_model_list
+            )
+            if component_skip_draw:
+                drawindexed_str_list = []
+
             # A component without any object is skipped in game instead of drawn
             # from the mod's buffers.
             component_has_objects = len(drawindexed_str_list) != 0
+
+            # One reason string keeps both draw branches below in sync when a
+            # component is hidden on purpose instead of unassigned.
+            draw_skipped_reason = (
+                "Skip Draw is enabled for this Submesh"
+                if component_skip_draw
+                else "No matching custom components found"
+            )
 
             texture_override_component.append(scoped_section("TextureOverrideComponent" + component_count_str, draw_ib))
             texture_override_component.append("hash = " + draw_ib_model.wwmi_info.vb0_hash)
@@ -414,7 +434,7 @@ class Exporter:
                         texture_override_component.append("    " + drawindexed_str)
                     texture_override_component.append("    run = " + scoped_name("CommandListCleanupSharedResources", draw_ib))
                 else:
-                    texture_override_component.append("    ; Draw skipped: No matching custom components found")
+                    texture_override_component.append("    ; Draw skipped: " + draw_skipped_reason)
                 texture_override_component.append("  endif")
             else:
                 texture_override_component.append("  handling = skip")
@@ -431,7 +451,7 @@ class Exporter:
                         texture_override_component.append("  " + drawindexed_str)
                     texture_override_component.append("  run = " + scoped_name("CommandListCleanupSharedResources", draw_ib))
                 else:
-                    texture_override_component.append("  ; Draw skipped: No matching custom components found")
+                    texture_override_component.append("  ; Draw skipped: " + draw_skipped_reason)
 
             texture_override_component.append("endif")
             texture_override_component.new_line()
@@ -610,6 +630,10 @@ class Exporter:
             os.path.join(GlobalConfig.path_generate_mod_folder(), filename))
 
     def export(self):
+        # Skip Draw is checked before any buffer or INI is written, so a mixed
+        # or unsupported combination never leaves a half-updated Mod on disk.
+        from ...common.skip_draw import validate_skip_draw
+        validate_skip_draw(list(self.drawib_drawibmodel_dict.values()))
         # Validate all native shape dispatches before overwriting any buffer.
         # A bad second DrawIB must not leave a half-updated Mod on disk.
         # Missing metadata remains an error, never a reason to drop shape keys.

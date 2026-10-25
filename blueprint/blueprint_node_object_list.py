@@ -144,6 +144,10 @@ class MIMIObjectListItem(PropertyGroup):
     of the export, and removing an unwanted object is done by deleting its
     row (which also removes the matching output socket). That keeps the
     node honest, because what the list shows is exactly what gets baked.
+
+    Skip Draw is not an on/off switch either: the entry still exports its
+    data, but its whole Submesh keeps handling = skip in the generated INI
+    and is never redrawn, so the Submesh is hidden while the mod is enabled.
     '''
     name: bpy.props.StringProperty(name=tr("Object"), default="") # type: ignore
 
@@ -163,6 +167,15 @@ class MIMIObjectListItem(PropertyGroup):
         description=tr("Optional Submesh override, same semantics as the Object Info node"),
         default="",
         update=lambda self, context: _object_list_item_changed(self),
+    ) # type: ignore
+
+    # Hides the whole Submesh this entry resolves to. The INI works per
+    # Submesh (one hash plus one match_first_index), so one marked row is
+    # enough and every object of that Submesh stops being drawn as well.
+    skip_draw: bpy.props.BoolProperty(
+        name=tr("Skip Draw"),
+        description=tr("Hide this whole Submesh: the generated INI keeps handling = skip and never redraws it"),
+        default=False,
     ) # type: ignore
 
 
@@ -383,6 +396,11 @@ class MIMINode_Object_List(MIMINodeBase):
         )
         # Every row counts: the list has no disabled entries any more.
         header_row.label(text=tr("{count} object(s)").format(count=len(self.object_items)), icon='OBJECT_DATAMODE')
+        # Hidden Submeshes are easy to forget once the list is collapsed, so
+        # the header keeps a visible marker for them.
+        skipped_row_count = len([row_item for row_item in self.object_items if row_item.skip_draw])
+        if skipped_row_count:
+            header_row.label(text=tr("{count} skipped").format(count=skipped_row_count), icon='HIDE_ON')
 
         if not self.show_details:
             return
@@ -425,6 +443,11 @@ class MIMINode_Object_List(MIMINodeBase):
         box.prop_search(item, "object_name", bpy.data, "objects", text="", icon='OBJECT_DATA')
         if tree is not None:
             box.prop_search(item, "submesh_name", tree, "ssmt_submesh_items", text=tr("Submesh"), icon='OUTLINER_COLLECTION')
+        # Skip Draw belongs to the Submesh, never to this single entry, so the
+        # label spells that out and the hidden entry stays visibly marked.
+        box.prop(item, "skip_draw", text=tr("Skip Draw (this Submesh)"))
+        if item.skip_draw:
+            box.label(text=tr("This entry hides its whole Submesh."), icon='HIDE_ON')
 
 
 classes = (

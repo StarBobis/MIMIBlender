@@ -495,6 +495,9 @@ class BluePrintModel:
                     submesh_name=str(getattr(item, "submesh_name", "") or ""),
                     original_object_name="",
                     chain_key_list=chain_key_list,
+                    # Skip Draw is stored per list row, exactly like the
+                    # Object Info node checkbox.
+                    skip_draw=bool(getattr(item, "skip_draw", False)),
                 )
 
             # Duplicate objects within one expansion would silently emit
@@ -519,6 +522,8 @@ class BluePrintModel:
                 submesh_name=str(getattr(unknown_node, 'submesh_name', '') or ""),
                 original_object_name=str(getattr(unknown_node, 'original_object_name', '') or ""),
                 chain_key_list=chain_key_list,
+                # The checkbox hides the whole Submesh this node resolves to.
+                skip_draw=bool(getattr(unknown_node, "skip_draw", False)),
             )
 
         elif unknown_node.bl_idname == MIMINode_Result_Output.bl_idname:
@@ -533,12 +538,15 @@ class BluePrintModel:
             # them in the regular output layer.
             return
 
-    def _emit_object_source(self, object_name: str, submesh_name: str, original_object_name: str, chain_key_list: list[M_Key]):
+    def _emit_object_source(self, object_name: str, submesh_name: str, original_object_name: str, chain_key_list: list[M_Key], skip_draw: bool = False):
         '''Emit one DrawCallModel (or its UniComponent splits) for an object.
 
         Shared by the Object Info branch and the Object List branch so both
         nodes behave identically: empty meshes are filtered early, and
         UniComponent mode splits the object per Submesh VG range.
+
+        skip_draw carries the blueprint "Skip Draw" checkbox; the whole
+        Submesh is hidden when any of its objects is marked.
         '''
         obj = bpy.data.objects.get(object_name)
 
@@ -557,6 +565,9 @@ class BluePrintModel:
                 obj_model = DrawCallModel(
                     obj_name=temp_obj.name,
                     submesh_name=split_submesh_name,
+                    # Every split of a marked object stays marked, so the whole
+                    # original Submesh is hidden as the user asked.
+                    skip_draw=skip_draw,
                 )
                 obj_model.work_key_list = copy.deepcopy(chain_key_list)
                 self.ordered_draw_obj_data_model_list.append(obj_model)
@@ -569,6 +580,8 @@ class BluePrintModel:
             obj_model = DrawCallModel(
                 obj_name=object_name,
                 submesh_name=submesh_name,
+                # Skip Draw hides the whole Submesh this draw belongs to.
+                skip_draw=skip_draw,
             )
 
             if original_object_name:
@@ -1188,6 +1201,11 @@ class BluePrintModel:
             None, self.global_hash_texture_binding_list,
             {model.draw_ib: model for model in drawib_model_list}, preflight_only=True,
         )
+        # Skip Draw is validated across the whole model set before any exporter
+        # opens a file: mixed marks only warn, combinations that cannot be
+        # expressed (Position.buf frames, cross-IB rendering) raise here.
+        from ..common.skip_draw import validate_skip_draw
+        validate_skip_draw(drawib_model_list)
         # Convert every Slot/Hash replacement before any output file is opened.
         # The copy stage repeats this through the cache, so it stays cheap.
         M_IniHelper.prepare_exact_texture_jobs(drawib_model_list)

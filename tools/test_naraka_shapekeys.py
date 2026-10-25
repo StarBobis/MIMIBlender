@@ -43,6 +43,10 @@ def ensure_parent_packages():
     ):
         if package_name not in sys.modules:
             sys.modules[package_name] = types.ModuleType(package_name)
+    # Skip Draw helpers are bpy-free and live in the real common folder.
+    # Exposing the folder lets this synthetic package import them by path,
+    # exactly like the production module does.
+    sys.modules[TEST_PKG + ".common"].__path__ = [os.path.join(ROOT, "common")]
 
 
 def install_global_config_stub(mod_folder_path: str):

@@ -66,6 +66,10 @@ def setup_modules():
     sys.modules[PACKAGE] = types.ModuleType(PACKAGE)
     for name in ("common", "games", "games.base", "blueprint"):
         install_module(name)
+    # Skip Draw helpers are bpy-free and live in the real common folder.
+    # Exposing the folder lets this synthetic package import them by path,
+    # exactly like the production module does.
+    sys.modules[PACKAGE + ".common"].__path__ = [str(ROOT / "common")]
     # Existing cloth fixtures have no shape keys; load the real optional path.
     # This keeps the regression test sensitive to accidental unguarded hooks.
     install_module("blueprint.blueprint_export_helper", BlueprintExportHelper=NS(
