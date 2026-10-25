@@ -248,10 +248,15 @@ def make_drawib(modules, draw_ib, submesh_list, markup_dict):
 def test_resolve_bindings(modules, source_dir):
     """MARK / FILE / RESOURCE sources and the restore option."""
     draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
 
     source_file = os.path.join(source_dir, "custom.png")
     with open(source_file, "wb") as file:
         file.write(b"fake png bytes")
+    # A plain Slot mark owns no [Resource...] section, so a per-object row
+    # copies the marked capture instead of referencing a section that the
+    # generated INI never writes.
+    mark_source = _write_placeholder(os.path.join(source_dir, "DiffuseMap.dds"))
 
     bound_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
     bound_call.texture_slot_binding_list = [
@@ -271,10 +276,20 @@ def test_resolve_bindings(modules, source_dir):
         ],
     }
     drawib_model = make_drawib(modules, "94517393", submesh_list, markup_dict)
-    drawib_model.resolve_texture_slot_bindings()
+    original_lookup = ini_helper_mod.M_IniHelper._get_slot_texture_source_path
+    ini_helper_mod.M_IniHelper._get_slot_texture_source_path = (
+        lambda draw_ib_model=None, part_name="", texture_markup_info=None: mark_source
+    )
+    try:
+        drawib_model.resolve_texture_slot_bindings()
+    finally:
+        ini_helper_mod.M_IniHelper._get_slot_texture_source_path = original_lookup
 
-    # MARK rows reuse the existing mark resource name as-is.
-    assert bound_call.resolved_texture_slot_lines[1] == "ps-t0 = Resource-DiffuseMap", bound_call.resolved_texture_slot_lines
+    # A Slot mark gives its object a copy of the marked image, so the line
+    # points at a resource the export really declares.
+    assert bound_call.resolved_texture_slot_lines[1].startswith("ps-t0 = ResourceTex_"), bound_call.resolved_texture_slot_lines
+    # A SharedSlot mark keeps its own section, which the row reuses untouched.
+    assert bound_call.resolved_texture_slot_lines[7] == "ps-t3 = Resource-LightMap", bound_call.resolved_texture_slot_lines
     # FILE rows get a generated resource name, recorded for copy + section.
     file_line = bound_call.resolved_texture_slot_lines[3]
     assert file_line.startswith("ps-t1 = ResourceTex_94517393_94517393_0_Hair_A_ps_t1"), file_line
@@ -292,11 +307,13 @@ def test_resolve_bindings(modules, source_dir):
     assert plain_call.resolved_texture_slot_lines == []
     assert plain_call.resolved_texture_slot_restore_lines == []
 
-    # FILE jobs are recorded exactly once (resource list + copy list).
+    # FILE jobs are recorded exactly once (resource list + copy list). The
+    # copied Slot mark is recorded the same way, so two objects of one Submesh
+    # can bind two different pictures.
     assert (file_resource_name, file_resource_name + '.png') in drawib_model.object_texture_binding_resource_list
     assert len([row for row in drawib_model.object_texture_binding_resource_list if not row[1]]) == 4
-    assert len(drawib_model.object_texture_binding_file_list) == 1
-    assert drawib_model.object_texture_binding_file_list[0][1] == source_file
+    assert len(drawib_model.object_texture_binding_file_list) == 2, drawib_model.object_texture_binding_file_list
+    assert [row[1] for row in drawib_model.object_texture_binding_file_list] == [mark_source, source_file]
 
     print("test_resolve_bindings OK")
 
@@ -612,6 +629,94 @@ def test_output_alias(modules, source_dir, texture_root):
     print("test_output_alias OK")
 
 
+def test_mark_replacement_image_switch(modules, source_dir, texture_root):
+    """Two switch states bind two pictures on the same slot of one object.
+
+    This is the workflow a key switch needs: the same object is wired through
+    two Slot Texture Bind nodes, each state picks its own image, and the export
+    must produce two different resources. Reusing one marked texture for both
+    states is reported, because the switch would then change nothing.
+    """
+    draw_call_mod = modules[TEST_PKG + ".model.draw_call_model"]
+    m_key_mod = modules[TEST_PKG + ".common.m_key"]
+    ini_helper_mod = modules[TEST_PKG + ".common.m_ini_helper"]
+    config_mod = sys.modules[TEST_PKG + ".common.global_config"]
+    config_mod.GlobalConfig._texture_root = texture_root
+
+    blue = _write_placeholder(os.path.join(source_dir, "blue.dds"), b"blue bytes")
+    black = _write_placeholder(os.path.join(source_dir, "black.dds"), b"black bytes")
+    mark_source = _write_placeholder(os.path.join(source_dir, "MarkedDiffuse.dds"), b"mark bytes")
+    markup_dict = {"94517393-0": [FakeMarkup("DiffuseMap", "Slot")]}
+
+    def branch(image_path, state):
+        """Build one switch state of the same object."""
+        key = m_key_mod.M_Key()
+        key.key_name = "$swapkey0"
+        key.tmp_value = state
+        call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_A", submesh_name="94517393-0")
+        call.work_key_list = [key]
+        call.texture_slot_binding_list = [
+            make_binding(
+                "MARK", slot="ps-t3", mark_name="DiffuseMap",
+                mark_file_path=image_path,
+            ),
+        ]
+        return call
+
+    calls = [branch(blue, 0), branch(black, 1)]
+    model = make_drawib(
+        modules, "94517393",
+        [FakeSubmeshModel("94517393-0", calls)],
+        markup_dict,
+    )
+    original_lookup = ini_helper_mod.M_IniHelper._get_slot_texture_source_path
+    ini_helper_mod.M_IniHelper._get_slot_texture_source_path = (
+        lambda draw_ib_model=None, part_name="", texture_markup_info=None: mark_source
+    )
+    try:
+        model.resolve_texture_slot_bindings()
+    finally:
+        ini_helper_mod.M_IniHelper._get_slot_texture_source_path = original_lookup
+
+    # The two states bind different resources, so switching really swaps the
+    # picture. Both rows keep the same physical slot.
+    line_a = calls[0].resolved_texture_slot_lines[1]
+    line_b = calls[1].resolved_texture_slot_lines[1]
+    assert line_a.startswith("ps-t3 = ResourceTex_"), line_a
+    assert line_b.startswith("ps-t3 = ResourceTex_"), line_b
+    assert line_a != line_b, (line_a, line_b)
+    # Each state copies its own image; the marked capture is not used.
+    copied_sources = [row[1] for row in model.object_texture_binding_file_list]
+    assert copied_sources == [blue, black], copied_sources
+
+    # Reusing one picture in both states is legal but pointless; the export
+    # says so instead of leaving the user with "the key does nothing".
+    same_source_calls = [branch(mark_source, 0), branch(mark_source, 1)]
+    same_model = make_drawib(
+        modules, "94517393",
+        [FakeSubmeshModel("94517393-0", same_source_calls)],
+        markup_dict,
+    )
+    ini_helper_mod.M_IniHelper._get_slot_texture_source_path = (
+        lambda draw_ib_model=None, part_name="", texture_markup_info=None: mark_source
+    )
+    printed = []
+    try:
+        import contextlib
+        import io
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            same_model.resolve_texture_slot_bindings()
+        printed = buffer.getvalue().splitlines()
+    finally:
+        ini_helper_mod.M_IniHelper._get_slot_texture_source_path = original_lookup
+    # One image shared by two states reuses one resource and warns.
+    assert same_source_calls[0].resolved_texture_slot_lines[1] == same_source_calls[1].resolved_texture_slot_lines[1]
+    assert any("WARNING" in line and "will not change the picture" in line for line in printed), printed
+
+    print("test_mark_replacement_image_switch OK")
+
+
 def main():
     ensure_parent_packages()
     install_stubs()
@@ -629,6 +734,7 @@ def main():
         test_drawindexed_line_emission(modules)
         test_resource_sections_and_copy(modules, temp_dir)
         test_output_alias(modules, source_dir, temp_dir)
+        test_mark_replacement_image_switch(modules, source_dir, temp_dir)
 
     print("ALL TEXTURE BIND TESTS PASSED")
 

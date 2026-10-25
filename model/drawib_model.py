@@ -502,6 +502,10 @@ class DrawIBModel:
         # One FILE resource per unique source path, shared by all objects
         # that picked the same file (same dedupe idea as the hash style).
         file_resource_by_source = {}
+        # (object, slot) -> {resource: [switch conditions]}. Filled while the
+        # rows resolve and checked once at the end, because a switch branch
+        # that binds the same picture as its sibling changes nothing at all.
+        slot_state_map = {}
 
         for submesh_model, draw_model in binding_owner_list:
             markup_list = self.get_submesh_texture_markup_info_list(submesh_model)
@@ -527,6 +531,15 @@ class DrawIBModel:
                             + "' of object '" + owner_name + "' is submitted by name and generates no texture file, "
                             + "so it cannot be renamed; clear the texture alias."
                         )
+                    if str(binding.get("mark_file_path", "") or "").strip():
+                        # The API submission always uses the marked image; a
+                        # per-object image has to replace a physical slot.
+                        raise ValueError(
+                            "Slot Texture Bind node '" + node_label + "': the GIMI texture slot '" + logical_slot
+                            + "' of object '" + owner_name + "' is submitted by name, so it cannot carry a per-object "
+                            + "replacement image; clear the image, or use the External File source with the captured "
+                            + "physical slot for a per-object replacement."
+                        )
                     # Captured slots and restore flags do not describe the API's
                     # runtime slots. Re-submitting defaults restores next draws.
                     resource = self._resolve_mark_texture_resource(
@@ -551,16 +564,34 @@ class DrawIBModel:
 
                 source_type = str(binding.get("source_type", "") or "")
                 if source_type == "MARK":
-                    if normalize_alias_stem(binding.get("output_name", "")):
-                        # A renamed mark binding must own a file, so the mark's
-                        # captured image is copied under the alias instead of
-                        # sharing the Submesh-wide mark resource.
-                        resource_name = self._resolve_mark_alias_resource(
-                            binding, markup_list, submesh_model, node_label, owner_name,
-                            slot, used_resource_names, file_resource_by_source,
-                        )
+                    # A marked texture is shared by every object of the
+                    # Submesh, so pointing a row at it gives every object the
+                    # same picture. The row only becomes a real per-object
+                    # choice when it owns an image: either the one the user
+                    # picked on the row or a copy of the marked capture.
+                    matched_markup = self._find_mark_markup(
+                        binding, markup_list, node_label, owner_name, submesh_model,
+                    )
+                    replacement_image = str(binding.get("mark_file_path", "") or "").strip()
+                    rename_requested = bool(normalize_alias_stem(binding.get("output_name", "")))
+                    # A plain Slot mark is bound by file name and declares no
+                    # [Resource...] section, so a per-object reference to it
+                    # would point at nothing (the switch then never changes the
+                    # picture). Only a SharedSlot mark owns a shared section.
+                    shares_mark_resource = (
+                        str(getattr(matched_markup, "mark_type", "") or "") == "SharedSlot"
+                        and not replacement_image
+                        and not rename_requested
+                    )
+                    if shares_mark_resource:
+                        resource_name = matched_markup.get_resource_name()
                     else:
-                        resource_name = self._resolve_mark_texture_resource(binding, markup_list, node_label, owner_name, submesh_model)
+                        resource_name = self._resolve_mark_image_resource(
+                            binding, matched_markup, markup_list, submesh_model,
+                            node_label, owner_name, slot,
+                            used_resource_names, file_resource_by_source,
+                            source_path_override=replacement_image,
+                        )
                 elif source_type == "FILE":
                     # A slot row has no mark name, so the slot identifies the
                     # captured original; a missing one keeps the raw copy.
@@ -602,8 +633,44 @@ class DrawIBModel:
                 before_lines.append(slot + " = " + resource_name)
                 after_lines.insert(0, slot + " = " + backup_name)
 
+                # Remember which picture each switch state binds for this
+                # object and slot; the check after the loop turns a silent
+                # "the key does nothing" into a readable warning.
+                condition = str(draw_model.get_condition_str() or "").strip()
+                resource_states = slot_state_map.setdefault((owner_name.lower(), slot), {})
+                resource_states.setdefault(resource_name, []).append(condition)
+
             draw_model.resolved_texture_slot_lines = before_lines
             draw_model.resolved_texture_slot_restore_lines = after_lines
+
+        self._warn_identical_switch_states(slot_state_map)
+
+    @staticmethod
+    def _warn_identical_switch_states(slot_state_map):
+        '''Warn when a key switch rebinds a slot to the picture it already has.
+
+        Two states of one switch bind the same object and slot. If both
+        resolve to the same resource, the switch redraws the object with an
+        unchanged image: the INI is valid and the key really toggles, so
+        nothing fails, but the user sees "the colour never changes". That is
+        the classic result of pointing both branches at one marked texture,
+        and it needs the branch that should differ to own an image.
+        '''
+        for (owner_name, slot), resource_states in slot_state_map.items():
+            if len(resource_states) != 1:
+                # Different pictures per state: exactly what a switch is for.
+                continue
+            resource_name = next(iter(resource_states))
+            conditions = [item for item in resource_states[resource_name] if item]
+            if len(set(conditions)) < 2:
+                # One state only, or identical conditions: nothing to compare.
+                continue
+            print(
+                "DrawIBModel: WARNING: object '" + owner_name + "' binds slot '" + slot
+                + "' to the same texture '" + resource_name + "' in " + str(len(set(conditions)))
+                + " switch states. Switching will not change the picture;"
+                + " give each branch its own replacement image."
+            )
 
     def _find_mark_markup(self, binding, markup_list, node_label, owner_name, submesh_model):
         '''Return the Slot / SharedSlot mark a MARK row points at.
@@ -641,39 +708,56 @@ class DrawIBModel:
         '''MARK source: reuse the Submesh mark's existing resource name.'''
         return self._find_mark_markup(binding, markup_list, node_label, owner_name, submesh_model).get_resource_name()
 
-    def _resolve_mark_alias_resource(self, binding, markup_list, submesh_model, node_label, owner_name, slot, used_resource_names, file_resource_by_source) -> str:
-        '''MARK source with a texture alias: copy the mark under the alias.
+    def _resolve_mark_image_resource(self, binding, matched_markup, markup_list, submesh_model,
+                                     node_label, owner_name, slot,
+                                     used_resource_names, file_resource_by_source,
+                                     source_path_override="") -> str:
+        '''MARK source that owns a file: copy an image and bind that copy.
 
-        A marked texture is normally a resource shared by every object of the
-        Submesh, so it cannot carry a name that belongs to one node row. An
-        alias therefore copies the mark's captured image once and binds that
-        copy, exactly like an external FILE row would.
+        Two cases need their own file instead of the Submesh-wide mark:
+
+        - the row picked its own replacement image (``source_path_override``);
+          this is what lets two objects of one Submesh show different pictures
+          on the same slot, and therefore what makes a key switch visible;
+        - the row targets a plain Slot mark, which the game binds by file name
+          and which declares no ``[Resource...]`` section. Referencing it from
+          a draw would point at a section that does not exist, so the marked
+          capture is copied and the copy is bound.
+
+        The copy is validated, deduped and named exactly like an external file
+        row, so an alias, the exact-format conversion and the generated-file
+        preview all behave identically.
         '''
-        matched_markup = self._find_mark_markup(binding, markup_list, node_label, owner_name, submesh_model)
         # Imported here on purpose: m_ini_helper imports DrawIBModel for its
         # type hints, so a module-level import would create a cycle.
         from ..common.m_ini_helper import M_IniHelper
-        source_path = M_IniHelper._get_slot_texture_source_path(
-            draw_ib_model=self,
-            part_name=self.get_submesh_part_name(submesh_model),
-            texture_markup_info=matched_markup,
-        )
+        source_path = str(source_path_override or "").strip()
+        if not source_path:
+            source_path = M_IniHelper._get_slot_texture_source_path(
+                draw_ib_model=self,
+                part_name=self.get_submesh_part_name(submesh_model),
+                texture_markup_info=matched_markup,
+            )
         if not source_path or not os.path.exists(source_path):
             raise ValueError(
                 "Slot Texture Bind node '" + node_label + "': mark '" + str(binding.get("mark_name", "") or "")
-                + "' cannot be renamed to '" + str(binding.get("output_name", "") or "")
-                + "' because its original texture file was not found in the workspace extract (object '"
-                + owner_name + "'); clear the texture alias to keep using the shared mark resource."
+                + "' has no image to copy for object '" + owner_name
+                + "' (the original texture file was not found in the workspace extract); "
+                + "pick a replacement image on the row, or share a SharedSlot mark instead."
             )
-        # The format decision runs on the mark's own capture, so a renamed mark
-        # keeps exactly the bytes and format the shared mark pipeline produces.
-        replacement_plan = self._plan_replacement(
-            source_path, binding, markup_list, submesh_model,
-            slot=slot,
-            mark_name=str(binding.get("mark_name", "") or ""),
-            node_label=node_label,
-            owner_name=owner_name,
-        )
+        # The format decision runs on the chosen image, with the mark's own
+        # capture as the format reference when the row has no image of its own.
+        # A copied mark capture already has the game's bytes and format, so it
+        # is published unchanged instead of being converted back to itself.
+        replacement_plan = None
+        if str(source_path_override or "").strip():
+            replacement_plan = self._plan_replacement(
+                source_path, binding, markup_list, submesh_model,
+                slot=slot,
+                mark_name=str(binding.get("mark_name", "") or ""),
+                node_label=node_label,
+                owner_name=owner_name,
+            )
         return self._resolve_file_texture_resource(
             binding, node_label, owner_name, slot.replace("-", "_"),
             used_resource_names, file_resource_by_source,

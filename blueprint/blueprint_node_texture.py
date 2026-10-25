@@ -20,12 +20,17 @@ textures under different switch states.
 
 Texture sources:
 - MARK:     reuse a texture marked in SSMT5 (TextureMarkUpInfoList of the
-            Submesh). No new file copy or resource section is needed; the
-            existing Slot / SharedSlot pipeline already provides them.
+            Submesh). The row may also carry its own replacement image, which
+            is what gives two objects of one Submesh two different pictures on
+            the same slot; without one it reuses the Submesh-wide mark.
 - FILE:     an external image file (dds/png/...). The exporter copies it
             into the generated mod and emits a dedicated resource section.
 - RESOURCE: an already existing resource name (advanced users who share
             one resource between several objects).
+
+Every row binds right before one drawindexed call, so the same node can be
+wired into different Switch Key states (copy the Object Info node per state)
+and each state then shows its own picture.
 '''
 import re
 import time
@@ -38,11 +43,9 @@ from .blueprint_node_base import MIMINodeBase
 from ..common.global_config import GlobalConfig
 from ..common.gimi_texture_slots import get_gimi_texture_slot
 from ..common.texture_output_naming import (
-    INDEX_PLACEHOLDER,
     file_resource_stem,
     normalize_alias_stem,
     shared_slot_output_filename,
-    slot_mark_output_filename,
 )
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
@@ -86,6 +89,11 @@ def _texture_slot_item_refresh_display(item):
     source_type = str(getattr(item, "source_type", "") or "")
     if source_type == 'MARK':
         source = str(getattr(item, "mark_name", "") or "").strip() or "?"
+        # A row with its own image differs from the plain mark reuse, so the
+        # list has to reveal that difference without opening the row.
+        replacement_image = bpy.path.basename(str(getattr(item, "mark_file_path", "") or "").strip())
+        if replacement_image:
+            source = source + " + " + replacement_image
     elif source_type == 'FILE':
         source = bpy.path.basename(str(getattr(item, "file_path", "") or "").strip()) or "?"
     else:
@@ -127,8 +135,8 @@ class MIMITextureSlotItem(PropertyGroup):
         name=tr("Source"),
         description=tr("Where the replacement texture comes from"),
         items=[
-            ('MARK', tr("Marked Texture"), tr("Reuse a texture marked in the SSMT5 texture mark page of this Submesh")),
-            ('FILE', tr("External File"), tr("Copy an external image file into the generated mod")),
+            ('MARK', tr("Marked Texture"), tr("Reuse a texture marked in the SSMT5 texture mark page of this Submesh, and optionally give this object its own image for that slot")),
+            ('FILE', tr("External File"), tr("Copy an external image file into the generated mod; the slot is typed by hand")),
             ('RESOURCE', tr("Existing Resource"), tr("Reference an existing [ResourceXXX] section by name")),
         ],
         default='MARK',
@@ -145,6 +153,14 @@ class MIMITextureSlotItem(PropertyGroup):
     file_path: bpy.props.StringProperty(
         name=tr("Texture File"),
         description=tr("Image file (dds, png, jpg, bmp or tga) copied into the generated mod at export time"),
+        subtype='FILE_PATH',
+        default="",
+        update=lambda self, context: _texture_slot_item_refresh_display(self),
+    ) # type: ignore
+
+    mark_file_path: bpy.props.StringProperty(
+        name=tr("Replacement Image"),
+        description=tr("Image that replaces the marked texture for this object only. Leave empty to reuse the marked image shared by the whole Submesh; pick a file to give two objects of one Submesh two different pictures on the same slot, which is what a key switch needs"),
         subtype='FILE_PATH',
         default="",
         update=lambda self, context: _texture_slot_item_refresh_display(self),
@@ -221,6 +237,68 @@ def _resolve_upstream_submesh_name(node, depth=0):
         if submesh_name or object_name:
             return submesh_name or object_name
     return ""
+
+
+# Nodes that only forward objects unchanged. The switch state readout walks
+# through them, because a binding is often placed above or below a Group.
+_SWITCH_STATE_PASS_THROUGH = (
+    'NodeReroute',
+    'MIMINode_Object_Group',
+    'MIMINode_Texture_Bind',
+    'MIMINode_Hash_Texture_Bind',
+)
+
+
+def downstream_switch_state(node, depth_limit=12):
+    '''Return ``(key, alias, state_index, state_count)`` of the nearest Switch Key.
+
+    A texture binding only takes effect in the state its object is drawn in, so
+    the node shows that state instead of leaving the wiring invisible.  An empty
+    tuple means no Switch Key follows this node, so the binding always applies.
+    '''
+    visited = set()
+    pending = [node]
+    steps = 0
+    while pending and steps <= depth_limit:
+        steps += 1
+        current = pending.pop(0)
+        for output in getattr(current, "outputs", []):
+            for link in output.links:
+                target = link.to_node
+                if target is None:
+                    continue
+                pointer = target.as_pointer()
+                if pointer in visited:
+                    continue
+                visited.add(pointer)
+                if getattr(target, "bl_idname", "") == 'MIMINode_SwitchKey':
+                    sockets = list(target.inputs)
+                    if link.to_socket not in sockets:
+                        continue
+                    return (
+                        str(getattr(target, "key_name", "") or "").strip(),
+                        str(getattr(target, "key_alias", "") or "").strip(),
+                        sockets.index(link.to_socket),
+                        len(sockets),
+                    )
+                if getattr(target, "bl_idname", "") in _SWITCH_STATE_PASS_THROUGH:
+                    pending.append(target)
+    return ()
+
+
+def draw_switch_state(layout, node):
+    '''Draw which key switch state the bindings of this node belong to.'''
+    state = downstream_switch_state(node)
+    if not state:
+        layout.label(text=tr("Not inside a key switch: the bindings always apply"), icon='BLANK1')
+        return
+    key_name, key_alias, state_index, state_count = state
+    text = tr("Key switch {key}: state {state} of {count}").format(
+        key=key_name or tr("(no key set)"), state=state_index + 1, count=state_count,
+    )
+    if key_alias:
+        text = text + "  ($" + key_alias.lower() + ")"
+    layout.label(text=text, icon='DRIVER')
 
 
 def _load_submesh_mark_dicts(submesh_name, dedupe_names=True):
@@ -361,25 +439,71 @@ def _slot_row_output_name(node, item):
             if mark_dict["name"].lower() == mark_name.lower():
                 matched_mark = mark_dict
                 break
+        replacement_path = str(getattr(item, "mark_file_path", "") or "").strip()
         if not mark_name or matched_mark is None:
+            # A row may already own an image before a mark is picked; the file
+            # is then named after the object and the slot like any other copy.
+            if replacement_path:
+                suffix, suffix_is_certain = predicted_suffix(node, item, replacement_path)
+                return file_resource_stem(draw_ib, object_name, slot_token) + suffix, suffix, suffix_is_certain, True, ""
             # Nothing is generated before the user picks a mark.
             return "", ".dds", True, True, tr("Pick a marked texture to see the generated file name")
-        # A shared marked texture keeps the hash name; a plain Slot mark is
-        # named after its Submesh position, which only export can decide.
+        if replacement_path:
+            # The row owns this image, so the export copies it into the Mod
+            # instead of pointing at the mark's shared resource.
+            suffix, suffix_is_certain = predicted_suffix(node, item, replacement_path)
+            return file_resource_stem(draw_ib, object_name, slot_token) + suffix, suffix, suffix_is_certain, True, ""
+        # A shared marked texture keeps the hash name and already owns a
+        # [Resource...] section, so this row reuses it without a new file.
         if str(matched_mark.get("type", "")) == "SharedSlot":
             generated_name = shared_slot_output_filename(matched_mark.get("hash", ""), matched_mark["name"])
-        else:
-            generated_name = slot_mark_output_filename(draw_ib, INDEX_PLACEHOLDER, matched_mark["name"])
-        suffix, suffix_is_certain = display_suffix(
-            getattr(item, "format_mode", "AUTO"), matched_mark.get("filename", ""),
-        )
-        return generated_name, suffix, suffix_is_certain, True, ""
+            suffix, suffix_is_certain = display_suffix(
+                getattr(item, "format_mode", "AUTO"), matched_mark.get("filename", ""),
+            )
+            return generated_name, suffix, suffix_is_certain, True, ""
+        # A plain Slot mark is bound by file name and declares no resource
+        # section, so an object scoped row copies the marked image and names it
+        # after the object and the slot. The copy always ends up as a DDS.
+        return file_resource_stem(draw_ib, object_name, slot_token) + ".dds", ".dds", True, True, ""
 
     # Anything else references an existing resource and creates no file.
     return (
         "", ".dds", True, False,
         tr("This row reuses an existing resource, so no texture file is generated"),
     )
+
+
+def _selected_mark_type(node, item):
+    '''Return the mark type (Slot / SharedSlot / Hash) picked on one row.
+
+    The node explains what an empty replacement image means, which depends on
+    whether the mark owns a shared [Resource...] section or is bound by file
+    name.  An unresolvable mark keeps the plain reuse wording.
+    '''
+    mark_name = normalize_mark_name_enum_value(getattr(item, "mark_name", ""))
+    if not mark_name:
+        return ""
+    try:
+        for mark_dict in _cached_submesh_mark_dicts(_resolve_upstream_submesh_name(node)):
+            if str(mark_dict.get("name", "")).lower() == mark_name.lower():
+                return str(mark_dict.get("type", "") or "")
+    except Exception:
+        # A half-built graph must never break node drawing.
+        return ""
+    return ""
+
+
+def _draw_image_format_controls(box, node, item, index, tree):
+    '''Draw the exact-format controls shared by file and mark-image rows.'''
+    # Auto matches the captured original; Manual is the explicit fallback for
+    # slots that have no capture to match.
+    format_row = box.row(align=True)
+    format_row.prop(item, "format_mode", text="")
+    if str(item.format_mode) == 'MANUAL':
+        format_row.prop(item, "manual_format", text="")
+    box.prop(item, "force_original_size")
+    # Detected original format, readiness and the per-row Convert button.
+    _draw_row_controls(box, node, item, index, tree)
 
 
 def _texture_bind_mark_name_items(item):
@@ -555,6 +679,9 @@ class MIMINode_Texture_Bind(MIMINodeBase):
         # A running exact-format batch is global, so its progress is shown at
         # the top of the node even while the user edits another row.
         _draw_node_progress(layout)
+        # Every row of this node applies only in the state its object is drawn
+        # in, so name that state instead of leaving the key wiring invisible.
+        draw_switch_state(layout, self)
 
         row = layout.row()
         # The list shows the compact one-line summary of every binding row.
@@ -602,6 +729,24 @@ class MIMINode_Texture_Bind(MIMINodeBase):
         source_type = str(item.source_type or "")
         if source_type == 'MARK':
             box.prop(item, "mark_name")
+            # The marked image is shared by the whole Submesh. This optional
+            # field is the per-object entry: two objects of one Submesh can use
+            # two different pictures on the same slot, which is exactly what a
+            # key switch compares.
+            box.prop(item, "mark_file_path")
+            draw_file_missing_warning(box, item.mark_file_path)
+            if str(item.mark_file_path or "").strip():
+                # The row owns an image, so it converts exactly like an
+                # external file and shows the same controls.
+                _draw_image_format_controls(box, self, item, index, tree)
+            elif _selected_mark_type(self, item) == "SharedSlot":
+                # A SharedSlot mark owns a [Resource...] section, so several
+                # objects can bind it without generating extra files.
+                box.label(text=tr("Empty: reuses the shared mark resource"), icon='BLANK1')
+            else:
+                # A plain Slot mark is bound by file name, so this object gets
+                # its own copy of the marked image.
+                box.label(text=tr("Empty: copies the marked image for this object"), icon='BLANK1')
             # Tell the user when the dropdown could not resolve the upstream
             # Submesh, instead of leaving a mysteriously empty dropdown.
             upstream_submesh = _resolve_upstream_submesh_name(self)
@@ -609,15 +754,7 @@ class MIMINode_Texture_Bind(MIMINodeBase):
                 box.label(text=tr("Upstream Submesh not resolved; mark names unavailable"), icon='ERROR')
         elif source_type == 'FILE':
             box.prop(item, "file_path")
-            # Exact-format conversion controls. Auto matches the captured
-            # original; Manual is the explicit fallback for slots without one.
-            format_row = box.row(align=True)
-            format_row.prop(item, "format_mode", text="")
-            if str(item.format_mode) == 'MANUAL':
-                format_row.prop(item, "manual_format", text="")
-            box.prop(item, "force_original_size")
-            # Detected original format, readiness and the per-row Convert button.
-            _draw_row_controls(box, self, item, index, tree)
+            _draw_image_format_controls(box, self, item, index, tree)
         else:
             box.prop(item, "resource_name")
 

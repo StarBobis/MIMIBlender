@@ -289,8 +289,14 @@ def enabled_rows(node):
 
 
 def _row_file_path(item):
-    """Return the absolute replacement path of one row, or ""."""
-    path = str(getattr(item, "file_path", "") or "").strip()
+    """Return the absolute replacement path of one row, or "".
+
+    A MARK row can own an image too (the per-object replacement of a marked
+    slot). It is converted exactly like an external file, so both fields are
+    read here instead of only ``file_path``.
+    """
+    attribute = "mark_file_path" if str(getattr(item, "source_type", "") or "") == 'MARK' else "file_path"
+    path = str(getattr(item, attribute, "") or "").strip()
     if not path:
         return ""
     try:
@@ -314,6 +320,19 @@ def _row_label(node, source):
     return _job_label(label, os.path.basename(source))
 
 
+def _mark_row_name(item):
+    """Return the picked mark name of a mark row, or "" when none is picked.
+
+    Imported lazily: the node module imports this service, so a module level
+    import would close the cycle.
+    """
+    try:
+        from ..blueprint.blueprint_node_texture import normalize_mark_name_enum_value
+        return str(normalize_mark_name_enum_value(getattr(item, "mark_name", "")) or "")
+    except Exception:
+        return ""
+
+
 def row_selectors(node, item):
     """Return the original-lookup selectors of one row, without the Submesh.
 
@@ -322,7 +341,15 @@ def row_selectors(node, item):
     """
     node_id = getattr(node, "bl_idname", "")
     if node_id == 'MIMINode_Texture_Bind':
-        return {"slot": str(getattr(item, "slot", "") or "")}
+        # A mark row resolves its original by mark name; the slot is the
+        # fallback for external files, which have no mark.
+        mark_name = ""
+        if str(getattr(item, "source_type", "") or "") == 'MARK':
+            mark_name = _mark_row_name(item)
+        return {
+            "slot": str(getattr(item, "slot", "") or ""),
+            "mark_name": mark_name,
+        }
     if node_id == 'MIMINode_Hash_Texture_Bind':
         return {
             "slot": str(getattr(item, "mark_source_slot", "") or ""),
@@ -359,7 +386,13 @@ def job_for_row(node, item, submesh=""):
     node_id = getattr(node, "bl_idname", "")
     source = _row_file_path(item)
     if node_id in ('MIMINode_Texture_Bind', 'MIMINode_Hash_Texture_Bind'):
-        if str(getattr(item, "source_type", "") or "") != 'FILE':
+        source_type = str(getattr(item, "source_type", "") or "")
+        if source_type == 'MARK':
+            # A mark row only converts when it picked its own image; a copied
+            # mark capture already has the game's bytes and format.
+            if not str(getattr(item, "mark_file_path", "") or "").strip():
+                return None
+        elif source_type != 'FILE':
             return None
     if node_id not in (
         'MIMINode_Texture_Bind', 'MIMINode_Hash_Texture_Bind',

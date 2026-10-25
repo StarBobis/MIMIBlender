@@ -50,6 +50,20 @@ def format_mode_items(self, context):
     ]
 
 
+def _row_owns_image(node, item):
+    """Return True when this row copies an image of its own.
+
+    External files always do; a MARK row does as soon as it carries its own
+    image, which is the per-object replacement of a marked slot.
+    """
+    source_type = str(getattr(item, "source_type", "") or "")
+    if source_type == 'FILE':
+        return True
+    if source_type == 'MARK':
+        return bool(str(getattr(item, "mark_file_path", "") or "").strip())
+    return False
+
+
 def row_target_format(node, item):
     """Return (target_format, state, detail) for one replacement row.
 
@@ -60,7 +74,7 @@ def row_target_format(node, item):
     if not source:
         return "", service.STATE_MISSING, ""
     if getattr(node, "bl_idname", "") in ('MIMINode_Texture_Bind', 'MIMINode_Hash_Texture_Bind'):
-        if str(getattr(item, "source_type", "") or "") != 'FILE':
+        if not _row_owns_image(node, item):
             return "", service.STATE_MISSING, ""
     selectors = service.row_selectors(node, item)
     submesh = service.row_submesh(node, item)
@@ -107,8 +121,9 @@ def row_status(node, item):
     if not source:
         return 'NONE', ""
     if getattr(node, "bl_idname", "") in ('MIMINode_Texture_Bind', 'MIMINode_Hash_Texture_Bind'):
-        if str(getattr(item, "source_type", "") or "") != 'FILE':
-            # Mark rows reuse the captured file bytes and need no conversion.
+        if not _row_owns_image(node, item):
+            # A mark row that only reuses the Submesh mark resource copies the
+            # captured bytes and needs no conversion.
             return 'NONE', ""
     target, state, detail = row_target_format(node, item)
     if state == service.STATE_CONFLICT:

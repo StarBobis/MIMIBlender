@@ -124,10 +124,12 @@ def main():
     assert slots.texture_binding_key(row, True) == r"Resource\GIMI\Diffuse"
     assert slots.texture_binding_key(row, False) == "ps-t8"
     config.logic_name = "ZZMI"
-    a.texture_slot_binding_list = [harness.make_binding("MARK", mark_name="DiffuseMap")]
+    # A SharedSlot mark already owns a [Resource...] section, so a row can bind
+    # it directly; a plain Slot mark would be copied per object instead.
+    a.texture_slot_binding_list = [harness.make_binding("MARK", mark_name="LightMap")]
     model.resolve_texture_slot_bindings()
     # Physical fallbacks now capture incoming state before the draw-local bind.
-    assert a.resolved_texture_slot_lines[-1] == 'ps-t1 = Resource-DiffuseMap'
+    assert a.resolved_texture_slot_lines[-1] == 'ps-t1 = Resource-LightMap'
     assert len(a.resolved_texture_slot_restore_lines) == 1
     assert not a.resolved_gimi_texture_bindings
     print("PASS GIMI aliases, API order, condition branches, object isolation, empty IB, conflicts, physical fallback and other-game behavior")

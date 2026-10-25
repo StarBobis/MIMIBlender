@@ -824,6 +824,69 @@ class BlueprintTests(unittest.TestCase):
         self.assertFalse(copied.enabled)
         self.assertTrue(copied.restore_after_draw)
 
+    def test_mark_row_image_and_switch_state(self):
+        # A marked row can own an image, which is what lets two objects of one
+        # Submesh bind two pictures on the same slot. The image survives a
+        # group clone and the node shows the generated per-object file name.
+        from MIMIBlender.blueprint import blueprint_node_texture
+
+        info = self.tree.nodes.new('MIMINode_Object_Info')
+        info.object_name = '94517393-0.Hair_A'
+        info.submesh_name = '94517393-0'
+        bind = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.tree.links.new(info.outputs[0], bind.inputs[0])
+        image = Path(tempfile.gettempdir()) / "mimi_mark_replacement.dds"
+        image.write_bytes(b"mark replacement bytes")
+        try:
+            item = bind.texture_slot_items.add()
+            item.source_type = 'MARK'
+            item.slot = 'ps-t3'
+            item.mark_file_path = str(image)
+            # The list label reveals that this row owns an image.
+            self.assertIn('mimi_mark_replacement.dds', item.name)
+
+            generated, suffix, _certain, can_rename, _reason = (
+                blueprint_node_texture._slot_row_output_name(bind, item)
+            )
+            self.assertTrue(generated.startswith('ResourceTex_94517393_'), generated)
+            self.assertTrue(generated.endswith(suffix))
+            self.assertTrue(can_rename)
+            # Drawing the row must not need a workspace mark; the image alone
+            # already decides the name.
+            layout = _FakeLayout()
+            bind.draw_buttons(bpy.context, layout)
+            texts = "".join(kwargs.get("text", "") for name, _args, kwargs in layout.calls if name == "label")
+            self.assertIn(generated, texts)
+            self.assertIn('Not inside a key switch', texts)
+
+            # A group clone keeps the per-object image.
+            child = bpy.data.node_groups.new('child_mark', self.tree.bl_idname)
+            copied = groups._clone_node(bind, child).texture_slot_items[0]
+            self.assertEqual(copied.mark_file_path, str(image))
+        finally:
+            image.unlink(missing_ok=True)
+
+        # Wiring the node into one state of a Switch Key is reported in the
+        # node, so the effect of the key is visible without opening the INI.
+        switch = self.tree.nodes.new('MIMINode_SwitchKey')
+        switch.key_name = '6'
+        switch.key_alias = 'COLOR'
+        switch.inputs.new('MIMISocketObject', 'Status 1')
+        # A reroute between the binding and the switch is transparent.
+        reroute = self.tree.nodes.new('NodeReroute')
+        self.tree.links.new(bind.outputs[0], reroute.inputs[0])
+        self.tree.links.new(reroute.outputs[0], switch.inputs[1])
+        self.assertEqual(
+            blueprint_node_texture.downstream_switch_state(bind), ('6', 'COLOR', 1, 2)
+        )
+        switch_layout = _FakeLayout()
+        bind.draw_buttons(bpy.context, switch_layout)
+        switch_text = "".join(
+            kwargs.get("text", "") for name, _args, kwargs in switch_layout.calls if name == "label"
+        )
+        self.assertIn('state 2 of 2', switch_text)
+        self.assertIn('$color', switch_text)
+
     def test_generated_texture_names_and_alias_draw(self):
         # Every texture replacement node shows the generated file name and an
         # alias field; draw both states so a bad RNA field cannot break the

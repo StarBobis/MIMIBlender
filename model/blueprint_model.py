@@ -673,11 +673,21 @@ class BluePrintModel:
                     file_path = bpy.path.abspath(file_path)
                 except Exception:
                     pass
+            # A MARK row may carry its own image. Resolving it here keeps the
+            # model layer free of bpy and lets the resolver treat the row
+            # exactly like an external file.
+            mark_file_path = str(getattr(item, "mark_file_path", "") or "").strip()
+            if mark_file_path:
+                try:
+                    mark_file_path = bpy.path.abspath(mark_file_path)
+                except Exception:
+                    pass
             bindings.append({
                 "enabled": bool(getattr(item, "enabled", True)),
                 "slot": str(getattr(item, "slot", "") or ""),
                 "source_type": str(getattr(item, "source_type", "") or ""),
                 "mark_name": normalize_mark_name_enum_value(getattr(item, "mark_name", "")),
+                "mark_file_path": mark_file_path,
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "restore_after_draw": bool(getattr(item, "restore_after_draw", False)),
