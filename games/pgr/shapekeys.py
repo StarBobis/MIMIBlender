@@ -64,7 +64,7 @@ from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 # (float3 position + float3 normal + float4 tangent), so the Position
 # category of the game type must match that exact layout. PGR extractions
 # always do (GPU_P12_N12_TA16_* types, e.g. the real
-# GPU_P12_N12_TA16_BW16_BI16_T8_T1-8_T2-8_T3-12_ capture); anything else is
+# GPU_P12_N12_TA16_BW16_BI16_T8_T1-8_T2-8_T3-8_T4-4_ capture); anything else is
 # reported and skipped instead of producing a broken mod.
 EXPECTED_LAYOUT_DICT = {
     # semantic name -> (expected byte offset inside the vertex, format)

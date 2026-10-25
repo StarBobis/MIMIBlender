@@ -1,11 +1,11 @@
 ---
 name: game-data-type-texcoord-widths
-description: Diagnose and fix a game preset whose TEXCOORD element width the Blender add-on cannot import (the "no models were imported" workspace import), by splitting the data type into ordinary two-component channels instead of adding a custom byte channel. Covers the PGR R32G32B32 -> R32G32 + R16G16 split, the extractor matching rule, and the measured fidelity.
+description: Diagnose and fix a game preset whose TEXCOORD element width the Blender add-on cannot carry (the "no models were imported" workspace import, or a mod build that dies with "could not broadcast input array from shape (N,2) into shape (N,4)"), by splitting the data type into ordinary two-component channels instead of adding a custom byte channel. Covers the PGR R32G32B32 -> R32G32 + R16G16 split, the R32G32B32A32 -> two R32G32 split, the extractor matching rule, and the measured fidelity.
 ---
 
 # TEXCOORD widths the Blender add-on can carry
 
-## Symptom
+## Symptom: the import refuses the workspace
 
 One-click workspace import ends with "No models were successfully imported
 from the current workspace" (当前工作空间中没有成功导入任何模型), while the
@@ -20,16 +20,40 @@ TEXCOORD has 3 components, which a Blender uv layer cannot hold.
 This workspace was extracted with an outdated data type; re-extract the model ...
 ```
 
+## Symptom: the mod build refuses a four-component element
+
+A **four**-component element (`R32G32B32A32_FLOAT`) imports fine — the add-on
+creates `<name>.xy` and `<name>.zw` — but the export cannot pack it back.
+`ObjBufferHelper._parse_texcoord` reads the two layers one at a time and keeps the
+last one (2 columns), while the structured record declares 4:
+
+```
+ValueError: could not broadcast input array from shape (16464,2) into shape (16464,4)
+  File "common/obj_buffer_helper.py", line 735, in convert_to_element_vertex_ndarray
+```
+
+The first dimension is the mesh's loop count, the second is the declared element
+width. Nothing the user did caused it: an unmodified import/export reproduces it.
+The fix is the same as below — split the 16 bytes into two `R32G32_FLOAT` elements
+in the data type (this renumbers the uv channels behind the split, so the type name
+changes too). Measured on PGR's 52-byte record (5188 v, 16464 loops): 5 uv layers,
+the exported 8 floats match the capture within `3e-8` (the usual V-flip rounding),
+and only the trailing `R16G16` half pair is canonicalized where the capture holds
+NaN.
+
 ## Why it cannot work in the add-on
 
 - A Blender uv layer is always **two components**. `MeshCreateHelper.import_uv_layers`
-  only supports 2 (`xy`) and 4 (`xy` + `zw`).
+  only supports 2 (`xy`) and 4 (`xy` + `zw`), and the exporter reads exactly one
+  layer per element, so a 4-component element exports 2 columns into 4.
 - The export writes exactly the width the data type declares
   (`D3D11GameType.get_total_structured_dtype()`), so importing 8 bytes for a
   12-byte element would shift every following element of the vertex.
 - Therefore the width has to be fixed **in the data type**, not patched with a
   custom byte attribute in the add-on. The project rule is: do not invent a
-  custom payload channel for a game channel that the uv path can describe.
+  custom payload channel for a game channel that the uv path can describe. The
+  same rule applies to widening the exporter: keep every TEXCOORD element
+  two-component instead.
 
 ## The fix (PGR, verified on the real capture)
 
@@ -114,7 +138,10 @@ asserts the old 12-byte arrangement produces the actionable error.
 
 ## Pitfalls
 
-- Do not split a **four**-component TEXCOORD: `xy` + `zw` already round-trips.
+- Do split a **four**-component TEXCOORD as well: it imports (`xy` + `zw`) but
+  never round-trips, because the exporter hands two columns to a four-column
+  field. Two `R32G32_FLOAT` elements keep the same 16 bytes at the same offset
+  and only renumber the channels behind them.
 - Keep element offsets contiguous; a gap would change the category stride.
 - The type name encodes widths, so rename it. Existing workspaces keep the old
   folder name and now fail with the actionable message — that is intended, and
