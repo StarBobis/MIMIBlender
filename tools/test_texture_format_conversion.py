@@ -182,6 +182,7 @@ def load_real_modules():
         (TEST_PKG + ".common.gimi_texture_slots", "common/gimi_texture_slots.py"),
         (TEST_PKG + ".common.texture_naming", "common/texture_naming.py"),
         (TEST_PKG + ".common.texture_output_naming", "common/texture_output_naming.py"),
+        (TEST_PKG + ".common.global_slot_bindings", "common/global_slot_bindings.py"),
         (TEST_PKG + ".utils.mmt_error_utils", "utils/mmt_error_utils.py"),
         (TEST_PKG + ".utils.json_utils", "utils/json_utils.py"),
         (TEST_PKG + ".utils.tbn_codec", "utils/tbn_codec.py"),
@@ -426,6 +427,44 @@ def main():
     assert disabled_model.object_texture_binding_file_list[0][2].endswith(".png")
     properties_mod.MIMIGlobalProperties.exact_texture_enabled = True
     print("PASS the global switch restores the copy-as-is behaviour")
+
+    # --- 6. Global slot rows carry the role hint of their mark ----------
+    # A normal map must keep its values. The Global Slot node has no colour
+    # space picker, so the role hint is the only thing that prevents AUTO from
+    # gamma converting vector data into the linear capture format.
+    from texcomb.core.texconv import _run_texconv
+    global_slot_mod = modules[TEST_PKG + ".common.global_slot_bindings"]
+    config_mod.GlobalConfig.logic_name = "SRMI"
+    normal_capture = build_original(dds_match, tmp_dir, "normal_original", "BC7_UNORM")
+    normal_png = make_png(os.path.join(tmp_dir, "normal_source.png"), color=(96, 96, 96, 255))
+    slot_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair_F", submesh_name="94517393-0")
+    slot_model = make_drawib(
+        modules, "94517393", [FakeSubmeshModel("94517393-0", [slot_call])], {"94517393-0": []},
+    )
+    global_slot_mod.apply_global_slots(slot_model, [dict(
+        submesh="94517393-0", slot="ps-t0", mark_name="NormalMap",
+        original_path=normal_capture, file_path=normal_png,
+        force_original_size=False, output_name="",
+        color_mode="AUTO", data_hint="NormalMap ps-t0",
+    )])
+    slot_job = list(slot_model.exact_texture_jobs.values())[0]
+    assert slot_job["data_hint"] == "NormalMap ps-t0", slot_job
+    ini_helper_mod.M_IniHelper.move_object_texture_binding_files(draw_ib_model=slot_model)
+    global_target = os.path.join(
+        texture_root, "94517393", slot_model.object_texture_binding_file_list[0][2],
+    )
+    global_meta = dds_match.read_dds_metadata(global_target)
+    assert global_meta.format == "BC7_UNORM", global_meta.format
+    # The values must survive: a gamma converted normal map would be ~4x darker.
+    from PIL import Image
+    decoded_dir = os.path.join(tmp_dir, "decoded_normal")
+    os.makedirs(decoded_dir, exist_ok=True)
+    _run_texconv(["-ft", "PNG", "-y", "-o", decoded_dir, global_target])
+    decoded_name = os.path.splitext(os.path.basename(global_target))[0] + ".png"
+    decoded = Image.open(os.path.join(decoded_dir, decoded_name)).convert("RGBA")
+    channel = decoded.getpixel((0, 0))[0]
+    assert abs(channel - 96) <= 6, decoded.getpixel((0, 0))
+    print("PASS global slot rows keep the data role hint")
 
     print("ALL TEXTURE FORMAT CONVERSION TESTS PASSED")
     return 0

@@ -45,6 +45,11 @@ def collect_global_slots(tree):
                     rows.append(dict(submesh=submesh, slot=mark['slot'], mark_name=mark['name'],
                                      original_path=original, file_path=__import__('bpy').path.abspath(item.file_path),
                                      force_original_size=item.force_original_size,
+                                     # The node has no colour space picker, so AUTO
+                                     # decides, but it needs the mark role: without
+                                     # it a normal or mask map is gamma converted.
+                                     color_mode='AUTO',
+                                     data_hint=(str(mark['name']) + ' ' + str(mark['slot'])).strip(),
                                      # The node's alias renames the generated file.
                                      output_name=str(getattr(item, 'output_name', '') or '')))
             if node.bl_idname == 'SSMTBlueprintGroupNode':

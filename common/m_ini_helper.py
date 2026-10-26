@@ -489,6 +489,15 @@ class M_IniHelper:
                     "original_path": original_path,
                     "force_original_size": binding.get("force_original_size", False),
                     "restore_original": restore_original,
+                    # The node offers no colour space picker, so AUTO decides,
+                    # and AUTO needs the role: a normal or mask map must keep
+                    # its values instead of being gamma converted.
+                    "color_mode": str(binding.get("color_space", "AUTO") or "AUTO").upper(),
+                    "data_hint": " ".join(part for part in (
+                        str(binding.get("mark_name", "") or ""),
+                        str(binding.get("mark_slot", "") or ""),
+                        os.path.basename(source_path or ""),
+                    ) if part),
                 })
             elif source_type == "RESOURCE":
                 resource_name = str(binding.get("resource_name", "") or "").strip()
@@ -549,7 +558,11 @@ class M_IniHelper:
                     # converted product is only the bytes that must be copied.
                     row["stamp_path"] = row["source_path"]
                     row["source_path"] = stage.prepare(
-                        row["source_path"], row["original_path"], row["force_original_size"]
+                        row["source_path"], row["original_path"], row["force_original_size"],
+                        # The role hint is what keeps vector/mask data intact;
+                        # the same keys travel with the per-object rows.
+                        color_mode=str(row.get("color_mode", "AUTO") or "AUTO"),
+                        data_hint=str(row.get("data_hint", "") or ""),
                     )
             # Blueprint construction validates the whole export before writers
             # create any output. The normal pass repeats this against live files.
