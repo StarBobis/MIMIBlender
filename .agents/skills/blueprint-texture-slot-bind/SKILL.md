@@ -87,12 +87,26 @@ Rules in `texcomb/core/dds_match.py`:
   the sRGB tag; the node status shows the treatment, e.g. `Needs conversion to BC6H_UF16
   (sRGB -> linear)`.
 
-## Regenerating must refresh, not skip
+## Regenerating keeps the newer file
 
-`M_IniHelper._refresh_generated_texture()` compares the bytes (`filecmp.cmp(shallow=False)`) and
-copies only when the source changed. The old "target exists -> skip" rule kept yesterday's
-picture after an edit or a re-extract, while the bind copy was refreshed, so one slot showed two
-different pictures. The automatic Slot, Hash and SharedSlot copy sites all use the helper.
+`M_IniHelper._refresh_generated_texture()` is the one rule for every generated texture: the
+automatic Slot / Hash / SharedSlot copies, the global hash rows and the per-object replacement
+images all go through it.
+
+- identical bytes: nothing is touched (a repeated export stays free);
+- target missing: copy;
+- **target newer than its source: keep it** and print `kept the generated texture you edited by
+  hand`, because artists re-save the generated DDS from Photoshop/NVTT to fix a colour and the
+  next export used to restore the capture over that fix;
+- otherwise (source edited, workspace re-extracted): copy.
+
+The copy carries the source timestamp (`os.utime`), so "newer" stays meaningful across exports.
+A converted replacement passes `source_stamp_path` = the picture the user picked, never the
+temporary conversion product (whose time is when texconv ran).
+
+Two earlier rules were each wrong for somebody: "target exists -> skip" kept yesterday's picture
+after a re-extract, and "always copy when the bytes differ" (1.0.66) overwrote a hand-corrected
+texture on the next export. Do not go back to either.
 
 ## Mark identity is a string, not an enum index
 

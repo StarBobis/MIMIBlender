@@ -545,6 +545,9 @@ class M_IniHelper:
             # which are copied unchanged exactly like the historical behaviour.
             for row in resolved_rows:
                 if row["source_path"] and row.get("original_path") and not row.get("restore_original", False):
+                    # Keep the user's own file as the timestamp reference; the
+                    # converted product is only the bytes that must be copied.
+                    row["stamp_path"] = row["source_path"]
                     row["source_path"] = stage.prepare(
                         row["source_path"], row["original_path"], row["force_original_size"]
                     )
@@ -560,7 +563,11 @@ class M_IniHelper:
                     continue
                 target_path = os.path.join(output_folder, row["target_filename"])
                 if os.path.normcase(os.path.abspath(source_path)) != os.path.normcase(os.path.abspath(target_path)):
-                    shutil.copy2(source_path, target_path)
+                    # Same "newer wins" rule as the automatic texture copies: a
+                    # file the user re-saved in the Mod folder is kept.
+                    cls._refresh_generated_texture(
+                        source_path, target_path, str(row.get("stamp_path", "") or ""),
+                    )
 
         # Keep resource declarations before all hash overrides. One section per
         # hash carries the global default plus every object scoped override.
@@ -957,25 +964,72 @@ class M_IniHelper:
         return f"{prefix}-{submesh_index}-{texture_markup_info.mark_name}.dds"
 
     @staticmethod
-    def _refresh_generated_texture(source_path: str, target_path: str) -> str:
-        """Copy one capture into the generated Mod unless the bytes are equal.
+    def _texture_stamp_ns(path: str) -> int:
+        """Return the modification time of one file in nanoseconds, or 0.
 
-        The historical "skip when the target exists" rule kept a texture from a
-        previous export forever, so re-extracting the workspace or editing a
-        capture produced a Mod that mixed old and new pictures. Comparing the
-        bytes keeps a hand-edited output file from being clobbered only when it
-        really is identical; a changed source always wins, which is what
-        "Generate Mod" must mean.
+        Only used to decide which of two files is newer, so a vanished file
+        simply loses that comparison instead of raising.
+        """
+        try:
+            return os.stat(path).st_mtime_ns
+        except OSError:
+            return 0
 
-        Returns ``copied``, ``unchanged`` or ``missing``.
+    @staticmethod
+    def _copy_generated_texture(source_path: str, target_path: str, stamp_ns: int) -> None:
+        """Copy one texture and stamp the copy with its source time.
+
+        The stamp is what the next export compares, so the generated file always
+        says how new the picture inside it really is. ``copy2`` already carries
+        the time of the file it copies; a converted replacement keeps the time
+        of the user's own image instead, which is why the stamp is explicit.
+        """
+        shutil.copy2(source_path, target_path)
+        if stamp_ns:
+            os.utime(target_path, ns=(stamp_ns, stamp_ns))
+
+    @classmethod
+    def _refresh_generated_texture(cls, source_path: str, target_path: str,
+                                   source_stamp_path: str = "") -> str:
+        """Copy one texture into the generated Mod, or keep a hand-edited one.
+
+        Two earlier rules were both wrong for somebody:
+
+        - "skip when the target exists" (before 1.0.66) kept a picture from a
+          previous export forever, so re-extracting a workspace or editing a
+          capture produced a Mod that mixed old and new textures;
+        - "copy whenever the bytes differ" (1.0.66) always won against a texture
+          the user had re-saved inside the generated folder by hand.
+
+        The rule is therefore "the newer file wins": a capture re-extracted or
+        edited after the export refreshes the Mod, while a generated texture the
+        user saved later is kept and reported. Identical bytes never touch the
+        file, so a repeated export stays free.
+
+        ``source_stamp_path`` lets a converted replacement carry the timestamp
+        of the user's own image instead of the temporary conversion product.
+
+        Returns ``copied``, ``unchanged``, ``kept`` or ``missing``.
         """
         # ``exists`` (not ``isfile``) is deliberate: the copy tests patch the
         # exists probe only, and a directory source fails loudly in copy2.
         if not source_path or not os.path.exists(source_path):
             return "missing"
-        if os.path.isfile(target_path) and filecmp.cmp(source_path, target_path, shallow=False):
+        # The stamp belongs to the picture, which is the real source when the
+        # bytes handed in are a converted copy of it.
+        source_stamp = cls._texture_stamp_ns(source_stamp_path or source_path)
+        if not os.path.isfile(target_path):
+            cls._copy_generated_texture(source_path, target_path, source_stamp)
+            return "copied"
+        if filecmp.cmp(source_path, target_path, shallow=False):
             return "unchanged"
-        shutil.copy2(source_path, target_path)
+        if cls._texture_stamp_ns(target_path) > source_stamp:
+            print(
+                "M_IniHelper: kept the generated texture you edited by hand "
+                + "(newer than its source): " + target_path
+            )
+            return "kept"
+        cls._copy_generated_texture(source_path, target_path, source_stamp)
         return "copied"
 
     @classmethod
@@ -1000,6 +1054,7 @@ class M_IniHelper:
 
         slot_copied = 0
         slot_skipped_exists = 0
+        slot_kept_manual = 0
         slot_skipped_no_source = 0
         slot_skipped_non_slot = 0
 
@@ -1045,22 +1100,26 @@ class M_IniHelper:
                     print("[TRACE] Slot texture source_path file does not exist, skip! source_path=" + source_path)
                     slot_skipped_no_source += 1
                     continue
-                # Refresh when the capture changed; identical bytes are kept.
-                if os.path.exists(target_path) and filecmp.cmp(source_path, target_path, shallow=False):
-                    print("[TRACE] Slot texture unchanged, skip copy: " + target_path)
-                    slot_skipped_exists += 1
-                    continue
-                print("[TRACE] >>> Executing shutil.copy2: " + source_path + " -> " + target_path)
+                # The capture is newer than the Mod file it should refresh, so
+                # a re-extracted or edited texture is copied; a generated file
+                # the user saved later is kept instead of being restored.
+                print("[TRACE] >>> Refreshing generated texture: " + source_path + " -> " + target_path)
                 try:
-                    shutil.copy2(source_path, target_path)
-                    print("[TRACE] <<< shutil.copy2 succeeded: " + target_path)
-                    slot_copied += 1
+                    result = cls._refresh_generated_texture(source_path, target_path)
+                    print("[TRACE] <<< Generated texture result: " + result + " for " + target_path)
+                    if result == "copied":
+                        slot_copied += 1
+                    elif result == "kept":
+                        slot_kept_manual += 1
+                    else:
+                        slot_skipped_exists += 1
                 except Exception as e:
-                    print("[TRACE] <<< shutil.copy2 failed! Exception: " + str(e))
+                    print("[TRACE] <<< Refresh failed! Exception: " + str(e))
 
         print("[TRACE] move_slot_style_textures() summary - DrawIB: " + draw_ib_model.draw_ib)
         print("[TRACE]   Slot copied: " + str(slot_copied))
-        print("[TRACE]   Slot skipped (target exists): " + str(slot_skipped_exists))
+        print("[TRACE]   Slot kept (edited in the Mod folder): " + str(slot_kept_manual))
+        print("[TRACE]   Slot unchanged: " + str(slot_skipped_exists))
         print("[TRACE]   Slot skipped (source missing): " + str(slot_skipped_no_source))
         print("[TRACE]   Slot skipped (non-Slot type): " + str(slot_skipped_non_slot))
         print("=" * 60)
@@ -1156,11 +1215,14 @@ class M_IniHelper:
             jobs = getattr(draw_ib_model, "exact_texture_jobs", {})
             for resource, source, filename in file_list:
                 row = jobs.get(resource)
+                # The user's own image stays the timestamp reference, so a
+                # generated file they edited later is still recognised as newer.
+                stamp_path = source
                 if row:
                     # The conversion result is always a .dds file; the model
                     # resolver already named the target accordingly.
                     source = prepare_replacement_job(stage, source, row)
-                prepared.append((resource, source, filename))
+                prepared.append((resource, source, filename, stamp_path))
             cls._copy_object_texture_binding_files(draw_ib_model, prepared)
 
     @classmethod
@@ -1202,26 +1264,39 @@ class M_IniHelper:
     def _copy_object_texture_binding_files(cls, draw_ib_model, file_list):
         # The caller owns staged storage; this helper performs only final copies.
         # File resources and names stay local to the existing exporter namespace.
+        # Entries are (resource, bytes_to_copy, target_name, timestamp_source):
+        # the timestamp source is the picture the user picked, never the
+        # temporary conversion product, so "newer wins" keeps working.
         texture_output_folder = GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib_model.draw_ib)
         os.makedirs(texture_output_folder, exist_ok=True)
 
         copied_count = 0
+        kept_count = 0
         skipped_count = 0
-        for resource_name, source_path, target_filename in file_list:
+        for entry in file_list:
+            resource_name, source_path, target_filename = entry[0], entry[1], entry[2]
+            stamp_path = entry[3] if len(entry) > 3 else source_path
             target_path = os.path.join(texture_output_folder, target_filename)
             if not os.path.exists(source_path):
                 print("M_IniHelper: Texture Bind source file missing, skip copy: " + source_path)
                 continue
 
             # Avoid a SameFileError when a source already lives in the output
-            # folder, but overwrite an existing target when it came from a
-            # different source selected in the node.
+            # folder; that row already points at the generated file.
             source_key = os.path.normcase(os.path.abspath(source_path))
             target_key = os.path.normcase(os.path.abspath(target_path))
             if source_key == target_key:
                 skipped_count += 1
                 continue
-            shutil.copy2(source_path, target_path)
+            # Same rule as the automatic copies: a generated texture the user
+            # re-saved by hand is newer than its source and must survive.
+            result = cls._refresh_generated_texture(source_path, target_path, stamp_path)
+            if result == "kept":
+                kept_count += 1
+                continue
+            if result == "unchanged":
+                skipped_count += 1
+                continue
             copied_count += 1
             # An older export may have written the same resource with the
             # source extension (for example .png). Only one file may exist for
@@ -1239,7 +1314,9 @@ class M_IniHelper:
 
         print(
             "M_IniHelper: Texture Bind texture copy done, DrawIB: " + draw_ib_model.draw_ib
-            + ", copied: " + str(copied_count) + ", skipped (source already is target): " + str(skipped_count)
+            + ", copied: " + str(copied_count)
+            + ", kept (edited in the Mod folder): " + str(kept_count)
+            + ", unchanged: " + str(skipped_count)
         )
 
     @staticmethod
