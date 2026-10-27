@@ -25,8 +25,10 @@ import importlib.util
 import os
 import sys
 
-# Directories whose files are never part of the addon UI surface.
-_EXCLUDED_DIRS = {"__pycache__", ".git", "tools", "node_modules"}
+# Directories whose files are never part of the addon UI surface. "tmp" holds
+# scratch copies (packed releases, baseline checkouts) that .gitignore already
+# excludes; scanning them reported stale keys of older versions as missing.
+_EXCLUDED_DIRS = {"__pycache__", ".git", "tools", "node_modules", "tmp"}
 
 # Files that define the translation machinery itself (they contain example
 # strings such as the language names, which are handled separately).
