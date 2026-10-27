@@ -202,6 +202,12 @@ class WWMIShaderResourceIniTests(unittest.TestCase):
         self.assertIn("  vs-t0 = ref " + self.scoped("ResourceTexcoordBufferSrvHalf2"), self.text)
         self.assertIn("  vs-t0 = ref " + self.scoped("ResourceTexcoordBufferSrv"), self.text)
         self.assertIn("global $srv_texcoord_half2_" + DRAW_IB + " = 0", self.text)
+        # The switch only helps when the generated file explains it: the user is
+        # the one who can see which width the game fetches.
+        self.assertIn(
+            "; byte elements). Set it to 1 when the mesh renders with wrong UVs.",
+            self.text,
+        )
         self.assertIn("vb2 = " + self.scoped("ResourceTexcoordBuffer"), self.text)
 
     def test_shader_resource_views_name_their_element_layout(self):

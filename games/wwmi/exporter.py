@@ -206,6 +206,21 @@ class Exporter:
         # groups (0) or single four byte half2 elements (1). Every other stream
         # keeps the width its captured input layout declares.
         if self.has_texcoord_half2_switch(draw_ib_model):
+            # The comment is part of the generated file: only the game's shader
+            # knows the width it fetches, so the switch has to be discoverable
+            # without regenerating the mod.
+            constants_section.append(
+                "; The texcoord record of this DrawIB is fetched from a shader resource"
+            )
+            constants_section.append(
+                "; slot, so the mod binds it through a resource view. 0 reads half4"
+            )
+            constants_section.append(
+                "; groups (eight byte elements), 1 reads single half2 elements (four"
+            )
+            constants_section.append(
+                "; byte elements). Set it to 1 when the mesh renders with wrong UVs."
+            )
             constants_section.append(
                 "global " + scoped_global("srv_texcoord_half2", draw_ib) + " = 0"
             )
