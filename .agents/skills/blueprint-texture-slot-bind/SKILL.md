@@ -32,6 +32,7 @@ Consequences:
 | Deciding the resource + copy job per row | `model/drawib_model.py` `resolve_texture_slot_bindings` |
 | Generated file names shared by UI and export | `common/texture_output_naming.py` |
 | Conversion (exact format) status + batch convert | `common/texture_format_service.py`, `blueprint/texture_format_widgets.py` |
+| Refreshing every texture node from one menu entry | `blueprint/texture_node_refresh.py` |
 | Emitting lines inside the switch condition | `common/m_control_flow.py` |
 
 ## Rules to keep
@@ -84,8 +85,26 @@ Rules in `texcomb/core/dds_match.py`:
   otherwise exactly `-srgbi` or `-srgbo`. `ConversionPlan` carries the decision and
   `ConversionCache` keys it (bump `CACHE_VERSION` when the flags change).
 - The row has a `Color Space` override (`AUTO/SRGB/LINEAR/DATA`) for a DDS whose editor dropped
-  the sRGB tag; the node status shows the treatment, e.g. `Needs conversion to BC6H_UF16
+  the sRGB tag; the node status shows the treatment, e.g. `Converts on export: BC6H_UF16
   (sRGB -> linear)`.
+
+## Nothing needs a per-node click
+
+A replacement is converted to the capture format automatically; the node buttons only
+pre-convert. Two independent guarantees make that true:
+
+- `ConversionCache.key()` hashes the source **bytes**, and the export copy stage calls
+  `prepare_replacement_job` for every registered row, so a Photoshop re-save is a cache miss and
+  is converted during the export itself;
+- `ui_func_export` converts every pending row of the tree in the background before it writes
+  buffers, so the wait happens before the first output file.
+
+Therefore `Refresh Blueprint` (`mimi.refresh_blueprint`, node editor context menu) is the only
+refresh a user needs: it rebuilds the Submesh list, re-resolves the object nodes, then calls
+`blueprint/texture_node_refresh.py` to re-read every Slot / Hash / Global slot node (nested
+groups included) and finally starts the pending conversions of that tree. A texture row the user
+never touches is still converted when the Mod is generated - never add a rule that makes the
+export depend on a previously pressed Convert button.
 
 ## Regenerating keeps the newer file
 

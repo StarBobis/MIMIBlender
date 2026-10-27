@@ -6,10 +6,13 @@ import bpy
 
 from ..common.global_config import GlobalConfig
 from ..common.global_config import LogicName
+from ..common import texture_format_service
 from ..i18n.i18n import I18nOperator, tr, translatable
 
 from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_obj import ObjectPersistentIdManager
+from .texture_node_refresh import refresh_tree_texture_nodes
+from .texture_output_widgets import exact_format_enabled
 
 
 def _new_batch_input(node):
@@ -408,10 +411,12 @@ class MMT_OT_CreateInternalSwitch(I18nOperator):
 
 
 class MMT_OT_RefreshBlueprint(I18nOperator):
-    '''Refresh the whole blueprint: rebuild the Submesh list from the workspace
-    and re-resolve the object reference of every object node'''
+    '''Refresh the whole blueprint: rebuild the Submesh list from the workspace,
+    re-resolve the object reference of every object node and re-read the mark
+    list of every texture replacement node'''
     bl_idname = "mimi.refresh_blueprint"
     bl_label = "Refresh Blueprint"
+    bl_description = "Refresh this blueprint: Submesh list, object nodes and the mark list of every texture node; replacements that still need a conversion are converted in the background"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -430,11 +435,48 @@ class MMT_OT_RefreshBlueprint(I18nOperator):
         # on every object node across all blueprints.
         refresh_summary = ObjectPersistentIdManager.refresh_all_nodes(include_all_blueprints=True, source="manual")
 
+        # Part 3: re-read the texture replacement nodes of this blueprint.
+        # A re-extract or a re-mark changes the workspace mark list, and the
+        # cached capture lookups then describe the previous workspace, so both
+        # caches are dropped before the rows are rebuilt.
+        texture_format_service.clear_lookup_cache()
+        texture_summary = refresh_tree_texture_nodes(node_tree)
+
+        # Part 4: convert the replacements this refresh just found pending, in
+        # the background. Generate Mod does the same before it writes files, so
+        # this only moves the wait forward and makes every row label current
+        # without the user pressing each node's own convert button.
+        conversion_count = 0
+        if exact_format_enabled() and not texture_format_service.is_running():
+            try:
+                conversion_count = texture_format_service.start_conversion(
+                    texture_format_service.collect_tree_jobs(node_tree)
+                )
+            except Exception as error:
+                # A broken row is reported by the conversion itself; a batch
+                # that cannot start must never cancel the refresh.
+                print("Refresh Blueprint: texture conversion did not start: " + str(error))
+
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        # The message is built from short fragments: the object, texture and
+        # conversion counts are optional and must read naturally in both
+        # languages, which one giant format string cannot do.
+        message = tr("Refreshed {submesh_count} submeshes, {object_count} object nodes, {texture_node_count} texture nodes").format(
+            submesh_count=len(submesh_names),
+            object_count=refresh_summary["updated_count"],
+            texture_node_count=texture_summary["node_count"],
+        )
         if refresh_summary["missing_count"] > 0:
-            self.report({'WARNING'}, tr("Refreshed blueprint: {submesh_count} submeshes, {updated_count} object nodes updated, but {missing_count} nodes have no matching object, took {elapsed_ms:.3f} ms").format(submesh_count=len(submesh_names), updated_count=refresh_summary["updated_count"], missing_count=refresh_summary["missing_count"], elapsed_ms=elapsed_ms))
+            message += tr("; {missing_count} object nodes have no matching object").format(
+                missing_count=refresh_summary["missing_count"],
+            )
+        if conversion_count > 0:
+            message += tr("; converting {count} replacement texture(s)").format(count=conversion_count)
+        message += tr("; took {elapsed_ms:.3f} ms").format(elapsed_ms=elapsed_ms)
+        if refresh_summary["missing_count"] > 0:
+            self.report({'WARNING'}, message)
         else:
-            self.report({'INFO'}, tr("Refreshed blueprint: {submesh_count} submeshes, {updated_count} object nodes updated, took {elapsed_ms:.3f} ms").format(submesh_count=len(submesh_names), updated_count=refresh_summary["updated_count"], elapsed_ms=elapsed_ms))
+            self.report({'INFO'}, message)
         return {'FINISHED'}
 
 

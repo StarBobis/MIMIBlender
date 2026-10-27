@@ -1170,6 +1170,89 @@ class BlueprintTests(unittest.TestCase):
                     path.unlink()
 
 
+    def test_refresh_blueprint_refreshes_every_texture_node(self):
+        # One right-click must make every texture node current. The slot rows
+        # rebuild their labels, the hash and global slot rows keep their
+        # replacement choices across the re-scan, and a texture node inside a
+        # nested group tree is visited exactly once even with two instances.
+        refresh = importlib.import_module("MIMIBlender.blueprint.texture_node_refresh")
+
+        slot_node = self.tree.nodes.new('MIMINode_Texture_Bind')
+        slot_row = slot_node.texture_slot_items.add()
+        slot_row.source_type = 'RESOURCE'
+        slot_row.resource_name = 'ResourceBody'
+        slot_row.slot = 'ps-t2'
+        # A saved file can carry a label that no longer matches its fields.
+        slot_row.name = 'stale label'
+
+        hash_node = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+        hash_row = hash_node.texture_hash_items.add()
+        hash_row.texture_hash = '0123abcd'
+        hash_row.source_type = 'FILE'
+        replacement = Path(tempfile.gettempdir()) / "mimi_refresh_replacement.dds"
+        replacement.write_bytes(b"replacement bytes")
+        hash_row.file_path = str(replacement)
+
+        global_node = self.tree.nodes.new('MIMINode_Texture_Global')
+        global_row = global_node.items.add()
+        global_row.identity = 'identity-a'
+        global_row.submesh = 'SubmeshA'
+        global_row.slot = 'ps-t0'
+        global_row.mark_name = 'DiffuseMap'
+        global_row.file_path = str(replacement)
+
+        # A texture node inside a group proves the nested traversal.
+        child = bpy.data.node_groups.new('refresh_child', self.tree.bl_idname)
+        child.interface.new_socket(name='in', in_out='INPUT', socket_type='MIMISocketObject')
+        child.interface.new_socket(name='out', in_out='OUTPUT', socket_type='MIMISocketObject')
+        child_input, child_output = groups._make_group_input_output(child)
+        inner = child.nodes.new('MIMINode_Texture_Bind')
+        inner_row = inner.texture_slot_items.add()
+        inner_row.source_type = 'RESOURCE'
+        inner_row.resource_name = 'ResourceInner'
+        child.links.new(child_input.outputs[0], inner.inputs[0])
+        child.links.new(inner.outputs[0], child_output.inputs[0])
+        for _instance_index in range(2):
+            instance = self.tree.nodes.new(groups.GROUP_NODE_IDNAME)
+            instance.node_tree = child
+
+        try:
+            summary = refresh.refresh_tree_texture_nodes(self.tree)
+            # Two slot nodes, one hash node and one global slot node.
+            self.assertEqual(summary["node_count"], 4)
+            self.assertEqual(summary["row_count"], 4)
+            # The list label was rebuilt from the current row fields.
+            self.assertNotEqual(slot_row.name, 'stale label')
+            self.assertIn('ResourceBody', slot_row.name)
+            self.assertIn('ps-t2', slot_row.name)
+            self.assertIn('ResourceInner', inner_row.name)
+            # Configured replacements survive a scan that finds no workspace.
+            self.assertEqual(len(hash_node.texture_hash_items), 1)
+            self.assertEqual(hash_node.texture_hash_items[0].file_path, str(replacement))
+            self.assertEqual(len(global_node.items), 1)
+            self.assertEqual(global_node.items[0].file_path, str(replacement))
+        finally:
+            replacement.unlink(missing_ok=True)
+
+    def test_refresh_blueprint_operator_reaches_texture_nodes(self):
+        # The context menu entry is the only way users refresh a whole
+        # blueprint, so the operator itself must rebuild a texture row label,
+        # not just the helper it delegates to.
+        helper = addon.blueprint_node_obj.BlueprintExportHelper
+        self.tree.use_fake_user = True
+        helper.set_runtime_blueprint_tree(self.tree)
+        node = self.tree.nodes.new('MIMINode_Texture_Bind')
+        row = node.texture_slot_items.add()
+        row.source_type = 'RESOURCE'
+        row.resource_name = 'ResourceBody'
+        row.slot = 'ps-t2'
+        row.name = 'stale label'
+        result = bpy.ops.mimi.refresh_blueprint()
+        self.assertEqual(result, {'FINISHED'})
+        self.assertIn('ResourceBody', row.name)
+        self.assertIn('ps-t2', row.name)
+
+
 if __name__ == "__main__":
     # Blender's --python-exit-code turns failed assertions into a failing job.
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(BlueprintTests))

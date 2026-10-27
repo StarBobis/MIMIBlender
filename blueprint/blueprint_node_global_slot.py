@@ -102,6 +102,42 @@ class GlobalSlotItem(bpy.types.PropertyGroup):
     )
 
 
+def refresh_global_slot_rows(node):
+    """Reconcile the rows of one global slot node with the workspace marks.
+
+    Returns the number of rows the node owns afterwards. The function is
+    shared by the node's own refresh button and by the blueprint wide
+    "Refresh Blueprint" entry, so both paths always behave identically.
+    """
+    # Complete the scan before mutating the saved collection.
+    # Existing rows are retained when a mark disappears.
+    # Their enabled replacement must be reviewed rather than silently deleted.
+    # New marks start unconfigured and therefore do not affect export.
+    marks = scan_slot_marks()
+    rows = {row.identity: row for row in node.items}
+    for row in node.items:
+        row.missing = row.identity not in marks
+    # Reuse rows by stable identity rather than their current display name.
+    # Refresh never overwrites replacement paths, enabled flags or size policy.
+    # The displayed label is informational and is not a binding key.
+    for identity, (submesh, mark, path) in marks.items():
+        row = rows.get(identity)
+        if row is None:
+            row = node.items.add()
+            row.identity = identity
+        # Only detection fields change; replacement/enable/size stay intact.
+        # SharedSlot ownership is intentionally not collapsed by hash.
+        row.submesh = submesh
+        row.slot = mark['slot']
+        row.mark_name = mark['name']
+        row.original_path = path
+        row.missing = False
+        # Rebuild the label from the detection fields so a configured alias
+        # survives the refresh instead of being wiped by a plain name write.
+        refresh_global_slot_row_label(row)
+    return len(node.items)
+
+
 class RefreshGlobalSlots(I18nOperator):
     """Scan Slot and SharedSlot without deduplicating their hashes."""
     bl_idname = 'mimi.global_slot_refresh'
@@ -115,32 +151,8 @@ class RefreshGlobalSlots(I18nOperator):
         node = tree.nodes.get(self.node_name) if tree else None
         if not node or node.bl_idname != 'MIMINode_Texture_Global':
             return {'CANCELLED'}
-        # Complete the scan before mutating the saved collection.
-        # Existing rows are retained when a mark disappears.
-        # Their enabled replacement must be reviewed rather than silently deleted.
-        # New marks start unconfigured and therefore do not affect export.
-        marks = scan_slot_marks()
-        rows = {row.identity: row for row in node.items}
-        for row in node.items:
-            row.missing = row.identity not in marks
-        # Reuse rows by stable identity rather than their current display name.
-        # Refresh never overwrites replacement paths, enabled flags or size policy.
-        # The displayed label is informational and is not a binding key.
-        for identity, (submesh, mark, path) in marks.items():
-            row = rows.get(identity)
-            if row is None:
-                row = node.items.add()
-                row.identity = identity
-            # Only detection fields change; replacement/enable/size stay intact.
-            # SharedSlot ownership is intentionally not collapsed by hash.
-            row.submesh = submesh
-            row.slot = mark['slot']
-            row.mark_name = mark['name']
-            row.original_path = path
-            row.missing = False
-            # Rebuild the label from the detection fields so a configured alias
-            # survives the refresh instead of being wiped by a plain name write.
-            refresh_global_slot_row_label(row)
+        # The shared helper keeps this button and Refresh Blueprint in sync.
+        refresh_global_slot_rows(node)
         return {'FINISHED'}
 
 

@@ -179,7 +179,9 @@ def row_status(node, item):
         return 'CHECKMARK', tr("Converted: {format}").format(format=target) + note_suffix
     if service.is_running():
         return 'TIME', tr("Waiting for conversion: {format}").format(format=target) + note_suffix
-    return 'INFO', tr("Needs conversion to {format}").format(format=target) + note_suffix
+    # The export converts every pending replacement before it writes a file, so
+    # this line describes what will happen, not work the user has to start.
+    return 'INFO', tr("Converts on export: {format}").format(format=target) + note_suffix
 
 
 def draw_row_status(layout, node, item):
