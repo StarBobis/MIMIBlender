@@ -67,6 +67,13 @@ class DrawCallModel:
     # An ordinary DrawIndexed branch may legally share this clock variable.
     time_position_key_name:str = field(init=False, default="")
 
+    # Graph provenance of a DrawIndex timeline, stored as tree name plus node
+    # name.  The Naraka cross-IB post-processor uses it to move every frame of
+    # one timeline to a host draw call without one manual pair per frame.
+    # This is deliberately not the timeline variable name: two nodes may share
+    # one clock alias and still own different draw calls.
+    time_switch_owner_key:str = field(init=False, default="")
+
     # These attributes are computed at the SubMeshModel level and used for ini output
     index_count:int = field(init=False,repr=False,default=0)
     vertex_count:int = field(init=False,repr=False,default=0)

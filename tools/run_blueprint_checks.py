@@ -14,6 +14,7 @@ TESTS = (
     'test_blueprint_blender.py',
     'test_dynamic_mod_titles.py',
     'test_dynamic_animation_blender.py',
+    'test_naraka_cross_ib_blender.py',
     'test_time_switch_ini.py',
     'test_time_position_ini.py',
     'test_animation_toggle_ini.py',

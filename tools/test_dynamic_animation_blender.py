@@ -50,6 +50,9 @@ def new_blueprint():
     model.ordered_draw_obj_data_model_list = []
     model.time_pos_frame_models = []
     model.time_pos_key_names = set()
+    # The DrawIndexed timeline stamps its graph-provenance key on every draw;
+    # the hand-built model must provide the same set as the real constructor.
+    model.parsed_time_switch_owner_keys = set()
     model._switch_alias_state_counts = {}
     model._key_group_state_counts = {}
     model._key_group_var_names = {}
@@ -78,7 +81,15 @@ def time_node(alias="shared", count=2, prefix="frame"):
     for index in range(count):
         leaf = types.SimpleNamespace(obj_name="abcd1234-0." + prefix + str(index), submesh_name="abcd1234-0")
         sockets.append(types.SimpleNamespace(is_linked=True, links=[types.SimpleNamespace(from_node=leaf, from_socket=None)]))
-    node = types.SimpleNamespace(inputs=sockets, time_alias=alias, fps=12.0, name=prefix, comment="")
+    node = types.SimpleNamespace(
+        inputs=sockets,
+        time_alias=alias,
+        fps=12.0,
+        name=prefix,
+        comment="",
+        # The provenance key is the owning tree name plus the node name.
+        id_data=types.SimpleNamespace(name="animation_test"),
+    )
     node.as_pointer = lambda: id(node)
     return node
 
@@ -94,11 +105,28 @@ def test_graph_provenance():
     assert all("draw" in d.obj_name for d in model.ordered_draw_obj_data_model_list)
     assert list(group_time_position_frames(model.time_pos_frame_models)) == ["$shared"]
 
+    # The DrawIndexed timeline owns its draws through the provenance key; the
+    # Position timeline must not claim them, and only the parsed DrawIndexed
+    # timeline is recorded as a cross-IB batch candidate.
+    assert model.parsed_time_switch_owner_keys == {"animation_test::draw"}
+    tagged_draw_list = [
+        d for d in model.ordered_draw_obj_data_model_list if d.time_switch_owner_key
+    ]
+    assert len(tagged_draw_list) == 2
+    assert all(d.time_switch_owner_key == "animation_test::draw" for d in tagged_draw_list)
+
     # A single position frame still replaces a base slice, never draws twice.
     single = new_blueprint()
     single._parse_time_switch_node(time_node(count=1), [], True)
     single._reclassify_time_pos_frames()
     assert not single.ordered_draw_obj_data_model_list and len(single.time_pos_frame_models) == 1
+
+    # A one-frame DrawIndex node is a pass-through for the clock, but its draw
+    # is still a valid cross-IB guest, so provenance must be recorded.
+    one_frame = new_blueprint()
+    one_frame._parse_time_switch_node(time_node(count=1, prefix="still"), [])
+    assert one_frame.parsed_time_switch_owner_keys == {"animation_test::still"}
+    assert one_frame.ordered_draw_obj_data_model_list[0].time_switch_owner_key == "animation_test::still"
 
     # Revisited anonymous nodes share a stable clock; case variants of an
     # explicit alias are identical because 3Dmigoto lowercases INI tokens.

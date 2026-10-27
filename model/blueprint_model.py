@@ -26,7 +26,7 @@ from ..blueprint.blueprint_node_hash_texture import (
     MIMINode_Hash_Texture_Bind,
     MIMINode_Hash_Texture_Global,
 )
-from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch
+from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch, time_switch_owner_key
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
 from ..blueprint.blueprint_node_group import (
@@ -101,6 +101,13 @@ class BluePrintModel:
         # provide per-frame Position bytes, never their own drawindexed call).
         self.time_pos_key_names: set[str] = set()
         self.time_pos_frame_models: list[DrawCallModel] = []
+
+        # Every DrawIndex timeline that the traversal actually reached (that
+        # is, one connected to the selected output).  The Naraka cross-IB
+        # post-processor reads this set so an unused timeline node is ignored,
+        # while a connected timeline whose frames all failed to export still
+        # raises a useful error instead of silently doing nothing.
+        self.parsed_time_switch_owner_keys: set[str] = set()
 
         print(tree)
         output_node = output_node or BlueprintExportHelper.get_node_from_bl_idname(
@@ -853,8 +860,12 @@ class BluePrintModel:
         if len(valid_input_sockets) == 1 and not is_position_switch and not has_toggle:
             # A one-frame draw switch is a pass-through. A position provider
             # must still replace the separate base object, never draw twice.
+            # The pass-through still records provenance, because one static
+            # frame is a valid cross-IB guest even without a clock.
+            first_draw = len(self.ordered_draw_obj_data_model_list)
             for link in valid_input_sockets[0].links:
                 self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
+            self._tag_time_switch_draws(time_node, first_draw)
             return
 
         fps = float(getattr(time_node, 'fps', 0.0) or 0.0)
@@ -912,6 +923,34 @@ class BluePrintModel:
                 if draw_call.time_position_key_name:
                     raise ValueError("Nested Position.buf Based Dynamic Mod nodes are not supported")
                 draw_call.time_position_key_name = m_key.key_name
+        else:
+            self._tag_time_switch_draws(time_node, first_draw)
+
+    def _tag_time_switch_draws(self, time_node, first_draw: int):
+        """Record which DrawIndex timeline produced the draws in one slice.
+
+        The Naraka cross-IB post-processor turns this provenance into one host
+        draw call for the whole timeline, so a 60-frame animation needs one
+        host setting instead of 60 manual pairs.  A shared clock alias stays
+        irrelevant here: two timelines may share a clock and still own
+        different draws.
+        """
+        owner_key = time_switch_owner_key(time_node)
+        self.parsed_time_switch_owner_keys.add(owner_key)
+        for draw_call in self.ordered_draw_obj_data_model_list[first_draw:]:
+            # A Position timeline nested inside this branch never draws on its
+            # own; the Position reclassification pass owns those calls.
+            if draw_call.time_position_key_name:
+                continue
+            # Nested draw timelines would make the host assignment ambiguous,
+            # so reject them instead of silently keeping the first or last
+            # owner.
+            if draw_call.time_switch_owner_key and draw_call.time_switch_owner_key != owner_key:
+                raise ValueError(
+                    "Nested DrawIndex Based Dynamic Mod nodes are not supported: '"
+                    + time_node.name + "' contains another timeline that already owns these frames"
+                )
+            draw_call.time_switch_owner_key = owner_key
 
     def _reclassify_time_pos_frames(self):
         """

@@ -7,6 +7,7 @@ import importlib
 import os
 from pathlib import Path
 import sys
+import types
 import unittest
 from unittest.mock import patch
 import tempfile
@@ -1002,6 +1003,71 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual(len(texture.inputs), 1)
         timeline = self.tree.nodes.new('MIMINode_TimeSwitch')
         self.assertEqual(menu._new_batch_input(timeline).name, 'Frame 1')
+
+    def test_naraka_cross_ib_batch_properties(self):
+        # The batch belongs to the timeline node itself: one host for every
+        # frame, and the provenance key must match between parser and export.
+        from MIMIBlender.blueprint.blueprint_node_time_switch import time_switch_owner_key
+
+        from MIMIBlender.common.global_config import GlobalConfig, LogicName
+
+        node = self.tree.nodes.new('MIMINode_TimeSwitch')
+        self.assertFalse(node.cross_ib_enabled)
+        self.assertIsNone(node.cross_ib_host_object)
+
+        mesh = bpy.data.meshes.new("cross_ib_host_mesh")
+        host = bpy.data.objects.new("cross_ib_host", mesh)
+        node.cross_ib_host_object = host
+        node.cross_ib_enabled = True
+        self.assertEqual(node.cross_ib_host_object, host)
+        self.assertEqual(
+            time_switch_owner_key(node),
+            self.tree.name + "::" + node.name,
+        )
+
+        # The Naraka panel must draw in both the "no host yet" and normal
+        # states; a drawing error would make the node unusable, not just ugly.
+        original_logic_name = GlobalConfig.logic_name
+        GlobalConfig.logic_name = LogicName.Naraka
+        try:
+            node.cross_ib_host_object = None
+            missing_host_layout = _FakeLayout()
+            node.draw_buttons(bpy.context, missing_host_layout)
+            self.assertTrue(any(
+                name == "prop" and len(args) > 1 and args[1] == "cross_ib_host_object"
+                for name, args, _kwargs in missing_host_layout.calls
+            ))
+
+            node.cross_ib_host_object = host
+            ready_layout = _FakeLayout()
+            node.draw_buttons(bpy.context, ready_layout)
+            # The ready state adds the informational "N frames follow this
+            # host" line; assert its icon instead of translated text.
+            self.assertTrue(any(
+                name == "label" and kwargs.get("icon") == "INFO"
+                for name, _args, kwargs in ready_layout.calls
+            ))
+
+            # Exercise the real tree scan with real Blender nodes, not a fake
+            # node list: the provenance key must line up on both sides.
+            from MIMIBlender.games.naraka.cross_ib import apply_cross_ib_render_nodes
+            from MIMIBlender.model.draw_call_model import DrawCallModel
+
+            owner_key = time_switch_owner_key(node)
+            frame_draw = DrawCallModel("Frame0", "LOD0.guest-3")
+            frame_draw.time_switch_owner_key = owner_key
+            host_draw = DrawCallModel(host.name, "LOD0.host-0")
+            fake_model = types.SimpleNamespace(
+                ordered_draw_obj_data_model_list=[host_draw, frame_draw],
+                parsed_time_switch_owner_keys={owner_key},
+            )
+            apply_cross_ib_render_nodes(self.tree, fake_model)
+            self.assertEqual(frame_draw.cross_render_at_submesh, "LOD0.host-0")
+        finally:
+            GlobalConfig.logic_name = original_logic_name
+
+        bpy.data.objects.remove(host, do_unlink=True)
+        bpy.data.meshes.remove(mesh)
 
     def test_highlight_restore_saved_color(self):
         # ID properties deserialize arrays as IDPropertyArray, not Python lists.

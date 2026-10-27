@@ -25,8 +25,23 @@ playback on/off: off selects frame zero, and re-enabling starts a fresh loop.
 '''
 import bpy
 
+from ..common.global_config import GlobalConfig, LogicName
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
+
+
+def time_switch_owner_key(time_node):
+    """Return the graph-provenance key of one DrawIndex timeline node.
+
+    The key is stable for the whole export run and does not depend on object
+    names, so re-baking a timeline (which creates new frame objects) keeps
+    working.  Re-instancing the same group tree on purpose shares the key,
+    exactly like the shared clock, because it is the same node.
+    """
+    tree = getattr(time_node, "id_data", None)
+    tree_name = str(getattr(tree, "name", "") or "")
+    node_name = str(getattr(time_node, "name", "") or "")
+    return tree_name + "::" + node_name
 
 
 class MMT_OT_TimeSwitch_AddSocket(I18nOperator):
@@ -86,7 +101,9 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         """Return every text that decides how wide this node has to be."""
         # The title is the longest text here, so an old default title must not
         # shrink the node back to a width that truncates the new name.
-        return [self.label, self.time_alias, self.comment]
+        host_object = getattr(self, "cross_ib_host_object", None)
+        host_name = str(getattr(host_object, "name", "") or "")
+        return [self.label, self.time_alias, self.comment, host_name]
 
     def update_fps(self, context):
         self.update_node_width(self.width_texts())
@@ -107,6 +124,10 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         self.update_node_width(self.width_texts())
 
     def update_playback_mode(self, context):
+        self.update_node_width(self.width_texts())
+
+    def update_cross_ib_host(self, context):
+        # The host name is drawn on the node, so the width has to follow it.
         self.update_node_width(self.width_texts())
 
     # Playback driver dropdown. LOOP keeps the legacy autoplay behavior;
@@ -153,6 +174,22 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         description=tr("Comment text; written into the config table as comments"),
         default="",
         update=update_comment,
+    ) # type: ignore
+
+    # Naraka-only batch: every frame of this timeline is drawn inside one host
+    # object's draw call, so the frames use the host's material and textures.
+    # The properties exist under every preset to keep blend data intact when a
+    # file is opened elsewhere; only the Naraka UI and post-processor use them.
+    cross_ib_enabled: bpy.props.BoolProperty(
+        name=tr("Enable Cross-IB"),
+        description=tr("Render this timeline's frames inside the host object's draw call so they use the host's material and textures"),
+        default=False,
+    ) # type: ignore
+    cross_ib_host_object: bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        name=tr("Host Object"),
+        description=tr("Object whose draw call and material the timeline frames should use; it must be part of the exported blueprint and map to exactly one Submesh"),
+        update=update_cross_ib_host,
     ) # type: ignore
 
     def init(self, context):
@@ -202,6 +239,27 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         op_bake.node_name = self.name
         tree = self.id_data if getattr(self, "id_data", None) else None
         op_bake.tree_name = tree.name if tree else ""
+
+        # Naraka only: one host object for the whole timeline.  This replaces
+        # the old workflow of adding one Cross-IB pair per frame object, which
+        # became unmaintainable for baked animations with dozens of frames.
+        if GlobalConfig.logic_name == LogicName.Naraka:
+            layout.separator()
+            box = layout.box()
+            box.label(text=tr("Naraka Cross-IB"), icon='LINKED')
+            box.prop(self, "cross_ib_enabled", text=tr("Cross-IB Render"))
+            host_column = box.column()
+            host_column.enabled = self.cross_ib_enabled
+            host_column.prop(self, "cross_ib_host_object", text=tr("Host Object"))
+            if not self.cross_ib_enabled:
+                box.label(text=tr("Render every frame at one host object's draw call"), icon='INFO')
+            elif self.cross_ib_host_object is None:
+                box.label(text=tr("Choose the host object whose material the frames should use"), icon='ERROR')
+            elif getattr(self.cross_ib_host_object, "type", "") != 'MESH':
+                box.label(text=tr("The host object must be a mesh object"), icon='ERROR')
+            else:
+                connected_count = len([socket for socket in self.inputs if socket.is_linked])
+                box.label(text=tr("{count} connected frame(s) follow this host").format(count=connected_count), icon='INFO')
 
 
 classes = (

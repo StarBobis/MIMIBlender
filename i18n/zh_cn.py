@@ -1218,6 +1218,19 @@ TRANSLATIONS_ZH_CN = {
     "Baking produced no objects": "烘焙未产出任何对象",
     "Baked {count} frames and wired them into this node": "已烘焙 {count} 帧并连线到此节点",
 
+    # ---- Naraka cross-IB batch on the DrawIndexed timeline ----
+    # One host object for the whole timeline replaces one pair per frame.
+    "Naraka Cross-IB": "Naraka 跨IB",
+    "Enable Cross-IB": "启用跨IB",
+    "Render this timeline's frames inside the host object's draw call so they use the host's material and textures": "将本时间轴的所有帧放到宿主对象的DrawCall中绘制，从而使用宿主的材质和贴图",
+    "Host Object": "宿主对象",
+    "Object whose draw call and material the timeline frames should use; it must be part of the exported blueprint and map to exactly one Submesh": "时间轴所有帧要借用的宿主对象；它必须已连接到导出蓝图，并且只对应一个 Submesh",
+    "Cross-IB Render": "跨IB渲染",
+    "Render every frame at one host object's draw call": "所有帧统一在同一个宿主对象的DrawCall中绘制",
+    "Choose the host object whose material the frames should use": "请选择要借用材质的宿主对象",
+    "The host object must be a mesh object": "宿主对象必须是网格对象",
+    "{count} connected frame(s) follow this host": "已连接的 {count} 帧将跟随此宿主",
+
     # ---- Position.buf Based Dynamic Mod node (Position.buf switching on a time line) ----
     "Position.buf Based Dynamic Mod": "基于Position.buf切换的动态Mod",
     "Time Position Switch": "时间位置切换",
