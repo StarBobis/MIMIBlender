@@ -32,6 +32,99 @@ from .ini_validation import disable_legacy_ini_files, validate_ini_builder
 from . import shapekeys
 from . import blend_remap
 
+# ---------------------------------------------------------------------------
+# Category binding helpers
+# ---------------------------------------------------------------------------
+# Every category used to be bound to one fixed vertex buffer slot. The capture
+# also stores the slot the stream was dumped from, and a shader resource slot
+# ("vs-t0", "vs-t1", "ps-t3", ...) means the vertex shader fetches that record by
+# hand instead of reading the input assembler. Such a stream is only reachable
+# through a resource view, so the mod has to hand the runtime a view instead of a
+# plain vertex buffer.
+CATEGORY_DEFAULT_SLOT = {
+    D3D11Category.POSITION: "vb0",
+    # "Vector" holds TANGENT and NORMAL and has no D3D11Category constant.
+    "Vector": "vb1",
+    D3D11Category.TEXCOORD: "vb2",
+    D3D11Category.COLOR: "vb3",
+    D3D11Category.BLEND: "vb4",
+}
+
+# DXGI format of one half2 texcoord element.
+HALF2_FORMAT = "DXGI_FORMAT_R16G16_FLOAT"
+
+# The game declares the texcoord record as half4 groups in the input layout, so
+# a manual fetch reads eight bytes at a time and the view element has to hold
+# four half components.
+HALF4_FORMAT = "DXGI_FORMAT_R16G16B16A16_FLOAT"
+
+
+def is_shader_resource_slot(slot_name: str) -> bool:
+    """Return True when the slot holds a shader resource view.
+
+    "vs-t0", "ps-t2", "cs-t1" and so on are shader resource slots: they take a
+    view and therefore need a declared element format. "vb0" and "ib" are input
+    assembler slots and take a buffer directly.
+    """
+    if not slot_name or "-t" not in slot_name:
+        return False
+    shader_prefix = slot_name.split("-t", 1)[0]
+    return shader_prefix in ("vs", "ps", "cs", "gs", "hs", "ds")
+
+
+def get_category_binding_slot(d3d11_game_type, category_name: str) -> str:
+    """Slot the mod has to bind for one category.
+
+    Old workspaces carry no ExtractSlot for their elements, so fall back to the
+    vertex buffer slot this exporter has always used.
+    """
+    slot_dict = getattr(d3d11_game_type, "CategoryExtractSlotDict", None) or {}
+    slot_name = slot_dict.get(category_name, "")
+    if slot_name:
+        return slot_name
+    return CATEGORY_DEFAULT_SLOT.get(category_name, "")
+
+
+def get_ordered_category_names(d3d11_game_type) -> list:
+    """Category names of one game type in declaration order.
+
+    The real model keeps ``OrderedCategoryNameList``. A stripped down model that
+    only carries the stride dict still works, because that dict keeps the
+    declaration order as well.
+    """
+    category_names = getattr(d3d11_game_type, "OrderedCategoryNameList", None)
+    if category_names:
+        return list(category_names)
+    return list(getattr(d3d11_game_type, "CategoryStrideDict", {}) or {})
+
+
+def get_srv_view_layout(d3d11_game_type, category_name: str):
+    """Return (format, element width) of the view a shader slot needs.
+
+    The texcoord record is declared as half4 groups, so a sixteen byte record is
+    read as two eight byte elements. Every other category is read one declared
+    element at a time, which is also what its input layout says.
+
+    Returns ("", 0) when the category has no element to describe.
+    """
+    elements = [
+        element
+        for element in getattr(d3d11_game_type, "D3D11ElementList", [])
+        if element.Category == category_name
+    ]
+    if not elements:
+        return "", 0
+    if category_name == D3D11Category.TEXCOORD:
+        category_stride = sum(element.ByteWidth for element in elements)
+        every_element_is_half2 = all(
+            element.Format == "R16G16_FLOAT" and element.ByteWidth == 4
+            for element in elements
+        )
+        if every_element_is_half2 and category_stride % 8 == 0:
+            return HALF4_FORMAT, 8
+    first_element = elements[0]
+    return "DXGI_FORMAT_" + first_element.Format, first_element.ByteWidth
+
 
 class Exporter:
     """WWMI exporter: one mod INI, scoped geometry, WWMIv1 registration."""
@@ -106,6 +199,16 @@ class Exporter:
         constants_section.append(
             "global " + scoped_global("mesh_vertex_count", draw_ib) + " = " + str(draw_ib_model.mesh_vertex_count)
         )
+
+        # A category dumped from a shader resource slot is bound through a
+        # resource view. The game's shader decides how wide that view element is,
+        # and the texcoord record has two documented widths: eight byte half4
+        # groups (0) or single four byte half2 elements (1). Every other stream
+        # keeps the width its captured input layout declares.
+        if self.has_texcoord_half2_switch(draw_ib_model):
+            constants_section.append(
+                "global " + scoped_global("srv_texcoord_half2", draw_ib) + " = 0"
+            )
         constants_section.append(
             "global " + scoped_global("shapekey_vertex_count", draw_ib) + " = "
             + str(len(draw_ib_model.obj_buffer_model_wwmi.shapekey_vertex_ids))
@@ -207,24 +310,21 @@ class Exporter:
         commandlist_section.append(scoped_section("CommandListOverrideSharedResources", draw_ib))
         commandlist_section.append(scoped_name("ResourceBypassVB0", draw_ib) + " = ref vb0")
         commandlist_section.append("ib = " + scoped_name("ResourceIndexBuffer", draw_ib))
+        # Shape key buffers are written by compute shaders before the bindings.
         if shapekeys.get_wwmi_shapekey_entries(draw_ib_model):
             commandlist_section.append("run = " + scoped_name("CommandListApplyShapeKeysPosition", draw_ib))
             commandlist_section.append("run = " + scoped_name("CommandListApplyShapeKeysVector", draw_ib))
-            commandlist_section.append("vb0 = ref " + scoped_name("ResourcePositionBufferShapeKeyVB", draw_ib))
-            commandlist_section.append("vb1 = ref " + scoped_name("ResourceVectorBufferShapeKeyVB", draw_ib))
-        else:
-            commandlist_section.append("vb0 = " + scoped_name("ResourcePositionBuffer", draw_ib))
-            commandlist_section.append("vb1 = " + scoped_name("ResourceVectorBuffer", draw_ib))
-        commandlist_section.append("vb2 = " + scoped_name("ResourceTexcoordBuffer", draw_ib))
-        # Some captured layouts omit COLOR entirely. Do not bind a resource
-        # that add_resource_buffer cannot declare for that layout.
-        if D3D11Category.COLOR in draw_ib_model.d3d11_game_type.CategoryStrideDict:
-            commandlist_section.append("vb3 = " + scoped_name("ResourceColorBuffer", draw_ib))
-        else:
-            commandlist_section.append("vb3 = null")
 
-        if not draw_ib_model.blend_remap:
-            commandlist_section.append("vb4 = " + scoped_name("ResourceBlendBuffer", draw_ib))
+        # One binding per captured category. The workspace stores the slot each
+        # stream was dumped from, so a shader resource slot (vs-t0, vs-t1) is
+        # filled with a resource view next to the vertex buffer slots.
+        self.add_category_bindings(commandlist_section, draw_ib_model)
+
+        # Some captured layouts omit COLOR entirely. Do not bind a resource that
+        # add_resource_buffer cannot declare for that layout; null it out so a
+        # buffer left behind by the previous draw is never read as our geometry.
+        if D3D11Category.COLOR not in draw_ib_model.d3d11_game_type.CategoryStrideDict:
+            commandlist_section.append("vb3 = null")
 
         # Note: here we must use ref instead of a direct "=" assignment.
         # In 3Dmigoto, "= ResourceMergedSkeleton" is a one-time value copy;
@@ -282,6 +382,97 @@ class Exporter:
 
         commandlist_section.new_line()
         ini_builder.append_section(commandlist_section)
+
+    def get_srv_category_names(self, draw_ib_model: DrawIBModelWWMI) -> list:
+        """Categories of one DrawIB that the capture dumped from a shader slot."""
+        game_type = draw_ib_model.d3d11_game_type
+        category_names = []
+        for category_name in get_ordered_category_names(game_type):
+            binding_slot = get_category_binding_slot(game_type, category_name)
+            if is_shader_resource_slot(binding_slot):
+                category_names.append(category_name)
+        return category_names
+
+    def has_texcoord_half2_switch(self, draw_ib_model: DrawIBModelWWMI) -> bool:
+        """Whether the texcoord record offers both view widths.
+
+        The half2 width is only declared when the default view is the half4
+        group, so the switch variable and its command list block must agree.
+        """
+        if D3D11Category.TEXCOORD not in self.get_srv_category_names(draw_ib_model):
+            return False
+        view_format, _view_stride = get_srv_view_layout(
+            draw_ib_model.d3d11_game_type, D3D11Category.TEXCOORD
+        )
+        return view_format == HALF4_FORMAT
+
+    def add_category_bindings(self, commandlist_section: M_IniSection, draw_ib_model: DrawIBModelWWMI):
+        """Bind every captured category to the slot it was dumped from.
+
+        Most categories come from a vertex buffer and keep the plain binding
+        this exporter has always written. A category dumped from a shader
+        resource slot is different: the vertex shader of such a mesh fetches the
+        record by hand, so the buffer has to be handed in as a resource view as
+        well. The vertex buffer slot of that category is bound too, because a
+        shader variant that reads the input assembler then keeps working on the
+        same data.
+        """
+        draw_ib = draw_ib_model.draw_ib
+        game_type = draw_ib_model.d3d11_game_type
+        # A shape key DrawIB replaces position and vector with the buffers its
+        # shape key command lists have just written.
+        shapekey_entries = shapekeys.get_wwmi_shapekey_entries(draw_ib_model)
+
+        for category_name in get_ordered_category_names(game_type):
+            binding_slot = get_category_binding_slot(game_type, category_name)
+            if not binding_slot:
+                # An unknown category name cannot be bound anywhere.
+                continue
+
+            # A blend remap keeps its own remapped Blend buffers, which the
+            # remap command lists bind; the shared list must not overwrite them.
+            if category_name == D3D11Category.BLEND and draw_ib_model.blend_remap:
+                continue
+
+            # Shape key buffers are written by a compute shader and only exist as
+            # vertex buffers, so they never live in a shader resource slot.
+            if shapekey_entries and category_name == D3D11Category.POSITION:
+                commandlist_section.append("vb0 = ref " + scoped_name("ResourcePositionBufferShapeKeyVB", draw_ib))
+                continue
+            if shapekey_entries and category_name == "Vector":
+                commandlist_section.append("vb1 = ref " + scoped_name("ResourceVectorBufferShapeKeyVB", draw_ib))
+                continue
+
+            resource_name = scoped_name("Resource" + category_name + "Buffer", draw_ib)
+
+            if not is_shader_resource_slot(binding_slot):
+                # A plain vertex buffer slot is complete with the buffer itself.
+                commandlist_section.append(binding_slot + " = " + resource_name)
+                continue
+
+            # Keep the input assembler path of the same category fed as well.
+            default_slot = CATEGORY_DEFAULT_SLOT.get(category_name, "")
+            if default_slot:
+                commandlist_section.append(default_slot + " = " + resource_name)
+
+            # The view element width has to match what the game's shader fetches.
+            # The texcoord record has two documented widths, so it gets a switch
+            # that selects between them in game. The half2 width is only offered
+            # when add_resource_buffer declared it for this record.
+            srv_resource_name = scoped_name("Resource" + category_name + "BufferSrv", draw_ib)
+            view_format, _view_stride = get_srv_view_layout(game_type, category_name)
+            use_half2_switch = (
+                category_name == D3D11Category.TEXCOORD and view_format == HALF4_FORMAT
+            )
+            if use_half2_switch:
+                half2_resource_name = scoped_name("Resource" + category_name + "BufferSrvHalf2", draw_ib)
+                commandlist_section.append("if " + scoped_global("srv_texcoord_half2", draw_ib))
+                commandlist_section.append("  " + binding_slot + " = ref " + half2_resource_name)
+                commandlist_section.append("else")
+                commandlist_section.append("  " + binding_slot + " = ref " + srv_resource_name)
+                commandlist_section.append("endif")
+            else:
+                commandlist_section.append(binding_slot + " = ref " + srv_resource_name)
 
     def add_resource_mod_info_section_default(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
         """Mod name / author / description resources.
@@ -518,6 +709,35 @@ class Exporter:
             resource_buffer_section.append("format = DXGI_FORMAT_R16_UINT")
             resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-BlendRemapReverse.buf"))
             resource_buffer_section.new_line()
+
+        # A category dumped from a shader resource slot cannot be bound as a
+        # plain buffer: a resource view has to name its element format and width.
+        # The element view is declared per shader slot category, and the texcoord
+        # record additionally declares the half2 width, so the switch in the
+        # command list can select it in game without a new export.
+        for category_name in self.get_srv_category_names(draw_ib_model):
+            view_format, view_stride = get_srv_view_layout(draw_ib_model.d3d11_game_type, category_name)
+            if not view_format or not view_stride:
+                # Nothing to describe, the category has no element.
+                continue
+            buffer_filename = GlobalConfig.ini_buffer_filename(draw_ib + "-" + category_name + ".buf")
+
+            resource_buffer_section.append(scoped_section("Resource" + category_name + "BufferSrv", draw_ib))
+            resource_buffer_section.append("type = Buffer")
+            resource_buffer_section.append("format = " + view_format)
+            resource_buffer_section.append("stride = " + str(view_stride))
+            resource_buffer_section.append("filename = " + buffer_filename)
+            resource_buffer_section.new_line()
+
+            if category_name == D3D11Category.TEXCOORD and view_format != HALF2_FORMAT:
+                resource_buffer_section.append(
+                    scoped_section("Resource" + category_name + "BufferSrvHalf2", draw_ib)
+                )
+                resource_buffer_section.append("type = Buffer")
+                resource_buffer_section.append("format = " + HALF2_FORMAT)
+                resource_buffer_section.append("stride = 4")
+                resource_buffer_section.append("filename = " + buffer_filename)
+                resource_buffer_section.new_line()
 
         resource_buffer_section.append(scoped_section("ResourceShapeKeyOffsetBuffer", draw_ib))
         resource_buffer_section.append("type = Buffer")

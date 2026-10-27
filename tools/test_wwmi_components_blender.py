@@ -99,8 +99,22 @@ def make_model(with_key=False, draw_ib=DRAW_IB):
         blend_remap=True,
         component_real_vg_count_dict={0: 5, 2: 7},
         d3d11_game_type=SimpleNamespace(
-            get_blendindices_count_wwmi=lambda: 4,
             CategoryStrideDict={"Position": 12, "Vector": 4, "Texcoord": 4, "Blend": 4},
+            get_blendindices_count_wwmi=lambda: 4,
+            # The real workspace model also carries the declaration order, the
+            # slot every stream was dumped from and the element widths. A vertex
+            # buffer slot is what the canonical WWMI types use; a shader resource
+            # slot is covered by test_wwmi_srv_binding_ini.py.
+            OrderedCategoryNameList=["Position", "Vector", "Texcoord", "Blend"],
+            CategoryExtractSlotDict={
+                "Position": "vb0", "Vector": "vb1", "Texcoord": "vb2", "Blend": "vb4",
+            },
+            D3D11ElementList=[
+                SimpleNamespace(Category="Position", Format="R32G32B32_FLOAT", ByteWidth=12),
+                SimpleNamespace(Category="Vector", Format="R8G8B8A8_SNORM", ByteWidth=4),
+                SimpleNamespace(Category="Texcoord", Format="R16G16_FLOAT", ByteWidth=4),
+                SimpleNamespace(Category="Blend", Format="R8G8B8A8_UINT", ByteWidth=4),
+            ],
         ),
         blueprint_model=SimpleNamespace(keyname_mkey_dict=keyname_mkey_dict),
     )
