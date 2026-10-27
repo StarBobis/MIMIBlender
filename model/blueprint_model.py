@@ -1146,6 +1146,22 @@ class BluePrintModel:
             LOG.warning(f"BluePrintModel: none of the Submeshes under DrawIB '{draw_ib}' has a VGMap; cannot split")
             return []
 
+        # A static DrawIB declares no bone in any Submesh palette (for example
+        # WWMI's shader-fetched weapon meshes): there is no palette to split by
+        # and the node object already holds exactly its own Submesh geometry.
+        # Bind a disposable copy so the draw is still exported, under the same
+        # temporary-object contract a real split uses. Splitting would raise
+        # "no skeleton ownership" and lose the whole draw.
+        if not any(submesh_vg_map.values()):
+            LOG.info(f"BluePrintModel: DrawIB '{draw_ib}' declares no bone palette (static layout); "
+                     f"keeping '{obj.name}' as one piece")
+            temp_obj = obj.copy()
+            temp_obj.data = obj.data.copy()
+            temp_obj.name = obj.name + "__mimi_unico_static"
+            collections = list(obj.users_collection)
+            (collections[0] if collections else bpy.context.scene.collection).objects.link(temp_obj)
+            return [(normalized_name, temp_obj)]
+
         # --- Filter: split only into Submeshes with unique VGs (falling back to the node-bound Submesh) ---
         # Compute shared VGs (VGs appearing in more than one Submesh VGMap)
         vg_occurrence: dict[int, set[str]] = {}

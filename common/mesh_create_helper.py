@@ -277,6 +277,12 @@ class MeshCreateHelper:
         MeshCreateHelper.import_uv_layers(mesh, obj, texcoords)
 
         print("Importing vertex groups")
+        # A data type without a Blend category (for example WWMI's shader-fetched
+        # static weapon meshes) declares no bone index element at all, so an empty
+        # vertex group list is the correct import result rather than a failed
+        # weight import. The exporter keeps the same layout and needs no weights.
+        if len(blend_indices) == 0:
+            print("Data type declares no BLENDINDICES: static mesh, no vertex groups expected")
         # Merged mode: remap local blend index to global bone ID with VGMap
         # An empty map still has meaningful offset-based global identities.
         # None alone means local import; truthiness loses sparse legacy maps.

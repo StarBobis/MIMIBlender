@@ -338,6 +338,58 @@ class BlenderRoutingTests(unittest.TestCase):
         self.assertTrue(self.obj.data.polygons[0].select)
         self.assertEqual(len(self.obj.data.polygons), 1)
 
+    def test_static_layout_without_bone_indices_keeps_face_ownership(self):
+        """Export a capture whose layout has no bone indices at all.
+
+        WWMI's shader-fetched static meshes (weapon records) carry only position,
+        vector and texcoord streams, so an import has no vertex groups and the
+        default MergedComponent export used to cancel with "missing bone index
+        export layout". Without bone indices no weight can constrain a palette,
+        so every triangle must stay with its blueprint component and the plan
+        must be a clean identity: no issues, no reassignment, unchanged ranges.
+        """
+        # Same blueprint, same ownership, but a layout nothing can localize.
+        self.game_type = D3D11GameType.from_submesh_json_dict({
+            'WorkGameType': 'routing_static_test', 'CategoryBufferList': [{'D3D11ElementList': [
+                {'SemanticName': 'POSITION', 'SemanticIndex': 0, 'Format': 'R32G32B32_FLOAT', 'ByteWidth': 12, 'Category': 'Position'},
+                {'SemanticName': 'TEXCOORD', 'SemanticIndex': 0, 'Format': 'R16G16_FLOAT', 'ByteWidth': 4, 'Category': 'Texcoord'},
+            ]}],
+        })
+        context = self.build_context()
+        plan = prepare_routing(self.model, context, False)
+        self.assertEqual(plan['assignments'], [0, 0])
+        self.assertEqual(plan['issues'], [])
+        self.assertEqual(plan['counts'], dict(unchanged=2, reassigned=0, ambiguous=0,
+                                             incompatible=0, draw_state=0))
+        self.assertEqual(list(plan['loop_components']), [0, 0, 0, 0, 0, 0])
+        # Localization has nothing to serialize, and no draw may be re-cloned.
+        self.assertEqual(localize_blendindices(
+            context, self.model.merged_object.components, self.model.wwmi_info.components,
+            self.model.draw_ib, plan['loop_components']), {})
+        self.assertEqual(apply_routing(self.model, context, plan,
+                                       ['LOD0.deadbeef-0', 'LOD0.deadbeef-1']), [])
+        self.assertEqual(self.model.submesh_drawcall_groups, [[self.draw], []])
+        # The source keeps its own groups: routing never deletes user data.
+        self.assertEqual([group.name for group in self.obj.vertex_groups], ['10', '30', '20'])
+
+    def test_weighted_layout_without_index_element_still_fails(self):
+        """Keep the corrupt-workspace guard beside the static exemption.
+
+        Only a layout that declares no Blend category at all may skip routing.
+        A weighted layout whose BLENDINDICES element vanished would otherwise
+        export global bone ids as local ones, so it must still raise instead of
+        producing a silently wrong mod.
+        """
+        self.game_type = D3D11GameType.from_submesh_json_dict({
+            'WorkGameType': 'routing_weight_corrupt_test', 'CategoryBufferList': [{'D3D11ElementList': [
+                {'SemanticName': 'POSITION', 'SemanticIndex': 0, 'Format': 'R32G32B32_FLOAT', 'ByteWidth': 12, 'Category': 'Position'},
+                {'SemanticName': 'BLENDWEIGHT', 'SemanticIndex': 0, 'Format': 'R32G32B32A32_FLOAT', 'ByteWidth': 16, 'Category': 'Blend'},
+            ]}],
+        })
+        context = self.build_context()
+        with self.assertRaisesRegex(ValueError, 'missing bone index export layout'):
+            prepare_routing(self.model, context, False)
+
     def test_incompatible_faces_reject_all_proposed_moves(self):
         """Keep one valid proposal beside one genuinely impossible triangle.
         Failure must preserve the original owner list instead of partly routing.

@@ -63,6 +63,7 @@ def prepare_routing(model, context, allow_draw_state_change):
     attribute.data.foreach_get('value', face_owners)
     if numpy.any(face_owners < 1) or numpy.any(face_owners > len(owners)):
         raise ValueError('MergedComponent: invalid source draw ownership')
+    source_components = [int(owner_components[int(owner) - 1]) for owner in face_owners]
     # Blend layouts may span more than one integer field (for example eight
     # influences split over two four-slot elements). Use their common safe bound.
     # Planning cannot choose a slot which final localization cannot serialize.
@@ -74,12 +75,26 @@ def prepare_routing(model, context, allow_draw_state_change):
             if scalar.kind != 'u':
                 raise ValueError('MergedComponent: bone indices require an unsigned integer layout')
             maximum_local.append(numpy.iinfo(scalar).max)
-    if not maximum_local:
+    if maximum_local:
+        names = {group.index: group.name for group in context.obj.vertex_groups}
+        plan = plan_faces(mesh.vertices, mesh.polygons, names, source_components,
+                          model.wwmi_info.components, allow_draw_state_change, min(maximum_local))
+    elif 'Blend' in context.d3d11_game_type.OrderedCategoryNameList:
+        # A weighted layout whose index element disappeared is a corrupt
+        # workspace, not a static mesh: localizing would silently write global
+        # bone ids, so keep the explicit failure.
         raise ValueError('MergedComponent: missing bone index export layout')
-    names = {group.index: group.name for group in context.obj.vertex_groups}
-    plan = plan_faces(mesh.vertices, mesh.polygons, names,
-                      [owner_components[int(owner) - 1] for owner in face_owners],
-                      model.wwmi_info.components, allow_draw_state_change, min(maximum_local))
+    else:
+        # A static draw (for example WWMI's shader-fetched weapon meshes) carries
+        # no bone indices at all, so no weight can constrain a palette. Every
+        # triangle already belongs to exactly one blueprint component; keeping it
+        # there is the identity plan. Refusing to plan would make such a capture
+        # unexportable in the default MergedComponent architecture even though the
+        # layout and every generated resource are complete. Weights a static
+        # layout cannot serialize are dropped exactly as in the Merged mode.
+        plan = dict(assignments=list(source_components), issues=[], counts=dict(
+            unchanged=len(source_components), reassigned=0, ambiguous=0,
+            incompatible=0, draw_state=0))
     plan['owners'] = owners
     plan['face_owners'] = face_owners
     if plan['issues']:
