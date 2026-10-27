@@ -26,6 +26,7 @@ from ..blueprint.blueprint_node_hash_texture import (
     MIMINode_Hash_Texture_Bind,
     MIMINode_Hash_Texture_Global,
 )
+from ..blueprint.texture_bind_channels import channel_inputs
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch, time_switch_owner_key
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -301,8 +302,16 @@ class BluePrintModel:
             raise ValueError("Shared switch aliases may expand to at most 10000 states")
         return periods
 
-    def parse_current_node(self, current_node:bpy.types.Node, chain_key_list:list[M_Key]):
-        for input_socket in current_node.inputs:
+    def parse_current_node(self, current_node:bpy.types.Node, chain_key_list:list[M_Key], input_sockets=None):
+        """Parse the upstream chain of a pass-through node.
+
+        ``input_sockets`` lets a node with several pass-through channels follow
+        only the one that feeds the wire this visit came from (see
+        ``blueprint.texture_bind_channels``). Without it every input is parsed,
+        which is the historical behaviour of groups, reroutes and switches.
+        """
+        sockets = current_node.inputs if input_sockets is None else input_sockets
+        for input_socket in sockets:
             for link in input_socket.links:
                 if link.from_node.bl_idname == GROUP_INPUT_IDNAME:
                     self._parse_group_input(link.from_node, link.from_socket, chain_key_list)
@@ -445,8 +454,13 @@ class BluePrintModel:
             # visit produced with the node's slot bindings. Each visit news
             # its own DrawCallModels, so the same Object Info passing
             # through different branches/bind nodes stays independent.
+            # With several channels only the paired input is parsed, so a node
+            # can serve several branches without mixing their objects.
             draw_model_count_before = len(self.ordered_draw_obj_data_model_list)
-            self.parse_current_node(unknown_node, chain_key_list)
+            self.parse_current_node(
+                unknown_node, chain_key_list,
+                channel_inputs(unknown_node, from_socket),
+            )
             bindings = self._collect_texture_bindings(unknown_node)
             if bindings:
                 for obj_model in self.ordered_draw_obj_data_model_list[draw_model_count_before:]:
@@ -460,8 +474,12 @@ class BluePrintModel:
             # variant; the resolved rows later merge into one global
             # [TextureOverride_Texture_<hash>] section per hash, so the same
             # "parse first, then tag the new models" pattern applies here.
+            # The channel pairing is identical to the Slot variant.
             draw_model_count_before = len(self.ordered_draw_obj_data_model_list)
-            self.parse_current_node(unknown_node, chain_key_list)
+            self.parse_current_node(
+                unknown_node, chain_key_list,
+                channel_inputs(unknown_node, from_socket),
+            )
             bindings = self._collect_hash_texture_bindings(unknown_node)
             if bindings:
                 for obj_model in self.ordered_draw_obj_data_model_list[draw_model_count_before:]:

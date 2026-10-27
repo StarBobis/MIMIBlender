@@ -6,6 +6,11 @@ passes through it gets its texture slots replaced right before its own
 drawindexed line, so two objects of the same Submesh can use different
 textures under different switch states.
 
+The node can expose several pass-through channels. Channel N is input N plus
+output N (see texture_bind_channels.py), and every channel shares the same
+rows, so one node replaces the texture of several parts without the user
+typing the rows once per part.
+
 3Dmigoto facts backing this design:
 - A texture slot assignment (e.g. "ps-t0 = ResourceXXX") inside a
   TextureOverride section stays in effect until another assignment changes
@@ -65,7 +70,10 @@ from .texture_output_widgets import (
     draw_rename_box,
     first_hint,
     upstream_draw_ib_hints,
+    upstream_submesh_names,
 )
+# Channel socket pairs and their operators are shared with the Hash variant.
+from .texture_bind_channels import channel_count, draw_channel_controls
 
 # 3Dmigoto texture slot syntax: shader stage (ps/vs/gs/hs/ds/cs) + binding
 # type (t/s/b/u) + register number, written lowercase by convention.
@@ -265,6 +273,43 @@ _SWITCH_STATE_PASS_THROUGH = (
 )
 
 
+def _find_switch_state(start_sockets, depth_limit=12):
+    """Walk downstream from output sockets to the nearest Switch Key input.
+
+    Returns ``(key, alias, state_index, state_count)`` or an empty tuple.
+    Starting from sockets instead of a node is what lets a multi-channel
+    binding node report the state of every channel separately.
+    """
+    visited = set()
+    pending = list(start_sockets)
+    steps = 0
+    while pending and steps <= depth_limit:
+        steps += 1
+        current = pending.pop(0)
+        for link in getattr(current, "links", []):
+            target = link.to_node
+            if target is None:
+                continue
+            pointer = target.as_pointer()
+            if pointer in visited:
+                continue
+            visited.add(pointer)
+            if getattr(target, "bl_idname", "") == 'MIMINode_SwitchKey':
+                sockets = list(target.inputs)
+                if link.to_socket not in sockets:
+                    continue
+                return (
+                    str(getattr(target, "key_name", "") or "").strip(),
+                    str(getattr(target, "key_alias", "") or "").strip(),
+                    sockets.index(link.to_socket),
+                    len(sockets),
+                )
+            if getattr(target, "bl_idname", "") in _SWITCH_STATE_PASS_THROUGH:
+                # Pass-through nodes forward with all of their own outputs.
+                pending.extend(list(getattr(target, "outputs", []) or []))
+    return ()
+
+
 def downstream_switch_state(node, depth_limit=12):
     '''Return ``(key, alias, state_index, state_count)`` of the nearest Switch Key.
 
@@ -272,49 +317,44 @@ def downstream_switch_state(node, depth_limit=12):
     the node shows that state instead of leaving the wiring invisible.  An empty
     tuple means no Switch Key follows this node, so the binding always applies.
     '''
-    visited = set()
-    pending = [node]
-    steps = 0
-    while pending and steps <= depth_limit:
-        steps += 1
-        current = pending.pop(0)
-        for output in getattr(current, "outputs", []):
-            for link in output.links:
-                target = link.to_node
-                if target is None:
-                    continue
-                pointer = target.as_pointer()
-                if pointer in visited:
-                    continue
-                visited.add(pointer)
-                if getattr(target, "bl_idname", "") == 'MIMINode_SwitchKey':
-                    sockets = list(target.inputs)
-                    if link.to_socket not in sockets:
-                        continue
-                    return (
-                        str(getattr(target, "key_name", "") or "").strip(),
-                        str(getattr(target, "key_alias", "") or "").strip(),
-                        sockets.index(link.to_socket),
-                        len(sockets),
-                    )
-                if getattr(target, "bl_idname", "") in _SWITCH_STATE_PASS_THROUGH:
-                    pending.append(target)
-    return ()
+    return _find_switch_state(getattr(node, "outputs", []) or [], depth_limit)
 
 
-def draw_switch_state(layout, node):
-    '''Draw which key switch state the bindings of this node belong to.'''
-    state = downstream_switch_state(node)
+def switch_state_text(state):
+    """Return the one-line description of one switch state tuple."""
     if not state:
-        layout.label(text=tr("Not inside a key switch: the bindings always apply"), icon='BLANK1')
-        return
+        return tr("Not inside a key switch: the bindings always apply")
     key_name, key_alias, state_index, state_count = state
     text = tr("Key switch {key}: state {state} of {count}").format(
         key=key_name or tr("(no key set)"), state=state_index + 1, count=state_count,
     )
     if key_alias:
         text = text + "  ($" + key_alias.lower() + ")"
-    layout.label(text=text, icon='DRIVER')
+    return text
+
+
+def draw_switch_state(layout, node):
+    '''Draw which key switch state the bindings of this node belong to.
+
+    With more than one channel every output can feed a different switch state,
+    so the node lists them instead of pretending there is a single state.
+    '''
+    if channel_count(node) <= 1:
+        state = downstream_switch_state(node)
+        layout.label(
+            text=switch_state_text(state),
+            icon='DRIVER' if state else 'BLANK1',
+        )
+        return
+    for index, output in enumerate(getattr(node, "outputs", []) or []):
+        if not output.is_linked:
+            detail = tr("Channel output not connected")
+        else:
+            detail = switch_state_text(_find_switch_state([output]))
+        layout.label(
+            text=tr("Channel {index}: {detail}").format(index=index + 1, detail=detail),
+            icon='DRIVER',
+        )
 
 
 def _load_submesh_mark_dicts(submesh_name, dedupe_names=True):
@@ -512,6 +552,33 @@ def _selected_mark_type(node, item):
     return ""
 
 
+def _mark_missing_submeshes(node, item):
+    '''Return the upstream Submeshes that do not contain this row's mark.
+
+    A node with several channels can feed objects of several Submeshes, while a
+    mark name only exists in the Submesh that was marked. The export resolves
+    the mark per object, so the objects of the other Submeshes would fail late;
+    reporting the gap next to the row makes the channel wiring safe to build.
+    A single-Submesh node returns nothing: its one Submesh is already validated
+    by the export message and by the empty dropdown.
+    '''
+    if str(getattr(item, "source_type", "") or "") != 'MARK':
+        return []
+    wanted = mark_name_of(item).lower()
+    if not wanted:
+        return []
+    submesh_names = upstream_submesh_names(node)
+    if len(submesh_names) < 2:
+        # One Submesh means one owner; there is nothing to compare.
+        return []
+    missing = []
+    for submesh_name in submesh_names:
+        mark_dict_list = _cached_submesh_mark_dicts(submesh_name)
+        if not any(str(mark_dict.get("name", "") or "").lower() == wanted for mark_dict in mark_dict_list):
+            missing.append(submesh_name)
+    return missing
+
+
 def _draw_image_format_controls(box, node, item, index, tree):
     '''Draw the exact-format controls shared by file and mark-image rows.'''
     # Auto matches the captured original; Manual is the explicit fallback for
@@ -529,16 +596,33 @@ def _draw_image_format_controls(box, node, item, index, tree):
 
 
 def _texture_bind_mark_name_items(item):
-    '''Enum items for the mark name dropdown: marks of the upstream Submesh.'''
+    '''Enum items for the mark name dropdown: marks of the upstream Submeshes.
+
+    A node with several channels can feed objects of several Submeshes, so the
+    dropdown lists the union of their marks. A name that exists in more than one
+    Submesh is offered once; the export resolves it against the Submesh of each
+    object, which is where the real mark lives.
+    '''
     empty_items = [(_MARK_NAME_NONE, "(" + tr("none") + ")", "")]
     try:
         node = _find_owner_bind_node(item)
-        submesh_name = _resolve_upstream_submesh_name(node)
-        if not submesh_name:
+        submesh_names = upstream_submesh_names(node)
+        if not submesh_names:
+            # Fall back to the single lookup for older graphs the helper cannot
+            # walk; it resolves the same value as before.
+            first_name = _resolve_upstream_submesh_name(node)
+            submesh_names = [first_name] if first_name else []
+        if not submesh_names:
             return empty_items
         items = list(empty_items)
-        for mark_dict in _load_submesh_mark_dicts(submesh_name):
-            items.append((mark_dict["name"], mark_dict["name"], ""))
+        seen_names = set()
+        for submesh_name in submesh_names:
+            for mark_dict in _load_submesh_mark_dicts(submesh_name):
+                normalized = str(mark_dict["name"] or "").strip().lower()
+                if not normalized or normalized in seen_names:
+                    continue
+                seen_names.add(normalized)
+                items.append((mark_dict["name"], mark_dict["name"], ""))
         return items if len(items) > 1 else empty_items
     except Exception:
         # Never let a dropdown lookup break the node editor drawing.
@@ -647,8 +731,13 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
         if node is None or getattr(node, "bl_idname", "") != 'MIMINode_Texture_Bind':
             return {'CANCELLED'}
 
-        submesh_name = _resolve_upstream_submesh_name(node)
-        if not submesh_name:
+        # A multi-channel node can feed objects of several Submeshes, so the
+        # rows are collected from every upstream Submesh, each mark once.
+        submesh_names = upstream_submesh_names(node)
+        if not submesh_names:
+            first_name = _resolve_upstream_submesh_name(node)
+            submesh_names = [first_name] if first_name else []
+        if not submesh_names:
             self.report({'ERROR'}, tr("Upstream Submesh not resolved; set the Submesh on the upstream Object Info node first"))
             return {'CANCELLED'}
 
@@ -665,31 +754,33 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
 
         added_count = 0
         skipped_count = 0
-        try:
-            mark_dict_list = _load_submesh_mark_dicts(submesh_name)
-        except Exception as error:
-            self.report({'ERROR'}, tr("Failed to read the texture marks of Submesh") + " '" + submesh_name + "': " + str(error))
-            return {'CANCELLED'}
+        for submesh_name in submesh_names:
+            try:
+                mark_dict_list = _load_submesh_mark_dicts(submesh_name)
+            except Exception as error:
+                # One unreadable Submesh must not hide the others' marks.
+                self.report({'ERROR'}, tr("Failed to read the texture marks of Submesh") + " '" + submesh_name + "': " + str(error))
+                continue
 
-        for mark_dict in mark_dict_list:
-            if mark_dict["type"] not in ("Slot", "SharedSlot"):
-                continue
-            if not mark_dict["name"] or mark_dict["name"].lower() in existing_names:
-                skipped_count += 1
-                continue
-            if not mark_dict["slot"]:
-                print("Slot Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkSlot, skipped")
-                skipped_count += 1
-                continue
-            row_item = node.texture_slot_items.add()
-            row_item.enabled = True
-            row_item.slot = mark_dict["slot"]
-            row_item.source_type = 'MARK'
-            row_item.mark_name = mark_dict["name"]
-            row_item.mark_name_value = mark_dict["name"]
-            _texture_slot_item_refresh_display(row_item)
-            added_count += 1
-            existing_names.add(mark_dict["name"].lower())
+            for mark_dict in mark_dict_list:
+                if mark_dict["type"] not in ("Slot", "SharedSlot"):
+                    continue
+                if not mark_dict["name"] or mark_dict["name"].lower() in existing_names:
+                    skipped_count += 1
+                    continue
+                if not mark_dict["slot"]:
+                    print("Slot Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkSlot, skipped")
+                    skipped_count += 1
+                    continue
+                row_item = node.texture_slot_items.add()
+                row_item.enabled = True
+                row_item.slot = mark_dict["slot"]
+                row_item.source_type = 'MARK'
+                row_item.mark_name = mark_dict["name"]
+                row_item.mark_name_value = mark_dict["name"]
+                _texture_slot_item_refresh_display(row_item)
+                added_count += 1
+                existing_names.add(mark_dict["name"].lower())
 
         node.texture_slot_index = len(node.texture_slot_items) - 1
         self.report({'INFO'}, tr("Auto fill done: {added} row(s) added, {skipped} skipped").format(added=added_count, skipped=skipped_count))
@@ -726,6 +817,9 @@ class MIMINode_Texture_Bind(MIMINodeBase):
         # A running exact-format batch is global, so its progress is shown at
         # the top of the node even while the user edits another row.
         _draw_node_progress(layout)
+        # Channels turn this pass-through into a reusable 1..N node; the count
+        # and its +- buttons stay at the top so the wiring is understandable.
+        draw_channel_controls(layout, self, tree)
         # Every row of this node applies only in the state its object is drawn
         # in, so name that state instead of leaving the key wiring invisible.
         draw_switch_state(layout, self)
@@ -799,6 +893,17 @@ class MIMINode_Texture_Bind(MIMINodeBase):
             upstream_submesh = _resolve_upstream_submesh_name(self)
             if not upstream_submesh:
                 box.label(text=tr("Upstream Submesh not resolved; mark names unavailable"), icon='ERROR')
+            # A multi-channel node can feed several Submeshes while a mark only
+            # exists in one of them; the export would fail for the other
+            # objects, so say it here where the row is edited.
+            missing_submeshes = _mark_missing_submeshes(self, item)
+            if missing_submeshes:
+                box.label(
+                    text=tr("This mark does not exist in Submesh: {submeshes}").format(
+                        submeshes=", ".join(missing_submeshes),
+                    ),
+                    icon='ERROR',
+                )
         elif source_type == 'FILE':
             box.prop(item, "file_path")
             _draw_image_format_controls(box, self, item, index, tree)

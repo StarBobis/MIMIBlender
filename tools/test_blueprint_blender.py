@@ -1252,6 +1252,122 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn('ResourceBody', row.name)
         self.assertIn('ps-t2', row.name)
 
+    def _binding_parser(self):
+        """Parser stub that records emitted objects and their slot bindings.
+
+        The real ``_emit_object_source`` needs mesh data and a workspace, so it
+        is replaced by a small stub that keeps the same bookkeeping the texture
+        pass-through relies on: every emitted object becomes one draw model
+        that the node then tags.
+        """
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+
+        model = BluePrintModel.__new__(BluePrintModel)
+        model._group_instance_stack = []
+        model.ordered_draw_obj_data_model_list = []
+        emitted = []
+
+        class _StubDraw:
+            def __init__(self, name):
+                self.obj_name = name
+                self.texture_slot_binding_list = []
+                self.hash_texture_binding_list = []
+
+        def emit(**kwargs):
+            name = kwargs['object_name']
+            emitted.append(name)
+            model.ordered_draw_obj_data_model_list.append(_StubDraw(name))
+
+        model._emit_object_source = emit
+        return model, emitted
+
+    def test_texture_bind_channel_pairing(self):
+        # Channel N is input N plus output N: two branches share one node but
+        # never see each other's objects, and both carry the same rows.
+        from MIMIBlender.blueprint import texture_bind_channels
+
+        first = self.tree.nodes.new('MIMINode_Object_Info')
+        first.object_name = 'mesh_a'
+        second = self.tree.nodes.new('MIMINode_Object_Info')
+        second.object_name = 'mesh_b'
+        bind = self.tree.nodes.new('MIMINode_Texture_Bind')
+        row = bind.texture_slot_items.add()
+        row.source_type = 'RESOURCE'
+        row.resource_name = 'ResourceBody'
+        row.slot = 'ps-t2'
+        self.assertTrue(texture_bind_channels.add_channel(bind))
+        self.tree.links.new(first.outputs[0], bind.inputs[0])
+        self.tree.links.new(second.outputs[0], bind.inputs[1])
+
+        # Visiting the node through output 1 parses input 1 only, and the rows
+        # of the node are tagged onto the object that came through that channel.
+        model, emitted = self._binding_parser()
+        model.parse_single_node(bind, [], bind.outputs[0])
+        self.assertEqual(emitted, ['mesh_a'])
+        self.assertEqual(len(model.ordered_draw_obj_data_model_list), 1)
+        tagged = model.ordered_draw_obj_data_model_list[0].texture_slot_binding_list
+        self.assertEqual(tagged[0]['slot'], 'ps-t2')
+
+        # The second channel reaches the second object, not the first one.
+        model, emitted = self._binding_parser()
+        model.parse_single_node(bind, [], bind.outputs[1])
+        self.assertEqual(emitted, ['mesh_b'])
+
+        # An unconnected channel contributes nothing instead of falling back to
+        # the other branch, which would duplicate geometry into the wrong state.
+        for link in list(bind.inputs[0].links):
+            self.tree.links.remove(link)
+        model, emitted = self._binding_parser()
+        model.parse_single_node(bind, [], bind.outputs[0])
+        self.assertEqual(emitted, [])
+        model, emitted = self._binding_parser()
+        model.parse_single_node(bind, [], bind.outputs[1])
+        self.assertEqual(emitted, ['mesh_b'])
+
+        # A node saved before channels existed keeps its single pass-through.
+        single = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.tree.links.new(first.outputs[0], single.inputs[0])
+        model, emitted = self._binding_parser()
+        model.parse_single_node(single, [], single.outputs[0])
+        self.assertEqual(emitted, ['mesh_a'])
+
+        # The node reports both channels separately instead of one state.
+        layout = _FakeLayout()
+        bind.draw_buttons(bpy.context, layout)
+        texts = [kwargs.get("text", "") for name, _args, kwargs in layout.calls if name == "label"]
+        self.assertTrue(any('Channel 1' in text for text in texts), texts)
+        self.assertTrue(any('Channel 2' in text for text in texts), texts)
+
+    def test_texture_bind_channel_operators(self):
+        # The +- buttons are the only way to create channels; numbering appears
+        # with the second pair and a wired channel is never removed silently.
+        node = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.assertEqual([socket.name for socket in node.inputs], ['Object'])
+        self.assertEqual(bpy.ops.mimi.texture_bind_add_channel(
+            node_name=node.name, tree_name=self.tree.name), {'FINISHED'})
+        self.assertEqual(len(node.inputs), 2)
+        self.assertEqual([socket.name for socket in node.inputs], ['Object 1', 'Object 2'])
+        self.assertEqual([socket.name for socket in node.outputs], ['Output 1', 'Output 2'])
+
+        source = self.tree.nodes.new('MIMINode_Object_Info')
+        source.object_name = 'mesh'
+        self.tree.links.new(source.outputs[0], node.inputs[1])
+        self.assertEqual(bpy.ops.mimi.texture_bind_remove_channel(
+            node_name=node.name, tree_name=self.tree.name), {'CANCELLED'})
+        self.assertEqual(len(node.inputs), 2)
+
+        for link in list(node.inputs[1].links):
+            self.tree.links.remove(link)
+        self.assertEqual(bpy.ops.mimi.texture_bind_remove_channel(
+            node_name=node.name, tree_name=self.tree.name), {'FINISHED'})
+        self.assertEqual(len(node.inputs), 1)
+        self.assertEqual([socket.name for socket in node.outputs], ['Output 1'])
+
+        # The last channel is the node's contract with the object flow.
+        self.assertEqual(bpy.ops.mimi.texture_bind_remove_channel(
+            node_name=node.name, tree_name=self.tree.name), {'CANCELLED'})
+        self.assertEqual(len(node.inputs), 1)
+
 
 if __name__ == "__main__":
     # Blender's --python-exit-code turns failed assertions into a failing job.

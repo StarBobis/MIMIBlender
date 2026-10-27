@@ -34,6 +34,8 @@ from bpy_extras.io_utils import ImportHelper
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
 from .hash_texture_preview import texture_icon, clear_previews
+# Channel socket pairs and their operators are shared with the Slot variant.
+from .texture_bind_channels import draw_channel_controls
 from ..common.texture_naming import normalize_texture_role
 from ..common.texture_output_naming import (
     file_resource_stem,
@@ -899,6 +901,10 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
     legacy_slotless: bpy.props.BoolProperty(name='Legacy slotless Hash (not draw-local)', default=False)
 
     def draw_buttons(self, context, layout):
+        # Channels let one hash node serve several branches; input N pairs
+        # with output N and every channel shares these rows.
+        tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
+        draw_channel_controls(layout, self, tree)
         layout.label(text='Connected scope: binds only before drawindexed', icon='INFO')
         layout.prop(self, 'legacy_slotless')
         _draw_hash_replacements(self, context, layout)
@@ -906,7 +912,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         # This node is a conditional pass-through. A dangling output means
         # the exporter cannot reach it from Generate Mod, so make the silent
         # no-op visible and point users to the socket-less global node.
-        if not self.outputs or not self.outputs[0].is_linked:
+        if not self.outputs or not any(output.is_linked for output in self.outputs):
             layout.label(
                 text=tr("Hash Texture Bind output is not connected; use Global Hash Texture Bind for an unconditional replacement"),
                 icon='ERROR',

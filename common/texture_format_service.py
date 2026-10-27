@@ -314,6 +314,26 @@ def upstream_submesh(node):
         return ""
 
 
+def upstream_submeshes(node):
+    """Return every Submesh feeding a connected node, in wire order.
+
+    A texture node with several channels can feed objects of several Submeshes.
+    Each Submesh resolves its own captured original, so the pre-conversion has
+    to cover all of them; the content-addressed cache then turns identical
+    products into a single lookup.
+    """
+    try:
+        from ..blueprint.texture_output_widgets import upstream_submesh_names
+        return [
+            str(name or "").strip()
+            for name in upstream_submesh_names(node)
+            if str(name or "").strip()
+        ]
+    except Exception:
+        # A half-built graph must not break job collection.
+        return []
+
+
 def _row_label(node, source):
     """Short caption used by the progress text and by error messages."""
     label = getattr(node, "label", "") or getattr(node, "name", "")
@@ -441,10 +461,19 @@ def collect_tree_jobs(tree):
                 continue
             # Walk upstream only for nodes that actually own replacement rows.
             submesh = upstream_submesh(node)
+            # A Slot Texture Bind node with several channels can feed objects of
+            # several Submeshes; each resolves a different captured original, so
+            # every one of them needs a pre-conversion. Hash rows carry their
+            # own Submesh, and the global slot node stores it per row, so those
+            # keep the single lookup.
+            submesh_targets = [submesh]
+            if node_id == 'MIMINode_Texture_Bind':
+                submesh_targets = upstream_submeshes(node) or [submesh]
             for item in enabled_rows(node):
-                job = job_for_row(node, item, submesh)
-                if job:
-                    jobs.append(job)
+                for target_submesh in submesh_targets:
+                    job = job_for_row(node, item, target_submesh)
+                    if job:
+                        jobs.append(job)
 
     visit(tree)
     return jobs

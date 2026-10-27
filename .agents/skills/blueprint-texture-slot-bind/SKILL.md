@@ -33,7 +33,29 @@ Consequences:
 | Generated file names shared by UI and export | `common/texture_output_naming.py` |
 | Conversion (exact format) status + batch convert | `common/texture_format_service.py`, `blueprint/texture_format_widgets.py` |
 | Refreshing every texture node from one menu entry | `blueprint/texture_node_refresh.py` |
+| Channel socket pairs of the connected texture nodes | `blueprint/texture_bind_channels.py` |
 | Emitting lines inside the switch condition | `common/m_control_flow.py` |
+
+## Channels: one node, several branches
+
+`Slot Texture Bind` and `Hash Texture Bind` expose N pass-through channel pairs. **Channel N is
+input N plus output N**, the same convention `_parse_custom_group` already uses for a group
+instance. The node owns one row set; every channel shares it.
+
+Rules:
+
+- `texture_bind_channels.channel_inputs(node, from_socket)` is the only place that decides which
+  input a visit follows. `BluePrintModel._parse_single_node_impl` must keep calling it for both
+  node types; "parse all inputs" would emit every branch into every switch state.
+- A single pair (every file saved before channels) and a node whose socket counts disagree fall
+  back to "all inputs", because no pairing decision is possible or needed there.
+- `+`/`-` create and remove one pair; the last pair and a wired pair are refused, so a node never
+  silently drops out of the object flow and never deletes links.
+- A `MARK` row resolves per object, so a multi-channel node may feed several Submeshes — but the
+  mark name has to exist in each of them. `_mark_missing_submeshes` reports the gap inline, and
+  `texture_format_service.collect_tree_jobs` pre-converts one job per upstream Submesh.
+- `iter_object_sources` already follows every input, so the mark dropdown lists the union of the
+  upstream Submeshes' marks; keep the dedupe by name.
 
 ## Rules to keep
 

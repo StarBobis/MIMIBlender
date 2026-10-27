@@ -42,6 +42,8 @@ from .blueprint import blueprint_node_hash_texture
 # Socketless Slot defaults register independently of connected texture nodes.
 from .blueprint import blueprint_node_global_slot
 from .blueprint import blueprint_node_base
+# Channel operators must exist before the connected texture nodes draw them.
+from .blueprint import texture_bind_channels
 from .blueprint import blueprint_node_menu
 from .blueprint import blueprint_node_shapekey
 from .blueprint import blueprint_node_time_switch
@@ -125,6 +127,8 @@ def _register_steps():
     yield blueprint_node_object_list.register
     # Textures register their shared exact-format operators before the nodes.
     yield texture_format_widgets.register
+    # Channel operators are drawn by the two connected texture nodes.
+    yield texture_bind_channels.register
     # Texture Bind node and its PropertyGroup register right after the base object nodes.
     yield blueprint_node_texture.register
     yield blueprint_node_hash_texture.register
@@ -185,6 +189,7 @@ def unregister():
         blueprint_node_obj.unregister,
         blueprint_node_object_list.unregister,
         blueprint_node_texture.unregister,
+        texture_bind_channels.unregister,
         blueprint_node_global_slot.unregister,
         blueprint_node_hash_texture.unregister,
         texture_format_widgets.unregister,
