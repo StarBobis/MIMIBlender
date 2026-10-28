@@ -1033,6 +1033,9 @@ class MMT_OT_BatchConnectNodes(I18nOperator):
             print(f"  {info}")
 
         return {'FINISHED'}
+
+
+@translatable
 class MIMIMT_TextureAssignMenu(bpy.types.Menu):
     '''Add-menu submenu grouping the texture assignment nodes'''
     bl_idname = "MIMI_MT_texture_assign"
@@ -1053,6 +1056,7 @@ class MIMIMT_TextureAssignMenu(bpy.types.Menu):
         layout.operator("node.add_node", text=tr("Global Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Global"
 
 
+@translatable
 class MIMIMT_DynamicModMenu(bpy.types.Menu):
     '''Add-menu submenu grouping the dynamic mod (timeline) nodes'''
     bl_idname = "MIMI_MT_dynamic_mod"

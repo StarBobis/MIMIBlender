@@ -380,6 +380,9 @@ TRANSLATIONS_ZH_CN = {
     "Skeleton binding failed: {error}": "骨骼绑定失败：{error}",
     "Skeleton applied: {summary}": "已应用骨骼：{summary}",
     "Skeleton Binding": "骨骼绑定",
+    # Hidden scene flags that keep the two collapsible blocks open or closed.
+    "Skeleton Binding Expanded": "骨骼绑定展开状态",
+    "Whether the skeleton binding settings are expanded": "骨骼绑定设置是否展开",
     "Bind Skeleton": "绑定骨骼",
     "Build the character armature from skeleton.json during import": "导入时根据 skeleton.json 创建角色骨架",
     "How the imported meshes and the armature reconcile their two name spaces": "导入后如何协调网格与骨骼的两套命名",
@@ -658,6 +661,9 @@ TRANSLATIONS_ZH_CN = {
     "Create Blueprint Group from Selected Objects": "从选中物体创建蓝图分组",
     "Create Blueprint Group from Selected Objects and Assign Submesh": "从选中物体创建蓝图分组并分配子网格",
     "Create Blueprint Group with Submesh": "创建带子网格的蓝图分组",
+    # Redo-panel property names of the deferred group operator.
+    "Blueprint": "蓝图",
+    "Objects": "物体",
     "Create Internal Switch": "创建内部开关",
     "Texture Assign": "贴图指定",
     "Dynamic Mod": "动态Mod",
@@ -684,6 +690,7 @@ TRANSLATIONS_ZH_CN = {
     "Set to Specified Submesh": "设为指定子网格",
     "Please select a valid Submesh.": "请选择一个有效的子网格。",
     "No object info nodes are currently selected": "当前未选中任何物体信息节点",
+    "No object info nodes or object list nodes are currently selected": "当前未选中任何物体信息节点或物体列表节点",
     "Set {count} object info nodes to submesh: {submesh}": "已将 {count} 个物体信息节点设为子网格：{submesh}",
     "Please use this feature in the node editor": "请在节点编辑器中使用此功能",
     "Node tree not found": "未找到节点树",
@@ -772,15 +779,22 @@ TRANSLATIONS_ZH_CN = {
     "Name of an existing [ResourceXXX] section, e.g. ResourceMySharedTexture": "已有 [ResourceXXX] 资源段的名称，例如 ResourceMySharedTexture",
     "Restore After Draw": "绘制后还原",
     "Capture the original texture with ref before the draw and bind it back after drawindexed; needed when a later draw must see the original texture again": "绘制前用 ref 捕获原始贴图并在 drawindexed 后重新绑定；当后续绘制需要看到原始贴图时使用",
+    # Caption of rows whose slot is physical, so the state is always restored.
+    "Draw-local binding: always restores after draw": "绘制局部绑定：绘制后始终恢复",
     "Enabled": "启用",
     "Disabled rows are skipped at export time": "禁用的行在导出时跳过",
     "Binding": "绑定",
+    # The two column captions of one texture binding row.
+    "Slot": "槽位",
+    "Source": "来源",
     "No bindings; objects pass through unchanged": "没有任何绑定；物体会原样透传",
     "Upstream Submesh not resolved; mark names unavailable": "未能解析上游 Submesh；标记名称不可用",
     "Slot format looks wrong; expected something like ps-t0": "槽位格式看起来不对；应为类似 ps-t0 的形式",
     "{count} slot binding(s)": "{count} 条槽位绑定",
     "Add Texture Binding": "添加贴图绑定",
     "Remove Texture Binding": "移除贴图绑定",
+    # Lowercase "none" is composed into "(none)" by the enum callback.
+    "none": "无",
     "(none)": "（无）",
     # ---- Generated texture file name and rename alias ----
     "Generated texture file": "生成的贴图文件名",
@@ -837,8 +851,24 @@ TRANSLATIONS_ZH_CN = {
     "{count} hash binding(s)": "{count} 条Hash绑定",
     "Add Hash Texture Binding": "添加Hash贴图绑定",
     "Remove Hash Texture Binding": "移除Hash贴图绑定",
+    # Captions and the legacy opt-in flag drawn inside the conditional node.
+    "Connected scope: binds only before drawindexed": "连接作用域：仅在 drawindexed 之前绑定",
+    "Legacy slotless Hash (not draw-local)": "旧版无槽位 Hash（非绘制局部）",
+    # ---- Global Slot Texture Bind node (socketless Submesh defaults) ----
+    "Global Slot Texture Bind": "全局贴图槽位绑定",
+    "Refresh Slot Marks": "刷新槽位标记",
+    "Replacement": "替换贴图",
+    "Submesh defaults / local draw overrides win": "子网格默认值 / 局部绘制覆盖优先",
+    "Original DDS unavailable": "原始 DDS 不可用",
+    "Stale mark: clear or disable replacement": "标记已失效：请清除或禁用该替换",
     # ---- Object List node (many objects in one collapsible node) ----
     "Object List": "物体列表",
+    # Batch Submesh actions of the whole list and their result messages.
+    "Batch Set Submesh": "批量设置子网格",
+    "Set All Items to Specified Submesh": "将所有条目设为指定子网格",
+    "The Object List node has no items": "该物体列表节点没有任何条目",
+    "The target Object List node no longer exists": "目标物体列表节点已不存在",
+    "Set {count} object entries to submesh: {submesh}": "已将 {count} 个物体条目设为子网格：{submesh}",
     "Add Object": "添加物体",
     "Remove Object": "移除物体",
     "Add Selected Objects": "添加选中物体",

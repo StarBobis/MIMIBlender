@@ -913,7 +913,7 @@ class MIMINode_Texture_Bind(MIMINodeBase):
         if not logical_slot:
             # Physical connected slots always restore their captured state.
             # Keep the old RNA field for saved files, but do not offer a leak mode.
-            box.label(text='Draw-local binding: always restores after draw')
+            box.label(text=tr('Draw-local binding: always restores after draw'))
 
         # Show the file name this row will produce and let the user rename it.
         # Every value comes from the shared naming helpers, so the displayed

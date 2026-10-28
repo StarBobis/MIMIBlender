@@ -413,7 +413,7 @@ class MIMITextureHashItem(PropertyGroup):
     mark_source_submesh: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     mark_source_name: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     # Resolution stays user-controlled unless explicitly matched to the capture.
-    force_original_size: bpy.props.BoolProperty(name='Force original resolution', default=False)
+    force_original_size: bpy.props.BoolProperty(name=tr("Force Original Resolution"), default=False)
     mark_source_file_path: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
     # Texture slot of the marked texture (such as ps-t0). A row that knows its
     # slot can bind the replacement inside the owning object's draw section,
@@ -898,14 +898,14 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
 
     # Older slotless trees remain opt-in because hash conditions are not draw-local.
     # New connected nodes must resolve a physical slot before export succeeds.
-    legacy_slotless: bpy.props.BoolProperty(name='Legacy slotless Hash (not draw-local)', default=False)
+    legacy_slotless: bpy.props.BoolProperty(name=tr('Legacy slotless Hash (not draw-local)'), default=False)
 
     def draw_buttons(self, context, layout):
         # Channels let one hash node serve several branches; input N pairs
         # with output N and every channel shares these rows.
         tree = self.id_data if getattr(self, "id_data", None) and getattr(self.id_data, "bl_idname", "") == 'MIMIBlueprintTreeType' else None
         draw_channel_controls(layout, self, tree)
-        layout.label(text='Connected scope: binds only before drawindexed', icon='INFO')
+        layout.label(text=tr('Connected scope: binds only before drawindexed'), icon='INFO')
         layout.prop(self, 'legacy_slotless')
         _draw_hash_replacements(self, context, layout)
 

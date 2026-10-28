@@ -24,6 +24,7 @@ from ..i18n.i18n import tr, translatable, I18nOperator
 from ..utils.merged_sculpt_utils import MergedSculptUtils, PROP_SOURCES
 
 
+@translatable
 class MIMI_OT_merged_sculpt_create(I18nOperator):
     """Duplicate the selected objects and join the copies into one sculpt target."""
 
@@ -64,6 +65,7 @@ class MIMI_OT_merged_sculpt_create(I18nOperator):
         return {'FINISHED'}
 
 
+@translatable
 class MIMI_OT_merged_sculpt_apply(I18nOperator):
     """Write the sculpted positions back into every source object."""
 
@@ -104,6 +106,7 @@ class MIMI_OT_merged_sculpt_apply(I18nOperator):
         return {'FINISHED'}
 
 
+@translatable
 class MIMI_OT_merged_sculpt_discard(I18nOperator):
     """Delete the merged sculpt object without writing anything back."""
 
@@ -134,6 +137,7 @@ class MIMI_OT_merged_sculpt_discard(I18nOperator):
         return {'FINISHED'}
 
 
+@translatable
 class MIMI_OT_merged_sculpt_validate(I18nOperator):
     """Read-only health check of the current merged sculpt session."""
 

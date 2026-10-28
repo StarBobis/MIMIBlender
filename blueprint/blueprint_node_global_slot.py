@@ -88,10 +88,13 @@ class GlobalSlotItem(bpy.types.PropertyGroup):
     slot: bpy.props.StringProperty()
     mark_name: bpy.props.StringProperty()
     original_path: bpy.props.StringProperty(subtype='FILE_PATH')
-    file_path: bpy.props.StringProperty(name='Replacement', subtype='FILE_PATH')
-    enabled: bpy.props.BoolProperty(name='Enabled', default=True)
+    # User-visible RNA names follow the selected UI language just like the
+    # captions below. They are read once at registration time, so a language
+    # change takes effect after the add-on is reloaded.
+    file_path: bpy.props.StringProperty(name=tr("Replacement"), subtype='FILE_PATH')
+    enabled: bpy.props.BoolProperty(name=tr("Enabled"), default=True)
     missing: bpy.props.BoolProperty(default=False)
-    force_original_size: bpy.props.BoolProperty(name='Force Original Size', default=False)
+    force_original_size: bpy.props.BoolProperty(name=tr("Force Original Resolution"), default=False)
     # Optional user alias: the generated texture file is renamed. Empty keeps
     # the generated name shown by the node.
     output_name: bpy.props.StringProperty(
@@ -138,6 +141,7 @@ def refresh_global_slot_rows(node):
     return len(node.items)
 
 
+@translatable
 class RefreshGlobalSlots(I18nOperator):
     """Scan Slot and SharedSlot without deduplicating their hashes."""
     bl_idname = 'mimi.global_slot_refresh'
@@ -181,7 +185,7 @@ class MIMINode_Texture_Global(MIMINodeBase):
     def draw_buttons(self, context, layout):
         # Running exact-format batches are global, so their progress shows here.
         _draw_node_progress(layout)
-        layout.label(text='Submesh defaults / local draw overrides win', icon='INFO')
+        layout.label(text=tr('Submesh defaults / local draw overrides win'), icon='INFO')
         op = layout.operator('mimi.global_slot_refresh', icon='FILE_REFRESH')
         op.tree_name, op.node_name = self.id_data.name, self.name
         layout.template_list('UI_UL_list', self.name, self, 'items', self, 'index', rows=4)
@@ -196,7 +200,8 @@ class MIMINode_Texture_Global(MIMINodeBase):
         _draw_row_controls(layout, self, row, int(self.index), tree)
         # Clearing or disabling withdraws only this layer of default binding.
         # The original and lower-priority configuration remain untouched.
-        layout.label(text=row.original_path or 'Original DDS unavailable')
+        # Only the fallback caption is translated; a real path stays verbatim.
+        layout.label(text=row.original_path or tr('Original DDS unavailable'))
         # The DrawIB comes from the row's Submesh; the row index inside the
         # export pass is only known there, so it stays a placeholder.
         generated_name = global_slot_output_filename(
@@ -206,7 +211,7 @@ class MIMINode_Texture_Global(MIMINodeBase):
         # The copy stage always converts to DDS, so the alias is always .dds.
         draw_rename_box(layout, row, ".dds", generated_name)
         if row.missing:
-            layout.label(text='Stale mark: clear or disable replacement', icon='ERROR')
+            layout.label(text=tr('Stale mark: clear or disable replacement'), icon='ERROR')
         # One click prepares every replacement of this node in the background.
         _draw_convert_all(layout, self, tree)
 
