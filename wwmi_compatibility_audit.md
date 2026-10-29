@@ -1,5 +1,9 @@
 # WWMI compatibility audit after v1.0.49
 
+> Historical record. The MergedComponent and UniComponent architectures
+> described below were removed from the add-on; the current vertex group modes
+> are Merged and PerComponent. The removed sources are kept in `recycle/`.
+
 ## Scope and evidence
 
 This audit follows the reported Merged Component bone 223 error and the Merged native shape-key batch metadata error. The original failing Blender project was unavailable during the initial audit. Evidence for that audit combines source/protocol inspection, synthetic regressions, and fresh imports of five existing local extraction workspaces. The later supplied-project investigation is recorded separately below. It is not an in-game rendering certification.

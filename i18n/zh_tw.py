@@ -22,29 +22,6 @@ Rules for editing this file:
 """
 TRANSLATIONS_ZH_TW = {
     # Routing consent is separate from bone compatibility and never inferred.
-    "Allow Component Draw-State Changes": "允許切換組件繪製狀態",
-    "MergedComponent only: move uniquely compatible triangles to another original component. Uses its native shaders/materials; explicit blueprint texture bindings and switches follow the source. Ambiguous or incompatible faces still stop export": "僅用於 MergedComponent：將唯一相容的三角面移至其他原始組件，使用目標組件的原生著色器/材質；來源藍圖的明確貼圖綁定和開關條件隨面保留。歸屬不明確或骨骼不相容的面仍會阻止匯出",
-    "MergedComponent routing stopped: {incompatible} incompatible triangles, {ambiguous} ambiguous, {draw_state} require draw-state consent. Open report: {report}. No weights were deleted; repair the reported faces or explicitly use Merged.": "MergedComponent 自動分配已停止：{incompatible} 個三角面無相容骨骼表，{ambiguous} 個歸屬不明確，{draw_state} 個需要授權切換繪製狀態。請開啟報告：{report}。未刪除任何權重；請修復報告中的面，或主動切換到 Merged。",
-    "MergedComponent face routing report": "MergedComponent 面歸屬檢查報告",
-    "Indices below are zero-based. Source faces precede modifiers; export triangles and vertices follow modifiers.": "以下編號從 0 開始。source_face 為套用修改器前的源面編號；triangle 和 export_vertices 為套用修改器後的匯出三角面與頂點編號。",
-    "Select a source object, then press F3 > Select WWMI Problem Faces. Selection refuses changed topology.": "選取源物件後，按 F3 搜尋「選取 WWMI 問題面」，或點擊「選取問題面」。若源拓撲已改變，請重新匯出以產生報告。",
-    "incompatible: no original palette contains every positive weight. Check workspace/LOD and bone names; repaint only if the weights are wrong, or explicitly use Merged.": "incompatible（無法表示）：沒有任何原始組件骨骼表能容納該面的全部正權重。檢查工作區、LOD 和骨骼名稱；僅在權重確實錯誤時人工重繪，否則主動選取 Merged。複製頂點不能解決單一頂點的跨表權重相依。",
-    "ambiguous: multiple target palettes fit. Separate these source faces into another object and bind it to the intended Submesh in the blueprint.": "ambiguous（歸屬不明確）：candidates 列出了多個骨骼相容的候選組件。請將這些源面分離成物件，在藍圖中綁定到你確定的目標 Submesh；不能僅靠骨骼判斷材質歸屬。",
-    "draw_state: one palette fits, but original target shaders/materials are not proven equivalent. Confirm the destination appearance, then enable Allow Component Draw-State Changes, or use Merged.": "draw_state（需要授權）：只有一個骨骼相容組件，但無法證明其原生著色器/材質與源組件等價。確認可以使用目標組件的繪製狀態後，勾選「允許切換組件繪製狀態」，或選取 Merged。",
-    "The routing plan was cancelled. Reassigned counts are proposals only. No automatic weight deletion, native shape-key renumbering, or architecture fallback was performed.": "整份分配計畫已取消，reassigned 數量僅為可遷移建議，並未實際移動任何面。本次沒有自動刪除權重、重編號原生形態鍵或回退匯出架構。",
-    "Connected parts reassigned by island analysis:": "依連通塊自動改判歸屬的部位：",
-    "Source object": "源物件",
-    "Source face indices": "源面編號",
-    "Open Routing Report": "開啟分配報告",
-    "Select Problem Faces": "選取問題面",
-    "Select WWMI Problem Faces": "選取 WWMI 問題面",
-    "Open the latest MergedComponent routing report in the Text Editor": "在文字編輯器中開啟最新的 MergedComponent 面歸屬檢查報告",
-    "Select reported source faces on the active object without changing geometry or weights": "在目前作用中的源物件上選取報告中的問題面，不修改幾何或權重",
-    "No MergedComponent routing report is available": "尚無 MergedComponent 分配報告，請先嘗試匯出",
-    "Select a source mesh and generate a routing report first": "請先嘗試匯出以產生分配報告，然後選取一個源網格物件",
-    "No current report for this object, or topology changed; export again to refresh the report": "報告中沒有此物件，或源拓撲已改變；請重新匯出以更新報告",
-    "These generated triangles have no reliable source face; inspect the export triangle details in the report": "這些產生的三角面沒有可靠的源面對應關係；請查看報告中的匯出三角面詳情",
-    "Selected {count} source faces; weights and geometry were not modified": "已選取 {count} 個源面；未修改權重或幾何",
     # Editable atlas allocation and merge approval messages.
     "Solid Color": "純色",
     "Shared Materials ({count})": "共用材質：{count} 個",
@@ -79,15 +56,10 @@ TRANSLATIONS_ZH_TW = {
     "Minimum final atlas height; non-power-of-two values round up": "最終圖集最小高度；非2的次方數值向上取整",
     "Limit each source texture without enlarging smaller textures; tightly pack the smallest possible atlas": "限制每張源貼圖的尺寸，不放大較小的貼圖；緊密打包，盡量縮小最終圖集",
     "Maximum size of each source texture axis, rounded down to a power of two; not the final atlas size": "每張源貼圖各軸的最大尺寸，向下取2的次方；不是最終圖集尺寸",
-    # NOTE: the WWMI vertex group mode names "MergedComponent", "Merged",
-    # "PerComponent" and "UniComponent" are fixed technical mode names that
-    # must stay in English in every UI language. Do NOT add dictionary entries
-    # for them here; their dropdown labels in mimi_global_properties.py
-    # intentionally skip tr() so translation could never apply anyway.
-    # Global editing and local export are deliberately described separately.
-    "Merged import; export local bone indices without splitting objects; all weighted bones must exist in the target component": "Merged 合併匯入；匯出時轉為局部骨骼索引，不拆分物件；所有加權骨骼必須存在於目標組件中",
-    # Keep legacy mode names and stored values available for existing scenes.
-    "MergedComponent: merged editing with local buffer export and no object splitting\nMerged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups\nUniComponent: merged editing with automatic object splitting": "MergedComponent：全域頂點群組製作，局部索引匯出，不拆分物件\nMerged：執行時合併骨架，支援跨組件權重\nPerComponent：獨立局部頂點群組\nUniComponent：合併製作，匯出時自動拆分物件",
+    # NOTE: the WWMI vertex group mode names "Merged" and "PerComponent" are
+    # fixed technical mode names that must stay in English in every UI
+    # language. Do NOT add dictionary entries for them here; their dropdown
+    # labels in mimi_global_properties.py intentionally skip tr().
     # ---- Independent active-mesh cleanup actions ----
     "Delete All Shape Keys": "刪除所有形態鍵",
     "Delete Invalid Vertex Groups": "刪除無效頂點群組",
@@ -211,7 +183,6 @@ TRANSLATIONS_ZH_TW = {
     "Square": "正方形",
     "Strict Custom": "嚴格自訂",
     "Submesh": "子網格",
-    # "UniComponent" must stay untranslated: see the NOTE at the top of this dict.
     "Ungroup": "取消群組",
     "Visibility": "可見性",
     "Warning": "警告",
@@ -319,8 +290,7 @@ TRANSLATIONS_ZH_TW = {
     "Workspace folder does not exist. Please set the workspace first.": "工作區資料夾不存在。請先設定工作區。",
     "Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export": "匯入合併後的統一頂點群組；匯出時使用 ComputeShader 執行階段對應",
     "Imports vertex groups independently per component": "依組件分別匯入獨立的頂點群組",
-    "Merged import; on export, automatically splits by Submesh and restores local vertex groups": "合併匯入；匯出時自動依子網格拆分並還原局部頂點群組",
-    "Merged: import the merged unified vertex groups (used by Unreal's merged vertex group technique). Wuthering Waves Mods generally choose this to reduce the complexity of making Mods\nPerComponent: import independent vertex groups per component\nUniComponent: merged import; automatically split back into component-level vertex groups on export": "Merged：匯入合併後的統一頂點群組（虛幻引擎合併頂點群組技術所用）。鳴潮 Mod 一般選擇此項以降低製作 Mod 的複雜度\nPerComponent：依組件匯入獨立的頂點群組\nUniComponent：合併匯入；匯出時自動拆分回組件層級頂點群組",
+    "Merged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups": "Merged：執行時合併骨架，支援跨組件權重\nPerComponent：獨立局部頂點群組",
     "Only applies to slot-style textures. When enabled, textures marked with specific names will use the SlotFix style, which can to some extent solve the problem of slot-style textures crossing slots. Crossing a Pixel slot means a texture is ps-t3 in the previous DrawCall but becomes ps-t5 in the next DrawCall. However, since the people responsible for maintaining it are also lazy, this is not reliable": "僅適用於槽位式貼圖。啟用後，使用特定名稱標記的貼圖將採用 SlotFix 方式，可在一定程度上解決槽位式貼圖跨槽位的問題。跨 Pixel 槽位是指一張貼圖在上一個 DrawCall 中是 ps-t3，到下一個 DrawCall 卻變成了 ps-t5。不過由於負責維護它的人也很懶，所以這並不可靠",
     "Only available for GIMI / GenshinImpact workspaces. When enabled, imported characters get a preview material built from LightMap, Body Ramp, MatCap and edge-light node groups.": "僅適用於 GIMI / 原神工作區。啟用後，匯入的角色會獲得由 LightMap、Body Ramp、MatCap 和邊緣光節點群組構成的預覽材質。",
 

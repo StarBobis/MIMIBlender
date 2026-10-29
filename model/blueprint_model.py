@@ -8,7 +8,6 @@ from ..utils.log_utils import LOG
 from ..utils.vertexgroup_utils import VertexGroupUtils
 
 from ..common.m_key import M_Key
-from ..common.mimi_global_properties import MIMIGlobalProperties
 from .draw_call_model import DrawCallModel
 from .submesh_model import SubMeshModel
 from .drawib_model import DrawIBModel
@@ -55,8 +54,6 @@ class BluePrintModel:
         # object traversal, then every exporter can emit their replacements.
         self.global_hash_texture_binding_list:list[dict] = []
 
-        # Temporary objects created by UniComponent splitting; must be cleaned up after export
-        self._unico_temp_objects: list[bpy.types.Object] = []
         self._group_instance_stack: list[bpy.types.Node] = []
 
         # Recursively parse all nodes starting from the output node
@@ -567,11 +564,10 @@ class BluePrintModel:
             return
 
     def _emit_object_source(self, object_name: str, submesh_name: str, original_object_name: str, chain_key_list: list[M_Key], skip_draw: bool = False):
-        '''Emit one DrawCallModel (or its UniComponent splits) for an object.
+        '''Emit one DrawCallModel for an object.
 
         Shared by the Object Info branch and the Object List branch so both
-        nodes behave identically: empty meshes are filtered early, and
-        UniComponent mode splits the object per Submesh VG range.
+        nodes behave identically: empty meshes are filtered early.
 
         skip_draw carries the blueprint "Skip Draw" checkbox; the whole
         Submesh is hidden when any of its objects is marked.
@@ -583,41 +579,19 @@ class BluePrintModel:
             LOG.info("BluePrintModel: skipping empty mesh or invalid object: " + str(object_name))
             return
 
-        # UniComponent mode: automatically detect and split the object
-        if MIMIGlobalProperties.is_unico_component():
-            split_results = self._unico_split_object(
-                obj=obj,
-                node_submesh_name=submesh_name,
-            )
-            for split_submesh_name, temp_obj in split_results:
-                obj_model = DrawCallModel(
-                    obj_name=temp_obj.name,
-                    submesh_name=split_submesh_name,
-                    # Every split of a marked object stays marked, so the whole
-                    # original Submesh is hidden as the user asked.
-                    skip_draw=skip_draw,
-                )
-                obj_model.work_key_list = copy.deepcopy(chain_key_list)
-                self.ordered_draw_obj_data_model_list.append(obj_model)
-                self._unico_temp_objects.append(temp_obj)
-                LOG.info(f"BluePrintModel: UniComponent split '{object_name}' -> "
-                         f"submesh='{split_submesh_name}' parsed='{obj_model.match_submesh_name}' "
-                         f"draw_ib='{obj_model.match_draw_ib}' (temporary object: '{temp_obj.name}')")
-        else:
-            # Legacy mode: use the original object directly
-            obj_model = DrawCallModel(
-                obj_name=object_name,
-                submesh_name=submesh_name,
-                # Skip Draw hides the whole Submesh this draw belongs to.
-                skip_draw=skip_draw,
-            )
+        obj_model = DrawCallModel(
+            obj_name=object_name,
+            submesh_name=submesh_name,
+            # Skip Draw hides the whole Submesh this draw belongs to.
+            skip_draw=skip_draw,
+        )
 
-            if original_object_name:
-                obj_model.display_name = original_object_name
+        if original_object_name:
+            obj_model.display_name = original_object_name
 
-            obj_model.work_key_list = copy.deepcopy(chain_key_list)
+        obj_model.work_key_list = copy.deepcopy(chain_key_list)
 
-            self.ordered_draw_obj_data_model_list.append(obj_model)
+        self.ordered_draw_obj_data_model_list.append(obj_model)
 
     @staticmethod
     def _collect_global_hash_texture_bindings(root_tree):
@@ -1054,163 +1028,6 @@ class BluePrintModel:
                 self.parse_single_node(link.from_node, chain_key_list, link.from_socket)
         finally:
             self._group_instance_stack.append(group_node)
-
-    def _unico_split_object(
-        self,
-        obj: bpy.types.Object,
-        node_submesh_name: str,
-    ) -> list[tuple[str, bpy.types.Object]]:
-        """
-        UniComponent split: split the Merged object's vertices per each Submesh's VG range.
-
-        Derives the draw_ib from the submesh_name bound to the node, loads the SubmeshJson
-        of every Submesh under that DrawIB, builds a submesh -> VG mapping, then calls
-        VertexGroupUtils.split_merged_object_by_submesh_vg_ranges().
-
-        Returns:
-            [(submesh_name, temp_split_object), ...]
-        """
-        from ..workspace.mmt_workspace import MMTWorkSpace
-        from ..workspace.submesh_json import SubmeshJson
-
-        # Derive draw_ib from the node's submesh_name
-        # submesh_name format: "LOD0.94517393-0" or "94517393-0"
-        normalized_name = str(node_submesh_name or "").strip()
-        if not normalized_name:
-            LOG.warning(f"BluePrintModel: UniComponent node '{obj.name}' has no Submesh set; skipping the split")
-            return []
-
-        # Strip the LOD prefix to get the bare name
-        if normalized_name.upper().startswith("LOD") and "." in normalized_name:
-            bare_name = normalized_name.split(".", 1)[1]
-        else:
-            bare_name = normalized_name
-
-        # Extract draw_ib (the part before the first '-')
-        draw_ib = bare_name.split("-")[0] if "-" in bare_name else ""
-        if not draw_ib:
-            LOG.warning(f"BluePrintModel: cannot parse draw_ib from submesh_name '{node_submesh_name}'")
-            return []
-
-        # Get the names of all Submeshes under this DrawIB
-        all_submesh_names = MMTWorkSpace.get_ordered_submesh_name_list_by_drawib(draw_ib)
-        # A shared DrawIB hash does not make different LOD palettes interchangeable.
-        # Match the same scope that the exporter uses for runtime metadata.
-        lod_prefix = normalized_name.split(".", 1)[0] if normalized_name.upper().startswith("LOD") and "." in normalized_name else ""
-        all_submesh_names = [name for name in all_submesh_names
-                             if (name.split(".", 1)[0] if "." in name else "") == lod_prefix]
-        if not all_submesh_names:
-            LOG.warning(f"BluePrintModel: no Submesh found under DrawIB '{draw_ib}'")
-            return []
-
-        LOG.info(f"BluePrintModel: found {len(all_submesh_names)} Submeshes: {all_submesh_names}")
-
-        # Load each Submesh's VGMap and build the submesh -> VG mapping
-        submesh_vg_map: dict[str, set[int]] = {}
-        submesh_reverse_vg_map: dict[str, dict[int, int]] = {}
-        runtime_aliases = {}
-
-        for sm_name in all_submesh_names:
-            try:
-                sm_path = MMTWorkSpace.check_and_get_submesh_json_path(sm_name)
-                sm_json = SubmeshJson(sm_path)
-                vg_map = sm_json.VGMap  # {local_idx: global_bone_id}
-                LOG.info(f"BluePrintModel:   Submesh '{sm_name}' VGMap = {dict(vg_map)}")
-                # VGMap is an override table, not necessarily the whole palette.
-                # Include offset fallbacks and metadata-proven runtime aliases
-                # so legacy/reverse imports split like current canonical imports.
-                reverse_map = {}
-                for local_id in range(sm_json.VGCount):
-                    global_id = int(vg_map.get(str(local_id), sm_json.VGOffset + local_id))
-                    reverse_map.setdefault(global_id, local_id)
-                for local_id in range(sm_json.VGCount):
-                    runtime_aliases[sm_json.VGOffset + local_id] = int(vg_map.get(str(local_id), sm_json.VGOffset + local_id))
-                global_vg_set = set(reverse_map)
-
-                submesh_vg_map[sm_name] = global_vg_set
-                submesh_reverse_vg_map[sm_name] = reverse_map
-            except Exception as e:
-                # Missing one palette must not silently discard its geometry.
-                raise ValueError(f"WWMI cannot load the palette of Submesh '{sm_name}': {e}") from e
-
-        # Shared aliases must have the same ownership as their canonical bone.
-        # Adding only each component's own runtime slots falsely marks shared
-        # duplicate bones as unique and can split reverse-imported faces apart.
-        for sm_name, reverse_map in submesh_reverse_vg_map.items():
-            for alias, canonical in runtime_aliases.items():
-                if canonical in reverse_map:
-                    reverse_map.setdefault(alias, reverse_map[canonical])
-            submesh_vg_map[sm_name] = set(reverse_map)
-
-        if not submesh_vg_map:
-            LOG.warning(f"BluePrintModel: none of the Submeshes under DrawIB '{draw_ib}' has a VGMap; cannot split")
-            return []
-
-        # A static DrawIB declares no bone in any Submesh palette (for example
-        # WWMI's shader-fetched weapon meshes): there is no palette to split by
-        # and the node object already holds exactly its own Submesh geometry.
-        # Bind a disposable copy so the draw is still exported, under the same
-        # temporary-object contract a real split uses. Splitting would raise
-        # "no skeleton ownership" and lose the whole draw.
-        if not any(submesh_vg_map.values()):
-            LOG.info(f"BluePrintModel: DrawIB '{draw_ib}' declares no bone palette (static layout); "
-                     f"keeping '{obj.name}' as one piece")
-            temp_obj = obj.copy()
-            temp_obj.data = obj.data.copy()
-            temp_obj.name = obj.name + "__mimi_unico_static"
-            collections = list(obj.users_collection)
-            (collections[0] if collections else bpy.context.scene.collection).objects.link(temp_obj)
-            return [(normalized_name, temp_obj)]
-
-        # --- Filter: split only into Submeshes with unique VGs (falling back to the node-bound Submesh) ---
-        # Compute shared VGs (VGs appearing in more than one Submesh VGMap)
-        vg_occurrence: dict[int, set[str]] = {}
-        for sm_name, vg_set in submesh_vg_map.items():
-            for vg_id in vg_set:
-                vg_occurrence.setdefault(vg_id, set()).add(sm_name)
-
-        # The VGs actually present on the object
-        obj_vg_ids = set()
-        for vg in obj.vertex_groups:
-            # Numeric Blender suffixes preserve the underlying bone identity.
-            # Helper groups are ignored when choosing candidate palettes.
-            match = re.fullmatch(r"(\d+)(?:\.\d+)?", vg.name)
-            if match:
-                obj_vg_ids.add(int(match.group(1)))
-
-        # Keep only the Submeshes that matter
-        filtered_vg_map: dict[str, set[int]] = {}
-        for sm_name, vg_set in submesh_vg_map.items():
-            unique_vgs = {vg for vg in vg_set if len(vg_occurrence.get(vg, set())) == 1}
-            has_unique = bool(unique_vgs & obj_vg_ids)
-            is_node_submesh = (sm_name == node_submesh_name)
-            if has_unique or is_node_submesh:
-                filtered_vg_map[sm_name] = vg_set
-
-        LOG.info(f"BluePrintModel: UniComponent split of '{obj.name}' "
-                 f"(vertices: {len(obj.data.vertices)}, VG: {len(obj.vertex_groups)})")
-        LOG.info(f"  node Submesh: '{node_submesh_name}', draw_ib: '{draw_ib}'")
-        LOG.info(f"  object VG: {sorted(obj_vg_ids)}")
-        LOG.info(f"  splitting into: {list(filtered_vg_map.keys())} "
-                 f"(Submeshes without unique VGs were filtered out)")
-
-        if not filtered_vg_map:
-            LOG.warning(f"BluePrintModel: no valid Submesh to split into; skipping")
-            return []
-        filtered_reverse_map = {k: v for k, v in submesh_reverse_vg_map.items() if k in filtered_vg_map}
-
-        # Build the unique-VG mapping (used to determine vertex ownership precisely)
-        filtered_unique_vg_map: dict[str, set[int]] = {}
-        for sm_name in filtered_vg_map:
-            unique = {vg for vg in submesh_vg_map[sm_name] if len(vg_occurrence.get(vg, set())) == 1}
-            filtered_unique_vg_map[sm_name] = unique
-
-        return VertexGroupUtils.split_merged_object_by_submesh_vg_ranges(
-            obj=obj,
-            submesh_vg_map=filtered_vg_map,
-            submesh_reverse_vg_map=filtered_reverse_map,
-            submesh_unique_vg_map=filtered_unique_vg_map,
-        )
 
     def parse_submesh_model_list(self) -> list[SubMeshModel]:
         """

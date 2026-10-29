@@ -35,7 +35,6 @@ from MIMIBlender.model.drawib_model import DrawIBModel
 # - Reversing object order checks that Blender selection order is irrelevant.
 # - Reusing names across Submeshes checks global AND local offset collisions.
 # - Array evaluation checks topology growth separately from unchanged geometry.
-# - UniComponent extraction checks that every region inherits the source key.
 # - WWMI checks its independent two-stage component merge and IB builder.
 # - Synthetic workspace metadata supplies formats, not expected IB ordering.
 # - There are no forced buffer reorderings or mocked geometry builders here.
@@ -153,41 +152,6 @@ class SplitDrawRangesTests(unittest.TestCase):
             mod.constant_offset_displace = (0, 0, 2)
             mod.count = 2
         self.assert_owned(self.export())
-
-    def test_unicomponent_keeps_keys_on_both_body_regions(self):
-        # Split each A/B object again by real upper/lower vertex-group ownership.
-        # Use the production blueprint emitter to verify condition propagation.
-        from MIMIBlender.common.mimi_global_properties import MIMIGlobalProperties
-        from MIMIBlender.model.blueprint_model import BluePrintModel
-        from MIMIBlender.utils.vertexgroup_utils import VertexGroupUtils
-        names = ['LOD0.12345678-0', 'LOD0.12345678-1']
-        maps = {names[0]: {0}, names[1]: {1}}
-        reverse = {names[0]: {0: 0}, names[1]: {1: 0}}
-        parser = BluePrintModel.__new__(BluePrintModel)
-        parser.ordered_draw_obj_data_model_list = []
-        parser._unico_temp_objects = []
-        for obj in self.objects:
-            for group, upper in [(0, True), (1, False)]:
-                vg = obj.vertex_groups.new(name=str(group))
-                vg.add([v.index for v in obj.data.vertices if (v.co.y > 0) == upper], 1, 'REPLACE')
-
-        def split(obj, node_submesh_name):
-            # No fabricated split objects: BMesh extraction runs on the real mesh.
-            return VertexGroupUtils.split_merged_object_by_submesh_vg_ranges(obj, maps, reverse, maps)
-
-        with patch.object(MIMIGlobalProperties, 'is_unico_component', return_value=True), patch.object(parser, '_unico_split_object', side_effect=split):
-            for obj in self.objects:
-                parser._emit_object_source(obj.name, names[0], '', [M_Key(key_name='$' + obj.name, tmp_value=1)])
-        self.assertEqual(len(parser.ordered_draw_obj_data_model_list), 4)
-        for source in self.objects:
-            draws = [draw for draw in parser.ordered_draw_obj_data_model_list if draw.get_condition_str() == '$' + source.name + ' == 1']
-            self.assertEqual({draw.submesh_name for draw in draws}, set(names))
-            regions = set()
-            for draw in draws:
-                obj = bpy.data.objects[draw.obj_name]
-                self.assertEqual(len(obj.data.polygons), 1)
-                regions.add(obj.data.vertices[0].co.y > 0)
-            self.assertEqual(regions, {False, True})
 
     def test_wwmi_cross_body_ranges(self):
         # Exercise WWMI's separate component merge and actual deduplicating builder.

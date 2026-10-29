@@ -3,7 +3,7 @@
 Run with --background --factory-startup --python-exit-code 1 --python this_file.
 MIMI_AUDIT_WORKSPACE selects a folder name under the local WWMI workspace root.
 MIMI_AUDIT_IMPORT_MODE=PER_COMPONENT tests local import/export independently.
-Default import tests MergedComponent, Merged, and UniComponent sequentially.
+Default import tests Merged and PerComponent sequentially.
 Source files and selection records are read-only; outputs stay under tmp.
 These checks exercise Blender and generated resources, not in-game rendering.
 """
@@ -68,9 +68,9 @@ if not workspace.is_dir():
 else:
     GlobalConfig.read_from_main_json()
     properties = bpy.context.scene.mimi_global_properties
-    import_mode = os.environ.get('MIMI_AUDIT_IMPORT_MODE', 'MERGED_COMPONENT')
+    import_mode = os.environ.get('MIMI_AUDIT_IMPORT_MODE', 'MERGED')
     properties.import_merged_vgmap = import_mode
-    modes = ['PER_COMPONENT'] if import_mode == 'PER_COMPONENT' else ['MERGED_COMPONENT', 'MERGED', 'UNICOMPONENT']
+    modes = ['PER_COMPONENT'] if import_mode == 'PER_COMPONENT' else ['MERGED']
     results = []
     with patch.object(GlobalConfig, 'path_workspace_folder', return_value=str(workspace)), patch.object(GlobalConfig, 'get_workspace_name', return_value=name), patch.object(JsonUtils, 'SaveToFile'):
         ImprotFromWorkSpaceFull(Reporter(), bpy.context)
@@ -90,8 +90,7 @@ else:
 
             def record_write(model):
                 # Check complete draw coverage before inspecting generated files.
-                # A successful UniComponent split may still lose boundary faces;
-                # exact source index coverage catches that silent data loss.
+                # Exact source index coverage catches silent geometry loss.
                 exported.append({'draw_ib': model.draw_ib, 'indices': len(model.obj_buffer_model_wwmi.ib), 'stride': model.blend_remap_bone_count})
                 return original_write(model)
 

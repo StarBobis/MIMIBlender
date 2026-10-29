@@ -1,7 +1,7 @@
 """Exercise real output validation without importing Blender.
 
 The fake exporter writes actual INI files in an isolated temporary folder.
-Production output-path validation and runtime cleanup run without changes.
+Production output-path validation and runtime state cleanup run without changes.
 This catches naming mismatches that mocked generation success tests miss.
 """
 import glob
@@ -21,7 +21,6 @@ class OutputDetectionTests(unittest.TestCase):
         # Only blueprint parsing and exporting are substituted for these tests.
         self.config = Mock(logic_name="WWMI")
         self.helper = SimpleNamespace(runtime_output_node=None)
-        self.cleanup = Mock()
         self.model = object()
         self.namespace = {
             "os": os,
@@ -38,13 +37,9 @@ class OutputDetectionTests(unittest.TestCase):
                 props=SimpleNamespace(StringProperty=lambda: None),
                 types=SimpleNamespace(Operator=type("Operator", (), {})),
             ),
-            # The export cleanup asks whether the merged (Unico) component
-            # mode is on; this suite exports plain workspace INIs only.
-            "MIMIGlobalProperties": SimpleNamespace(is_unico_component=lambda: False),
             "tr": lambda text: text,
         }
         exec(compile(harness.module, str(harness.SOURCE), "exec"), self.namespace)
-        self.namespace["_cleanup_unico_temp_objects"] = self.cleanup
         self.node = SimpleNamespace(name="Generate Mod")
 
     def export_files(self, folder, names):
@@ -66,7 +61,6 @@ class OutputDetectionTests(unittest.TestCase):
         with TemporaryDirectory() as folder:
             result = self.export_files(folder, ["workspace.ini"])
             self.assertEqual(result, [os.path.join(folder, "workspace.ini")])
-        self.cleanup.assert_called_once_with(self.model)
         self.assertIsNone(self.helper.runtime_output_node)
         self.assertEqual(self.config.generated_mod_name_override, "")
 
@@ -79,11 +73,10 @@ class OutputDetectionTests(unittest.TestCase):
 
     def test_missing_ini_still_reports_error_and_cleans_runtime(self):
         # Fixing the name check must not disable the missing-output safeguard.
-        # Cleanup runs even when no INI was written by the exporter.
+        # Runtime state clears even when no INI was written by the exporter.
         with TemporaryDirectory() as folder:
             with self.assertRaisesRegex(ValueError, "did not generate an INI file"):
                 self.export_files(folder, [])
-        self.cleanup.assert_called_once_with(self.model)
         self.assertIsNone(self.helper.runtime_output_node)
         self.assertEqual(self.config.generated_mod_name_override, "")
 

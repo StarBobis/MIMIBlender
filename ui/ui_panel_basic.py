@@ -145,14 +145,6 @@ class MIMIPanelBasicInformation(bpy.types.Panel):
 
         if GlobalConfig.logic_name == LogicName.WWMI:
             layout.prop(mimi_global_properties,"import_merged_vgmap", text=tr("Vertex Group Mode"))
-            # Expose routing consent beside its architecture, never as a hidden
-            # fallback. Reports and source-face selection are available even when
-            # consent is disabled or a full export is rejected.
-            if mimi_global_properties.import_merged_vgmap == 'MERGED_COMPONENT':
-                layout.prop(mimi_global_properties, "allow_component_draw_state_changes", text=tr("Allow Component Draw-State Changes"))
-                row = layout.row(align=True)
-                row.operator("mimi.open_wwmi_component_report", text=tr("Open Routing Report"), icon='TEXT')
-                row.operator("mimi.select_wwmi_problem_faces", text=tr("Select Problem Faces"), icon='FACESEL')
 
         if GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
             layout.prop(mimi_global_properties,"import_skip_empty_vertex_groups", text=tr("Skip Empty Vertex Groups"))

@@ -60,11 +60,8 @@ def _get_import_merged_vgmap_items(self, context):
     # descriptions are translated.
     return [
         # Explicit values preserve saved scenes when the new default comes first.
-        # MergedComponent edits global groups but exports local buffer indices.
-        ('MERGED_COMPONENT', 'MergedComponent', tr('Merged import; export local bone indices without splitting objects; all weighted bones must exist in the target component'), 0, 3),
         ('MERGED', 'Merged', tr('Imports the merged unified vertex groups; uses ComputeShader runtime mapping on export'), 0, 0),
         ('PER_COMPONENT', 'PerComponent', tr('Imports vertex groups independently per component'), 0, 1),
-        ('UNICOMPONENT', 'UniComponent', tr('Merged import; on export, automatically splits by Submesh and restores local vertex groups'), 0, 2),
     ]
 
 
@@ -205,20 +202,11 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
 
     import_merged_vgmap: bpy.props.EnumProperty(
         name=tr("Vertex Group Mode"),
-        description=tr("MergedComponent: merged editing with local buffer export and no object splitting\nMerged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups\nUniComponent: merged editing with automatic object splitting"),
+        description=tr("Merged: runtime merged skeleton for cross-component weights\nPerComponent: independent local groups"),
         items=_get_import_merged_vgmap_items,
         # Dynamic enum defaults use the explicit numeric value, not item order.
-        # Value 3 selects the new mode while old saved values keep their meaning.
-        default=3,
-    ) # type: ignore
-
-    # Palette compatibility alone cannot establish shader/material equivalence.
-    # Keep existing scenes conservative until the user explicitly accepts the
-    # destination component's native draw state for uniquely routable triangles.
-    allow_component_draw_state_changes: bpy.props.BoolProperty(
-        name=tr("Allow Component Draw-State Changes"),
-        description=tr("MergedComponent only: move uniquely compatible triangles to another original component. Uses its native shaders/materials; explicit blueprint texture bindings and switches follow the source. Ambiguous or incompatible faces still stop export"),
-        default=False,
+        # Value 1 keeps the historical per-component default.
+        default=1,
     ) # type: ignore
 
     ignore_muted_shape_keys: bpy.props.BoolProperty(
@@ -387,27 +375,17 @@ class MIMIGlobalProperties(bpy.types.PropertyGroup):
 
     @classmethod
     def import_merged_vgmap(cls) -> str:
-        """Return the saved editing/export mode, including MERGED_COMPONENT."""
+        """Return the saved editing/export mode."""
         return cls._instance().import_merged_vgmap
 
     @classmethod
-    def is_unico_component(cls) -> bool:
-        return cls._instance().import_merged_vgmap == 'UNICOMPONENT'
-
-    @classmethod
     def is_merged_mode(cls) -> bool:
-        """Global editing modes use VGMap merging only during import."""
-        return cls._instance().import_merged_vgmap in ('MERGED', 'UNICOMPONENT', 'MERGED_COMPONENT')
+        """The merged mode uses VGMap merging during import and export."""
+        return cls._instance().import_merged_vgmap == 'MERGED'
 
     @classmethod
     def ignore_muted_shape_keys(cls):
         return cls._instance().ignore_muted_shape_keys
-
-    @classmethod
-    def allow_component_draw_state_changes(cls):
-        # Read the per-scene opt-in instead of inferring consent from bone overlap.
-        # No export operation writes this setting or switches architecture itself.
-        return cls._instance().allow_component_draw_state_changes
 
     @classmethod
     def apply_all_modifiers(cls):

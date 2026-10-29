@@ -36,7 +36,11 @@ from ...model.drawib_model import DrawIBModel
 from ...common.skip_draw import aggregate_skip_draw
 from ...workspace.submesh_json import SubmeshJson
 from ...workspace.texture_metadata_helper import TextureMetadataResolver
-from .merged_component import GLOBAL_GROUP_NAME, localize_blendindices
+
+
+# Numeric vertex group names are bone identities, optionally with Blender's
+# duplicate suffix ("12.001"). Names that do not match are not bone ids.
+GLOBAL_GROUP_NAME = re.compile(r"^(\d+)(?:\.\d+)?$")
 
 
 class BlendRemapEntry(TypedDict):
@@ -249,31 +253,11 @@ class DrawIBModelWWMI:
             obj=self.merged_object.object,
         )
 
-        # Plan complete triangles before localizing export arrays. Every positive
-        # influence participates, even if later buffer quantization would hide it.
-        # Source geometry and native shape identities remain unchanged throughout.
-        routed_draw_links = []
-        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
-            from .component_routing_blender import prepare_routing, apply_routing
-            try:
-                routing = prepare_routing(self, element_context,
-                                          MIMIGlobalProperties.allow_component_draw_state_changes())
-                element_context.final_elementname_data_dict.update(localize_blendindices(
-                    element_context, self.merged_object.components, self.wwmi_info.components, self.draw_ib,
-                    routed_loop_components=routing['loop_components'],
-                ))
-                routed_draw_links = apply_routing(self, element_context, routing, ordered_submesh_name_list)
-            except ValueError:
-                # Mapping failures must leave only the user's original objects.
-                # The merged export object is a disposable copy, never a source.
-                bpy.data.objects.remove(self.merged_object.object, do_unlink=True)
-                raise
-        else:
-            # Resolve names after the final join, which may reorder group IDs.
-            # Keep full-width identities for the runtime remapper's input too.
-            self.resolve_named_blendindices(element_context)
-            if self.blend_remap:
-                self.replace_remapped_blendindices(element_context)
+        # Resolve names after the final join, which may reorder group IDs.
+        # Keep full-width identities for the runtime remapper's input too.
+        self.resolve_named_blendindices(element_context)
+        if self.blend_remap:
+            self.replace_remapped_blendindices(element_context)
 
         element_context.element_vertex_ndarray = ObjBufferHelper.convert_to_element_vertex_ndarray(
             mesh=element_context.mesh,
@@ -311,13 +295,6 @@ class DrawIBModelWWMI:
         for component in self.merged_object.components:
             component.index_count = sum(temp.index_count for temp in component.objects)
         self.merged_object.index_count = len(self.obj_buffer_model_wwmi.ib)
-        # Routed draw copies must use the final IB buckets, never pre-join ranges.
-        # Several key branches may intentionally reference the same geometry.
-        # Update every branch by object identity rather than synthetic name lookup.
-        for draw, temp in routed_draw_links:
-            draw.index_count = temp.index_count
-            draw.index_offset = temp.index_offset
-            draw.vertex_count = temp.vertex_count
 
         position_stride: int = self.d3d11_game_type.CategoryStrideDict["Position"]
         position_bytelength: int = len(self.obj_buffer_model_wwmi.category_buffer_dict["Position"])
@@ -424,19 +401,6 @@ class DrawIBModelWWMI:
 
         workspace_collection = bpy.context.collection
         processed_obj_name_list: list[str] = []
-        # One source object cannot use two different local palettes in this
-        # object-bound export path. Reject that ambiguity rather than reusing
-        # the first component's index range under the second component's draw.
-        local_object_components: dict[str, int] = {}
-        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
-            for component_id, drawcalls in enumerate(self.submesh_drawcall_groups):
-                for drawcall in drawcalls:
-                    previous_component = local_object_components.setdefault(drawcall.obj_name, component_id)
-                    if previous_component != component_id:
-                        raise ValueError(
-                            "MergedComponent: object '" + drawcall.obj_name + "' is assigned to multiple components; "
-                            "assign the complete object to one compatible Submesh."
-                        )
 
         for component_id, component_drawcall_model_list in enumerate(self.submesh_drawcall_groups):
             for drawcall_model in component_drawcall_model_list:
@@ -448,13 +412,10 @@ class DrawIBModelWWMI:
 
                 source_obj = ObjUtils.get_obj_by_name(obj_name)
                 # A joined-away object can survive as orphaned data because the
-                # blueprint row still references it. It carries no geometry of
-                # its own any more: its faces now live in the merged object and
-                # arrive here through routing. Copying it would duplicate that
-                # geometry under two components, so only the draw branch stays.
-                # Objects merely hidden in an excluded collection keep exporting.
+                # blueprint row still references it. It carries no geometry any
+                # more, so copying it would export a stale duplicate.
                 if source_obj is None or not source_obj.users_collection:
-                    print("WWMI: draw branch only (object left the scene): " + str(obj_name))
+                    print("WWMI: skipping object that left the scene: " + str(obj_name))
                     continue
                 temp_obj = ObjUtils.copy_object(
                     bpy.context,
@@ -479,13 +440,6 @@ class DrawIBModelWWMI:
 
             for temp_object in component.objects:
                 temp_obj = temp_object.object
-
-                # Carry source face identity through modifiers and triangulation.
-                # Only disposable MergedComponent copies receive these attributes.
-                # They support repair selection without changing source meshes.
-                if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED_COMPONENT':
-                    from .component_routing_blender import tag_source_faces
-                    tag_source_faces(temp_obj)
 
                 if MIMIGlobalProperties.ignore_muted_shape_keys() and temp_obj.data.shape_keys:
                     muted_shape_keys = []
@@ -516,7 +470,7 @@ class DrawIBModelWWMI:
                 DrawRangeUtils.tag_object(temp_obj, owner)
 
                 vertex_groups = ObjUtils.get_vertex_groups(temp_obj)
-                # MergedComponent validates exported global identities later.
+                # Numeric identities are resolved again after the final join.
                 # Never discard a weighted group merely for its internal index.
                 # Internal group order is not a bone identity in any architecture.
                 # Preserve sparse/reordered groups and validate active numeric
