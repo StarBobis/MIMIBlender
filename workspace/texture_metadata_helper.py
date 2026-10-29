@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field
 
 from .submesh_json import SubmeshJson
@@ -35,6 +36,33 @@ class TextureMetadataResolver:
                     texture_path = os.path.join(root, file)
                     return texture_path
         return None
+
+    @staticmethod
+    def find_texture_with_mark_hash(texture_prefix, texture_stem, extension, directory):
+        '''
+        Finds the single marked texture whose name carries a disambiguation hash.
+
+        MMT appends "-<8 hex texture hash>" when one mark name is used for
+        several different pictures of the same SubMesh. The import-time
+        material still needs that picture, but the exact name lookup above
+        only accepts names that end with the mark name. Several different
+        hashes are genuinely ambiguous, so those are never guessed.
+        '''
+        normalized_prefix = str(texture_prefix).casefold()
+        normalized_stem = str(texture_stem).casefold()
+        normalized_extension = str(extension).casefold()
+        if not normalized_stem or not normalized_extension:
+            return None
+        pattern = re.compile(
+            '^' + re.escape(normalized_prefix) + '.*' + re.escape(normalized_stem)
+            + r'-[0-9a-f]{8}' + re.escape(normalized_extension) + '$'
+        )
+        matches = []
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if pattern.match(file.casefold()):
+                    matches.append(os.path.join(root, file))
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _get_texture_markup_info_identity(texture_info) -> tuple:

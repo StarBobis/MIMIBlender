@@ -767,12 +767,22 @@ class MeshCreateHelper:
 
     @staticmethod
     def _find_gimi_texture(texture_prefix: str, texture_stem: str, directory: str):
-        """Resolve GIMI maps across the formats emitted by different dumpers."""
+        """Resolve GIMI maps across the formats and names emitted by different dumpers."""
         # DDS/PNG/TGA preserve the alpha masks consumed by the GIMI shader.
         # JPG remains a compatibility fallback for ordinary material imports.
         for extension in (".dds", ".png", ".tga", ".jpg", ".jpeg"):
             path = TextureMetadataResolver.find_texture(
                 texture_prefix, texture_stem + extension, directory
+            )
+            if path is not None:
+                return path
+        # MMT renames a marked picture to "<SubMesh>-<MarkName>-<hash>.dds" when
+        # one mark name points at several different pictures. An exact name must
+        # always win; otherwise the import preview uses the only such picture.
+        # A genuinely ambiguous set stays without a material instead of guessing.
+        for extension in (".dds", ".png", ".tga", ".jpg", ".jpeg"):
+            path = TextureMetadataResolver.find_texture_with_mark_hash(
+                texture_prefix, texture_stem, extension, directory
             )
             if path is not None:
                 return path
