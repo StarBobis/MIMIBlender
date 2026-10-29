@@ -8,8 +8,10 @@ The test:
 1. Enables the addon and creates one node of each dynamic mod type.
 2. Checks the English titles, the node width and the untouched identifiers.
 3. Checks that the load_post migration rewrites the titles written by older
-   versions, in both languages, without touching a user-chosen title.
+   versions, in every language, without touching a user-chosen title.
 4. Switches to Simplified Chinese and checks every renamed UI string.
+5. Switches to Traditional Chinese and checks the same strings plus a title
+   migration from both Chinese spellings.
 
 Exits with code 0 on success and 1 on the first failed check.
 """
@@ -169,6 +171,47 @@ def main():
          "已烘焙 {count} 个权重帧到基于ShapeKey实时计算的动态Mod节点"),
     ):
         check("translated report: " + english_text, i18n.tr(english_text) == chinese_text)
+
+    # 5b. Traditional Chinese. A blueprint title can be stored in any of the
+    # three languages, so a title written in Traditional has to migrate too,
+    # and the Simplified legacy titles have to stay recognised while
+    # Traditional Chinese is the active language.
+    from MIMIBlender.i18n.zh_tw import TRANSLATIONS_ZH_TW
+
+    preferences.ui_language = "zh_tw"
+    for _, english_title, _ in _TITLES:
+        check(
+            "title (zh_tw): " + english_title,
+            i18n.tr(english_title) == TRANSLATIONS_ZH_TW[english_title],
+        )
+    for node_type, _, legacy_title in _LEGACY_TITLES:
+        # Keep the Simplified spelling: that is what an older version wrote
+        # while Simplified Chinese was active, and it must migrate even now.
+        nodes[node_type].label = legacy_title
+    check(
+        "migration rewrites Simplified legacy titles while zh_tw is active",
+        migrate_legacy_node_titles() == len(_LEGACY_TITLES),
+    )
+    for node_type, english_title, _ in _TITLES:
+        check(
+            "migrated title (zh_tw): " + node_type,
+            nodes[node_type].label == TRANSLATIONS_ZH_TW[english_title],
+        )
+    # A title that was created while Traditional Chinese was active must be
+    # recognised as a default title as well, never as a user-made one. The
+    # tuple stores the Simplified spelling, so the English key is translated
+    # again to get the Traditional spelling an older version would have saved.
+    for node_type, english_legacy_title, _ in _LEGACY_TITLES:
+        nodes[node_type].label = TRANSLATIONS_ZH_TW[english_legacy_title]
+    check(
+        "migration rewrites Traditional legacy titles",
+        migrate_legacy_node_titles() == len(_LEGACY_TITLES),
+    )
+    for node_type, english_title, _ in _TITLES:
+        check(
+            "migrated Traditional title: " + node_type,
+            nodes[node_type].label == TRANSLATIONS_ZH_TW[english_title],
+        )
 
     # 6. Back to English, then a clean unload.
     preferences.ui_language = "en"

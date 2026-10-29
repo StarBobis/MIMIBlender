@@ -60,6 +60,6 @@ The ordering is input events, timeline update, Position selection/copy, then sha
 - `tools/test_animation_toggle_ini.py`: executes the generated test subset in pre-Present/input/post-Present order; checks both startup states, first press, disable, restart, Position cache behavior, shape weights and compute ordering.
 - `tools/test_dynamic_animation_blender.py`: checks actual node-to-key parsing, shared alias deduplication/conflicts, all three RNA properties, blend-library save/load, and shared/Naraka/WWMI integration.
 - Existing DrawIndexed and Position/shape INI tests verify blank-key backward compatibility.
-- Translation coverage checks include the new English and Simplified Chinese UI labels and help text.
+- Translation coverage checks include the new English, Simplified Chinese and Traditional Chinese UI labels and help text.
 
 These checks are not a running-game injection test. Validate the chosen key bindings in the target game's 3Dmigoto environment and check for collisions with other enabled mods.

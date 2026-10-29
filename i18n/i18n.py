@@ -1,6 +1,10 @@
 '''
 Lightweight in-addon i18n (internationalization) support for MIMIBlender.
 
+Supported languages: English (source text), Simplified Chinese and Traditional
+Chinese. Each translated language lives in its own dictionary module under the
+i18n package, and this module only decides which dictionary is active.
+
 Why not Blender's built-in bpy.app.translations?
 Blender's native system only follows Blender's global UI language. The addon
 needs its own independent language switch inside the MIMITools panel, so this
@@ -34,10 +38,21 @@ import bpy
 import sys
 
 from .zh_cn import TRANSLATIONS_ZH_CN
+from .zh_tw import TRANSLATIONS_ZH_TW
 
-# Language codes used by the ui_language enum property.
+# Language codes used by the ui_language enum property. English is the source
+# language: every dictionary key is the English text itself.
 LANG_EN = "en"
 LANG_ZH = "zh"
+LANG_ZH_TW = "zh_tw"
+
+# One dictionary per translated language. tr() and apply_language() only read
+# this table, so a new language means one new dictionary module, one new row
+# here, one new enum item below and nothing else.
+_DICTIONARIES = {
+    LANG_ZH: TRANSLATIONS_ZH_CN,
+    LANG_ZH_TW: TRANSLATIONS_ZH_TW,
+}
 
 # The module-level current language. tr() reads this on every call, so text
 # drawn by draw() functions always follows the latest user choice.
@@ -54,7 +69,7 @@ _tracked_class_attrs = []
 
 
 def get_language():
-    '''Return the currently active language code ("en" or "zh").'''
+    '''Return the active language code: "en", "zh" or "zh_tw".'''
     return _current_language
 
 
@@ -64,12 +79,40 @@ def tr(text):
     The English source text is the dictionary key. Any value that is not a
     non-empty string, or that has no dictionary entry, is returned unchanged,
     so wrapping a string with tr() can never break the UI.
+
+    A missing entry falls back to English and never to the other Chinese
+    variant: a Simplified sentence inside a Traditional panel would look
+    broken, while the English source text is unambiguous. The coverage tool
+    reports any such gap, so the fallback is only a safety net.
     '''
     if not isinstance(text, str) or not text:
         return text
-    if _current_language != LANG_ZH:
+    dictionary = _DICTIONARIES.get(_current_language)
+    if dictionary is None:
+        # English is the source language and has no dictionary.
         return text
-    return TRANSLATIONS_ZH_CN.get(text, text)
+    return dictionary.get(text, text)
+
+
+def translation_variants(text):
+    '''Return every known spelling of one UI string in every language.
+
+    A node title and a socket caption are instance data stored inside the blend
+    file, so they keep the spelling of the language that was active when they
+    were written. Comparing a stored caption with this set lets the legacy
+    title migration and the socket labels recognise a name created in English,
+    Simplified Chinese or Traditional Chinese without rewriting a custom one.
+    '''
+    # The argument itself is always a valid spelling, even for text that no
+    # dictionary knows (for example a user-defined title).
+    spellings = {text}
+    for dictionary in _DICTIONARIES.values():
+        for source_text, translated_text in dictionary.items():
+            # A match in either direction collects the other spelling too.
+            if text == source_text or text == translated_text:
+                spellings.add(source_text)
+                spellings.add(translated_text)
+    return tuple(sorted(spellings))
 
 
 def translatable(cls):
@@ -91,7 +134,9 @@ def translatable(cls):
 def apply_language(value):
     '''Switch the current language and refresh every tracked class attribute.'''
     global _current_language
-    _current_language = LANG_ZH if value == LANG_ZH else LANG_EN
+    # An unknown value (a stale preference written by another version, for
+    # example) falls back to English instead of leaving a half-translated UI.
+    _current_language = value if value in _DICTIONARIES else LANG_EN
     for cls, attr, original in _tracked_class_attrs:
         try:
             setattr(cls, attr, tr(original))
@@ -169,8 +214,15 @@ class MIMIAddonPreferences(bpy.types.AddonPreferences):
             "重启 Blender 后完全生效。"
         ),
         items=[
-            ("en", "English", "Show panels in English / 以英文显示面板"),
-            ("zh", "简体中文", "Show panels in Simplified Chinese / 以简体中文显示面板"),
+            # Each language name is written in its own script, so the list is
+            # readable whichever language is active right now.
+            (LANG_EN, "English", "Show panels in English / 以英文显示面板"),
+            (LANG_ZH, "简体中文", "Show panels in Simplified Chinese / 以简体中文显示面板"),
+            (
+                LANG_ZH_TW,
+                "繁體中文",
+                "Show panels in Traditional Chinese / 以繁體中文顯示面板",
+            ),
         ],
         default="en",
         update=_on_ui_language_update,

@@ -72,7 +72,13 @@ def capture():
             addon.i18n.redraw_all_areas()
         elif stage == 4:
             bpy.ops.screen.screenshot(filepath=str(output_dir / 'blueprint_all_nodes_zh.png'))
-            print('PASS: rendered all blueprint nodes in English and Chinese', flush=True)
+            # The third language uses the same layout, but its characters are
+            # wider than the Simplified ones in a few labels, so capture it too.
+            addon.i18n.apply_language('zh_tw')
+            addon.i18n.redraw_all_areas()
+        elif stage == 5:
+            bpy.ops.screen.screenshot(filepath=str(output_dir / 'blueprint_all_nodes_zh_tw.png'))
+            print('PASS: rendered all blueprint nodes in English, Simplified Chinese and Traditional Chinese', flush=True)
             bpy.ops.wm.quit_blender()
             return None
     stage += 1

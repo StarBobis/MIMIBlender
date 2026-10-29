@@ -7,8 +7,7 @@ import bpy
 from bpy.types import NodeTree, Node, NodeSocket, PropertyGroup
 
 from ..common.global_config import GlobalConfig
-from ..i18n.i18n import I18nOperator, tr, translatable
-from ..i18n.zh_cn import TRANSLATIONS_ZH_CN
+from ..i18n.i18n import I18nOperator, tr, translatable, translation_variants
 
 
 
@@ -72,18 +71,14 @@ def _historical_titles(title):
     A node title is instance data, so an existing blueprint keeps the title
     that was set when the node was created, written in the language that was
     active at that moment. The English source text and every translation of it
-    therefore both have to be recognised.
+    therefore both have to be recognised, in English, Simplified Chinese and
+    Traditional Chinese alike.
     """
+    # The shared helper scans every language dictionary in both directions, so
+    # this file does not need to know which languages the addon ships with.
     # The argument already holds the spelling of the active language, because
     # the caller passes the result of tr().
-    spellings = {title}
-    # The dictionary maps English source text to its translation; checking both
-    # directions also collects the spelling of the other language.
-    for source_text, translated_text in TRANSLATIONS_ZH_CN.items():
-        if source_text == title or translated_text == title:
-            spellings.add(source_text)
-            spellings.add(translated_text)
-    return tuple(sorted(spellings))
+    return translation_variants(title)
 
 
 # Default titles that earlier versions wrote into freshly created nodes. The

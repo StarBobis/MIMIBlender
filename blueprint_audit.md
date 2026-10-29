@@ -49,7 +49,7 @@ python tools/run_blueprint_checks.py "C:\Program Files\Blender Foundation\Blende
 The runner launches eleven isolated suites and rejects both nonzero exits and unexpected Python tracebacks. It also normalizes the Python import path and argv for legacy standalone fixtures. Logs are written under `tmp/blueprint_checks/`.
 
 - `test_blueprint_blender.py`: 22 real-Blender regression cases, including every registered custom node type plus native Frame/Reroute cloning, grouping roundtrips, rollback failure injection, nested/shared groups, serialization, references, output ownership and drawing.
-- `test_dynamic_mod_titles.py`: English/Chinese titles, node sizing and legacy title migration.
+- `test_dynamic_mod_titles.py`: English/Simplified Chinese/Traditional Chinese titles, node sizing and legacy title migration.
 - `test_dynamic_animation_blender.py`: graph conditions, aliases, evaluated-mesh baking, time/shape configuration, independent rebaking, RNA serialization and generated game-specific controls. The obsolete Object-Info-only rebake mock is replaced with real Object List RNA tests.
 - Existing time-switch, position-switch, animation-toggle, slot-texture, hash-texture, material application, Naraka shape-key and YYSLS shape-key suites cover related export paths.
 
@@ -59,7 +59,7 @@ For actual GPU-drawn node UI screenshots, run a separate disposable GUI process:
 blender --factory-startup --python-exit-code 1 --python tools/test_blueprint_ui.py
 ```
 
-It renders the reported socket layout and all registered blueprint nodes in English and Chinese, saves screenshots in `tmp/`, then exits. The startup splash is disabled only for that process. Headless tests are not presented as a substitute for this drawing check.
+It renders the reported socket layout and all registered blueprint nodes in English, Simplified Chinese and Traditional Chinese, saves screenshots in `tmp/`, then exits. The startup splash is disabled only for that process. Headless tests are not presented as a substitute for this drawing check.
 
 ## Release
 

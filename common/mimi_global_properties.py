@@ -56,8 +56,8 @@ def _get_import_merged_vgmap_items(self, context):
     # IMPORTANT: the display names below are fixed WWMI technical mode names
     # that match WWMI/XXMI documentation and the export logic. They MUST stay
     # in plain English in every UI language, so NEVER wrap them with tr() and
-    # never add zh_cn dictionary entries for them; only the hover descriptions
-    # are translated.
+    # never add a translation dictionary entry for them; only the hover
+    # descriptions are translated.
     return [
         # Explicit values preserve saved scenes when the new default comes first.
         # MergedComponent edits global groups but exports local buffer indices.

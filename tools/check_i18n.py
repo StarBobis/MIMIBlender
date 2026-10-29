@@ -1,4 +1,4 @@
-"""Check i18n coverage: every tr() msgid must exist in the zh_CN dictionary.
+"""Check i18n coverage: every tr() msgid must exist in every dictionary.
 
 This script runs with plain Python (no Blender required). It walks the addon
 source tree, parses every .py file with the ``ast`` module, and collects:
@@ -11,9 +11,14 @@ source tree, parses every .py file with the ``ast`` module, and collects:
 3. Simple module-level string constants referenced as ``tr(NAME)`` (for
    example ``tr(_INSTALL_HELP_TEXT)``).
 
-It then imports ``i18n/zh_cn.py`` and reports:
-- MISSING: keys used in code but absent from the dictionary.
+It then imports every dictionary listed in ``_LANGUAGE_DICTIONARIES`` and
+reports, per language:
+- MISSING: keys used in code but absent from that dictionary.
 - UNUSED: dictionary keys that no code references (likely stale).
+
+Finally it compares the languages with each other: a key translated in one
+language has to be translated in all of them, otherwise switching the language
+silently falls back to English.
 
 Usage:
     python tools/check_i18n.py
@@ -33,6 +38,14 @@ _EXCLUDED_DIRS = {"__pycache__", ".git", "tools", "node_modules", "tmp"}
 # Files that define the translation machinery itself (they contain example
 # strings such as the language names, which are handled separately).
 _EXCLUDED_FILES = {"i18n_experiment.py"}
+
+# One row per translated language: the module below i18n/ and the dictionary
+# variable it exports. Adding a language to i18n/i18n.py only needs one new row
+# here; the rest of this script walks the table.
+_LANGUAGE_DICTIONARIES = (
+    ("zh_cn", "TRANSLATIONS_ZH_CN"),
+    ("zh_tw", "TRANSLATIONS_ZH_TW"),
+)
 
 
 def _iter_python_files(root_dir):
@@ -125,13 +138,53 @@ def _collect_msgids_from_file(file_path):
     return msgids
 
 
-def _load_translations(root_dir):
-    """Import i18n/zh_cn.py with plain Python and return the dict."""
-    zh_cn_path = os.path.join(root_dir, "i18n", "zh_cn.py")
-    spec = importlib.util.spec_from_file_location("zh_cn", zh_cn_path)
+def _load_dictionary(root_dir, module_name, variable_name):
+    """Import i18n/<module_name>.py with plain Python and return its dict."""
+    module_path = os.path.join(root_dir, "i18n", module_name + ".py")
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return dict(getattr(module, "TRANSLATIONS_ZH_CN", {}))
+    return dict(getattr(module, variable_name, {}))
+
+
+def _report_language(module_name, translations, msgids):
+    """Print the missing and unused keys of one language and return a count."""
+    missing = sorted(msgids - set(translations))
+    unused = sorted(set(translations) - msgids)
+    print(
+        "=== {}: {} keys MISSING, {} UNUSED ===".format(
+            module_name, len(missing), len(unused)
+        )
+    )
+    for key in missing:
+        print("MISSING {}".format(repr(key)))
+    for key in unused:
+        print("UNUSED  {}".format(repr(key)))
+    print()
+    # Only a missing key breaks the UI; an unused key is a maintenance hint.
+    return len(missing)
+
+
+def _report_parity(dictionaries):
+    """Print keys that one language has and another language lacks."""
+    every_key = set()
+    for translations in dictionaries.values():
+        every_key.update(translations)
+    problems = 0
+    for module_name, translations in dictionaries.items():
+        absent = sorted(every_key - set(translations))
+        if not absent:
+            continue
+        problems += len(absent)
+        print(
+            "=== {}: {} keys missing compared with other languages ===".format(
+                module_name, len(absent)
+            )
+        )
+        for key in absent:
+            print("PARITY  {}".format(repr(key)))
+        print()
+    return problems
 
 
 def main():
@@ -147,26 +200,21 @@ def main():
             print("SYNTAX ERROR in {}: {}".format(file_path, error))
             return 1
 
-    translations = _load_translations(root_dir)
-
-    missing = sorted(msgids - set(translations))
-    unused = sorted(set(translations) - msgids)
-
     if dump_mode:
         print("=== {} msgids collected ===".format(len(msgids)))
         for msgid in sorted(msgids):
             print(repr(msgid))
         print()
 
-    print("=== {} keys MISSING from zh_cn ===".format(len(missing)))
-    for key in missing:
-        print(repr(key))
-    print()
-    print("=== {} UNUSED keys in zh_cn ===".format(len(unused)))
-    for key in unused:
-        print(repr(key))
+    dictionaries = {}
+    problems = 0
+    for module_name, variable_name in _LANGUAGE_DICTIONARIES:
+        translations = _load_dictionary(root_dir, module_name, variable_name)
+        dictionaries[module_name] = translations
+        problems += _report_language(module_name, translations, msgids)
+    problems += _report_parity(dictionaries)
 
-    return 1 if missing else 0
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
