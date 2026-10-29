@@ -94,7 +94,7 @@ def prepare_routing(model, context, allow_draw_state_change):
         # layout cannot serialize are dropped exactly as in the Merged mode.
         plan = dict(assignments=list(source_components), issues=[], counts=dict(
             unchanged=len(source_components), reassigned=0, ambiguous=0,
-            incompatible=0, draw_state=0))
+            incompatible=0, draw_state=0, island=0), islands=[])
     plan['owners'] = owners
     plan['face_owners'] = face_owners
     if plan['issues']:
@@ -102,6 +102,10 @@ def prepare_routing(model, context, allow_draw_state_change):
         counts = plan['counts']
         raise ValueError(tr('MergedComponent routing stopped: {incompatible} incompatible triangles, {ambiguous} ambiguous, {draw_state} require draw-state consent. Open report: {report}. No weights were deleted; repair the reported faces or explicitly use Merged.').format(
             **counts, report=text.name))
+    # A component without a draw branch of its own is not an error: routing
+    # clones the owning object's branch into the destination section and the
+    # target component metadata supplies the match range. Only the source
+    # object must exist, which the bucket keys already guarantee.
     # Per-loop localization can duplicate export vertices where palettes differ.
     # Shape deltas still come from the same source vertex for every duplicate.
     # No physical mesh split or shape-key renumbering is necessary.
@@ -137,7 +141,8 @@ def write_report(draw_ib, mesh, owners, face_owners, plan, group_names):
             group_names.get(weight.group, str(weight.group)): float(weight.weight)
             for weight in mesh.vertices[index].groups if weight.weight > 0}) for index in face.vertices]
         objects[name]['issues'].append(record)
-    report = dict(version=1, draw_ib=draw_ib, counts=plan['counts'], objects=objects)
+    report = dict(version=1, draw_ib=draw_ib, counts=plan['counts'], objects=objects,
+                  islands=plan.get('islands', []))
     text = bpy.data.texts.new('mimi_wwmi_component_report.' + draw_ib + '.txt')
     text[REPORT_DATA] = json.dumps(report, ensure_ascii=False)
     text['mimi_report_time'] = time.time()
@@ -148,6 +153,14 @@ def write_report(draw_ib, mesh, owners, face_owners, plan, group_names):
              tr('ambiguous: multiple target palettes fit. Separate these source faces into another object and bind it to the intended Submesh in the blueprint.'),
              tr('draw_state: one palette fits, but original target shaders/materials are not proven equivalent. Confirm the destination appearance, then enable Allow Component Draw-State Changes, or use Merged.'),
              tr('The routing plan was cancelled. Reassigned counts are proposals only. No automatic weight deletion, native shape-key renumbering, or architecture fallback was performed.'), '']
+    islands = plan.get('islands', [])
+    if islands:
+        # Island decisions are applied before this report is written, so they
+        # are a record of what already happened, not a proposal for the user.
+        lines += [tr('Connected parts reassigned by island analysis:'), '']
+        for island in islands:
+            lines.append(json.dumps(island, ensure_ascii=False))
+        lines.append('')
     for name, entry in objects.items():
         lines += [tr('Source object') + ': ' + name, tr('Source face indices') + ': ' + str(sorted({
             issue['source_face'] for issue in entry['issues'] if issue['source_face'] >= 0}))]
@@ -180,7 +193,9 @@ def apply_routing(model, context, plan, submesh_names):
     # plan must not bypass the all-or-nothing export contract.
     if plan.get('issues'):
         raise ValueError('MergedComponent: cannot apply an incomplete routing plan')
-    if not plan['counts']['reassigned']:
+    # Island decisions move whole connected parts without the per-face consent,
+    # so both counters must be checked before reporting a no-op.
+    if not (plan['counts']['reassigned'] or plan['counts'].get('island')):
         return []
     owners = plan['owners']
     keys = set(zip(map(int, plan['face_owners']), plan['assignments']))
@@ -211,10 +226,17 @@ def apply_routing(model, context, plan, submesh_names):
     # exactly the same geometry. Each branch needs one clone per destination.
     # Resolved explicit bindings follow the source; absent bindings deliberately
     # inherit the destination game's state under the opt-in consent contract.
-    for group in model.submesh_drawcall_groups:
+    for component_index, group in enumerate(model.submesh_drawcall_groups):
         for draw in group:
-            owner = owner_by_name[draw.obj_name]
-            for target in sorted(target for candidate, target in keys if candidate == owner):
+            owner = owner_by_name.get(draw.obj_name)
+            # A draw branch whose object was joined away owns no geometry any
+            # more. It must still describe every bucket routed into this
+            # component, otherwise the routed faces would have no draw call.
+            if owner is None:
+                pairs = sorted(key for key in keys if key[1] == component_index)
+            else:
+                pairs = sorted(key for key in keys if key[0] == owner)
+            for bucket_owner, target in pairs:
                 routed = copy.copy(draw)
                 routed.submesh_name = submesh_names[target]
                 routed.match_submesh_name = submesh_names[target]
@@ -222,7 +244,7 @@ def apply_routing(model, context, plan, submesh_names):
                 routed.match_first_index = str(extracted.index_offset)
                 routed.match_index_count = str(extracted.index_count)
                 new_draws[target].append(routed)
-                links.append((routed, buckets[(owner, target)]))
+                links.append((routed, buckets[(bucket_owner, target)]))
     # All lookups complete before mutating the export model or its FACE tags.
     # Bucket numbering follows the new component-major range-owner list exactly.
     # Buffer alignment later derives final offsets from the actual emitted IB.

@@ -48,6 +48,120 @@ def resolve_local(global_id, reverse, aliases):
     return reverse.get(global_id)
 
 
+def faces_by_island(faces):
+    """Group faces that share an exported edge into connected parts.
+
+    A Blender join does not weld vertices, so every absorbed source object
+    keeps its own connected pieces. Those pieces are the only surviving
+    evidence that a group of faces was one object before the join.
+    """
+    parent = list(range(len(faces)))
+
+    def find(index):
+        # Path compression keeps repeated lookups cheap on dense meshes.
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left, right):
+        # Merge two parts into the same root; the root itself has no meaning.
+        left = find(left)
+        right = find(right)
+        if left != right:
+            parent[right] = left
+
+    first_face_by_edge = {}
+    for face_index, face in enumerate(faces):
+        corners = list(face.vertices)
+        for position, corner in enumerate(corners):
+            other = corners[(position + 1) % len(corners)]
+            # An undirected edge key sorts the two corners once for everyone.
+            if corner < other:
+                key = (corner, other)
+            else:
+                key = (other, corner)
+            owner = first_face_by_edge.get(key)
+            if owner is None:
+                first_face_by_edge[key] = face_index
+            else:
+                union(face_index, owner)
+
+    islands = {}
+    for face_index in range(len(faces)):
+        islands.setdefault(find(face_index), []).append(face_index)
+    return list(islands.values())
+
+
+def resolve_island_targets(faces, face_masks, face_components, all_targets, expected_faces=None):
+    """Return one target per connected part when a single palette covers it.
+
+    An island only decides when the intersection of its face masks is not
+    empty: every triangle of that part must fit the same component palette.
+    A part whose own component already covers it never moves, so ordinary
+    geometry keeps its draw even when another palette would also fit.
+    Parts that fit several palettes fall back to the per-face decision, except
+    when counting proves the destination: the component that is still missing
+    exactly as many faces as these parts contain is the only possible target.
+    """
+    targets = [None] * len(faces)
+    islands = []
+    fixed_faces = {}
+    pending = []
+    for island in faces_by_island(faces):
+        # Intersect every triangle mask of this part. One zero is final.
+        mask = all_targets
+        for index in island:
+            mask &= face_masks[index]
+            if mask == 0:
+                break
+        if mask == 0:
+            continue
+        sources = {face_components[index] for index in island}
+        if len(sources) == 1:
+            source = next(iter(sources))
+            # Staying in the recorded component is always the safest answer.
+            if mask & (1 << source):
+                for index in island:
+                    targets[index] = source
+                fixed_faces[source] = fixed_faces.get(source, 0) + len(island)
+                continue
+        if bin(mask).count("1") != 1:
+            # Several palettes fit the whole part; counting may still prove
+            # one of them before the per-face rule gives up on it.
+            pending.append((island, mask))
+            continue
+        target = mask.bit_length() - 1
+        for index in island:
+            targets[index] = target
+        fixed_faces[target] = fixed_faces.get(target, 0) + len(island)
+        islands.append(dict(source=sorted(sources), target=target, faces=len(island)))
+    if pending and expected_faces:
+        # A component's original face count is fixed game metadata. When this
+        # part is the only component still short by exactly the pending total,
+        # the export faces can only be its own; anything else cannot add up.
+        remaining = sum(len(island) for island, mask in pending)
+        candidates = 0
+        for island, mask in pending:
+            candidates |= mask
+        absorbing = []
+        for target in range(len(expected_faces)):
+            if not (candidates & (1 << target)):
+                continue
+            missing = expected_faces[target] - fixed_faces.get(target, 0)
+            if missing == remaining:
+                absorbing.append(target)
+        if len(absorbing) == 1:
+            target = absorbing[0]
+            for island, mask in pending:
+                sources = {face_components[index] for index in island}
+                for index in island:
+                    targets[index] = target
+                islands.append(dict(source=sorted(sources), target=target, faces=len(island)))
+            pending = []
+    return targets, islands
+
+
 def plan_faces(vertices, faces, group_names, face_components, components,
                allow_draw_state_change=False, maximum_local=255):
     """Find complete target palettes for all positive influences on each face.
@@ -91,15 +205,61 @@ def plan_faces(vertices, faces, group_names, face_components, components,
 
     assignments = []
     issues = []
-    counts = dict(unchanged=0, reassigned=0, ambiguous=0, incompatible=0, draw_state=0)
+    # The island count is a separate decision kind: the connected part proved
+    # the target, so it does not need the per-face draw-state consent.
+    counts = dict(unchanged=0, reassigned=0, ambiguous=0, incompatible=0,
+                  draw_state=0, island=0)
     if len(faces) != len(face_components):
         raise ValueError('MergedComponent: face ownership count does not match the export mesh')
-    for triangle, (face, source) in enumerate(zip(faces, face_components)):
-        if len(face.vertices) != 3 or source < 0 or source >= len(maps):
+    # Validate ownership before any mask work: an island pass would shift a
+    # negative or out-of-range component id and report the wrong failure.
+    for triangle, source in enumerate(face_components):
+        if len(faces[triangle].vertices) != 3 or source < 0 or source >= len(maps):
             raise ValueError('MergedComponent: invalid triangle or original component ownership')
+
+    # Cache one mask per triangle: the island pass and the per-face pass must
+    # read exactly the same evidence, and a second pass would double the cost.
+    face_masks = []
+    for face in faces:
         mask = all_targets
         for vertex in face.vertices:
             mask &= vertex_masks[vertex]
+        face_masks.append(mask)
+
+    island_targets, islands = resolve_island_targets(
+        faces, face_masks, face_components, all_targets,
+        # Original face counts are fixed game metadata; the counting proof
+        # needs them, and a missing value only disables that proof.
+        [int(getattr(component, "index_count", 0) or 0) // 3 for component in components])
+
+    for triangle, (face, source) in enumerate(zip(faces, face_components)):
+        if len(face.vertices) != 3 or source < 0 or source >= len(maps):
+            raise ValueError('MergedComponent: invalid triangle or original component ownership')
+        mask = face_masks[triangle]
+        # A connected part with one feasible palette already answered the
+        # question; using it keeps an absorbed object intact instead of
+        # splitting it across two draws face by face. Moving that part still
+        # changes which draw renders it, so the same consent gates the move.
+        island_target = island_targets[triangle]
+        if island_target is not None:
+            if island_target == source:
+                assignments.append(source)
+                counts['unchanged'] += 1
+                continue
+            if allow_draw_state_change:
+                assignments.append(island_target)
+                counts['island'] += 1
+                continue
+            # Consent is missing: report the proven island target per face so
+            # the existing selection and repair tools still address it.
+            counts['draw_state'] += 1
+            assignments.append(source)
+            bones = sorted(set().union(*(vertex_groups[index] for index in face.vertices)))
+            issues.append(dict(triangle=triangle, source_component=source,
+                               kind='draw_state', candidates=[island_target],
+                               groups=bones, island=True,
+                               unassignable_vertices=[]))
+            continue
         # Staying in the explicit blueprint target is safe and deterministic.
         # Do not move a shared-bone triangle merely because another palette fits.
         # Only a missing complete target requires a migration decision.
@@ -128,4 +288,4 @@ def plan_faces(vertices, faces, group_names, face_components, components,
                            candidates=targets, groups=bones,
                            unassignable_vertices=[int(index) for index in face.vertices
                                                   if vertex_masks[index] == 0]))
-    return dict(assignments=assignments, issues=issues, counts=counts)
+    return dict(assignments=assignments, issues=issues, counts=counts, islands=islands)

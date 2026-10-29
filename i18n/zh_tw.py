@@ -32,6 +32,7 @@ TRANSLATIONS_ZH_TW = {
     "ambiguous: multiple target palettes fit. Separate these source faces into another object and bind it to the intended Submesh in the blueprint.": "ambiguous（歸屬不明確）：candidates 列出了多個骨骼相容的候選組件。請將這些源面分離成物件，在藍圖中綁定到你確定的目標 Submesh；不能僅靠骨骼判斷材質歸屬。",
     "draw_state: one palette fits, but original target shaders/materials are not proven equivalent. Confirm the destination appearance, then enable Allow Component Draw-State Changes, or use Merged.": "draw_state（需要授權）：只有一個骨骼相容組件，但無法證明其原生著色器/材質與源組件等價。確認可以使用目標組件的繪製狀態後，勾選「允許切換組件繪製狀態」，或選取 Merged。",
     "The routing plan was cancelled. Reassigned counts are proposals only. No automatic weight deletion, native shape-key renumbering, or architecture fallback was performed.": "整份分配計畫已取消，reassigned 數量僅為可遷移建議，並未實際移動任何面。本次沒有自動刪除權重、重編號原生形態鍵或回退匯出架構。",
+    "Connected parts reassigned by island analysis:": "依連通塊自動改判歸屬的部位：",
     "Source object": "源物件",
     "Source face indices": "源面編號",
     "Open Routing Report": "開啟分配報告",

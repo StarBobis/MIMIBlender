@@ -447,6 +447,15 @@ class DrawIBModelWWMI:
                 processed_obj_name_list.append(obj_name)
 
                 source_obj = ObjUtils.get_obj_by_name(obj_name)
+                # A joined-away object can survive as orphaned data because the
+                # blueprint row still references it. It carries no geometry of
+                # its own any more: its faces now live in the merged object and
+                # arrive here through routing. Copying it would duplicate that
+                # geometry under two components, so only the draw branch stays.
+                # Objects merely hidden in an excluded collection keep exporting.
+                if source_obj is None or not source_obj.users_collection:
+                    print("WWMI: draw branch only (object left the scene): " + str(obj_name))
+                    continue
                 temp_obj = ObjUtils.copy_object(
                     bpy.context,
                     source_obj,

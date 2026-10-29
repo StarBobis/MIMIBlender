@@ -182,6 +182,53 @@ class BlenderRoutingTests(unittest.TestCase):
         self.assertEqual([key.name for key in self.obj.data.shape_keys.key_blocks], ['Basis', 'Deform 0', 'Deform 127'])
         self.assertEqual([group.name for group in self.obj.vertex_groups], ['10', '30', '20'])
 
+    def test_island_analysis_moves_one_connected_part_without_consent(self):
+        """Let a joined object carry parts that no single blueprint palette holds.
+
+        The two parts share no edge, so the join kept them apart and the
+        connected-part evidence survives. Each part fits exactly one component,
+        so the deduction names a single destination per part instead of leaving
+        a per-face ambiguity. Moving that part still changes its draw state, so
+        consent is required, and the report must name the proven candidate.
+        """
+        # Two disjoint triangles in one object; the second needs component 1.
+        mesh = bpy.data.meshes.new('routing_island')
+        mesh.from_pydata(
+            [(2, 0, 0), (3, 0, 0), (2, 1, 0), (5, 0, 0), (6, 0, 0), (5, 1, 0)],
+            [], [(0, 1, 2), (3, 4, 5)])
+        uv = mesh.uv_layers.new(name='texcoord')
+        uv.data.foreach_set('uv', [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
+        island = bpy.data.objects.new('deadbeef-0.routing_island', mesh)
+        bpy.context.scene.collection.objects.link(island)
+        island.vertex_groups.new(name='10').add([0, 1, 2], 1, 'REPLACE')
+        island.vertex_groups.new(name='20').add([3, 4, 5], 1, 'REPLACE')
+        # One object, one blueprint row: the whole object is bound to component 0.
+        self.model.submesh_drawcall_groups = [
+            [DrawCallModel(island.name, 'LOD0.deadbeef-0')], []]
+        context = self.build_context()
+        # Without consent the proven island target is reported, never applied.
+        with self.assertRaisesRegex(ValueError, 'routing stopped|自动分配已停止'):
+            prepare_routing(self.model, context, False)
+        report = json.loads(latest_report()[REPORT_DATA])
+        self.assertEqual(report['counts']['draw_state'], 1)
+        self.assertEqual(report['counts']['ambiguous'], 0)
+        issue = report['objects'][island.name]['issues'][0]
+        self.assertTrue(issue.get('island'))
+        self.assertEqual(issue['candidates'], [1])
+        plan = prepare_routing(self.model, context, True)
+        self.assertEqual(plan['assignments'], [0, 1])
+        self.assertEqual(plan['counts']['island'], 1)
+        self.assertEqual(plan['counts']['draw_state'], 0)
+        self.assertEqual(plan['issues'], [])
+        self.assertEqual(plan['islands'], [dict(source=[0], target=1, faces=1)])
+        # The routed part receives a cloned branch and its own component range.
+        links = apply_routing(self.model, context, plan,
+                              ['LOD0.deadbeef-0', 'LOD0.deadbeef-1'])
+        self.assertEqual(len(links), 2)
+        self.assertEqual({draw.get_submesh_name() for draw, _temp in links},
+                         {'LOD0.deadbeef-0', 'LOD0.deadbeef-1'})
+        self.assertEqual([len(group) for group in self.model.submesh_drawcall_groups], [1, 1])
+
     def test_draw_conditions_bindings_and_final_ranges_follow_faces(self):
         """Check rendered INI as well as Python-side draw metadata.
         Correct buffer ranges alone do not preserve switches or texture scope.
@@ -360,7 +407,7 @@ class BlenderRoutingTests(unittest.TestCase):
         self.assertEqual(plan['assignments'], [0, 0])
         self.assertEqual(plan['issues'], [])
         self.assertEqual(plan['counts'], dict(unchanged=2, reassigned=0, ambiguous=0,
-                                             incompatible=0, draw_state=0))
+                                             incompatible=0, draw_state=0, island=0))
         self.assertEqual(list(plan['loop_components']), [0, 0, 0, 0, 0, 0])
         # Localization has nothing to serialize, and no draw may be re-cloned.
         self.assertEqual(localize_blendindices(
