@@ -60,6 +60,7 @@ from .texture_row_ui import (
     draw_preview_pair,
     draw_texture_row_panel,
     register_profile,
+    row_warnings,
 )
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
@@ -708,10 +709,10 @@ def _draw_hash_replacements(node, context, layout):
     box = layout.box()
     box.label(text=item.texture_hash + " - " + item.mark_source_name)
     box.label(text=item.mark_source_submesh)
-    if item.mark_missing:
-        box.label(text=tr("Mark is outside the current scope; clear its replacement or disable this row"), icon='ERROR')
-    elif not item.global_detected:
-        box.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
+    # Same status lines as the socketless manager: the profile owns the two
+    # hash specific ones and the shared helper adds the vanished-file checks.
+    for warning_icon, warning_text in row_warnings(_HASH_ROW_PROFILE, item):
+        box.label(text=warning_text, icon=warning_icon)
     draw_preview_pair(box, item.mark_source_file_path, item.file_path)
     draw_file_picker(box, node, item, index)
     # The conditional node can fall back to an explicit format when the
@@ -730,13 +731,14 @@ def _draw_hash_replacements(node, context, layout):
     # Mark rows reuse captured bytes, so only FILE-backed rows show a status.
     if str(item.source_type) == 'FILE':
         _draw_row_controls(box, node, item, index, tree)
-    if item.file_path and not os.path.isfile(bpy.path.abspath(item.file_path)):
-        box.label(text=tr("Replacement file was not found"), icon='ERROR')
     # Show the generated file name and let the user rename it.
     generated_name, suffix, suffix_is_certain = _hash_row_output_name(node, item)
     draw_generated_name(box, generated_name, certainty_note=alias_suffix_note(suffix_is_certain))
     draw_rename_box(box, item, suffix, generated_name)
-    layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
+    # Same rule as the shared panel: the caption only describes a row that has
+    # no replacement yet.
+    if not str(item.file_path or "").strip():
+        layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
     # One click prepares every replacement of this node in the background.
     _draw_convert_all(layout, node, tree)
 

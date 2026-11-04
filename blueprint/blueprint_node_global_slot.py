@@ -35,7 +35,9 @@ def refresh_global_slot_row_label(row):
     label = str(row.submesh or "?") + " / " + str(row.slot or "?") + " / " + str(row.mark_name or "?")
     alias_stem = normalize_alias_stem(getattr(row, "output_name", ""))
     row.name = label + (" -> " + alias_stem if alias_stem else "")
-    return row.name
+    # Blender requires a property update callback to return None; returning the
+    # new name made every alias edit print "the return value must be None".
+    # The list reads row.name, so no caller needs the value.
 
 
 def scan_slot_marks():

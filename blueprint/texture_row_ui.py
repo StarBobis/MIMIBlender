@@ -139,12 +139,12 @@ def _is_file(path):
         return True
 
 
-def _row_warnings(profile, item):
+def row_warnings(profile, item):
     """Status lines of one row: node specific ones plus the shared file checks.
 
-    The file checks used to live in one node only.  Both now report a vanished
-    replacement and a vanished capture, so a broken row is visible before the
-    export pass reaches it.
+    Every panel that shows a row uses this, including the connected Hash node's
+    own detail box, so a vanished replacement or capture is reported the same
+    way instead of by a copy of the check.
     """
     warnings = list(profile.warnings(item) or [])
     replacement = str(profile.replacement_path(item) or "").strip()
@@ -249,7 +249,7 @@ class MIMI_UL_TextureRows(bpy.types.UIList):
         )
         # The first warning decides the row icon, so a stale target or a
         # deleted file is visible without opening the detail box.
-        warnings = _row_warnings(profile, item)
+        warnings = row_warnings(profile, item)
         if warnings:
             row.label(text="", icon=warnings[0][0])
 
@@ -265,7 +265,7 @@ def _draw_row_detail(node, item, index, layout):
     subtitle = str(profile.subtitle(item) or "")
     if subtitle:
         box.label(text=subtitle)
-    for warning_icon, warning_text in _row_warnings(profile, item):
+    for warning_icon, warning_text in row_warnings(profile, item):
         box.label(text=warning_text, icon=warning_icon)
     draw_preview_pair(
         box,
