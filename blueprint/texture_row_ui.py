@@ -187,34 +187,44 @@ def draw_preview_pair(layout, original_path, replacement_path):
     )
 
 
-def draw_file_picker(layout, node, item):
-    """Draw the one chooser both nodes use, plus its explicit clear button."""
+def _target_row_operator(operator, node, row_key, index):
+    """Point one row operator at the row the panel drew it for."""
+    operator.node_name = node.name
+    operator.tree_name = node.id_data.name
+    # The identity survives a refresh that reorders rows; the index is the
+    # fallback for a duplicated identity and for rows that have none yet.
+    operator.row_key = row_key
+    operator.row_index = int(index)
+
+
+def draw_file_picker(layout, node, item, index):
+    """Draw the chooser both nodes use, plus its explicit clear button."""
     profile = profile_for(node)
     if profile is None:
         return
     row_key = str(profile.key(item) or "")
+    replacement = str(profile.replacement_path(item) or "").strip()
     if not row_key:
-        # A row with no identity cannot be addressed after a refresh and cannot
-        # be exported either, so its chooser would be a dead button.
+        # A row with no identity cannot be exported, so offering a chooser
+        # would be dishonest. Withdrawing a replacement stays available
+        # because refresh drops such a row only once it owns nothing.
         layout.label(text=tr("This row has no identity yet; refresh the node first"), icon='INFO')
-        return
-    row = layout.row(align=True)
-    select = row.operator(
-        "mimi.texture_row_select_file",
-        text=tr("Choose Replacement Texture"),
-        icon='FILE_FOLDER',
-    )
-    select.node_name = node.name
-    select.tree_name = node.id_data.name
-    select.row_key = row_key
+    row = None
+    if row_key:
+        row = layout.row(align=True)
+        select = row.operator(
+            "mimi.texture_row_select_file",
+            text=tr("Choose Replacement Texture"),
+            icon='FILE_FOLDER',
+        )
+        _target_row_operator(select, node, row_key, index)
     # Clearing is a separate action, not another file browser: an empty path is
-    # a meaningful state ("keep the original"), so it must be reachable.
-    if not str(profile.replacement_path(item) or "").strip():
+    # a meaningful state ("keep the original"), so it must always be reachable.
+    if not replacement:
         return
+    row = row or layout.row(align=True)
     clear = row.operator("mimi.texture_row_clear_file", text="", icon='X')
-    clear.node_name = node.name
-    clear.tree_name = node.id_data.name
-    clear.row_key = row_key
+    _target_row_operator(clear, node, row_key, index)
 
 
 class MIMI_UL_TextureRows(bpy.types.UIList):
@@ -262,7 +272,7 @@ def _draw_row_detail(node, item, index, layout):
         str(profile.original_path(item) or ""),
         str(profile.replacement_path(item) or ""),
     )
-    draw_file_picker(box, node, item)
+    draw_file_picker(box, node, item, index)
     # Enabled lives next to the hint that says what disabling really does,
     # because that is the one rule the two managers must not blur.
     box.prop(item, "enabled")
@@ -274,7 +284,10 @@ def _draw_row_detail(node, item, index, layout):
     draw_rename_box(box, item, suffix, generated_name)
     if not bool(getattr(item, "enabled", True)):
         box.label(text=_row_text(profile.disabled_hint), icon='INFO')
-    layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
+    # The caption describes a row without a replacement; saying it for a
+    # configured row would be false.
+    if not str(profile.replacement_path(item) or "").strip():
+        layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
     # One click prepares every replacement of this node in the background.
     draw_convert_all(layout, node, tree)
 
@@ -323,12 +336,32 @@ def _resolve_node(operator, context):
 
 
 def _resolve_row(operator, node, profile):
-    """Find the row an operator targets by its semantic key, never by position."""
-    rows = getattr(node, profile.rows_prop, None) or []
+    """Find the row an operator targets: by identity, then by drawn position."""
+    rows = list(getattr(node, profile.rows_prop, None) or [])
     row_key = str(getattr(operator, "row_key", "") or "")
-    if not row_key:
-        return None
-    return next((item for item in rows if str(profile.key(item)) == row_key), None)
+    # Never write ``int(value or -1)`` here: row 0 is a valid target and would
+    # be folded into the "no row" sentinel.
+    stored_index = getattr(operator, "row_index", -1)
+    row_index = int(stored_index) if stored_index is not None else -1
+    if row_key:
+        matches = [
+            position for position, item in enumerate(rows)
+            if str(profile.key(item)) == row_key
+        ]
+        if len(matches) == 1:
+            # The common case. An identity keeps working when a refresh inserts
+            # rows while the file browser is open.
+            return rows[matches[0]]
+        if row_index in matches:
+            # Two rows claim the same identity (a legacy or hand-edited file),
+            # so the position the button was drawn for decides which one.
+            return rows[row_index]
+        return rows[matches[0]] if matches else None
+    # A row without an identity can only be addressed by position, which is
+    # enough to withdraw the replacement that kept it alive across refreshes.
+    if 0 <= row_index < len(rows):
+        return rows[row_index]
+    return None
 
 
 class MIMI_OT_TextureRowSelectFile(I18nOperator, ImportHelper):
@@ -345,6 +378,7 @@ class MIMI_OT_TextureRowSelectFile(I18nOperator, ImportHelper):
     node_name: bpy.props.StringProperty() # type: ignore
     tree_name: bpy.props.StringProperty() # type: ignore
     row_key: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    row_index: bpy.props.IntProperty(default=-1, options={'HIDDEN'}) # type: ignore
 
     def invoke(self, context, event):
         node = _resolve_node(self, context)
@@ -391,6 +425,7 @@ class MIMI_OT_TextureRowClearFile(I18nOperator):
     node_name: bpy.props.StringProperty() # type: ignore
     tree_name: bpy.props.StringProperty() # type: ignore
     row_key: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
+    row_index: bpy.props.IntProperty(default=-1, options={'HIDDEN'}) # type: ignore
 
     def execute(self, context):
         node = _resolve_node(self, context)
@@ -422,11 +457,13 @@ class MIMI_OT_TextureRowRefresh(I18nOperator):
         from .texture_node_refresh import refresh_texture_node
 
         try:
+            # The dispatcher returns the number of rows the node owns now, not
+            # the number of marks in the workspace, so the caption says rows.
             count = refresh_texture_node(node)
         except Exception as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
-        self.report({'INFO'}, tr("Detected {count} texture marks").format(count=count))
+        self.report({'INFO'}, tr("Refreshed {count} texture rows").format(count=count))
         return {'FINISHED'}
 
 

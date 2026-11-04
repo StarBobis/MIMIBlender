@@ -713,7 +713,7 @@ def _draw_hash_replacements(node, context, layout):
     elif not item.global_detected:
         box.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
     draw_preview_pair(box, item.mark_source_file_path, item.file_path)
-    draw_file_picker(box, node, item)
+    draw_file_picker(box, node, item, index)
     # The conditional node can fall back to an explicit format when the
     # selected hash has no captured original in the current workspace.
     format_row = box.row(align=True)
@@ -721,6 +721,11 @@ def _draw_hash_replacements(node, context, layout):
     if str(item.format_mode) == 'MANUAL':
         format_row.prop(item, 'manual_format', text="")
     box.prop(item, 'force_original_size')
+    # Disabling this row does not merely skip it: the export writes the captured
+    # original bytes back over the generated texture. Say so here too, because
+    # the connected node owns its own detail box.
+    if not bool(getattr(item, 'enabled', True)):
+        box.label(text=_hash_disabled_hint(), icon='INFO')
     # Detected original format, readiness and the per-row Convert button.
     # Mark rows reuse captured bytes, so only FILE-backed rows show a status.
     if str(item.source_type) == 'FILE':
@@ -854,6 +859,13 @@ def _hash_row_set_file(item, path):
     item.file_path = path
 
 
+def _hash_disabled_hint():
+    '''Caption of the restore rule that a disabled hash row triggers.'''
+    # Shared by the socketless manager's gallery and the connected node's own
+    # detail box, so both say the same thing about the same export rule.
+    return tr("Disabled: original bytes are written back over the Mod texture")
+
+
 _HASH_ROW_PROFILE = TextureRowProfile(
     rows_prop="texture_hash_items",
     index_prop="texture_hash_index",
@@ -871,7 +883,7 @@ _HASH_ROW_PROFILE = TextureRowProfile(
     # A hash override owns a file in the generated Textures folder. Disabling
     # it therefore has to put the original bytes back, not just stop drawing;
     # the caption says so because the Slot manager behaves differently.
-    disabled_hint=lambda: tr("Disabled: original bytes are written back over the Mod texture"),
+    disabled_hint=_hash_disabled_hint,
     scope_icon='WORLD',
 )
 

@@ -660,6 +660,11 @@ class GlobalHashTests(unittest.TestCase):
         slot_row.missing = True
         self.assertIn('Stale mark', ' '.join(panel(slot_node).labels))
 
+        # The list is the only place that shows which row owns a renamed file,
+        # so the alias stays part of the slot caption.
+        slot_row.output_name = 'MyAlias'
+        self.assertTrue(row_ui.profile_for(slot_node).list_title(slot_row).endswith('MyAlias'))
+
     def test_socketless_managers_draw_with_no_rows(self):
         # An empty manager must draw its refresh button and its scope caption
         # instead of raising while formatting a row that does not exist.
@@ -674,15 +679,64 @@ class GlobalHashTests(unittest.TestCase):
             self.assertEqual(recorder.order[0], ('operator', 'mimi.texture_row_refresh'))
             self.assertTrue([entry for entry in recorder.order if entry[0] == 'label'])
 
-        # A row without an identity cannot be addressed after a refresh, so the
-        # chooser would be a dead button; the panel explains it instead.
+        # A row without an identity cannot be exported, so it offers no chooser
+        # but must keep the clear action: withdrawing the replacement is the
+        # only way to let a refresh drop such a legacy row again.
         node = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
-        node.texture_hash_items.add()
+        legacy = node.texture_hash_items.add()
+        legacy.file_path = str(self.image_path)
         recorder = PanelRecorder()
         node.draw_buttons(bpy.context, recorder)
         operators = [entry[1] for entry in recorder.order if entry[0] == 'operator']
         self.assertNotIn('mimi.texture_row_select_file', operators)
+        self.assertIn('mimi.texture_row_clear_file', operators)
         self.assertIn('This row has no identity yet; refresh the node first', recorder.labels)
+        bpy.ops.mimi.texture_row_clear_file(node_name=node.name, tree_name=self.tree.name, row_index=0)
+        self.assertEqual(legacy.file_path, '')
+
+    def test_duplicate_hash_rows_are_addressed_by_drawn_position(self):
+        # Two rows can carry one identity in a legacy or hand-edited file. The
+        # position the button was drawn for must decide, never "the first match".
+        from MIMIBlender.i18n import i18n
+        previous = i18n.get_language()
+        self.addCleanup(i18n.apply_language, previous)
+        i18n.apply_language('en')
+        node = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+        for _ in range(2):
+            item = node.texture_hash_items.add()
+            item.global_detected = True
+            item.texture_hash = 'feedface'
+            item.mark_source_name = 'DiffuseMap'
+            item.mark_source_file_path = str(self.image_path)
+        bpy.ops.mimi.texture_row_select_file(
+            node_name=node.name, tree_name=self.tree.name,
+            row_key='feedface', row_index=1, filepath=str(self.image_path),
+        )
+        self.assertEqual(node.texture_hash_items[0].file_path, '')
+        self.assertEqual(node.texture_hash_items[1].file_path, str(self.image_path))
+
+    def test_connected_hash_node_explains_the_restore_rule(self):
+        # Disabling a row is not a no-op on either hash panel: the export writes
+        # the captured original bytes back. The connected node owns its detail
+        # box, so it has to draw that caption itself.
+        from MIMIBlender.i18n import i18n
+        previous = i18n.get_language()
+        self.addCleanup(i18n.apply_language, previous)
+        i18n.apply_language('en')
+        node = self.tree.nodes.new('MIMINode_Hash_Texture_Bind')
+        item = node.texture_hash_items.add()
+        item.global_detected = True
+        item.texture_hash = 'feedface'
+        item.mark_source_name = 'DiffuseMap'
+        item.mark_source_file_path = str(self.image_path)
+        item.file_path = str(self.image_path)
+        item.enabled = False
+        recorder = PanelRecorder()
+        node.draw_buttons(bpy.context, recorder)
+        self.assertTrue(
+            any('original bytes are written back' in text for text in recorder.labels),
+            recorder.labels,
+        )
 
     def test_removed_mark_keeps_choice_but_blocks_export(self):
         metadata = self.mark_json('LOD0', '94517393-10-0', [self.mark('6077b727')])

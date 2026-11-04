@@ -834,9 +834,8 @@ TRANSLATIONS_ZH_TW = {
     # The two managers draw the same controls; only their export rules differ.
     "Refresh Marked Textures": "重新整理標記貼圖",
     "Re-read the marked textures of this node and keep every replacement choice": "重新讀取此節點的標記貼圖，並保留所有已指定的替換",
-    "Detected {count} texture marks": "偵測到 {count} 張標記貼圖",
+    "Refreshed {count} texture rows": "已重新整理 {count} 個貼圖項目",
     "Refresh to detect marked Slot textures": "點擊重新整理，偵測已標記的槽位貼圖",
-    "Choose Replacement Texture": "選擇替換貼圖",
     "Clear Replacement Texture": "清除替換貼圖",
     "Texture row no longer exists": "貼圖列已不存在",
     "This row has no identity yet; refresh the node first": "此項目還沒有身分識別；請先重新整理此節點",

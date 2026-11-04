@@ -48,7 +48,8 @@ box are single-sourced.
 The node-specific half is a `TextureRowProfile` the node module registers at import time
 (`register_profile(...)`), which is where `rows_prop` / `index_prop` / the field names live. The
 connected `Hash Texture Bind` registers the same profile because it owns the same row RNA; it
-draws its own detail box only for the switch conditions and the manual-format fallback.
+reuses the shared list, previews and chooser but draws its own detail box instead of the shared
+one, because it alone carries switch conditions and the manual-format fallback.
 
 Rules to keep:
 
@@ -56,9 +57,11 @@ Rules to keep:
   INI section shape) into the profile: `Disabled` means "write the original bytes back" for a
   hash row and "stop emitting the binding" for a slot row, and that stays in the export path.
 - Each manager names its own disabled/empty/scope caption through the profile, so two identical
-  panels still explain their different rule.
-- Rows are found by `profile.key(item)` (`texture_hash` / `identity`), never by list index: a
-  refresh can insert rows while the Blender file browser is open.
+  panels still explain their different rule. Every panel that shows a row must show its rule:
+  the connected node draws the same hash `disabled_hint` in its own detail box.
+- Rows are found by `profile.key(item)` (`texture_hash` / `identity`) first and by the drawn
+  position only as a fallback: a refresh can insert rows while the Blender file browser is open,
+  while a duplicated identity or a row without one has no other way to be addressed.
 - `original_path`, `replacement_path`, `set_file` and `warnings` are the only places that know
   the per-node RNA field names. Assigning a path goes through `set_file` because the Hash row
   has a property `update` callback that retypes the source, records that a replacement existed

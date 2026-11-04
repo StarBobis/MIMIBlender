@@ -202,13 +202,25 @@ def _slot_row_title(item):
     )
 
 
+def _slot_row_list_title(item):
+    """List caption of one row, including the alias of its generated file.
+
+    The list is the only place where a user can see which row owns which
+    renamed texture, so the alias stays part of it exactly like the previous
+    plain ``row.name`` list showed it.
+    """
+    title = _slot_row_title(item)
+    alias_stem = normalize_alias_stem(getattr(item, "output_name", ""))
+    return title + (" -> " + alias_stem if alias_stem else "")
+
+
 _SLOT_ROW_PROFILE = TextureRowProfile(
     rows_prop="items",
     index_prop="index",
     # Identity carries the Submesh, the slot and the mark name; the texture
     # hash is intentionally absent because re-extraction changes it.
     key=lambda item: str(getattr(item, "identity", "") or ""),
-    list_title=_slot_row_title,
+    list_title=_slot_row_list_title,
     title=_slot_row_title,
     subtitle=lambda item: "",
     original_path=lambda item: str(getattr(item, "original_path", "") or ""),

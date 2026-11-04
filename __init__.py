@@ -196,8 +196,10 @@ def unregister():
         texture_bind_channels.unregister,
         blueprint_node_global_slot.unregister,
         blueprint_node_hash_texture.unregister,
-        texture_format_widgets.unregister,
+        # Reverse of the register order: the gallery goes before the shared
+        # exact-format widgets it draws with.
         texture_row_ui.unregister,
+        texture_format_widgets.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
         ui_func_import_mmt.unregister,
