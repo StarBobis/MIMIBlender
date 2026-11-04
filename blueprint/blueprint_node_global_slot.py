@@ -13,16 +13,14 @@ from ..common.texture_output_naming import (
     global_slot_output_filename,
     normalize_alias_stem,
 )
-from ..i18n.i18n import I18nOperator, tr, translatable
-from .texture_output_widgets import (
-    draw_ib_from_name,
-    draw_generated_name,
-    draw_rename_box,
-)
-from .texture_format_widgets import (
-    draw_convert_all as _draw_convert_all,
-    draw_node_progress as _draw_node_progress,
-    draw_row_controls as _draw_row_controls,
+from ..i18n.i18n import tr, translatable
+# The row gallery is shared with Global Hash Texture Bind; the node declares
+# what its rows mean and the gallery owns how they are edited.
+from .texture_output_widgets import draw_ib_from_name
+from .texture_row_ui import (
+    TextureRowProfile,
+    draw_texture_row_panel,
+    register_profile,
 )
 
 
@@ -142,25 +140,6 @@ def refresh_global_slot_rows(node):
 
 
 @translatable
-class RefreshGlobalSlots(I18nOperator):
-    """Scan Slot and SharedSlot without deduplicating their hashes."""
-    bl_idname = 'mimi.global_slot_refresh'
-    bl_label = 'Refresh Slot Marks'
-    bl_options = {'REGISTER', 'UNDO'}
-    tree_name: bpy.props.StringProperty()
-    node_name: bpy.props.StringProperty()
-
-    def execute(self, context):
-        tree = bpy.data.node_groups.get(self.tree_name)
-        node = tree.nodes.get(self.node_name) if tree else None
-        if not node or node.bl_idname != 'MIMINode_Texture_Global':
-            return {'CANCELLED'}
-        # The shared helper keeps this button and Refresh Blueprint in sync.
-        refresh_global_slot_rows(node)
-        return {'FINISHED'}
-
-
-@translatable
 class MIMINode_Texture_Global(MIMINodeBase):
     """Global manager for selected Submesh defaults, with no object sockets."""
     bl_idname = 'MIMINode_Texture_Global'
@@ -183,40 +162,72 @@ class MIMINode_Texture_Global(MIMINodeBase):
     # Original DDS availability is shown next to the replacement controls.
     # A stale active row requires explicit user withdrawal or reconfiguration.
     def draw_buttons(self, context, layout):
-        # Running exact-format batches are global, so their progress shows here.
-        _draw_node_progress(layout)
-        layout.label(text=tr('Submesh defaults / local draw overrides win'), icon='INFO')
-        op = layout.operator('mimi.global_slot_refresh', icon='FILE_REFRESH')
-        op.tree_name, op.node_name = self.id_data.name, self.name
-        layout.template_list('UI_UL_list', self.name, self, 'items', self, 'index', rows=4)
-        if not 0 <= self.index < len(self.items):
-            return
-        row = self.items[self.index]
-        layout.prop(row, 'enabled')
-        layout.prop(row, 'file_path')
-        layout.prop(row, 'force_original_size')
-        # Original format, readiness and the per-row Convert button.
-        tree = self.id_data
-        _draw_row_controls(layout, self, row, int(self.index), tree)
-        # Clearing or disabling withdraws only this layer of default binding.
-        # The original and lower-priority configuration remain untouched.
-        # Only the fallback caption is translated; a real path stays verbatim.
-        layout.label(text=row.original_path or tr('Original DDS unavailable'))
-        # The DrawIB comes from the row's Submesh; the row index inside the
-        # export pass is only known there, so it stays a placeholder.
-        generated_name = global_slot_output_filename(
-            draw_ib_from_name(row.submesh) or "<DrawIB>", INDEX_PLACEHOLDER,
+        # Same gallery as Global Hash Texture Bind: one list, one preview pair,
+        # one chooser. Only the row profile and the export path differ.
+        draw_texture_row_panel(self, layout)
+
+
+def _slot_row_warnings(item):
+    """Status lines that only a Submesh slot default can produce."""
+    if bool(getattr(item, "missing", False)):
+        return [('ERROR', tr("Stale mark: clear or disable replacement"))]
+    return []
+
+
+def _slot_row_set_file(item, path):
+    """Store the replacement image of one slot default."""
+    # The label describes the mark and the alias, not the picked file, so no
+    # extra bookkeeping runs here; the export resolves the path itself.
+    item.file_path = path
+
+
+def _slot_row_output_name(node, item):
+    """Return (generated_name, suffix, suffix_is_certain) of one slot default.
+
+    The export pass decides the row index, so the name shows a placeholder; the
+    copy stage always converts to DDS, which makes the suffix certain.
+    """
+    draw_ib = draw_ib_from_name(getattr(item, "submesh", "")) or "<DrawIB>"
+    return global_slot_output_filename(draw_ib, INDEX_PLACEHOLDER), ".dds", True
+
+
+def _slot_row_title(item):
+    """Return the familiar 'Submesh / slot / mark' caption of one row."""
+    return ' / '.join(
+        str(part or "?") for part in (
+            getattr(item, "submesh", "") or "?",
+            getattr(item, "slot", "") or "?",
+            getattr(item, "mark_name", "") or "?",
         )
-        draw_generated_name(layout, generated_name)
-        # The copy stage always converts to DDS, so the alias is always .dds.
-        draw_rename_box(layout, row, ".dds", generated_name)
-        if row.missing:
-            layout.label(text=tr('Stale mark: clear or disable replacement'), icon='ERROR')
-        # One click prepares every replacement of this node in the background.
-        _draw_convert_all(layout, self, tree)
+    )
 
 
-classes = (GlobalSlotItem, RefreshGlobalSlots, MIMINode_Texture_Global)
+_SLOT_ROW_PROFILE = TextureRowProfile(
+    rows_prop="items",
+    index_prop="index",
+    # Identity carries the Submesh, the slot and the mark name; the texture
+    # hash is intentionally absent because re-extraction changes it.
+    key=lambda item: str(getattr(item, "identity", "") or ""),
+    list_title=_slot_row_title,
+    title=_slot_row_title,
+    subtitle=lambda item: "",
+    original_path=lambda item: str(getattr(item, "original_path", "") or ""),
+    replacement_path=lambda item: str(getattr(item, "file_path", "") or ""),
+    set_file=_slot_row_set_file,
+    warnings=_slot_row_warnings,
+    generated_name=_slot_row_output_name,
+    scope_text=lambda: tr("Submesh defaults / local draw overrides win"),
+    empty_hint=lambda: tr("Refresh to detect marked Slot textures"),
+    # A slot default owns no file: disabling it only stops emitting the
+    # per-draw binding, so the game's own texture stays bound.
+    disabled_hint=lambda: tr("Disabled: this Submesh draws with the game's own texture"),
+    scope_icon='INFO',
+)
+
+register_profile('MIMINode_Texture_Global', profile=_SLOT_ROW_PROFILE)
+
+
+classes = (GlobalSlotItem, MIMINode_Texture_Global)
 
 
 # Register RNA item types before nodes that reference their collections.

@@ -28,6 +28,7 @@ Consequences:
 | Concern | File |
 |---|---|
 | Row RNA, node drawing, mark dropdown, generated-name preview | `blueprint/blueprint_node_texture.py` |
+| Shared row gallery of the socketless managers (list, previews, chooser, panel order) | `blueprint/texture_row_ui.py` |
 | Collecting rows into plain dicts at export time | `model/blueprint_model.py` `_collect_texture_bindings` |
 | Deciding the resource + copy job per row | `model/drawib_model.py` `resolve_texture_slot_bindings` |
 | Generated file names shared by UI and export | `common/texture_output_naming.py` |
@@ -35,6 +36,36 @@ Consequences:
 | Refreshing every texture node from one menu entry | `blueprint/texture_node_refresh.py` |
 | Channel socket pairs of the connected texture nodes | `blueprint/texture_bind_channels.py` |
 | Emitting lines inside the switch condition | `common/m_control_flow.py` |
+
+## The two socketless managers share one gallery
+
+`Global Hash Texture Bind` and `Global Slot Texture Bind` organise rows differently on purpose
+(a hash is globally unique; a slot default belongs to one Submesh) **but must never look
+different while being edited**. Both draw `texture_row_ui.draw_texture_row_panel`, so the list
+class, the preview pair, the chooser operator, the refresh button and the order of the detail
+box are single-sourced.
+
+The node-specific half is a `TextureRowProfile` the node module registers at import time
+(`register_profile(...)`), which is where `rows_prop` / `index_prop` / the field names live. The
+connected `Hash Texture Bind` registers the same profile because it owns the same row RNA; it
+draws its own detail box only for the switch conditions and the manual-format fallback.
+
+Rules to keep:
+
+- A profile field is display data only. Never move an export rule (restore bytes, ref backup,
+  INI section shape) into the profile: `Disabled` means "write the original bytes back" for a
+  hash row and "stop emitting the binding" for a slot row, and that stays in the export path.
+- Each manager names its own disabled/empty/scope caption through the profile, so two identical
+  panels still explain their different rule.
+- Rows are found by `profile.key(item)` (`texture_hash` / `identity`), never by list index: a
+  refresh can insert rows while the Blender file browser is open.
+- `original_path`, `replacement_path`, `set_file` and `warnings` are the only places that know
+  the per-node RNA field names. Assigning a path goes through `set_file` because the Hash row
+  has a property `update` callback that retypes the source, records that a replacement existed
+  and clears stale mark fields.
+- The panel contract (control order) is asserted in
+  `tools/test_global_hash_blender.py::test_socketless_managers_share_one_panel`; extend that test
+  when a control is added instead of letting the two nodes drift again.
 
 ## Channels: one node, several branches
 
@@ -167,12 +198,22 @@ python tools/test_texture_format_color_space.py       # real texconv colour matr
 python tools/test_texture_format_conversion.py        # exact-format end-to-end (needs Pillow)
 python tools/check_i18n.py                            # every tr() msgid has a zh_CN entry
 python tools/run_blueprint_checks.py <blender.exe>     # real Blender suites
+blender -b --factory-startup --python tools/test_global_hash_blender.py
+                                                      # refresh, chooser, panel parity
 ```
+
+The Blender suites need the executable spelled out (`"C:\Program Files\Blender Foundation\
+Blender 5.2\blender.exe"`); `blender` is not on PATH on this machine. `test_global_hash_blender.py`
+is not part of `run_blueprint_checks.py`, so run it separately when touching either manager.
 
 A headless export of a user blend is the fastest end-to-end check: point
 `scene.mimi_global_properties` at a `CUSTOM` workspace, set `generate_mod_folder_path` to a temp
 folder, call `ui_func_export.generate_mod_from_output_node`, then decode the produced
 `Textures/*.dds` with the bundled texconv and compare the values with the source image.
+
+`tools/check_i18n.py` already reports 11 missing keys from `recycle/component_routing_blender.py`
+on a clean checkout (plus about 22 unused legacy keys); compare the MISSING/UNUSED counts before
+and after a change instead of expecting a zero exit code.
 
 `tools/test_blueprint_blender.py::test_wwmi_connected_hash_file_export` fails on a clean
 checkout too (its `WWMIInfoHelper` stub has no `shapekeys`); do not read that as a regression

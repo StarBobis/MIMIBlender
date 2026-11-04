@@ -41,6 +41,7 @@ addon = importlib.import_module(ROOT.name)
 addon.register()
 from MIMIBlender.blueprint import blueprint_node_hash_texture as nodes
 from MIMIBlender.blueprint import hash_texture_preview as previews
+from MIMIBlender.blueprint import texture_row_ui as row_ui
 from MIMIBlender.model.blueprint_model import BluePrintModel
 from MIMIBlender.common.global_config import GlobalConfig
 from MIMIBlender.common.m_ini_builder import M_IniBuilder
@@ -78,6 +79,35 @@ class LayoutRecorder:
 
     def template_icon(self, **kwargs):
         self.icons.append(kwargs['icon_value'])
+
+
+class PanelRecorder(LayoutRecorder):
+    """Layout recorder that also keeps the order of every drawn control.
+
+    Two nodes that draw the same controls in the same order must produce the
+    same ordered trace; a separate list per control type cannot show that.
+    """
+    def __init__(self):
+        super().__init__()
+        self.order = []
+
+    def label(self, **kwargs):
+        super().label(**kwargs)
+        self.order.append(('label', kwargs.get('text', ''), kwargs.get('icon', '')))
+
+    def prop(self, data, name, **kwargs):
+        super().prop(data, name, **kwargs)
+        self.order.append(('prop', name))
+
+    def operator(self, name, **kwargs):
+        result = super().operator(name, **kwargs)
+        self.order.append(('operator', name))
+        return result
+
+    def template_list(self, *args, **kwargs):
+        # The RNA collection name differs per node by design; the widget does
+        # not, so only the UIList class is part of the compared trace.
+        self.order.append(('list', args[0]))
 
 
 class GlobalHashTests(unittest.TestCase):
@@ -143,8 +173,8 @@ class GlobalHashTests(unittest.TestCase):
         self.assertEqual(item.mark_source_name, 'DiffuseMap')
         index = list(rows).index('6077b727')
         self.node.texture_hash_index = index
-        bpy.ops.mimi.texhashbind_select_file(node_name=self.node.name, tree_name=self.tree.name,
-                                            item_index=index, filepath=str(self.image_path))
+        bpy.ops.mimi.texture_row_select_file(node_name=self.node.name, tree_name=self.tree.name,
+                                            row_key='6077b727', filepath=str(self.image_path))
         self.assertEqual(item.mark_source_file_path, original)
 
         # Selecting a file must leave the original preview intact. Repeated
@@ -156,14 +186,19 @@ class GlobalHashTests(unittest.TestCase):
         self.assertEqual(tuple(next(iter(previews._collection.values())).image_size), (8, 8))
         self.assertEqual(original_icon, previews.texture_icon(original))
         layout = LayoutRecorder()
-        with patch.object(nodes, 'texture_icon', return_value=1):
+        with patch.object(row_ui, 'texture_icon', return_value=1):
             self.node.draw_buttons(bpy.context, layout)
         self.assertEqual(len(layout.icons), 2)
-        self.assertIn('mimi.global_hash_refresh', layout.operators)
+        # The socketless global node draws the shared gallery, not a private one.
+        self.assertIn('mimi.texture_row_refresh', layout.operators)
+        self.assertIn('mimi.texture_row_select_file', layout.operators)
         self.assertNotIn('mimi.texhashbind_add_item', layout.operators)
         self.assertNotIn('mimi.texhashbind_remove_item', layout.operators)
         for hidden_input in ('source_type', 'texture_hash', 'mark_name', 'resource_name'):
             self.assertNotIn(hidden_input, layout.properties)
+        # A raw FILE_PATH widget would add its own browse icon next to the
+        # shared chooser, so the row must not expose the property directly.
+        self.assertNotIn('file_path', layout.properties)
         self.assertEqual(len(bpy.data.images), self.image_count)
 
         # Add a mark which changes sorted row indices. The replacement and
@@ -206,8 +241,8 @@ class GlobalHashTests(unittest.TestCase):
         self.assertEqual(read_dds_metadata(output / '6077b727_DiffuseMap.dds').dxgi, 28)
 
         # Clear means no override; the original mark is still available.
-        bpy.ops.mimi.texhashbind_clear_file(node_name=self.node.name, tree_name=self.tree.name,
-                                           item_index=self.node.texture_hash_index)
+        bpy.ops.mimi.texture_row_clear_file(node_name=self.node.name, tree_name=self.tree.name,
+                                           row_key=item.texture_hash)
         self.assertEqual(item.mark_source_file_path, original)
         restoration = BluePrintModel._collect_global_hash_texture_bindings(self.tree)
         self.assertTrue(restoration[0]['restore_original'])
@@ -258,12 +293,12 @@ class GlobalHashTests(unittest.TestCase):
         self.mark_json('LOD0', '94517393-10-10', [self.mark('aaaaaaaa', 'Shared', 'SharedSlot')])
         node = self.tree.nodes.new('MIMINode_Texture_Global')
         self.assertEqual(len(node.inputs) + len(node.outputs), 0)
-        bpy.ops.mimi.global_slot_refresh(node_name=node.name, tree_name=self.tree.name)
+        bpy.ops.mimi.texture_row_refresh(node_name=node.name, tree_name=self.tree.name)
         self.assertEqual(len(node.items), 2)
         self.assertNotEqual(node.items[0].identity, node.items[1].identity)
         node.items[0].file_path = str(self.image_path)
         node.items[0].force_original_size = True
-        bpy.ops.mimi.global_slot_refresh(node_name=node.name, tree_name=self.tree.name)
+        bpy.ops.mimi.texture_row_refresh(node_name=node.name, tree_name=self.tree.name)
         self.assertTrue(node.items[0].force_original_size)
         rows = collect_global_slots(self.tree)
         self.assertEqual(len(rows), 1)
@@ -519,26 +554,135 @@ class GlobalHashTests(unittest.TestCase):
         self.assertEqual(self.node.label, '全局Hash贴图绑定')
         self.assertEqual(connected.label, 'Hash贴图绑定')
         self.assertEqual(custom.label, 'User custom title')
+        # Both hash nodes read the same rows, so they must show the same
+        # original/replacement previews and the same chooser button.
+        layouts = {}
         for node in (self.node, connected):
             layout = LayoutRecorder()
-            with patch.object(nodes, 'texture_icon', return_value=1):
+            with patch.object(row_ui, 'texture_icon', return_value=1):
                 node.draw_buttons(bpy.context, layout)
-            self.assertIn('刷新检测Hash标记贴图', layout.button_texts)
+            layouts[node.name] = layout
+        for layout in layouts.values():
             self.assertIn('选择替换贴图', layout.button_texts)
             self.assertIn('原标记贴图', layout.labels)
             self.assertIn('替换贴图', layout.labels)
-            self.assertEqual(layout.operators.count('mimi.texhashbind_select_file'), 1)
+            self.assertEqual(layout.operators.count('mimi.texture_row_select_file'), 1)
             # A FILE_PATH property adds its own folder icon; forbid it here.
             self.assertNotIn('file_path', layout.properties)
             self.assertNotIn('source_type', layout.properties)
             self.assertNotIn('mimi.texhashbind_add_item', layout.operators)
             self.assertEqual(len(layout.icons), 2)
+        # The socketless manager uses the shared refresh; the connected node
+        # still scans only its upstream scope with its own button.
+        self.assertIn('mimi.texture_row_refresh', layouts[self.node.name].operators)
+        self.assertIn('刷新标记贴图', layouts[self.node.name].button_texts)
+        self.assertIn('mimi.global_hash_refresh', layouts[connected.name].operators)
+        self.assertIn('刷新检测Hash标记贴图', layouts[connected.name].button_texts)
         layout = LayoutRecorder()
         base.MIMISocketObject.draw(connected.outputs[0], bpy.context, layout, connected, 'Output')
         self.assertIn('输出', layout.labels)
         i18n.apply_language('en')
         self.assertEqual(connected.label, 'Hash Texture Bind')
         self.assertEqual(self.node.label, 'Global Hash Texture Bind')
+
+    def test_socketless_managers_share_one_panel(self):
+        # Both managers are edited the same way; only the captions that describe
+        # a genuinely different export rule may differ.
+        from MIMIBlender.i18n import i18n
+        from MIMIBlender.blueprint import texture_row_ui as row_ui
+        previous = i18n.get_language()
+        self.addCleanup(i18n.apply_language, previous)
+        i18n.apply_language('en')
+
+        hash_node = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+        hash_row = hash_node.texture_hash_items.add()
+        hash_row.global_detected = True
+        hash_row.texture_hash = 'abcdef12'
+        hash_row.mark_source_name = 'DiffuseMap'
+        hash_row.mark_source_submesh = '94517393-0'
+        hash_row.mark_source_slot = 'ps-t0'
+        hash_row.mark_source_file_path = str(self.image_path)
+        hash_row.file_path = str(self.image_path)
+
+        slot_node = self.tree.nodes.new('MIMINode_Texture_Global')
+        slot_row = slot_node.items.add()
+        slot_row.identity = 'LOD0|94517393-0|ps-t0|DiffuseMap'
+        slot_row.submesh = '94517393-0'
+        slot_row.slot = 'ps-t0'
+        slot_row.mark_name = 'DiffuseMap'
+        slot_row.original_path = str(self.image_path)
+        slot_row.file_path = str(self.image_path)
+
+        def panel(node):
+            recorder = PanelRecorder()
+            with patch.object(row_ui, 'texture_icon', return_value=1):
+                node.draw_buttons(bpy.context, recorder)
+            return recorder
+
+        hash_panel, slot_panel = panel(hash_node), panel(slot_node)
+        # Controls, not captions: the interactive surface has to be identical,
+        # down to the order in which the panel draws it.
+        def controls(recorder):
+            return [entry for entry in recorder.order if entry[0] in ('operator', 'prop', 'list')]
+
+        expected = [
+            ('operator', 'mimi.texture_row_refresh'),
+            ('list', 'MIMI_UL_texture_rows'),
+            ('operator', 'mimi.texture_row_select_file'),
+            ('operator', 'mimi.texture_row_clear_file'),
+            ('prop', 'enabled'),
+            ('prop', 'force_original_size'),
+            # Per-row Convert, then the rename field, then Convert All.
+            ('operator', 'mimi.texture_format_convert'),
+            ('prop', 'output_name'),
+            ('operator', 'mimi.texture_format_convert'),
+        ]
+        self.assertEqual(controls(hash_panel), expected)
+        self.assertEqual(controls(slot_panel), expected)
+        # Both preview cards appear in both panels.
+        for recorder in (hash_panel, slot_panel):
+            self.assertIn('Original marked texture', recorder.labels)
+            self.assertIn('Replacement texture', recorder.labels)
+            self.assertEqual(len(recorder.icons), 2)
+
+        # Disabling is the one action with a different meaning, and each panel
+        # has to say which one applies to it.
+        hash_row.enabled = False
+        slot_row.enabled = False
+        hash_text = ' '.join(panel(hash_node).labels)
+        slot_text = ' '.join(panel(slot_node).labels)
+        self.assertIn('original bytes are written back', hash_text)
+        self.assertNotIn("game's own texture", hash_text)
+        self.assertIn("game's own texture", slot_text)
+        self.assertNotIn('original bytes are written back', slot_text)
+
+        # A stale slot row is reported in the panel, exactly like a missing mark.
+        slot_row.missing = True
+        self.assertIn('Stale mark', ' '.join(panel(slot_node).labels))
+
+    def test_socketless_managers_draw_with_no_rows(self):
+        # An empty manager must draw its refresh button and its scope caption
+        # instead of raising while formatting a row that does not exist.
+        from MIMIBlender.i18n import i18n
+        previous = i18n.get_language()
+        self.addCleanup(i18n.apply_language, previous)
+        i18n.apply_language('en')
+        for node_idname in ('MIMINode_Hash_Texture_Global', 'MIMINode_Texture_Global'):
+            node = self.tree.nodes.new(node_idname)
+            recorder = PanelRecorder()
+            node.draw_buttons(bpy.context, recorder)
+            self.assertEqual(recorder.order[0], ('operator', 'mimi.texture_row_refresh'))
+            self.assertTrue([entry for entry in recorder.order if entry[0] == 'label'])
+
+        # A row without an identity cannot be addressed after a refresh, so the
+        # chooser would be a dead button; the panel explains it instead.
+        node = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
+        node.texture_hash_items.add()
+        recorder = PanelRecorder()
+        node.draw_buttons(bpy.context, recorder)
+        operators = [entry[1] for entry in recorder.order if entry[0] == 'operator']
+        self.assertNotIn('mimi.texture_row_select_file', operators)
+        self.assertIn('This row has no identity yet; refresh the node first', recorder.labels)
 
     def test_removed_mark_keeps_choice_but_blocks_export(self):
         metadata = self.mark_json('LOD0', '94517393-10-0', [self.mark('6077b727')])

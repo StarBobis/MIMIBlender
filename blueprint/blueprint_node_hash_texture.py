@@ -29,11 +29,10 @@ import re
 
 import bpy
 from bpy.types import PropertyGroup
-from bpy_extras.io_utils import ImportHelper
 
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
-from .hash_texture_preview import texture_icon, clear_previews
+from .hash_texture_preview import clear_previews
 # Channel socket pairs and their operators are shared with the Slot variant.
 from .texture_bind_channels import draw_channel_controls
 from ..common.texture_naming import normalize_texture_role
@@ -52,6 +51,15 @@ from .texture_output_widgets import (
     exact_format_enabled,
     first_hint,
     upstream_draw_ib_hints,
+)
+# The row gallery is shared with Global Slot Texture Bind so the two managers
+# cannot drift apart again; see texture_row_ui for what each node declares.
+from .texture_row_ui import (
+    TextureRowProfile,
+    draw_file_picker,
+    draw_preview_pair,
+    draw_texture_row_panel,
+    register_profile,
 )
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
@@ -79,9 +87,6 @@ _HASH_NODE_IDNAMES = {
     'MIMINode_Hash_Texture_Bind',
     'MIMINode_Hash_Texture_Global',
 }
-
-# The browser only exposes formats that 3Dmigoto can load directly.
-_TEXTURE_FILE_FILTER = "*.dds;*.png;*.jpg;*.jpeg;*.bmp;*.tga"
 
 
 def _is_hash_texture_node(node):
@@ -320,36 +325,6 @@ class MMT_OT_GlobalHashRefresh(I18nOperator):
         return {'FINISHED'}
 
 
-class MIMI_UL_GlobalHashTextures(bpy.types.UIList):
-    '''Compact original/replacement thumbnails with a selectable detail view.'''
-    bl_idname = "MIMI_UL_global_hash_textures"
-
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0):
-        row = layout.row(align=True)
-        row.prop(item, "enabled", text="")
-        row.label(text=item.mark_source_name or item.texture_hash,
-                  icon_value=texture_icon(item.mark_source_file_path))
-        row.label(text="", icon='FORWARD')
-        row.label(text=bpy.path.basename(item.file_path) if item.file_path else tr("Unchanged"),
-                  icon_value=texture_icon(item.file_path))
-        if item.mark_missing:
-            row.label(text="", icon='ERROR')
-
-
-def _draw_global_texture_preview(layout, title, file_path):
-    '''Draw thumbnails side by side without altering Blender Image datablocks.'''
-    box = layout.box()
-    box.label(text=tr(title))
-    icon_id = texture_icon(file_path)
-    if icon_id:
-        box.template_icon(icon_value=icon_id, scale=6.0)
-    else:
-        message = "Preview unavailable" if file_path or title == "Original marked texture" else "Unchanged"
-        box.label(text=tr(message), icon='IMAGE_DATA')
-    if file_path:
-        box.label(text=bpy.path.basename(file_path))
-
-
 def _find_global_hash_mark_by_identifier(identifier):
     '''Find the workspace mark represented by a global enum identifier.'''
     for entry in _load_global_hash_mark_entries():
@@ -544,87 +519,6 @@ def _find_hash_node_for_operator(operator, context):
     return node
 
 
-class MMT_OT_TexHashBindSelectFile(I18nOperator, ImportHelper):
-    '''Choose an external image with Blender's file browser.'''
-    bl_idname = "mimi.texhashbind_select_file"
-    bl_label = "Choose Hash Texture File"
-    bl_description = "Choose an external texture with Blender's file browser"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    # ImportHelper supplies filepath; these properties identify the row after
-    # the modal file browser returns control to the operator.
-    filter_glob: bpy.props.StringProperty(
-        default=_TEXTURE_FILE_FILTER,
-        options={'HIDDEN'},
-    ) # type: ignore
-    node_name: bpy.props.StringProperty() # type: ignore
-    tree_name: bpy.props.StringProperty() # type: ignore
-    item_index: bpy.props.IntProperty(default=-1, options={'HIDDEN'}) # type: ignore
-    target_hash: bpy.props.StringProperty(default="", options={'HIDDEN'}) # type: ignore
-
-    def invoke(self, context, event):
-        node = _find_hash_node_for_operator(self, context)
-        items = _get_hash_node_items(node) if node is not None else None
-        if items is None or not 0 <= self.item_index < len(items):
-            self.report({'ERROR'}, tr("Hash texture row no longer exists"))
-            return {'CANCELLED'}
-
-        # Reopen beside the current file when the row already has a path.
-        current_path = str(getattr(items[self.item_index], "file_path", "") or "").strip()
-        if current_path:
-            self.filepath = bpy.path.abspath(current_path)
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-    def execute(self, context):
-        node = _find_hash_node_for_operator(self, context)
-        items = _get_hash_node_items(node) if node is not None else None
-        if items is not None and self.target_hash:
-            # Refresh in another editor may reorder rows while the file
-            # browser is open. Assign by hash instead of a stale list index.
-            self.item_index = next((i for i, item in enumerate(items) if item.texture_hash == self.target_hash), -1)
-        if items is None or not 0 <= self.item_index < len(items):
-            self.report({'ERROR'}, tr("Hash texture row no longer exists"))
-            return {'CANCELLED'}
-
-        selected_path = str(self.filepath or "").strip()
-        selected_path = bpy.path.abspath(selected_path) if selected_path else ""
-        selected_path = os.path.normpath(selected_path) if selected_path else ""
-        if not selected_path or not os.path.isfile(selected_path):
-            self.report({'ERROR'}, tr("Please select a valid texture file"))
-            return {'CANCELLED'}
-
-        item = items[self.item_index]
-        item.file_path = selected_path
-        # Selecting a file is also an explicit source choice, even when the
-        # row previously referenced a mark or an existing resource.
-        item.source_type = 'FILE'
-        _texture_hash_item_refresh_display(item)
-        self.report({'INFO'}, tr("Hash texture file selected: {path}").format(path=selected_path))
-        return {'FINISHED'}
-
-
-class MMT_OT_TexHashBindClearFile(I18nOperator):
-    '''Clear the external file path of one hash texture row.'''
-    bl_idname = "mimi.texhashbind_clear_file"
-    bl_label = "Clear Hash Texture File"
-    bl_description = "Clear Hash Texture File"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    node_name: bpy.props.StringProperty() # type: ignore
-    tree_name: bpy.props.StringProperty() # type: ignore
-    item_index: bpy.props.IntProperty(default=-1, options={'HIDDEN'}) # type: ignore
-
-    def execute(self, context):
-        node = _find_hash_node_for_operator(self, context)
-        items = _get_hash_node_items(node) if node is not None else None
-        if items is None or not 0 <= self.item_index < len(items):
-            return {'CANCELLED'}
-        items[self.item_index].file_path = ""
-        _texture_hash_item_refresh_display(items[self.item_index])
-        return {'FINISHED'}
-
-
 class MMT_OT_TexHashBindAddItem(I18nOperator):
     '''Add one hash texture binding row to a Hash Texture Bind node'''
     bl_idname = "mimi.texhashbind_add_item"
@@ -729,34 +623,6 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
         return {'FINISHED'}
 
 
-def _draw_hash_file_picker(layout, item, node, tree, item_index):
-    '''Use one chooser, without Blender's extra FILE_PATH browse control.'''
-    row = layout.row(align=True)
-
-    select_operator = row.operator(
-        "mimi.texhashbind_select_file",
-        text=tr("Choose Replacement Texture"),
-        icon='FILE_FOLDER',
-    )
-    select_operator.node_name = node.name
-    select_operator.tree_name = tree.name if tree else ""
-    select_operator.item_index = item_index
-    select_operator.target_hash = item.texture_hash if item.global_detected else ""
-
-    # Clearing is a separate action, not another file chooser. Hide it until
-    # a replacement exists, and keep filenames visible in the preview cards.
-    if not item.file_path:
-        return
-    clear_operator = row.operator(
-        "mimi.texhashbind_clear_file",
-        text="",
-        icon='X',
-    )
-    clear_operator.node_name = node.name
-    clear_operator.tree_name = tree.name if tree else ""
-    clear_operator.item_index = item_index
-
-
 def _hash_row_output_name(node, item):
     '''Return how one Hash Texture Bind row names its generated file.
 
@@ -813,17 +679,20 @@ def _hash_row_output_name(node, item):
 
 
 def _draw_hash_replacements(node, context, layout):
-    '''Both nodes use the same controls; only the discovery scope differs.'''
+    '''Rows of the connected Hash Texture Bind node.
+
+    The socketless global node draws the shared row gallery instead
+    (``texture_row_ui.draw_texture_row_panel``).  This node keeps its own
+    detail box because it alone carries switch conditions and an explicit
+    format fallback for hashes without a captured original.
+    '''
     tree = node.id_data
     # A running exact-format batch is global, so its progress is visible here.
     _draw_node_progress(layout)
     refresh = layout.operator("mimi.global_hash_refresh", text=tr("Refresh Hash Texture Marks"), icon='FILE_REFRESH')
     refresh.node_name = node.name
     refresh.tree_name = tree.name
-    if node.bl_idname == 'MIMINode_Hash_Texture_Global':
-        layout.label(text=tr("Scope: all workspace Hash marks"), icon='WORLD')
-    else:
-        layout.label(text=tr("Scope: connected upstream Hash marks only"), icon='LINKED')
+    layout.label(text=tr("Scope: connected upstream Hash marks only"), icon='LINKED')
     if not node.texture_hash_items:
         layout.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
         return
@@ -831,7 +700,7 @@ def _draw_hash_replacements(node, context, layout):
     # No editable hash/source fields, and no FILE_PATH widget with its own
     # implicit browse button. All visible captions translate at draw time.
     layout.template_list(
-        "MIMI_UL_global_hash_textures", "mimi_hash_replacements_" + node.name,
+        "MIMI_UL_texture_rows", "mimi_hash_replacements_" + node.name,
         node, "texture_hash_items", node, "texture_hash_index", rows=4,
     )
     index = min(max(0, int(node.texture_hash_index)), len(node.texture_hash_items) - 1)
@@ -843,23 +712,18 @@ def _draw_hash_replacements(node, context, layout):
         box.label(text=tr("Mark is outside the current scope; clear its replacement or disable this row"), icon='ERROR')
     elif not item.global_detected:
         box.label(text=tr("Refresh to detect marked Hash textures"), icon='INFO')
-    previews = box.row(align=True)
-    _draw_global_texture_preview(previews.column(), "Original marked texture", item.mark_source_file_path)
-    _draw_global_texture_preview(previews.column(), "Replacement texture", item.file_path)
-    _draw_hash_file_picker(box, item, node, tree, index)
-    if node.bl_idname == 'MIMINode_Hash_Texture_Global':
-        box.prop(item, 'force_original_size')
-    else:
-        # The conditional node can fall back to an explicit format when the
-        # selected hash has no captured original in the current workspace.
-        format_row = box.row(align=True)
-        format_row.prop(item, 'format_mode', text="")
-        if str(item.format_mode) == 'MANUAL':
-            format_row.prop(item, 'manual_format', text="")
-        box.prop(item, 'force_original_size')
+    draw_preview_pair(box, item.mark_source_file_path, item.file_path)
+    draw_file_picker(box, node, item)
+    # The conditional node can fall back to an explicit format when the
+    # selected hash has no captured original in the current workspace.
+    format_row = box.row(align=True)
+    format_row.prop(item, 'format_mode', text="")
+    if str(item.format_mode) == 'MANUAL':
+        format_row.prop(item, 'manual_format', text="")
+    box.prop(item, 'force_original_size')
     # Detected original format, readiness and the per-row Convert button.
     # Mark rows reuse captured bytes, so only FILE-backed rows show a status.
-    if str(item.source_type) == 'FILE' or node.bl_idname == 'MIMINode_Hash_Texture_Global':
+    if str(item.source_type) == 'FILE':
         _draw_row_controls(box, node, item, index, tree)
     if item.file_path and not os.path.isfile(bpy.path.abspath(item.file_path)):
         box.label(text=tr("Replacement file was not found"), icon='ERROR')
@@ -944,14 +808,13 @@ class MIMINode_Hash_Texture_Global(MIMINodeBase):
         self.color = (0.25, 0.48, 0.30)
 
     def draw_buttons(self, context, layout):
-        _draw_hash_replacements(self, context, layout)
+        # Rows are hash-keyed and globally shared, so the node has no object
+        # socket and edits its replacements in the shared row gallery.
+        draw_texture_row_panel(self, layout)
 
 
 classes = (
     MMT_OT_GlobalHashRefresh,
-    MIMI_UL_GlobalHashTextures,
-    MMT_OT_TexHashBindSelectFile,
-    MMT_OT_TexHashBindClearFile,
     MMT_OT_TexHashBindAddItem,
     MMT_OT_TexHashBindRemoveItem,
     MMT_OT_TexHashBindAutoFill,
@@ -972,3 +835,50 @@ def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     bpy.utils.unregister_class(MIMITextureHashItem)
+
+
+def _hash_row_warnings(item):
+    '''Status lines that only a hash row can produce.'''
+    if bool(getattr(item, "mark_missing", False)):
+        return [('ERROR', tr("Mark is outside the current scope; clear its replacement or disable this row"))]
+    if not bool(getattr(item, "global_detected", False)):
+        return [('INFO', tr("Refresh to detect marked Hash textures"))]
+    return []
+
+
+def _hash_row_set_file(item, path):
+    '''Store a replacement through RNA so the row's own update logic runs.'''
+    # The property update retypes the source as FILE, remembers that a
+    # replacement existed (needed for the restore path) and clears stale mark
+    # fields; writing the field directly would silently skip all three.
+    item.file_path = path
+
+
+_HASH_ROW_PROFILE = TextureRowProfile(
+    rows_prop="texture_hash_items",
+    index_prop="texture_hash_index",
+    key=lambda item: str(getattr(item, "texture_hash", "") or "").strip().lower(),
+    list_title=lambda item: str(getattr(item, "mark_source_name", "") or "") or str(getattr(item, "texture_hash", "") or "?"),
+    title=lambda item: str(getattr(item, "texture_hash", "") or "?") + " - " + str(getattr(item, "mark_source_name", "") or "?"),
+    subtitle=lambda item: str(getattr(item, "mark_source_submesh", "") or ""),
+    original_path=lambda item: str(getattr(item, "mark_source_file_path", "") or ""),
+    replacement_path=lambda item: str(getattr(item, "file_path", "") or ""),
+    set_file=_hash_row_set_file,
+    warnings=_hash_row_warnings,
+    generated_name=_hash_row_output_name,
+    scope_text=lambda: tr("Scope: all workspace Hash marks"),
+    empty_hint=lambda: tr("Refresh to detect marked Hash textures"),
+    # A hash override owns a file in the generated Textures folder. Disabling
+    # it therefore has to put the original bytes back, not just stop drawing;
+    # the caption says so because the Slot manager behaves differently.
+    disabled_hint=lambda: tr("Disabled: original bytes are written back over the Mod texture"),
+    scope_icon='WORLD',
+)
+
+# The connected node reads the same rows, so it shares the profile for the list
+# and the chooser; only its own detail box is drawn locally.
+register_profile(
+    'MIMINode_Hash_Texture_Bind',
+    'MIMINode_Hash_Texture_Global',
+    profile=_HASH_ROW_PROFILE,
+)

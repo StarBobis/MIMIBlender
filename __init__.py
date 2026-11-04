@@ -37,6 +37,8 @@ from .blueprint import blueprint_node_obj
 from .blueprint import blueprint_node_object_list
 # Shared exact-format UI/operators must register before the texture nodes draw.
 from .blueprint import texture_format_widgets
+# The socketless managers share one row gallery, registered with them.
+from .blueprint import texture_row_ui
 from .blueprint import blueprint_node_texture
 from .blueprint import blueprint_node_hash_texture
 # Socketless Slot defaults register independently of connected texture nodes.
@@ -127,6 +129,8 @@ def _register_steps():
     yield blueprint_node_object_list.register
     # Textures register their shared exact-format operators before the nodes.
     yield texture_format_widgets.register
+    # The shared row gallery of the two socketless texture managers.
+    yield texture_row_ui.register
     # Channel operators are drawn by the two connected texture nodes.
     yield texture_bind_channels.register
     # Texture Bind node and its PropertyGroup register right after the base object nodes.
@@ -193,6 +197,7 @@ def unregister():
         blueprint_node_global_slot.unregister,
         blueprint_node_hash_texture.unregister,
         texture_format_widgets.unregister,
+        texture_row_ui.unregister,
         blueprint_node_shapekey.unregister,
         ui_panel_fast_texture.unregister,
         ui_func_import_mmt.unregister,

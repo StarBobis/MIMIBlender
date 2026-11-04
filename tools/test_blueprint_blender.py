@@ -71,10 +71,10 @@ class BlueprintTests(unittest.TestCase):
         source_path.write_bytes(b"test dds")
         item.file_path = str(source_path)
 
-        result = bpy.ops.mimi.texhashbind_select_file(
+        result = bpy.ops.mimi.texture_row_select_file(
             node_name=node.name,
             tree_name=self.tree.name,
-            item_index=0,
+            row_key=item.texture_hash,
             filepath=str(source_path),
         )
         self.assertIn('FINISHED', result)
