@@ -32,6 +32,36 @@ def _export_blueprint_model(blueprint_model):
 _OUTPUT_NODE_IDS = {"MIMINode_Result_Output", "MIMINode_Face_Mod_Export"}
 
 
+def _set_progress_status(context, text):
+    """Show or clear the conversion caption in the window status bar.
+
+    ``window_manager.progress_*`` draws the bar itself; this text names the
+    texture that is being converted, so a Generate Mod that has to bake a large
+    blueprint does not look frozen.
+    """
+    try:
+        workspace = getattr(context, "workspace", None)
+        if workspace is None:
+            return
+        if text:
+            workspace.status_text_set(text)
+        else:
+            workspace.status_text_clear()
+    except Exception:
+        # A background session has no workspace; the export must still run.
+        pass
+
+
+def _conversion_status_text():
+    """Return the one-line progress caption of the running conversion batch."""
+    snapshot = texture_format.progress_snapshot()
+    return tr("Converting {done}/{total}: {current}").format(
+        done=int(snapshot.get("done") or 0),
+        total=int(snapshot.get("total") or 0),
+        current=str(snapshot.get("current") or ""),
+    )
+
+
 def _export_regular_output(tree, context, output_node, config_name):
     output_folder = GlobalConfig.path_generate_mod_folder()
     stem = os.path.splitext(config_name)[0]
@@ -168,11 +198,13 @@ class MMTGenerateModBlueprint(I18nOperator):
             return self.execute(context)
         self.operation_timer = context.window_manager.event_timer_add(0.2, window=context.window)
         context.window_manager.modal_handler_add(self)
+        _set_progress_status(context, _conversion_status_text())
         self.report({'INFO'}, tr("{count} replacement texture(s) need conversion before export").format(count=started))
         return {'RUNNING_MODAL'}
 
     def _stop_timer(self, context):
-        """Remove the modal timer once the preparation phase has ended."""
+        """Remove the modal timer and its status bar caption."""
+        _set_progress_status(context, "")
         timer = getattr(self, "operation_timer", None)
         if timer is None:
             return
@@ -191,6 +223,9 @@ class MMTGenerateModBlueprint(I18nOperator):
         if event.type != 'TIMER':
             return {'PASS_THROUGH'}
         if texture_format.is_running():
+            # Name the file that is being converted; the bar alone does not
+            # tell a user whether a large blueprint is progressing.
+            _set_progress_status(context, _conversion_status_text())
             return {'RUNNING_MODAL'}
         self._stop_timer(context)
         errors = texture_format.progress_snapshot().get("errors") or []

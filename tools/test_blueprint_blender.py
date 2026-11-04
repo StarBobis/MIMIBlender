@@ -935,7 +935,7 @@ class BlueprintTests(unittest.TestCase):
                 kwargs.get("text", "") for name, _args, kwargs in alias_layout.calls if name == "label"
             ))
 
-            # Global Hash Texture Bind names one file per hash; the suffix again
+            # Global Hash Texture Replacement names one file per hash; the suffix again
             # follows whether the replacement has to be converted.
             global_hash = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
             hash_item = global_hash.texture_hash_items.add()
@@ -951,7 +951,7 @@ class BlueprintTests(unittest.TestCase):
             self.assertIn(hash_suffix, ('.png', '.dds'))
             global_hash.draw_buttons(bpy.context, _FakeLayout())
 
-            # Global Slot Texture Bind shows the DrawIB and a placeholder row
+            # Global Slot Texture Replacement shows the DrawIB and a placeholder row
             # index, because the index is decided by the export pass.
             global_slot = self.tree.nodes.new('MIMINode_Texture_Global')
             row = global_slot.items.add()

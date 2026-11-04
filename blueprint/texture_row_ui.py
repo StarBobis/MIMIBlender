@@ -1,6 +1,6 @@
 """Shared row gallery for the socketless texture managers.
 
-Global Hash Texture Bind and Global Slot Texture Bind organise their rows
+Global Hash Texture Replacement and Global Slot Texture Replacement organise their rows
 differently on purpose.  A texture hash is globally unique and replaces one
 texture wherever the game binds it, while a slot default belongs to exactly one
 Submesh and only applies to that Submesh's draws.  Their editing surface does
@@ -28,9 +28,8 @@ from bpy_extras.io_utils import ImportHelper
 from ..i18n.i18n import I18nOperator, tr
 from .hash_texture_preview import texture_icon
 from .texture_format_widgets import (
-    draw_convert_all,
     draw_node_progress,
-    draw_row_controls,
+    draw_row_status,
 )
 from .texture_output_widgets import (
     alias_suffix_note,
@@ -277,8 +276,9 @@ def _draw_row_detail(node, item, index, layout):
     # because that is the one rule the two managers must not blur.
     box.prop(item, "enabled")
     box.prop(item, "force_original_size")
-    # Detected original format, readiness and the per-row Convert button.
-    draw_row_controls(box, node, item, index, tree)
+    # What Generate Mod will write for this row. The conversion itself runs
+    # during the export, so this panel offers no conversion button.
+    draw_row_status(box, node, item)
     generated_name, suffix, suffix_is_certain = profile.generated_name(node, item)
     draw_generated_name(box, generated_name, certainty_note=alias_suffix_note(suffix_is_certain))
     draw_rename_box(box, item, suffix, generated_name)
@@ -288,8 +288,6 @@ def _draw_row_detail(node, item, index, layout):
     # configured row would be false.
     if not str(profile.replacement_path(item) or "").strip():
         layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
-    # One click prepares every replacement of this node in the background.
-    draw_convert_all(layout, node, tree)
 
 
 def draw_texture_row_panel(node, layout):

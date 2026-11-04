@@ -77,7 +77,7 @@ class ExportEFMI:
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
-        # Conditional hash overrides from Hash Texture Bind nodes: explicit
+        # Conditional hash overrides from Targeted Hash Texture Replacement nodes: explicit
         # user intent, emitted even when the automatic pipeline is disabled.
         M_IniHelper.generate_hash_style_object_texture_ini(
             ini_builder=ini_builder,

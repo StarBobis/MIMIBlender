@@ -1,5 +1,5 @@
 '''
-Slot Texture Bind blueprint node (per-object texture slot binding).
+Targeted Slot Texture Replacement blueprint node (per-object texture slot binding).
 
 A transparent pass-through node: Object in, Object out. Every object that
 passes through it gets its texture slots replaced right before its own
@@ -55,9 +55,8 @@ from ..common.texture_output_naming import (
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
     color_space_items as _color_space_items,
-    draw_convert_all as _draw_convert_all,
     draw_node_progress as _draw_node_progress,
-    draw_row_controls as _draw_row_controls,
+    draw_row_status as _draw_row_status,
     format_mode_items as _format_mode_items,
     manual_format_items as _manual_format_items,
     predicted_suffix,
@@ -465,7 +464,7 @@ def _cached_submesh_mark_dicts(submesh_name):
 
 
 def _slot_row_output_name(node, item):
-    '''Return how one Slot Texture Bind row names its generated file.
+    '''Return how one Targeted Slot Texture Replacement row names its generated file.
 
     The result is ``(generated_name, suffix, suffix_is_certain, can_rename,
     disabled_reason)``.  ``generated_name`` is the exact name the export writes
@@ -591,8 +590,9 @@ def _draw_image_format_controls(box, node, item, index, tree):
     # Colour-space interpretation: AUTO derives it from the source format and
     # the mark role; a mis-tagged DDS can be corrected per row.
     box.prop(item, "color_space")
-    # Detected original format, readiness and the per-row Convert button.
-    _draw_row_controls(box, node, item, index, tree)
+    # What Generate Mod will write for this row. The conversion itself runs
+    # during the export, so there is no button here.
+    _draw_row_status(box, node, item)
 
 
 def _texture_bind_mark_name_items(item):
@@ -769,7 +769,7 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
                     skipped_count += 1
                     continue
                 if not mark_dict["slot"]:
-                    print("Slot Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkSlot, skipped")
+                    print("Targeted Slot Texture Replacement auto fill: mark '" + mark_dict["name"] + "' has no MarkSlot, skipped")
                     skipped_count += 1
                     continue
                 row_item = node.texture_slot_items.add()
@@ -789,9 +789,9 @@ class MMT_OT_TexBindAutoFill(I18nOperator):
 
 @translatable
 class MIMINode_Texture_Bind(MIMINodeBase):
-    '''Slot Texture Bind assigns replacement textures to slots right before each passing object's drawindexed'''
+    '''Targeted Slot Texture Replacement assigns replacement textures to slots right before each passing object's drawindexed'''
     bl_idname = 'MIMINode_Texture_Bind'
-    bl_label = 'Slot Texture Bind'
+    bl_label = 'Targeted Slot Texture Replacement'
     bl_icon = 'TEXTURE'
     bl_width_min = 320
 
@@ -804,7 +804,7 @@ class MIMINode_Texture_Bind(MIMINodeBase):
 
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Slot Texture Bind")
+        self.label = tr("Targeted Slot Texture Replacement")
         self.inputs.new('MIMISocketObject', "Object")
         self.outputs.new('MIMISocketObject', "Output")
         self.width = 340
@@ -941,10 +941,6 @@ class MIMINode_Texture_Bind(MIMINodeBase):
 
         active_count = len([row_item for row_item in self.texture_slot_items if row_item.enabled])
         layout.label(text=tr("{count} slot binding(s)").format(count=active_count), icon='TEXTURE')
-
-        # One click prepares every replacement of this node in the background,
-        # so a later Generate Mod only has to copy finished files.
-        _draw_convert_all(layout, self, tree)
 
 
 classes = (

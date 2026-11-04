@@ -81,6 +81,20 @@ def _historical_titles(title):
     return translation_variants(title)
 
 
+def _renamed_titles(*titles):
+    """Return every spelling a renamed node type was ever given as a title.
+
+    Pass each title through tr() at the call site, previous default first and
+    current default last. Both are needed: the old one lets a blueprint saved
+    before the rename be recognised, and the current one keeps the title
+    following the UI language after it was migrated once.
+    """
+    spellings = ()
+    for title in titles:
+        spellings += _historical_titles(title)
+    return spellings
+
+
 # Default titles that earlier versions wrote into freshly created nodes. The
 # strings stay in the translation dictionary on purpose: a node created before
 # a rename must be recognised no matter which language was active back then.
@@ -88,14 +102,26 @@ _LEGACY_TITLES_BY_IDNAME = {
     'MIMINode_TimeSwitch': _historical_titles(tr("Time Switch")),
     'MIMINode_TimePosSwitch': _historical_titles(tr("Time Position Switch")),
     'MIMINode_TimeShapeKey': _historical_titles(tr("Time Shape Key")),
-    # Renamed to "Slot Texture Bind"; the plain English "Texture Bind" was
+    # Renamed to "...Texture Replacement"; the plain English "Texture Bind" was
     # the default title for a few days and is added explicitly because the
-    # dictionary pairing below only knows the current label.
-    'MIMINode_Texture_Bind': _historical_titles(tr("Slot Texture Bind")) + ("Texture Bind",),
+    # dictionary pairing above only knows whole titles.
+    'MIMINode_Texture_Bind': _renamed_titles(
+        tr("Slot Texture Bind"), tr("Targeted Slot Texture Replacement"),
+    ) + ("Texture Bind",),
     # Hash titles used to stay in the creation language even after switching
-    # addon languages. Recognize both defaults without changing custom labels.
-    'MIMINode_Hash_Texture_Bind': _historical_titles("Hash Texture Bind"),
-    'MIMINode_Hash_Texture_Global': _historical_titles("Global Hash Texture Bind"),
+    # addon languages, so both the previous and the current default are
+    # recognised without touching a custom label.
+    'MIMINode_Hash_Texture_Bind': _renamed_titles(
+        tr("Hash Texture Bind"), tr("Targeted Hash Texture Replacement"),
+    ),
+    'MIMINode_Hash_Texture_Global': _renamed_titles(
+        tr("Global Hash Texture Bind"), tr("Global Hash Texture Replacement"),
+    ),
+    # The socketless slot manager was never listed here, so its rename would
+    # otherwise strand every title written by an earlier version.
+    'MIMINode_Texture_Global': _renamed_titles(
+        tr("Global Slot Texture Bind"), tr("Global Slot Texture Replacement"),
+    ),
 }
 
 

@@ -5,9 +5,9 @@ of the modules under test are replaced with light stubs, while the real
 Blender-free texcomb pipeline and the real texconv.exe perform the conversion.
 
 Covered cases:
-1. A Slot Texture Bind FILE row converts a PNG to the captured BC7 format,
+1. A Targeted Slot Texture Replacement FILE row converts a PNG to the captured BC7 format,
    the generated name ends with .dds and a stale .png sibling is removed.
-2. A Hash Texture Bind FILE row replaces a Hash mark with a PNG without the
+2. A Targeted Hash Texture Replacement FILE row replaces a Hash mark with a PNG without the
    old "file formats differ" error, and keeps the marked .dds filename.
 3. A manual format override converts when no capture can be resolved.
 4. Conflicting captures on one slot are not guessed: the row stays a copy.

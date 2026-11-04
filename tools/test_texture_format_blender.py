@@ -100,9 +100,12 @@ def main():
             failures.append(name)
 
     # 1. Registration: operators, RNA settings and enum callbacks.
-    check("convert operator registered", hasattr(bpy.ops.mimi, "texture_format_convert"))
-    check("cancel operator registered", hasattr(bpy.ops.mimi, "texture_format_cancel"))
-    check("clear cache operator registered", hasattr(bpy.ops.mimi, "texture_format_clear_cache"))
+    # Conversion has no operator: Generate Mod owns it, so a node can only
+    # report what it will write. bpy.ops resolves any idname lazily, so the
+    # class objects are what proves the operators are really gone.
+    check("convert operator class is gone", not hasattr(widgets, "MIMI_OT_TextureFormatConvert"))
+    check("cancel operator class is gone", not hasattr(widgets, "MIMI_OT_TextureFormatCancel"))
+    check("clear cache class registered", hasattr(widgets, "MIMI_OT_TextureFormatClearCache"))
     properties = bpy.context.scene.mimi_global_properties
     check("switch property registered", hasattr(properties, "exact_texture_format"))
     check("filter property registered", hasattr(properties, "exact_texture_resize_filter"))
@@ -133,7 +136,7 @@ def main():
         layout = LayoutRecorder()
         slot_node.draw_buttons(bpy.context, layout)
         check("slot node drew a status", any("convert" in text.lower() for text in layout.texts), layout.texts)
-        check("convert all operator drawn", "mimi.texture_format_convert" in layout.operators)
+        check("no convert button is drawn", "mimi.texture_format_convert" not in layout.operators)
 
         hash_node = tree.nodes.new('MIMINode_Hash_Texture_Global')
         hash_row = hash_node.texture_hash_items.add()

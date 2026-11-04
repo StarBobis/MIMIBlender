@@ -88,7 +88,7 @@ class Exporter:
             for drawib_model in self.drawib_model_list:
                 M_IniHelper.move_slot_style_textures(draw_ib_model=drawib_model)
 
-        # Hash Texture Bind conditional overrides are explicit user intent
+        # Targeted Hash Texture Replacement conditional overrides are explicit user intent
         # and are emitted even when the automatic texture pipeline is off.
         M_IniHelper.generate_hash_style_object_texture_ini(
             ini_builder=tex_ini_builder,

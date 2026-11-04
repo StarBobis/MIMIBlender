@@ -52,7 +52,7 @@ from .texture_output_widgets import (
     first_hint,
     upstream_draw_ib_hints,
 )
-# The row gallery is shared with Global Slot Texture Bind so the two managers
+# The row gallery is shared with Global Slot Texture Replacement so the two managers
 # cannot drift apart again; see texture_row_ui for what each node declares.
 from .texture_row_ui import (
     TextureRowProfile,
@@ -64,9 +64,8 @@ from .texture_row_ui import (
 )
 from .texture_format_widgets import (
     DEFAULT_MANUAL_FORMAT as _DEFAULT_MANUAL_FORMAT,
-    draw_convert_all as _draw_convert_all,
     draw_node_progress as _draw_node_progress,
-    draw_row_controls as _draw_row_controls,
+    draw_row_status as _draw_row_status,
     format_mode_items as _format_mode_items,
     manual_format_items as _manual_format_items,
     predicted_suffix,
@@ -447,7 +446,7 @@ class MIMITextureHashItem(PropertyGroup):
 
 
 def _find_owner_hash_bind_node(item):
-    '''Find the Hash Texture Bind node that owns the given collection item.'''
+    '''Find the Targeted Hash Texture Replacement node that owns the given collection item.'''
     return _find_hash_item_owner(item)
 
 
@@ -521,7 +520,7 @@ def _find_hash_node_for_operator(operator, context):
 
 
 class MMT_OT_TexHashBindAddItem(I18nOperator):
-    '''Add one hash texture binding row to a Hash Texture Bind node'''
+    '''Add one hash texture binding row to a Targeted Hash Texture Replacement node'''
     bl_idname = "mimi.texhashbind_add_item"
     bl_label = "Add Hash Texture Binding"
     bl_options = {'REGISTER', 'UNDO'}
@@ -540,7 +539,7 @@ class MMT_OT_TexHashBindAddItem(I18nOperator):
 
 
 class MMT_OT_TexHashBindRemoveItem(I18nOperator):
-    '''Remove the selected hash texture binding row from a Hash Texture Bind node'''
+    '''Remove the selected hash texture binding row from a Targeted Hash Texture Replacement node'''
     bl_idname = "mimi.texhashbind_remove_item"
     bl_label = "Remove Hash Texture Binding"
     bl_options = {'REGISTER', 'UNDO'}
@@ -606,7 +605,7 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
                 skipped_count += 1
                 continue
             if not mark_dict["hash"]:
-                print("Hash Texture Bind auto fill: mark '" + mark_dict["name"] + "' has no MarkHash, skipped")
+                print("Targeted Hash Texture Replacement auto fill: mark '" + mark_dict["name"] + "' has no MarkHash, skipped")
                 skipped_count += 1
                 continue
             row_item = node.texture_hash_items.add()
@@ -625,7 +624,7 @@ class MMT_OT_TexHashBindAutoFill(I18nOperator):
 
 
 def _hash_row_output_name(node, item):
-    '''Return how one Hash Texture Bind row names its generated file.
+    '''Return how one Targeted Hash Texture Replacement row names its generated file.
 
     Returns ``(generated_name, suffix, suffix_is_certain)``.  The two node
     variants write their files through two different export paths, so each
@@ -680,7 +679,7 @@ def _hash_row_output_name(node, item):
 
 
 def _draw_hash_replacements(node, context, layout):
-    '''Rows of the connected Hash Texture Bind node.
+    '''Rows of the connected Targeted Hash Texture Replacement node.
 
     The socketless global node draws the shared row gallery instead
     (``texture_row_ui.draw_texture_row_panel``).  This node keeps its own
@@ -727,10 +726,11 @@ def _draw_hash_replacements(node, context, layout):
     # the connected node owns its own detail box.
     if not bool(getattr(item, 'enabled', True)):
         box.label(text=_hash_disabled_hint(), icon='INFO')
-    # Detected original format, readiness and the per-row Convert button.
-    # Mark rows reuse captured bytes, so only FILE-backed rows show a status.
+    # What Generate Mod will write for this row. The conversion runs during the
+    # export, so there is no button here. Mark rows reuse captured bytes, so
+    # only FILE-backed rows show a status.
     if str(item.source_type) == 'FILE':
-        _draw_row_controls(box, node, item, index, tree)
+        _draw_row_status(box, node, item)
     # Show the generated file name and let the user rename it.
     generated_name, suffix, suffix_is_certain = _hash_row_output_name(node, item)
     draw_generated_name(box, generated_name, certainty_note=alias_suffix_note(suffix_is_certain))
@@ -739,15 +739,13 @@ def _draw_hash_replacements(node, context, layout):
     # no replacement yet.
     if not str(item.file_path or "").strip():
         layout.label(text=tr("No replacement selected: keep the original texture"), icon='INFO')
-    # One click prepares every replacement of this node in the background.
-    _draw_convert_all(layout, node, tree)
 
 
 @translatable
 class MIMINode_Hash_Texture_Bind(MIMINodeBase):
-    '''Hash Texture Bind replaces a texture hash with conditional this= blocks while the upstream switch conditions hold'''
+    '''Targeted Hash Texture Replacement replaces a texture hash with conditional this= blocks while the upstream switch conditions hold'''
     bl_idname = 'MIMINode_Hash_Texture_Bind'
-    bl_label = 'Hash Texture Bind'
+    bl_label = 'Targeted Hash Texture Replacement'
     bl_icon = 'TEXTURE_DATA'
     bl_width_min = 340
 
@@ -760,7 +758,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
 
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Hash Texture Bind")
+        self.label = tr("Targeted Hash Texture Replacement")
         self.inputs.new('MIMISocketObject', "Object")
         self.outputs.new('MIMISocketObject', "Output")
         self.width = 480
@@ -785,7 +783,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
         # no-op visible and point users to the socket-less global node.
         if not self.outputs or not any(output.is_linked for output in self.outputs):
             layout.label(
-                text=tr("Hash Texture Bind output is not connected; use Global Hash Texture Bind for an unconditional replacement"),
+                text=tr("Targeted Hash Texture Replacement output is not connected; use Global Hash Texture Replacement for an unconditional replacement"),
                 icon='ERROR',
             )
 
@@ -795,7 +793,7 @@ class MIMINode_Hash_Texture_Bind(MIMINodeBase):
 class MIMINode_Hash_Texture_Global(MIMINodeBase):
     '''Specify unconditional global hash replacements without object links.'''
     bl_idname = 'MIMINode_Hash_Texture_Global'
-    bl_label = 'Global Hash Texture Bind'
+    bl_label = 'Global Hash Texture Replacement'
     bl_icon = 'TEXTURE_DATA'
     bl_width_min = 340
 
@@ -809,7 +807,7 @@ class MIMINode_Hash_Texture_Global(MIMINodeBase):
     def init(self, context):
         # This node deliberately has no sockets: hash replacements are global
         # and must not be tied to an individual object's draw path.
-        self.label = tr("Global Hash Texture Bind")
+        self.label = tr("Global Hash Texture Replacement")
         self.width = 480
         self.use_custom_color = True
         self.color = (0.25, 0.48, 0.30)

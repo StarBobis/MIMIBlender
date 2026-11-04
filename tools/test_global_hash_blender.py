@@ -540,7 +540,8 @@ class GlobalHashTests(unittest.TestCase):
         connected = self.tree.nodes.new('MIMINode_Hash_Texture_Bind')
         custom = self.tree.nodes.new('MIMINode_Hash_Texture_Global')
         custom.label = 'User custom title'
-        # Simulate existing English labels loaded from an older blueprint.
+        # Simulate the titles an older blueprint really stored, in the spelling
+        # of the version that wrote them; the rename has to migrate both.
         self.node.label = 'Global Hash Texture Bind'
         connected.label = 'Hash Texture Bind'
         for node in (self.node, connected):
@@ -551,8 +552,8 @@ class GlobalHashTests(unittest.TestCase):
             item.mark_source_file_path = str(self.image_path)
             item.file_path = str(self.image_path)
         i18n.apply_language('zh')
-        self.assertEqual(self.node.label, '全局Hash贴图绑定')
-        self.assertEqual(connected.label, 'Hash贴图绑定')
+        self.assertEqual(self.node.label, '全局Hash贴图替换')
+        self.assertEqual(connected.label, '指定Hash贴图替换')
         self.assertEqual(custom.label, 'User custom title')
         # Both hash nodes read the same rows, so they must show the same
         # original/replacement previews and the same chooser button.
@@ -582,8 +583,8 @@ class GlobalHashTests(unittest.TestCase):
         base.MIMISocketObject.draw(connected.outputs[0], bpy.context, layout, connected, 'Output')
         self.assertIn('输出', layout.labels)
         i18n.apply_language('en')
-        self.assertEqual(connected.label, 'Hash Texture Bind')
-        self.assertEqual(self.node.label, 'Global Hash Texture Bind')
+        self.assertEqual(connected.label, 'Targeted Hash Texture Replacement')
+        self.assertEqual(self.node.label, 'Global Hash Texture Replacement')
 
     def test_socketless_managers_share_one_panel(self):
         # Both managers are edited the same way; only the captions that describe
@@ -632,10 +633,9 @@ class GlobalHashTests(unittest.TestCase):
             ('operator', 'mimi.texture_row_clear_file'),
             ('prop', 'enabled'),
             ('prop', 'force_original_size'),
-            # Per-row Convert, then the rename field, then Convert All.
-            ('operator', 'mimi.texture_format_convert'),
+            # Conversion runs inside Generate Mod, so the panel only carries the
+            # status line and the rename field after the size policy.
             ('prop', 'output_name'),
-            ('operator', 'mimi.texture_format_convert'),
         ]
         self.assertEqual(controls(hash_panel), expected)
         self.assertEqual(controls(slot_panel), expected)

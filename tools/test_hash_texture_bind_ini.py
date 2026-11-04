@@ -1,10 +1,10 @@
-"""Smoke test for the Hash Texture Bind node (conditional hash-style override).
+"""Smoke test for the Targeted Hash Texture Replacement node (conditional hash-style override).
 
 Runs outside Blender like test_texture_bind_ini.py: bpy-dependent imports are
 replaced with light stubs so the pure INI generation logic can be verified
 directly. The test checks that:
 
-1. DrawIBModel.resolve_hash_texture_bindings turns Hash Texture Bind node
+1. DrawIBModel.resolve_hash_texture_bindings turns Targeted Hash Texture Replacement node
    rows into (texture_hash, condition_str, resource_name) rows: FILE sources
    get a unique resource name plus a copy job, MARK sources resolve the mark
    file through the workspace helper, RESOURCE sources pass the name through,
@@ -220,7 +220,7 @@ class FakeSubmeshModel:
 
 
 def make_binding(source_type, texture_hash=HASH_RED, **kwargs):
-    """Build one Hash Texture Bind row dict as BluePrintModel collects it."""
+    """Build one Targeted Hash Texture Replacement row dict as BluePrintModel collects it."""
     binding = {
         "enabled": True,
         "texture_hash": texture_hash,
@@ -554,7 +554,7 @@ def test_resolve_hash_validation(modules, source_dir):
         {"94517393-0": [FakeMarkup("HairMark", "Hash")]},
         "was not found",
     )
-    # Slot-style marks belong to the Slot Texture Bind node, not this one.
+    # Slot-style marks belong to the Targeted Slot Texture Replacement node, not this one.
     expect_error(
         [make_binding("MARK", "0123aaaa", mark_name="BodyDiffuse")],
         {"94517393-0": [FakeMarkup("BodyDiffuse", "Slot")]},
@@ -582,7 +582,7 @@ def test_resolve_hash_validation(modules, source_dir):
         "bound twice for object",
     )
 
-    # The dedicated Slot Texture Bind node is more specific than a hash row,
+    # The dedicated Targeted Slot Texture Replacement node is more specific than a hash row,
     # so the conflict is reported instead of silently picking one binding.
     conflict_call = draw_call_mod.DrawCallModel(obj_name="94517393-0.Hair", submesh_name="94517393-0")
     conflict_call.texture_slot_binding_list = [{"enabled": True, "slot": "ps-t0"}]
@@ -595,7 +595,7 @@ def test_resolve_hash_validation(modules, source_dir):
     try:
         conflict_model.resolve_hash_texture_bindings()
     except ValueError as error:
-        assert "already bound by a Slot Texture Bind node" in str(error), str(error)
+        assert "already bound by a Targeted Slot Texture Replacement node" in str(error), str(error)
     else:
         raise AssertionError("expected a slot conflict error")
 

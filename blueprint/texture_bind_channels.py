@@ -1,6 +1,6 @@
 """Independent pass-through channels for the two connected texture nodes.
 
-A Slot Texture Bind or Hash Texture Bind node used to expose exactly one Object
+A Targeted Slot Texture Replacement or Targeted Hash Texture Replacement node used to expose exactly one Object
 input and one Object output. A blueprint that applies the same replacement to
 several parts therefore needed one node per part: the rows had to be typed once
 per copy, and every later edit (a new image, a different mark, a colour-space

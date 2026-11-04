@@ -45,7 +45,7 @@ class DrawCallModel:
     resolved_texture_slot_lines:list[str] = field(init=False,repr=False,default_factory=list)
     resolved_texture_slot_restore_lines:list[str] = field(init=False,repr=False,default_factory=list)
 
-    # Per-object hash texture bindings collected from Hash Texture Bind
+    # Per-object hash texture bindings collected from Targeted Hash Texture Replacement
     # blueprint nodes this object passed through (list of plain dicts).
     # A row without a texture slot becomes a blueprint-global conditional
     # "this = ..." block inside [TextureOverride_Texture_<hash>]; a row that

@@ -105,7 +105,7 @@ def apply_global_slots(model, rows):
         if alias_name:
             ensure_ini_encodable(
                 alias_name,
-                "Texture alias '" + str(row.get('output_name', '') or "") + "' of Global Slot Texture Bind",
+                "Texture alias '" + str(row.get('output_name', '') or "") + "' of Global Slot Texture Replacement",
             )
             # Only the file name changes; the resource identity stays unique so
             # two rows can never claim the same binding slot.

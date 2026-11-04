@@ -633,7 +633,7 @@ def test_mark_replacement_image_switch(modules, source_dir, texture_root):
     """Two switch states bind two pictures on the same slot of one object.
 
     This is the workflow a key switch needs: the same object is wired through
-    two Slot Texture Bind nodes, each state picks its own image, and the export
+    two Targeted Slot Texture Replacement nodes, each state picks its own image, and the export
     must produce two different resources. Reusing one marked texture for both
     states is reported, because the switch would then change nothing.
     """

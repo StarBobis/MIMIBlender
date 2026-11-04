@@ -200,7 +200,7 @@ def shared_slot_output_filename(mark_hash, mark_name):
 
 
 def hash_output_stem(texture_hash, role, draw_ib="", object_scoped=False):
-    """Return the generated stem of a Hash Texture Bind row.
+    """Return the generated stem of a Targeted Hash Texture Replacement row.
 
     ``object_scoped`` rows bind inside one object's draw call and need their
     own file, so the DrawIB scope is part of the name (exactly like the export
@@ -213,7 +213,7 @@ def hash_output_stem(texture_hash, role, draw_ib="", object_scoped=False):
 
 
 def hash_output_filename(texture_hash, role, draw_ib, suffix, object_scoped):
-    """Return the generated file name of a Hash Texture Bind row."""
+    """Return the generated file name of a Targeted Hash Texture Replacement row."""
     return hash_output_stem(texture_hash, role, draw_ib, object_scoped) + str(suffix or DEFAULT_TEXTURE_SUFFIX)
 
 
@@ -223,7 +223,7 @@ def hash_mark_output_filename(texture_hash, mark_name):
 
 
 def global_slot_output_filename(draw_ib, index):
-    """Return the generated file name of one Global Slot Texture Bind row.
+    """Return the generated file name of one Global Slot Texture Replacement row.
 
     The copy stage always converts the replacement to DDS, so this name always
     ends with ``.dds`` even when the chosen file is a PNG.

@@ -156,12 +156,12 @@ class DrawIBModel:
             self.obj_name_draw_offset = obj_name_draw_offset
             self.index_count = total_index_count
 
-        # Resolve per-object texture slot bindings (Slot Texture Bind nodes)
+        # Resolve per-object texture slot bindings (Targeted Slot Texture Replacement nodes)
         # now that the texture markup dict is loaded, so every game exporter
         # sees ready-made INI lines on the DrawCallModels.
         self.resolve_texture_slot_bindings()
 
-        # Resolve per-object hash texture bindings (Hash Texture Bind nodes)
+        # Resolve per-object hash texture bindings (Targeted Hash Texture Replacement nodes)
         # the same way; the resolved rows are consumed by the blueprint-wide
         # conditional this= section generator in M_IniHelper.
         self.resolve_hash_texture_bindings()
@@ -496,7 +496,7 @@ class DrawIBModel:
         if MIMIGlobalProperties.forbid_auto_texture_ini():
             # The global switch only disables the automatic texture pipeline;
             # a Texture Bind node is explicit user intent and still applies.
-            print("DrawIBModel: forbid_auto_texture_ini is on, but Slot Texture Bind nodes are explicit user intent; bindings still apply.")
+            print("DrawIBModel: forbid_auto_texture_ini is on, but Targeted Slot Texture Replacement nodes are explicit user intent; bindings still apply.")
 
         used_resource_names = set()
         # One FILE resource per unique source path, shared by all objects
@@ -527,7 +527,7 @@ class DrawIBModel:
                     # so there is no generated file the alias could rename.
                     if normalize_alias_stem(binding.get("output_name", "")):
                         raise ValueError(
-                            "Slot Texture Bind node '" + node_label + "': the GIMI texture slot '" + logical_slot
+                            "Targeted Slot Texture Replacement node '" + node_label + "': the GIMI texture slot '" + logical_slot
                             + "' of object '" + owner_name + "' is submitted by name and generates no texture file, "
                             + "so it cannot be renamed; clear the texture alias."
                         )
@@ -535,7 +535,7 @@ class DrawIBModel:
                         # The API submission always uses the marked image; a
                         # per-object image has to replace a physical slot.
                         raise ValueError(
-                            "Slot Texture Bind node '" + node_label + "': the GIMI texture slot '" + logical_slot
+                            "Targeted Slot Texture Replacement node '" + node_label + "': the GIMI texture slot '" + logical_slot
                             + "' of object '" + owner_name + "' is submitted by name, so it cannot carry a per-object "
                             + "replacement image; clear the image, or use the External File source with the captured "
                             + "physical slot for a per-object replacement."
@@ -552,12 +552,12 @@ class DrawIBModel:
                     continue
                 if OBJECT_TEXTURE_SLOT_PATTERN.match(slot) is None:
                     raise ValueError(
-                        "Slot Texture Bind node '" + node_label + "': invalid texture slot '" + str(binding.get("slot", ""))
+                        "Targeted Slot Texture Replacement node '" + node_label + "': invalid texture slot '" + str(binding.get("slot", ""))
                         + "' for object '" + owner_name + "'; expected the form ps-t0."
                     )
                 if slot in seen_slots:
                     raise ValueError(
-                        "Slot Texture Bind node '" + node_label + "': slot '" + slot + "' is bound twice for object '"
+                        "Targeted Slot Texture Replacement node '" + node_label + "': slot '" + slot + "' is bound twice for object '"
                         + owner_name + "'."
                     )
                 seen_slots.add(slot)
@@ -611,16 +611,16 @@ class DrawIBModel:
                     resource_name = str(binding.get("resource_name", "") or "").strip()
                     # An existing resource points at a file this node does not
                     # create, so it has no name of its own that could be changed.
-                    self._reject_alias_for_existing_resource(binding, "Slot Texture Bind", node_label, owner_name)
+                    self._reject_alias_for_existing_resource(binding, "Targeted Slot Texture Replacement", node_label, owner_name)
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
-                            "Slot Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
+                            "Targeted Slot Texture Replacement node '" + node_label + "': invalid resource name '" + resource_name
                             + "' for object '" + owner_name + "'."
                         )
                     used_resource_names.add(resource_name)
                 else:
                     raise ValueError(
-                        "Slot Texture Bind node '" + node_label + "': unknown source type '" + source_type
+                        "Targeted Slot Texture Replacement node '" + node_label + "': unknown source type '" + source_type
                         + "' for object '" + owner_name + "'."
                     )
 
@@ -681,7 +681,7 @@ class DrawIBModel:
         mark_name = str(binding.get("mark_name", "") or "").strip()
         if not mark_name:
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
+                "Targeted Slot Texture Replacement node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
             )
         matched_markup = None
         for markup_info in markup_list:
@@ -689,18 +689,18 @@ class DrawIBModel:
                 # GIMI must not silently choose between images for one semantic.
                 if getattr(GlobalConfig, "logic_name", "") == "GIMI":
                     if matched_markup is not None and matched_markup.get_resource_name() != markup_info.get_resource_name():
-                        raise ValueError("Slot Texture Bind: ambiguous marked texture: " + mark_name)
+                        raise ValueError("Targeted Slot Texture Replacement: ambiguous marked texture: " + mark_name)
                 matched_markup = markup_info
                 if getattr(GlobalConfig, "logic_name", "") != "GIMI":
                     break
         if matched_markup is None:
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
+                "Targeted Slot Texture Replacement node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
                 + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
             )
         if str(getattr(matched_markup, "mark_type", "") or "") not in ("Slot", "SharedSlot"):
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
+                "Targeted Slot Texture Replacement node '" + node_label + "': mark '" + mark_name + "' uses the Hash style, which is a global texture replacement and needs no per-object binding; mark it as Slot / SharedSlot in SSMT5 instead."
             )
         return matched_markup
 
@@ -740,7 +740,7 @@ class DrawIBModel:
             )
         if not source_path or not os.path.exists(source_path):
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': mark '" + str(binding.get("mark_name", "") or "")
+                "Targeted Slot Texture Replacement node '" + node_label + "': mark '" + str(binding.get("mark_name", "") or "")
                 + "' has no image to copy for object '" + owner_name
                 + "' (the original texture file was not found in the workspace extract); "
                 + "pick a replacement image on the row, or share a SharedSlot mark instead."
@@ -969,7 +969,7 @@ class DrawIBModel:
     def _resolve_file_texture_resource(self, binding, node_label, owner_name, slug_token, used_resource_names, file_resource_by_source, source_path_override="", target_filename_override="", replacement_plan=None) -> str:
         '''FILE source: build a resource and record its copy job.
 
-        ``source_path_override`` lets the Hash Texture Bind MARK source feed
+        ``source_path_override`` lets the Targeted Hash Texture Replacement MARK source feed
         a workspace-resolved mark file through the same validation, dedupe
         and copy-job registration as a plain FILE row. ``target_filename_override``
         keeps a marked Hash texture's generated filename stable when an
@@ -979,12 +979,12 @@ class DrawIBModel:
         source_path = str(source_path_override or "").strip() or str(binding.get("file_path", "") or "").strip()
         if not source_path:
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': texture file path is empty for object '" + owner_name + "'."
+                "Targeted Slot Texture Replacement node '" + node_label + "': texture file path is empty for object '" + owner_name + "'."
             )
         file_suffix = os.path.splitext(source_path)[1].lower()
         if file_suffix not in OBJECT_TEXTURE_FILE_SUFFIXES:
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': unsupported texture file '" + source_path
+                "Targeted Slot Texture Replacement node '" + node_label + "': unsupported texture file '" + source_path
                 + "' for object '" + owner_name + "'; use one of " + ", ".join(OBJECT_TEXTURE_FILE_SUFFIXES) + "."
             )
         # A converted replacement is always a DDS resource, whatever the
@@ -992,13 +992,13 @@ class DrawIBModel:
         target_suffix = str((replacement_plan or {}).get("suffix", "") or file_suffix)
         if target_filename_override and os.path.splitext(target_filename_override)[1].lower() != target_suffix:
             raise ValueError(
-                "Hash Texture Bind node '" + node_label + "': external file '" + source_path
+                "Targeted Hash Texture Replacement node '" + node_label + "': external file '" + source_path
                 + "' cannot replace marked filename '" + target_filename_override
                 + "'; the generated resource must end with '" + target_suffix + "'."
             )
         if not os.path.exists(source_path):
             raise ValueError(
-                "Slot Texture Bind node '" + node_label + "': texture file does not exist: " + source_path
+                "Targeted Slot Texture Replacement node '" + node_label + "': texture file does not exist: " + source_path
                 + " (object '" + owner_name + "')."
             )
 
@@ -1062,10 +1062,10 @@ class DrawIBModel:
         return candidate
 
     def resolve_hash_texture_bindings(self):
-        '''Resolve Hash Texture Bind node rows onto the objects that own them.
+        '''Resolve Targeted Hash Texture Replacement node rows onto the objects that own them.
 
         A row that knows the mark's texture slot binds its replacement inside
-        the owning object's draw section (the same list the Slot Texture Bind
+        the owning object's draw section (the same list the Targeted Slot Texture Replacement
         node fills), so the replacement applies to that draw call only. The
         object's own switch condition already wraps that line, and an object
         whose state does not match keeps whatever the shared hash section
@@ -1094,7 +1094,7 @@ class DrawIBModel:
         if MIMIGlobalProperties.forbid_auto_texture_ini():
             # Same rule as the slot bindings: explicit node intent wins over
             # the global "no automatic texture" switch.
-            print("DrawIBModel: forbid_auto_texture_ini is on, but Hash Texture Bind nodes are explicit user intent; bindings still apply.")
+            print("DrawIBModel: forbid_auto_texture_ini is on, but Targeted Hash Texture Replacement nodes are explicit user intent; bindings still apply.")
 
         used_resource_names = set()
         file_resource_by_source = {}
@@ -1115,16 +1115,16 @@ class DrawIBModel:
             for binding in draw_model.hash_texture_binding_list:
                 if not binding.get("enabled", True):
                     continue
-                node_label = str(binding.get("node_label", "") or "Hash Texture Bind")
+                node_label = str(binding.get("node_label", "") or "Targeted Hash Texture Replacement")
                 texture_hash = str(binding.get("texture_hash", "") or "").strip().lower()
                 if OBJECT_TEXTURE_HASH_PATTERN.match(texture_hash) is None:
                     raise ValueError(
-                        "Hash Texture Bind node '" + node_label + "': invalid texture hash '" + str(binding.get("texture_hash", ""))
+                        "Targeted Hash Texture Replacement node '" + node_label + "': invalid texture hash '" + str(binding.get("texture_hash", ""))
                         + "' for object '" + owner_name + "'; expected 8 hexadecimal characters (a 32-bit texture hash)."
                     )
                 if texture_hash in seen_hashes:
                     raise ValueError(
-                        "Hash Texture Bind node '" + node_label + "': texture hash '" + texture_hash + "' is bound twice for object '"
+                        "Targeted Hash Texture Replacement node '" + node_label + "': texture hash '" + texture_hash + "' is bound twice for object '"
                         + owner_name + "'."
                     )
                 seen_hashes.add(texture_hash)
@@ -1149,23 +1149,23 @@ class DrawIBModel:
                     source_path = str(binding.get("file_path", "") or "").strip()
                 elif source_type != "RESOURCE":
                     raise ValueError(
-                        "Hash Texture Bind node '" + node_label + "': unknown source type '" + source_type
+                        "Targeted Hash Texture Replacement node '" + node_label + "': unknown source type '" + source_type
                         + "' for object '" + owner_name + "'."
                     )
 
                 mark_slot = str(binding.get("mark_slot", "") or "").strip().lower()
                 if mark_slot and OBJECT_TEXTURE_SLOT_PATTERN.match(mark_slot) is None:
                     raise ValueError(
-                        "Hash Texture Bind node '" + node_label + "': invalid mark slot '" + mark_slot
+                        "Targeted Hash Texture Replacement node '" + node_label + "': invalid mark slot '" + mark_slot
                         + "' for object '" + owner_name + "'; expected the form ps-t0."
                     )
                 if not mark_slot and not binding.get('legacy_slotless', False):
                     # Hash conditions cannot isolate two draws in the same state.
                     # Strict connected nodes therefore require a captured slot.
-                    raise ValueError("Hash Texture Bind: no resolvable slot for " + texture_hash
+                    raise ValueError("Targeted Hash Texture Replacement: no resolvable slot for " + texture_hash
                                      + "; refresh a slotted mark or explicitly enable Legacy slotless Hash.")
                 if mark_slot:
-                    # The dedicated Slot Texture Bind node is more specific
+                    # The dedicated Targeted Slot Texture Replacement node is more specific
                     # than a hash replacement, so the conflict is reported
                     # instead of silently picking one of the two.
                     slot_owner_slots = {
@@ -1175,12 +1175,12 @@ class DrawIBModel:
                     }
                     if mark_slot in slot_owner_slots:
                         raise ValueError(
-                            "Hash Texture Bind node '" + node_label + "': slot '" + mark_slot + "' of object '" + owner_name
-                            + "' is already bound by a Slot Texture Bind node; remove one of the two bindings."
+                            "Targeted Hash Texture Replacement node '" + node_label + "': slot '" + mark_slot + "' of object '" + owner_name
+                            + "' is already bound by a Targeted Slot Texture Replacement node; remove one of the two bindings."
                         )
                     if mark_slot in bound_slots:
                         raise ValueError(
-                            "Hash Texture Bind node '" + node_label + "': slot '" + mark_slot + "' is bound twice for object '"
+                            "Targeted Hash Texture Replacement node '" + node_label + "': slot '" + mark_slot + "' is bound twice for object '"
                             + owner_name + "'; keep one hash replacement per slot."
                         )
                     bound_slots.add(mark_slot)
@@ -1243,10 +1243,10 @@ class DrawIBModel:
                     resource_name = str(binding.get("resource_name", "") or "").strip()
                     # Same rule as the slot bindings: an existing resource owns
                     # no generated file, so an alias has nothing to rename.
-                    self._reject_alias_for_existing_resource(binding, "Hash Texture Bind", node_label, owner_name)
+                    self._reject_alias_for_existing_resource(binding, "Targeted Hash Texture Replacement", node_label, owner_name)
                     if OBJECT_TEXTURE_RESOURCE_PATTERN.match(resource_name) is None:
                         raise ValueError(
-                            "Hash Texture Bind node '" + node_label + "': invalid resource name '" + resource_name
+                            "Targeted Hash Texture Replacement node '" + node_label + "': invalid resource name '" + resource_name
                             + "' for object '" + owner_name + "'."
                         )
                     used_resource_names.add(resource_name)
@@ -1298,19 +1298,19 @@ class DrawIBModel:
         mark_name = str(binding.get("mark_name", "") or "").strip()
         if not mark_name:
             raise ValueError(
-                "Hash Texture Bind node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
+                "Targeted Hash Texture Replacement node '" + node_label + "': mark name is empty for object '" + owner_name + "'."
             )
         for markup_info in markup_list:
             if str(getattr(markup_info, "mark_name", "") or "").strip().lower() != mark_name.lower():
                 continue
             if str(getattr(markup_info, "mark_type", "") or "") != "Hash":
                 raise ValueError(
-                    "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' uses the " + str(getattr(markup_info, "mark_type", "") or "")
-                    + " style; the Hash Texture Bind node only accepts Hash-style marks (Slot / SharedSlot marks belong to the Slot Texture Bind node)."
+                    "Targeted Hash Texture Replacement node '" + node_label + "': mark '" + mark_name + "' uses the " + str(getattr(markup_info, "mark_type", "") or "")
+                    + " style; the Targeted Hash Texture Replacement node only accepts Hash-style marks (Slot / SharedSlot marks belong to the Targeted Slot Texture Replacement node)."
                 )
             return markup_info
         raise ValueError(
-            "Hash Texture Bind node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
+            "Targeted Hash Texture Replacement node '" + node_label + "': mark '" + mark_name + "' was not found in the texture marks of Submesh '"
             + str(getattr(submesh_model, "submesh_name", "") or "") + "' (object '" + owner_name + "'). Run the SSMT5 texture mark apply first."
         )
 
@@ -1341,7 +1341,7 @@ class DrawIBModel:
         )
         if not source_path or not os.path.exists(source_path):
             raise ValueError(
-                "Hash Texture Bind node '" + node_label + "': source file of mark '" + mark_name + "' was not found in the workspace (object '"
+                "Targeted Hash Texture Replacement node '" + node_label + "': source file of mark '" + mark_name + "' was not found in the workspace (object '"
                 + owner_name + "')."
             )
         return source_path

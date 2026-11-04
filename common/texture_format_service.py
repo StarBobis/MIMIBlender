@@ -461,7 +461,7 @@ def collect_tree_jobs(tree):
                 continue
             # Walk upstream only for nodes that actually own replacement rows.
             submesh = upstream_submesh(node)
-            # A Slot Texture Bind node with several channels can feed objects of
+            # A Targeted Slot Texture Replacement node with several channels can feed objects of
             # several Submeshes; each resolves a different captured original, so
             # every one of them needs a pre-conversion. Hash rows carry their
             # own Submesh, and the global slot node stores it per row, so those

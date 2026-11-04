@@ -12,7 +12,6 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_export_helper import BlueprintExportHelper
 from .blueprint_node_obj import ObjectPersistentIdManager
 from .texture_node_refresh import refresh_tree_texture_nodes
-from .texture_output_widgets import exact_format_enabled
 
 
 def _new_batch_input(node):
@@ -442,25 +441,13 @@ class MMT_OT_RefreshBlueprint(I18nOperator):
         texture_format_service.clear_lookup_cache()
         texture_summary = refresh_tree_texture_nodes(node_tree)
 
-        # Part 4: convert the replacements this refresh just found pending, in
-        # the background. Generate Mod does the same before it writes files, so
-        # this only moves the wait forward and makes every row label current
-        # without the user pressing each node's own convert button.
-        conversion_count = 0
-        if exact_format_enabled() and not texture_format_service.is_running():
-            try:
-                conversion_count = texture_format_service.start_conversion(
-                    texture_format_service.collect_tree_jobs(node_tree)
-                )
-            except Exception as error:
-                # A broken row is reported by the conversion itself; a batch
-                # that cannot start must never cancel the refresh.
-                print("Refresh Blueprint: texture conversion did not start: " + str(error))
-
+        # Part 4: nothing is converted here. Generate Mod converts every pending
+        # replacement right before it writes the files, so a refresh stays a
+        # cheap metadata pass instead of a background texture bake.
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-        # The message is built from short fragments: the object, texture and
-        # conversion counts are optional and must read naturally in both
-        # languages, which one giant format string cannot do.
+        # The message is built from short fragments: the object and texture
+        # counts are optional and must read naturally in both languages, which
+        # one giant format string cannot do.
         message = tr("Refreshed {submesh_count} submeshes, {object_count} object nodes, {texture_node_count} texture nodes").format(
             submesh_count=len(submesh_names),
             object_count=refresh_summary["updated_count"],
@@ -470,8 +457,6 @@ class MMT_OT_RefreshBlueprint(I18nOperator):
             message += tr("; {missing_count} object nodes have no matching object").format(
                 missing_count=refresh_summary["missing_count"],
             )
-        if conversion_count > 0:
-            message += tr("; converting {count} replacement texture(s)").format(count=conversion_count)
         message += tr("; took {elapsed_ms:.3f} ms").format(elapsed_ms=elapsed_ms)
         if refresh_summary["missing_count"] > 0:
             self.report({'WARNING'}, message)
@@ -1043,17 +1028,20 @@ class MIMIMT_TextureAssignMenu(bpy.types.Menu):
 
     def draw(self, context):
         layout = self.layout
-        # Slot Texture Bind replaces texture slots right before each passing
-        # object's drawindexed; it is a pass-through like the Group node.
-        layout.operator("node.add_node", text=tr("Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
-        # Hash Texture Bind turns each passing object into conditional this=
-        # blocks inside the global hash-style TextureOverride sections.
-        layout.operator("node.add_node", text=tr("Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
-        # Global Hash Texture Bind has no sockets because its replacements apply
+        # Two pairs: the node that applies to the objects you wire into it, then
+        # the socketless manager that applies by itself. Each pair keeps the
+        # same Slot/Hash order.
+        # A targeted node replaces what its passing objects draw; it is a
+        # pass-through like the Group node.
+        layout.operator("node.add_node", text=tr("Targeted Slot Texture Replacement"), icon='TEXTURE').type = "MIMINode_Texture_Bind"
+        # Hash rows turn each passing object into conditional this= blocks
+        # inside the global hash-style TextureOverride sections.
+        layout.operator("node.add_node", text=tr("Targeted Hash Texture Replacement"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
+        # Socketless manager: changes the default of selected Submesh marks only.
+        layout.operator("node.add_node", text=tr("Global Slot Texture Replacement"), icon='TEXTURE').type = "MIMINode_Texture_Global"
+        # Global hash rows have no sockets because their replacements apply
         # wherever the game binds the selected hash.
-        layout.operator("node.add_node", text=tr("Global Hash Texture Bind"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Global"
-        # Socketless manager changes defaults only for selected Submesh marks.
-        layout.operator("node.add_node", text=tr("Global Slot Texture Bind"), icon='TEXTURE').type = "MIMINode_Texture_Global"
+        layout.operator("node.add_node", text=tr("Global Hash Texture Replacement"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Global"
 
 
 @translatable

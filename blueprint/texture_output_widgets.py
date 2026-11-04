@@ -1,6 +1,6 @@
 """Generated-file controls shared by the four texture replacement nodes.
 
-Slot Texture Bind, Hash Texture Bind, Global Hash Texture Bind and Global Slot
+Targeted Slot Texture Replacement, Targeted Hash Texture Replacement, Global Hash Texture Replacement and Global Slot
 Texture Bind all rename one or more generated texture files, so the drawing
 code for "here is the file name" plus "type an alias to rename it" lives here
 instead of being copied four times.

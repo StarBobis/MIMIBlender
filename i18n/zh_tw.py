@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Traditional Chinese (zh-TW) translations for MIMIBlender.
 
 Every key is the original English source string (msgid) used in the addon's
@@ -657,7 +657,6 @@ TRANSLATIONS_ZH_TW = {
     "Refresh this blueprint: Submesh list, object nodes and the mark list of every texture node; replacements that still need a conversion are converted in the background": "重新整理此藍圖：子網格清單、物件節點以及所有貼圖節點的標記清單；仍需轉換的替換貼圖會在背景自動轉換",
     "Refreshed {submesh_count} submeshes, {object_count} object nodes, {texture_node_count} texture nodes": "已重新整理 {submesh_count} 個子網格、{object_count} 個物件節點、{texture_node_count} 個貼圖節點",
     "; {missing_count} object nodes have no matching object": "；{missing_count} 個物件節點找不到對應的物件",
-    "; converting {count} replacement texture(s)": "；正在轉換 {count} 張替換貼圖",
     "; took {elapsed_ms:.3f} ms": "；耗時 {elapsed_ms:.3f} 毫秒",
     "Batch Set Selected Nodes to Submesh": "批次將選取的節點設為子網格",
     "No Submesh list is available in the current blueprint. Please run Refresh Blueprint first.": "目前藍圖沒有可用的子網格清單。請先執行「重新整理藍圖」。",
@@ -732,6 +731,10 @@ TRANSLATIONS_ZH_TW = {
     "(no key set)": "（未設定按鍵）",
     # ---- Texture Bind node (per-object texture slot binding) ----
     "Slot Texture Bind": "貼圖槽位綁定",
+    # Current label of the same node. The old spelling above stays in the
+    # dictionary because a saved blueprint is migrated from the title it was
+    # created with, in whichever language was active back then.
+    "Targeted Slot Texture Replacement": "指定Slot貼圖替換",
     "Texture Bind": "貼圖槽位綁定",
     "Texture slot to replace right before this object's drawindexed, e.g. ps-t0": "在此物件的 drawindexed 之前替換的貼圖槽位，例如 ps-t0",
     "Where the replacement texture comes from": "替換貼圖的來源",
@@ -789,7 +792,9 @@ TRANSLATIONS_ZH_TW = {
     "Leave empty to keep the generated file name shown above; fill in to rename the generated texture file (the image format suffix stays)": "留空則維持上方顯示的產生檔案名稱；填寫後會用這個名稱重新命名產生的貼圖檔案（圖片格式副檔名保持不變）",
     # ---- Hash Texture Bind nodes (conditional and global hash-style overrides) ----
     "Hash Texture Bind": "Hash 貼圖綁定",
+    "Targeted Hash Texture Replacement": "指定Hash貼圖替換",
     "Global Hash Texture Bind": "全域 Hash 貼圖綁定",
+    "Global Hash Texture Replacement": "全域Hash貼圖替換",
     "Refresh Hash Texture Marks": "重新整理並偵測 Hash 標記貼圖",
     "Refresh marked Hash textures and preserve replacement choices": "重新整理 Hash 標記貼圖，並保留已指定的替換圖片",
     "Choose Replacement Texture": "選擇替換貼圖",
@@ -806,7 +811,7 @@ TRANSLATIONS_ZH_TW = {
     "Replacement file was not found": "找不到替換貼圖檔案",
     "No replacement selected: keep the original texture": "未指定替換圖片時保留原始貼圖",
     "Mark no longer exists; clear its replacement or disable this row": "標記已不存在；請清除替換圖片或停用此列",
-    "Hash Texture Bind output is not connected; use Global Hash Texture Bind for an unconditional replacement": "Hash 貼圖綁定的輸出未連接；如需無條件替換，請使用全域 Hash 貼圖綁定",
+    "Targeted Hash Texture Replacement output is not connected; use Global Hash Texture Replacement for an unconditional replacement": "指定Hash貼圖替換的輸出未連接；如需無條件替換，請使用全域Hash貼圖替換",
     "Hash Source Mark": "Hash 來源標記",
     "Choose an external texture with Blender's file browser": "使用 Blender 檔案瀏覽器選擇外部貼圖",
     "Please select a valid texture file": "請選擇有效的貼圖檔案",
@@ -827,6 +832,7 @@ TRANSLATIONS_ZH_TW = {
     "Legacy slotless Hash (not draw-local)": "舊版無槽位 Hash（非繪製局部）",
     # ---- Global Slot Texture Bind node (socketless Submesh defaults) ----
     "Global Slot Texture Bind": "全域貼圖槽位綁定",
+    "Global Slot Texture Replacement": "全域Slot貼圖替換",
     "Replacement": "替換貼圖",
     "Submesh defaults / local draw overrides win": "子網格預設值 / 局部繪製覆寫優先",
     "Stale mark: clear or disable replacement": "標記已失效：請清除或停用該替換",
@@ -1350,19 +1356,8 @@ TRANSLATIONS_ZH_TW = {
     "Converted: {format}": "已轉換：{format}",
     "Waiting for conversion: {format}": "等待轉換：{format}",
     "Converts on export: {format}": "匯出時自動轉換：{format}",
-    "Convert Now": "立即轉換",
-    "Convert All Replacements": "轉換全部替換貼圖",
     "Converting {done}/{total}: {current}": "正在轉換 {done}/{total}：{current}",
-    "Converting {count} replacement texture(s)": "正在轉換 {count} 張替換貼圖",
-    "No replacement needs exact format conversion": "沒有需要精確格式轉換的替換貼圖",
     "Texture node was not found": "找不到貼圖節點",
-    "A conversion is already running": "已有轉換工作正在執行",
-    "Texture format conversion could not start; see the console for details": "貼圖格式轉換無法開始；詳細資訊請查看主控台",
-    "Convert Replacement Textures": "轉換替換貼圖",
-    "Convert replacement textures to the exact format of the original game texture in the background": "在背景把替換貼圖轉換成與原版遊戲貼圖完全一致的格式",
-    "Cancel Texture Conversion": "取消貼圖轉換",
-    "Stop converting after the current replacement texture": "目前這張替換貼圖轉換完成後停止",
-    "Cancelling texture format conversion": "正在取消貼圖格式轉換",
     "Clear Texture Conversion Cache": "清除貼圖轉換快取",
     "Delete the converted replacement textures of this workspace; they are recreated on demand": "刪除本工作區已轉換的替換貼圖；需要時會自動重新產生",
     "Removed {size} of cached texture conversions": "已清除 {size} 的貼圖轉換快取",
@@ -1374,7 +1369,6 @@ TRANSLATIONS_ZH_TW = {
     "Converted replacement textures are stored in this folder; leave empty to use the default location": "轉換後的替換貼圖會儲存在此資料夾；留空則使用預設位置",
     "Texture conversion cache: {size}": "貼圖轉換快取：{size}",
     "Clear Cache": "清除快取",
-    "Convert All Replacements in this Blueprint": "轉換此藍圖中全部替換貼圖",
     "{count} replacement texture(s) need conversion before export": "匯出前有 {count} 張替換貼圖需要轉換",
     "Replacement texture conversion failed; export stopped": "替換貼圖轉換失敗；匯出已停止",
 }

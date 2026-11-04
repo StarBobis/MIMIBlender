@@ -14,7 +14,7 @@ from ..common.texture_output_naming import (
     normalize_alias_stem,
 )
 from ..i18n.i18n import tr, translatable
-# The row gallery is shared with Global Hash Texture Bind; the node declares
+# The row gallery is shared with Global Hash Texture Replacement; the node declares
 # what its rows mean and the gallery owns how they are edited.
 from .texture_output_widgets import draw_ib_from_name
 from .texture_row_ui import (
@@ -145,7 +145,7 @@ def refresh_global_slot_rows(node):
 class MIMINode_Texture_Global(MIMINodeBase):
     """Global manager for selected Submesh defaults, with no object sockets."""
     bl_idname = 'MIMINode_Texture_Global'
-    bl_label = 'Global Slot Texture Bind'
+    bl_label = 'Global Slot Texture Replacement'
     bl_icon = 'TEXTURE'
     items: bpy.props.CollectionProperty(type=GlobalSlotItem)
     index: bpy.props.IntProperty(default=0)
@@ -164,7 +164,7 @@ class MIMINode_Texture_Global(MIMINodeBase):
     # Original DDS availability is shown next to the replacement controls.
     # A stale active row requires explicit user withdrawal or reconfiguration.
     def draw_buttons(self, context, layout):
-        # Same gallery as Global Hash Texture Bind: one list, one preview pair,
+        # Same gallery as Global Hash Texture Replacement: one list, one preview pair,
         # one chooser. Only the row profile and the export path differ.
         draw_texture_row_panel(self, layout)
 

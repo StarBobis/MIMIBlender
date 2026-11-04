@@ -327,7 +327,7 @@ class M_IniHelper:
             if condition_str in resource_by_condition:
                 if resource_by_condition[condition_str] != resource_name:
                     raise ValueError(
-                        "Hash Texture Bind: texture hash " + texture_hash + " is bound with condition '"
+                        "Targeted Hash Texture Replacement: texture hash " + texture_hash + " is bound with condition '"
                         + (condition_str or "<always>") + "' to both " + resource_by_condition[condition_str]
                         + " and " + resource_name + "; give each switch state one texture."
                     )
@@ -376,20 +376,20 @@ class M_IniHelper:
             if not binding.get("enabled", True):
                 continue
 
-            node_label = str(binding.get("node_label", "") or "Global Hash Texture Bind")
+            node_label = str(binding.get("node_label", "") or "Global Hash Texture Replacement")
             texture_hash = str(binding.get("texture_hash", "") or "").strip().lower()
             restore_original = bool(binding.get("restore_original", False))
             if restore_original and (texture_hash in active_hashes or texture_hash in seen_hashes):
                 continue
             if _GLOBAL_HASH_PATTERN.fullmatch(texture_hash) is None:
                 raise ValueError(
-                    "Global Hash Texture Bind node '" + node_label
+                    "Global Hash Texture Replacement node '" + node_label
                     + "': invalid texture hash '" + str(binding.get("texture_hash", ""))
                     + "'; expected 8 hexadecimal characters."
                 )
             if texture_hash in seen_hashes:
                 raise ValueError(
-                    "Global Hash Texture Bind node '" + node_label
+                    "Global Hash Texture Replacement node '" + node_label
                     + "': texture hash '" + texture_hash
                     + "' is specified more than once; keep one global replacement per hash."
                 )
@@ -403,19 +403,19 @@ class M_IniHelper:
                     source_path = str(binding.get("file_path", "") or "").strip()
                 if not source_path:
                     raise ValueError(
-                        "Global Hash Texture Bind node '" + node_label
+                        "Global Hash Texture Replacement node '" + node_label
                         + "': texture file path is empty for hash '" + texture_hash + "'."
                     )
                 file_suffix = os.path.splitext(source_path)[1].lower()
                 if file_suffix not in _GLOBAL_HASH_FILE_SUFFIXES:
                     raise ValueError(
-                        "Global Hash Texture Bind node '" + node_label
+                        "Global Hash Texture Replacement node '" + node_label
                         + "': unsupported texture file '" + source_path
                         + "'; use one of " + ", ".join(_GLOBAL_HASH_FILE_SUFFIXES) + "."
                     )
                 if not os.path.isfile(source_path):
                     raise ValueError(
-                        "Global Hash Texture Bind node '" + node_label
+                        "Global Hash Texture Replacement node '" + node_label
                         + "': texture file does not exist: " + source_path + "."
                     )
 
@@ -446,7 +446,7 @@ class M_IniHelper:
                     originals.extend(entry['source_path'] for entry in _load_global_hash_mark_entries()
                                      if entry['hash'] == texture_hash and entry['source_path'])
                     if not originals:
-                        raise ValueError("Global Hash Texture Bind: original DDS is unavailable for hash " + texture_hash)
+                        raise ValueError("Global Hash Texture Replacement: original DDS is unavailable for hash " + texture_hash)
                     from ..texcomb.core.dds_match import read_dds_metadata
                     # Parse originals before creating the global texture output folder.
                     # Comparing immutable metadata makes conflict detection deterministic.
@@ -454,7 +454,7 @@ class M_IniHelper:
                     # Replacement size policy is independent of original-format selection.
                     metadata = [read_dds_metadata(path) for path in originals]
                     if any(value != metadata[0] for value in metadata[1:]):
-                        raise ValueError("Global Hash Texture Bind: conflicting original DDS metadata for hash " + texture_hash)
+                        raise ValueError("Global Hash Texture Replacement: conflicting original DDS metadata for hash " + texture_hash)
                     # A converted replacement is always written as a DDS file.
                     original_path = originals[0]
                     file_suffix = ".dds"
@@ -504,13 +504,13 @@ class M_IniHelper:
                 # An existing resource owns no generated file to rename.
                 if normalize_alias_stem(binding.get("output_name", "")):
                     raise ValueError(
-                        "Global Hash Texture Bind node '" + node_label + "': hash '" + texture_hash
+                        "Global Hash Texture Replacement node '" + node_label + "': hash '" + texture_hash
                         + "' reuses an existing resource, which generates no texture file to rename; "
                         + "clear the texture alias or pick a texture file / mark instead."
                     )
                 if _GLOBAL_RESOURCE_PATTERN.fullmatch(resource_name) is None:
                     raise ValueError(
-                        "Global Hash Texture Bind node '" + node_label
+                        "Global Hash Texture Replacement node '" + node_label
                         + "': invalid resource name '" + resource_name + "'."
                     )
                 resolved_rows.append({
@@ -521,7 +521,7 @@ class M_IniHelper:
                 })
             else:
                 raise ValueError(
-                    "Global Hash Texture Bind node '" + node_label
+                    "Global Hash Texture Replacement node '" + node_label
                     + "': source type '" + source_type
                     + "' is not supported; use Marked Texture, External File or Existing Resource."
                 )
@@ -602,7 +602,7 @@ class M_IniHelper:
             )
             if has_unconditional:
                 raise ValueError(
-                    "Hash Texture Bind: texture hash " + texture_hash
+                    "Targeted Hash Texture Replacement: texture hash " + texture_hash
                     + " uses a global replacement and an object binding without a switch state;"
                     + " connect the object through a Switch Key node, or remove the global replacement for that hash."
                 )
@@ -638,7 +638,7 @@ class M_IniHelper:
         two overrides claiming one texture hash.
 
         Emitted even when forbid_auto_texture_ini is on, for the same reason
-        as the slot bindings: a Hash Texture Bind node is explicit user
+        as the slot bindings: a Targeted Hash Texture Replacement node is explicit user
         intent, not part of the automatic texture pipeline.
         '''
         binding_entry_dict = cls._collect_hash_switch_entry_dict(drawib_drawibmodel_dict)
@@ -655,7 +655,7 @@ class M_IniHelper:
             )
             if has_unconditional and len(condition_order) > 1:
                 raise ValueError(
-                    "Hash Texture Bind: texture hash " + texture_hash + " mixes an unconditional binding with "
+                    "Targeted Hash Texture Replacement: texture hash " + texture_hash + " mixes an unconditional binding with "
                     + str(len(condition_order) - 1) + " conditional one(s); connect every branch through an explicit switch so the replacement states stay unambiguous."
                 )
 
@@ -755,11 +755,11 @@ class M_IniHelper:
                         continue
                     repeat_hash_list.append(mark_hash)
 
-                    # Hashes bound by Hash Texture Bind nodes keep their
+                    # Hashes bound by Targeted Hash Texture Replacement nodes keep their
                     # resource management but skip the automatic override;
                     # the explicit node sections take over.
                     if mark_hash in managed_hash_set:
-                        print("M_IniHelper: hash " + mark_hash + " is managed by Hash Texture Bind nodes; skipping the automatic Hash override.")
+                        print("M_IniHelper: hash " + mark_hash + " is managed by Targeted Hash Texture Replacement nodes; skipping the automatic Hash override.")
                         continue
 
                     # Find the source texture file path

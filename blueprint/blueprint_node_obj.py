@@ -632,15 +632,8 @@ class MIMINode_Result_Output(MIMINodeBase):
             icon='DISK_DRIVE',
         )
         format_box.operator("mimi.texture_format_clear_cache", text=tr("Clear Cache"), icon='TRASH')
-        # The whole blueprint can be prepared without opening every node.
-        convert_all = format_box.operator(
-            "mimi.texture_format_convert",
-            text=tr("Convert All Replacements in this Blueprint"),
-            icon='FILE_REFRESH',
-        )
-        convert_all.node_name = ""
-        convert_all.tree_name = self.id_data.name if self.id_data else ""
-        convert_all.row_index = -1
+        # No convert button: Generate Mod converts every pending replacement
+        # right before it writes the files.
 
     def update(self):
         if self.inputs and self.inputs[-1].is_linked:

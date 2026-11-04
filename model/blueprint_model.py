@@ -467,7 +467,7 @@ class BluePrintModel:
                     )
 
         elif unknown_node.bl_idname == MIMINode_Hash_Texture_Bind.bl_idname:
-            # Hash Texture Bind is a transparent pass-through like the Slot
+            # Targeted Hash Texture Replacement is a transparent pass-through like the Slot
             # variant; the resolved rows later merge into one global
             # [TextureOverride_Texture_<hash>] section per hash, so the same
             # "parse first, then tag the new models" pattern applies here.
@@ -611,7 +611,7 @@ class BluePrintModel:
                 if getattr(node, "bl_idname", "") == MIMINode_Hash_Texture_Global.bl_idname:
                     # Muted nodes behave like every other muted blueprint node.
                     if not getattr(node, "mute", False):
-                        node_label = str(getattr(node, "label", "") or getattr(node, "name", "") or "Global Hash Texture Bind")
+                        node_label = str(getattr(node, "label", "") or getattr(node, "name", "") or "Global Hash Texture Replacement")
                         for item in getattr(node, "texture_hash_items", []):
                             file_path = str(getattr(item, "file_path", "") or "").strip()
                             detected = bool(getattr(item, "global_detected", False))
@@ -624,10 +624,10 @@ class BluePrintModel:
                                 if not item.global_replacement_used or item.mark_missing:
                                     continue
                                 if not item.mark_source_file_path:
-                                    raise ValueError("Global Hash Texture Bind: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
+                                    raise ValueError("Global Hash Texture Replacement: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
                                 file_path = item.mark_source_file_path
                             if detected and getattr(item, "mark_missing", False):
-                                raise ValueError("Global Hash Texture Bind: mark " + item.texture_hash + " no longer exists; refresh, clear its replacement or disable the row.")
+                                raise ValueError("Global Hash Texture Replacement: mark " + item.texture_hash + " no longer exists; refresh, clear its replacement or disable the row.")
                             if file_path:
                                 try:
                                     file_path = bpy.path.abspath(file_path)
@@ -704,7 +704,7 @@ class BluePrintModel:
                 "color_space": str(getattr(item, "color_space", "AUTO") or "AUTO").upper(),
                 # Optional user alias: the generated texture file is renamed.
                 "output_name": str(getattr(item, "output_name", "") or ""),
-                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Slot Texture Bind"),
+                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Targeted Slot Texture Replacement"),
             })
         return bindings
 
@@ -728,7 +728,7 @@ class BluePrintModel:
 
     @staticmethod
     def _collect_hash_texture_bindings(bind_node):
-        '''Read the Hash Texture Bind node rows into plain dicts for export.'''
+        '''Read the Targeted Hash Texture Replacement node rows into plain dicts for export.'''
         bindings = []
         for item in getattr(bind_node, "texture_hash_items", []):
             file_path = str(getattr(item, "file_path", "") or "").strip()
@@ -741,9 +741,9 @@ class BluePrintModel:
                     continue
                 file_path = item.mark_source_file_path
                 if not file_path:
-                    raise ValueError("Hash Texture Bind: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
+                    raise ValueError("Targeted Hash Texture Replacement: cannot restore original texture " + item.texture_hash + "; source file is unavailable.")
             if detected and item.mark_missing:
-                raise ValueError("Hash Texture Bind: mark " + item.texture_hash + " is outside the connected scope; refresh, clear its replacement or disable the row.")
+                raise ValueError("Targeted Hash Texture Replacement: mark " + item.texture_hash + " is outside the connected scope; refresh, clear its replacement or disable the row.")
             if file_path:
                 try:
                     file_path = bpy.path.abspath(file_path)
@@ -760,19 +760,19 @@ class BluePrintModel:
                 "file_path": file_path,
                 "resource_name": str(getattr(item, "resource_name", "") or ""),
                 "legacy_slotless": bool(getattr(bind_node, "legacy_slotless", False)),
-                # Exact-format controls shared with the Slot Texture Bind node.
+                # Exact-format controls shared with the Targeted Slot Texture Replacement node.
                 "format_mode": str(getattr(item, "format_mode", "AUTO") or "AUTO").strip().lower(),
                 "manual_format": str(getattr(item, "manual_format", "") or "").strip(),
                 "force_original_size": bool(getattr(item, "force_original_size", False)),
                 # Optional user alias: the generated texture file is renamed.
                 "output_name": str(getattr(item, "output_name", "") or ""),
-                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Hash Texture Bind"),
+                "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Targeted Hash Texture Replacement"),
             })
         return bindings
 
     @staticmethod
     def _merge_hash_texture_bindings(inner_list, outer_list):
-        '''Merge bindings of nested Hash Texture Bind nodes, keyed by hash.
+        '''Merge bindings of nested Targeted Hash Texture Replacement nodes, keyed by hash.
 
         Same rule as the slot variant: the node closest to the Object Info
         node wins for the same texture hash.

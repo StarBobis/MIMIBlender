@@ -39,17 +39,25 @@ Consequences:
 
 ## The two socketless managers share one gallery
 
-`Global Hash Texture Bind` and `Global Slot Texture Bind` organise rows differently on purpose
-(a hash is globally unique; a slot default belongs to one Submesh) **but must never look
-different while being edited**. Both draw `texture_row_ui.draw_texture_row_panel`, so the list
-class, the preview pair, the chooser operator, the refresh button and the order of the detail
+`Global Hash Texture Replacement` and `Global Slot Texture Replacement` organise rows differently
+on purpose (a hash is globally unique; a slot default belongs to one Submesh) **but must never
+look different while being edited**. Both draw `texture_row_ui.draw_texture_row_panel`, so the
+list class, the preview pair, the chooser operator, the refresh button and the order of the detail
 box are single-sourced.
 
 The node-specific half is a `TextureRowProfile` the node module registers at import time
 (`register_profile(...)`), which is where `rows_prop` / `index_prop` / the field names live. The
-connected `Hash Texture Bind` registers the same profile because it owns the same row RNA; it
-reuses the shared list, previews and chooser but draws its own detail box instead of the shared
-one, because it alone carries switch conditions and the manual-format fallback.
+connected `Targeted Hash Texture Replacement` registers the same profile because it owns the same
+row RNA; it reuses the shared list, previews and chooser but draws its own detail box instead of
+the shared one, because it alone carries switch conditions and the manual-format fallback.
+
+The four node labels were renamed from `... Texture Bind` to `Targeted Slot/Hash Texture
+Replacement` and `Global Slot/Hash Texture Replacement`. The old spellings stay in both
+translation dictionaries and in `blueprint_node_base._LEGACY_TITLES_BY_IDNAME` (through
+`_renamed_titles`), because a node title is instance data: a blueprint saved before the rename
+carries the old spelling in whichever language was active then. Never delete those dictionary
+rows, and never drop the current spelling from `_renamed_titles` — it is what keeps a migrated
+title following the UI language afterwards.
 
 Rules to keep:
 
@@ -62,6 +70,10 @@ Rules to keep:
 - Rows are found by `profile.key(item)` (`texture_hash` / `identity`) first and by the drawn
   position only as a fallback: a refresh can insert rows while the Blender file browser is open,
   while a duplicated identity or a row without one has no other way to be addressed.
+- There is no conversion button anywhere. A row panel draws the status line only
+  (`draw_row_status`), and Generate Mod converts every pending replacement in its own modal phase
+  before it writes anything, reporting progress in the window status bar. Do not add a manual
+  convert operator back: it can only duplicate work the export already owns.
 - `original_path`, `replacement_path`, `set_file` and `warnings` are the only places that know
   the per-node RNA field names. Assigning a path goes through `set_file` because the Hash row
   has a property `update` callback that retypes the source, records that a replacement existed
@@ -144,23 +156,26 @@ Rules in `texcomb/core/dds_match.py`:
   the sRGB tag; the node status shows the treatment, e.g. `Converts on export: BC6H_UF16
   (sRGB -> linear)`.
 
-## Nothing needs a per-node click
+## Generate Mod owns the conversion
 
-A replacement is converted to the capture format automatically; the node buttons only
-pre-convert. Two independent guarantees make that true:
+There is no manual conversion step left. The row panels draw a status line only, and Generate Mod
+converts every pending replacement itself. Two independent guarantees make that safe:
 
+- `ui_func_export.MMTGenerateModBlueprint.invoke` collects the rows whose plan is not None,
+  starts the same background service, and waits on a modal timer. `window_manager.progress_*`
+  draws the bar and `_set_progress_status()` writes "Converting 3/12: <file>" into the status
+  text, so a large blueprint never looks frozen. ESC cancels; a conversion error aborts the
+  export with the offending row's label instead of writing a wrong-format texture.
 - `ConversionCache.key()` hashes the source **bytes**, and the export copy stage calls
   `prepare_replacement_job` for every registered row, so a Photoshop re-save is a cache miss and
-  is converted during the export itself;
-- `ui_func_export` converts every pending row of the tree in the background before it writes
-  buffers, so the wait happens before the first output file.
+  is converted during the export itself even if the modal phase were skipped.
 
-Therefore `Refresh Blueprint` (`mimi.refresh_blueprint`, node editor context menu) is the only
-refresh a user needs: it rebuilds the Submesh list, re-resolves the object nodes, then calls
-`blueprint/texture_node_refresh.py` to re-read every Slot / Hash / Global slot node (nested
-groups included) and finally starts the pending conversions of that tree. A texture row the user
-never touches is still converted when the Mod is generated - never add a rule that makes the
-export depend on a previously pressed Convert button.
+`Refresh Blueprint` (`mimi.refresh_blueprint`, node editor context menu) is therefore a pure
+metadata pass: it rebuilds the Submesh list, re-resolves the object nodes and calls
+`blueprint/texture_node_refresh.py` to re-read every texture node (nested groups included). It
+must not start conversions again - a refresh that secretly bakes textures makes the command look
+slow for no visible reason. A row the user never touches is still converted when the Mod is
+generated; never add a rule that makes the export depend on a previously pressed button.
 
 ## Regenerating keeps the newer file
 
