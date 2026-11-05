@@ -86,6 +86,9 @@ class GlobalConfig:
     # the host predates that field and the add-on must read d3dx.ini itself.
     mods_location = ""
     logic_name = ""
+    # AI workflows bind explicit paths only for one main-thread operation step.
+    # None preserves every existing UI/host configuration resolution behavior.
+    _automation_override = None
 
     '''
     In the new Generate Mod architecture, tracks the global key index within a Mod
@@ -117,6 +120,10 @@ class GlobalConfig:
 
     @classmethod
     def read_from_main_json(cls) :
+        # Dynamic UI enums may call this during an AI operation. Its explicit
+        # scope must not be replaced with the unrelated host-selected workspace.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            return
         try:
             # SSMT5/ProjectBunny panel must read its own settings only,
             # never fall back to MMT / MIMITools settings here.
@@ -360,6 +367,9 @@ class GlobalConfig:
 
     @classmethod
     def path_mods_folder(cls):
+        # Auxiliary legacy writers remain inside the AI output root as well.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            return cls.path_generate_mod_folder()
         # The host resolves the mods root from the same d3dx.ini the game reads
         # (GIMI renames the stock `Mods` folder to `Stuffs`) and publishes it in
         # Games/<game>/Config.json. Trust that answer first: a stale stock
@@ -391,6 +401,9 @@ class GlobalConfig:
 
     @classmethod
     def get_workspace_name(cls):
+        # Explicit AI contexts never depend on the user's current dropdown.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            return cls._automation_override["workspace_name"]
         try:
             workspace_source_mode = MIMIGlobalProperties.workspace_source_mode()
 
@@ -412,6 +425,9 @@ class GlobalConfig:
     
     @classmethod
     def path_workspace_folder(cls):
+        # Source data remains at its explicit read-only workspace location.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            return cls._automation_override["workspace"]
         try:
             if MIMIGlobalProperties.workspace_source_mode() == "CUSTOM":
                 custom_workspace_folder_path = GlobalConfig._normalize_workspace_folder_path(
@@ -426,7 +442,22 @@ class GlobalConfig:
         return os.path.join(GlobalConfig.path_current_game_total_workspace_folder(), cls.get_workspace_name() + "\\")
     
     @classmethod
+    def path_import_selection_json(cls):
+        """Resolve the type-selection record independently of source buffers."""
+        # Ordinary UI imports keep their historical workspace-level record.
+        # AI imports record choices only in an explicit isolated session folder.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            return cls._automation_override["import_selection"]
+        return os.path.join(cls.path_workspace_folder(), "Import.json")
+
+    @classmethod
     def path_generate_mod_folder(cls):
+        # AI writes must never silently fall back to the user's installed Mods.
+        if isinstance(getattr(cls, "_automation_override", None), dict):
+            output = cls._automation_override.get("output")
+            if not output:
+                raise ValueError("Explicit AI output directory is required")
+            return output
         # If the user enabled the "use a specified folder" option, return that folder location,
         # otherwise return our default location. Note that SkipIB and VSCheck are not generated into the specified location.
         if MIMIGlobalProperties.use_specific_generate_mod_folder_path():

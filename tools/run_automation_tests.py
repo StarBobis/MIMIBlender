@@ -33,7 +33,7 @@ import bpy
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py")
+SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py", "test_automation_workspaces_blender.py")
 
 
 def run_visible_tests(suites=SUITES):
@@ -42,12 +42,17 @@ def run_visible_tests(suites=SUITES):
         raise RuntimeError("Visible Blender desktop required; background testing is forbidden")
     if bpy.data.filepath or not bpy.context.scene.name.startswith("MIMIBlender MCP Capability Probe"):
         raise RuntimeError("Use the designated unsaved test scene, never an existing user project")
+    if bpy.context.mode != "OBJECT":
+        raise RuntimeError("Do not start fixture tests while the user is editing/posing an object")
     if any(name not in SUITES for name in suites):
         raise ValueError("Unknown visible automation test suite")
+    records = bpy.app.driver_namespace.get("mimi_ai_jobs", {})
+    if any(item["status"] not in {"succeeded", "failed", "cancelled", "interrupted"} for item in records.values()):
+        raise RuntimeError("Finish active workflow jobs before running/reloading the test suite")
     # Reload only already loaded automation implementations, preserving bpy data.
     # Pure contract tests are run separately in ordinary Python, not in Blender.
     prefix = ROOT.name + ".automation"
-    for suffix in ("registry", "revisions", "inspection", "properties", "presentation", "blueprints", ""):
+    for suffix in ("registry", "paths", "revisions", "inspection", "properties", "presentation", "context", "jobs", "blueprints", "workspaces", ""):
         name = prefix + ("." + suffix if suffix else "")
         if name in sys.modules:
             importlib.reload(sys.modules[name])

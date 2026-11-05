@@ -44,9 +44,23 @@ Presentation is transactional: a mid-operation GUI failure restores the previous
 
 Frame a newly bound graph with a short main-thread Blender timer, not an immediate view-all call before editor initialization. Mark that framing as pending in the initial result. Do not focus a graph if the user has switched the target editor before the callback runs. Never sleep or run bpy in a worker thread.
 
-## Workflows under implementation
+## Native workspace imports
 
-Build import/export and mesh operations as dedicated actions rather than a blanket unrestricted `bpy.ops` endpoint. Use explicit source/output/tree/object identities; preserve user projects and original assets. Existing UI import/export functions can report success after partial failures, so action adapters must validate produced meshes, graph coverage and actual output artifacts independently.
+`workspace.inspect` discovers explicit native workspace LOD/component/type candidates, buffer dependencies and source-stat revision tokens. Missing buffers remain invalid candidates; ambiguity requires explicit `types` choices or an existing valid source selection record. `workspace.import` validates that observation and starts a visible cooperative job. Poll its exact ID with `job.inspect`; `queued` or `running` is not success. `job.cancel` retains already yielded partial work.
+
+Each component uses the real `MMTImportHelper`, including native UV/weight/shape-key/material behavior. Capture all newly created segment objects rather than trusting only the first object return. Every timer step exits `workflow_context` before yielding so manual settings/selection remain normal between steps. File stats are checked before each component read; these tokens are observations, not cryptographic authenticity or byte-level integrity claims.
+
+The scope adds a private `GlobalConfig._automation_override` dictionary and one `path_import_selection_json` helper. Outside that scope, existing host configuration and paths behave unchanged. Inside it, workspace and output paths are explicit and source `Import.json` is never rewritten. AI-owned type records use lowercase `import.json` in new session directories. Native external source folder conventions such as `LOD0`/`TYPE_` remain unchanged in fixtures and source data; code filenames stay lowercase.
+
+The blueprint and imported collection persist `mimi_ai_workflow` JSON plus a stable session marker. Object/source mappings use native object identities so user renames remain valid. User scene changes, Edit/Pose/Paint mode entry and changed imported transforms/ownership interrupt final binding instead of forcing the user back or overwriting their work. This ownership check does not claim to detect every possible arbitrary Python buffer edit.
+
+The final graph reuses native Object List and Face Mod helpers, preserving per-segment source bindings. Scope restoration and final graph validation run even when the native importer otherwise reports partial success. Captured native errors are failures; warnings remain explicit.
+
+## Workflows still under implementation
+
+Implement explicit workspace binding for user-created/partially completed graphs, safe mesh operations, validated native export and manual UI handoff, reverse-output imports, dedicated MCP tool exposure and packaging checks. Do not mark the full objective complete from the currently implemented normal-workspace import milestone.
+
+Manual Generate Mod and marked-texture UI/API operations must resolve a tree's persisted AI workspace metadata, not the unrelated host-selected game/workspace restored between steps. This handoff is a required next integration step, not yet an accepted workflow. Existing UI import/export functions can report success after partial failures, so adapters must independently validate meshes, graph coverage and actual output artifacts.
 
 Do not write `Import.json` into an original extraction workspace just to preserve an AI session's type selection. Isolate selection records and export artifacts in a managed working copy or explicit output directory. Restore transient global exporter state and scene settings even on exceptions. Do not make every operation asynchronous by running bpy in a background worker; timer-based jobs must retain main-thread ownership and bounded polling.
 
@@ -59,7 +73,9 @@ from MIMIBlender.tools.run_automation_tests import run_visible_tests
 result = run_visible_tests()
 ```
 
-The live runner rejects headless mode and saved/ordinary user scenes. It reloads automation implementations, never the registered add-on chain, and returns diagnostics without exiting Blender. Query tests inventory every registered operator/node schema; graph tests cover typed edits, collection copying, rollback, stale user changes and actual editor/selection presentation. The initial collaborative editing milestone passed six ordinary-Python protocol tests plus four query and twelve graph tests in a visible Blender 5.2 desktop. Recompute these results after further changes. Place generated evidence under repository `tmp/`.
+The live runner rejects headless mode, saved/ordinary user scenes and active user Edit/Pose mode. It reloads automation implementations, never the registered add-on chain, and returns diagnostics without exiting Blender. Refresh the authored legacy path methods with `MIMIBlender.tools.reload_automation_live.reload_visible_automation` when testing those source changes in an already loaded desktop; preserve existing class identities. Reload `paths` before consumers such as `workspaces`, otherwise new imports can still resolve stale cached helper definitions.
+
+The visible import milestone passed 29 real-desktop cases: four query, thirteen graph and twelve workspace cases. Those include independent source/user-geometry hashes, cancellation, user rename/transform/mode handoff, source containment, stale observations and an optional real cached PGR workspace with two components. One separately started PGR import completed through actual automatic timers in the existing visible desktop. The earlier six-component cached beads workspace was correctly rejected because its declared source buffers were missing; do not inherit historical success from that incomplete cache. Six ordinary-Python protocol tests, four legacy generation-entry tests and seven legacy Mods-root tests passed. The legacy filesystem fixtures were retained under tmp rather than automatically deleted. Recompute every result after further changes.
 
 ## Desktop capture traps
 

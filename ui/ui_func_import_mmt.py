@@ -621,7 +621,7 @@ def ImprotFromWorkSpaceFull(self, context):
     _auto_bind_workspace_skeleton(self, drawib_imported_objects, drawib_skeletons, workspace_collection)
 
     # Save the workspace-level Import.json selection record (using new-format keys)
-    save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
+    save_import_json_path = GlobalConfig.path_import_selection_json()
     JsonUtils.SaveToFile(json_dict=foldername_gametypename_dict, filepath=save_import_json_path)
     
     if getattr(context.scene.mimi_global_properties, "align_face_on_import", False):
@@ -911,7 +911,7 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
         return
 
     # Update Import.json (keep existing records, overwrite the ones imported now)
-    save_import_json_path = os.path.join(GlobalConfig.path_workspace_folder(), "Import.json")
+    save_import_json_path = GlobalConfig.path_import_selection_json()
     existing_import_json = {}
     if os.path.exists(save_import_json_path):
         try:

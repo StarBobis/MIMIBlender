@@ -770,7 +770,7 @@ class MMTWorkSpace:
                 + "Please make sure the model has been extracted from the game and run the \"One-Click Import Current Workspace Content\" operation."
             )
 
-        workspace_import_json_path = os.path.join(workspace_folder, "Import.json")
+        workspace_import_json_path = GlobalConfig.path_import_selection_json()
         workspace_import_json = JsonUtils.LoadFromFile(workspace_import_json_path) if os.path.exists(workspace_import_json_path) else {}
         # The Import.json key may be in new format or old format; try both
         gametype_name = workspace_import_json.get(submesh_name, "")

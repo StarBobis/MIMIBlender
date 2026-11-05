@@ -212,6 +212,29 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(properties.open_mod_folder_after_generate_mod, original_open)
         self.call("settings.update", {"owner": "mimi_global_properties", "values": {"workspace_source_mode": original_mode}})
 
+    def test_frame_auto_fit_does_not_invalidate_graph_revision(self):
+        # Native shrink frames move their origin while preserving child positions.
+        # This drawing update must not be mistaken for a new user graph edit.
+        from MIMIBlender.automation.revisions import blueprint_revision
+        spec = self.spec()
+        spec["nodes"].append({"name": "Frame", "type": "NodeFrame"})
+        for item in spec["nodes"][:2]:
+            item["parent"] = "Frame"
+        result = self.call("blueprint.build", spec)
+        tree = bpy.data.node_groups[result["tree"]]
+        before = blueprint_revision(tree)
+        frame = tree.nodes["Frame"]
+        frame.width += 40.0
+        frame.location.x += 30.0
+        for node in tree.nodes:
+            if node.parent == frame:
+                node.location.x -= 30.0
+        self.assertEqual(blueprint_revision(tree), before)  # Frame redraws do not create false stale-token conflicts.
+        # A real frame move shifts its children's effective layout and conflicts.
+        # Auto-fit normalization must not hide that actual user-visible change.
+        frame.location.x += 10.0
+        self.assertNotEqual(blueprint_revision(tree), before)  # A real visible move still invalidates the old observation.
+
     def test_stale_user_edit_is_not_overwritten(self):
         # Simulate a user editing the graph after the AI's state query.
         # The old observation token must not authorize a new patch version.

@@ -57,6 +57,25 @@ def value_state(value, depth=0):
     return {"unavailable": type(value).__name__}
 
 
+def absolute_node_location(node):
+    """Hash effective layout, not relative offsets changed by frame auto-fitting.
+
+    Blender moves/resizes shrink-to-fit frames during the first desktop draw.
+    Their child absolute positions remain the same and are the user-visible edit.
+    """
+    x, y = node.location
+    parent = node.parent
+    seen = {node.as_pointer()}
+    while parent is not None:
+        if parent.as_pointer() in seen or len(seen) > 32:
+            raise AutomationError("FRAME_RECURSION", "Frame layout has invalid parent recursion")
+        seen.add(parent.as_pointer())
+        x += parent.location.x
+        y += parent.location.y
+        parent = parent.parent
+    return [x, y]
+
+
 def tree_state(tree, ancestors=()):
     """Read full graph data, including custom-group dependencies, without edits."""
     if tree.as_pointer() in ancestors:
@@ -80,9 +99,12 @@ def tree_state(tree, ancestors=()):
                 properties[prop.identifier] = {"unavailable": "context_required"}
         child = getattr(node, "node_tree", None)
         sockets = lambda values: [(socket.identifier, socket.name, socket.bl_idname) for socket in values]
+        auto_frame = node.bl_idname == "NodeFrame" and getattr(node, "shrink", False)
+        # Automatic frame bounds are drawing state, not independent user edits.
+        # Moving a frame still changes its children's effective positions below.
         nodes.append({"name": node.name, "type": node.bl_idname, "label": node.label,
-                      "location": list(node.location), "parent": node.parent.name if node.parent else None,
-                      "mute": node.mute, "hide": node.hide, "width": node.width,
+                      "location": None if auto_frame else absolute_node_location(node), "parent": node.parent.name if node.parent else None,
+                      "mute": node.mute, "hide": node.hide, "width": None if auto_frame else node.width,
                       "properties": properties, "inputs": sockets(node.inputs), "outputs": sockets(node.outputs),
                       "group": tree_state(child, ancestors + (tree.as_pointer(),)) if child else None})
     # Link ordering is not semantic for ordinary single-input sockets.

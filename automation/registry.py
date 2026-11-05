@@ -118,3 +118,36 @@ add_action("scene.present", "Show an explicit blueprint or object set in the use
     "objects": {"type": "array", "items": string_schema("Exact scene object name"), "minItems": 1, "maxItems": 200},
     "focus": {"type": "boolean"},
 }, mutates=True)
+
+# Source discovery is read-only and exposes ambiguous native type candidates.
+# Import requests are cooperative jobs, not long blocking UI operator wrappers.
+# Work directories contain new session records, never rewritten source buffers.
+# Type maps use explicit native Submesh identities from workspace.inspect.
+# The source revision detects changes between inspection and submission.
+# Native component steps additionally check dependency file stats before reads.
+add_action("workspace.inspect", "Inspect explicit native workspace components, type choices and buffer dependencies.", {
+    "source": string_schema("Absolute read-only workspace directory"),
+    "offset": {"type": "integer", "minimum": 0},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+}, ("source",))
+add_action("workspace.import", "Start a visible cooperative native workspace import into the current user scene.", {
+    "source": string_schema("Absolute read-only source workspace directory"),
+    "source_revision": string_schema("Optional inspected source revision token"),
+    "logic": string_schema("Registered game exporter logic identifier"),
+    "workspace_name": string_schema("Workspace identity used by native model bindings"),
+    "name": string_schema("Unique blueprint/collection name for the imported result"),
+    "work_directory": string_schema("Absolute working root outside the source workspace"),
+    "types": {"type": "object", "additionalProperties": string_schema("Explicit native data type")},
+    "settings": {"type": "object", "additionalProperties": {}},
+    "present": {"type": "boolean"},
+}, ("source", "logic", "name", "work_directory"), mutates=True)
+
+# A queued/running status is not a successful workflow result.
+# Polling observes state only; timers own progress on the visible main thread.
+# Cancellation retains already committed/visible artifacts for manual recovery.
+add_action("job.inspect", "Read a cooperative job's actual progress, error or terminal result.", {
+    "job": string_schema("Exact returned workflow job identifier"),
+}, ("job",))
+add_action("job.cancel", "Cancel future steps of a visible workflow while retaining partial user-visible work.", {
+    "job": string_schema("Exact returned workflow job identifier"),
+}, ("job",), mutates=True)

@@ -44,7 +44,13 @@ def dispatch(request):
         try:
             # Import only the selected implementation boundary. Query-only
             # clients do not need to initialize graph mutation helpers.
-            if name == "scene.present":
+            if name in {"workspace.inspect", "workspace.import"}:  # Explicit source discovery/import handlers.
+                from .workspaces import HANDLERS
+                handler = HANDLERS[name]
+            elif name in {"job.inspect", "job.cancel"}:  # Cooperative status/control never advances a job implicitly.
+                from .jobs import HANDLERS
+                handler = HANDLERS[name]
+            elif name == "scene.present":
                 from .presentation import scene_present
                 handler = scene_present
             elif name == "settings.update":
