@@ -22,7 +22,7 @@ from bpy.props import StringProperty
 from .state import snapshot
 
 
-ALLOWED = {"job.cancel", "mesh.inspect", "mesh.restore", "scene.present"}  # The desktop operator cannot become a generic bpy invocation endpoint.
+ALLOWED = {"job.cancel", "mesh.inspect", "mesh.restore", "material.inspect", "material.restore", "scene.present"}  # The desktop operator cannot become a generic bpy invocation endpoint.
 
 
 def button(layout, label, action, params):
@@ -108,6 +108,16 @@ def draw_status(layout, context):
             for checkpoint in result.get("checkpoints", [])[-5:]:
                 button(layout, "Restore " + checkpoint["id"][:8], "mesh.restore", {
                     "object": obj.name, "revision": result["revision"], "checkpoint": checkpoint["id"]})
+    if obj and obj.type == "MESH" and obj.active_material:
+        index = obj.active_material_index  # Explicit active-slot inspection freezes its revision for recovery.
+        button(layout, "Inspect active material / recovery", "material.inspect", {"object": obj.name, "slot": index})
+        observation = next((item for item in reversed(events) if item["action"] == "material.inspect" and item["ok"]
+                            and item["targets"].get("object") == obj.name and item["result"].get("slot") == index), None)
+        if observation:
+            result = observation["result"]  # Drawing never silently refreshes a stale recovery token.
+            for checkpoint in result.get("checkpoints", [])[-3:]:
+                button(layout, "Restore material " + checkpoint["id"][:8], "material.restore", {
+                    "object": obj.name, "slot": index, "revision": result["revision"], "checkpoint": checkpoint["id"]})
 
 
 class MIMI_PT_ai_collaboration_view(bpy.types.Panel):

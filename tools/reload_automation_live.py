@@ -74,7 +74,8 @@ def reload_visible_automation():
     definitions = [node for node in parsed.body if isinstance(node, ast.FunctionDef)
                    and node.name in {"ImprotFromWorkSpaceFull", "ImprotFromWorkSpaceSelected"}]
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(path), "exec"), ui.__dict__)
-    for relative, module_name in (("ui/ui_func_export.py", ".ui.ui_func_export"),
+    for relative, module_name in (("common/texture_format_service.py", ".common.texture_format_service"),
+                                  ("ui/ui_func_export.py", ".ui.ui_func_export"),
                                   ("blueprint/blueprint_node_face_mod.py", ".blueprint.blueprint_node_face_mod"),
                                   ("blueprint/blueprint_graph.py", ".blueprint.blueprint_graph")):
         target = importlib.import_module(prefix + module_name)
@@ -87,8 +88,8 @@ def reload_visible_automation():
     patch_class(export_ui, ROOT / "ui" / "ui_func_export.py", "MMTGenerateModBlueprint", ("invoke",))
     # Registered class objects remain valid; refresh only their implementation API.
     # Existing user data must not be reinitialized to obtain new helper functions.
-    for suffix in ("registry", "paths", "context", "revisions", "inspection", "properties", "presentation",
-                   "preservation", "audits", "jobs", "state", "blueprints", "workspaces", "binding", "exports", "meshes", "reverse", "collaboration", ""):
+    for suffix in ("contract", "registry", "paths", "context", "revisions", "inspection", "properties", "presentation",
+                   "preservation", "audits", "jobs", "state", "blueprints", "workspaces", "binding", "exports", "meshes", "materials", "reverse", "collaboration", ""):
         name = prefix + ".automation" + ("." + suffix if suffix else "")
         if name in sys.modules:
             importlib.reload(sys.modules[name])

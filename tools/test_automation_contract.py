@@ -132,6 +132,23 @@ class ContractTests(unittest.TestCase):
             stub.HANDLERS["scene.inspect"] = lambda params: {}
             self.assertTrue(automation.dispatch(request)["ok"])
 
+    def test_numeric_socket_union_is_strict_before_handler(self):
+        # The material manifest publishes a finite scalar/vector union.
+        # Invalid branches must fail before a Blender material handler imports.
+        # Booleans are not numeric socket values, even though Python subclasses int.
+        # Vectors keep their shape and element constraints at the protocol boundary.
+        # Valid branches validate independently without executing any mutation.
+        schema = registry.ACTIONS["material.patch"]["inputSchema"]["properties"]["inputs"]["items"]["properties"]["value"]
+        for value in (0.2, [0.2, 0.3, 0.4, 1]):
+            contract.validate(value, schema)
+        for value in (True, "0.2", {}, [], [0] * 5, [False], [float("nan")]):
+            with self.assertRaises(contract.AutomationError):
+                contract.validate(value, schema)
+        result = automation.dispatch({"action": "material.patch", "params": {"object": "fixture", "slot": 0,
+            "revision": "old", "inputs": [{"node": "native", "socket": "scalar", "value": True}]}})
+        self.assertEqual(result["error"]["code"], "INVALID_ARGUMENT")
+        self.assertNotIn(NAME + ".materials", sys.modules)
+
     def test_worker_threads_never_access_blender(self):
         # Main-thread ownership is necessary even if a transport uses workers.
         # This fails before the optional bpy inspection module could be imported.

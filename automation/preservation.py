@@ -42,6 +42,12 @@ def object_signature(obj):
              "parent": obj.parent.name if obj.parent else None,
              "modifiers": [(item.name, item.type, item.show_viewport, item.show_render) for item in obj.modifiers],
              "materials": [slot.material.name if slot.material else None for slot in obj.material_slots]}
+    if obj.material_slots:
+        # Material shader edits are user changes even when slot names are unchanged.
+        # Inspect native graphs without evaluating them or editing shared data.
+        # The material adapter never calls object_signature from its graph fingerprint.
+        from .materials import fingerprint
+        state["material_revisions"] = [fingerprint(slot.material) if slot.material else None for slot in obj.material_slots]
     if obj.type == "MESH":
         mesh = obj.data
         state["mesh"] = mesh.name

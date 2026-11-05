@@ -95,6 +95,20 @@ def validate(value, schema, path="params", depth=0):
     """
     if depth > MAX_DEPTH:
         raise AutomationError("INVALID_ARGUMENT", "Request nesting is too deep", {"path": path})
+    if "oneOf" in schema:
+        # Union schemas must validate exactly one branch before handler import.
+        # Failed branches are observations, not partial mutations or coercions.
+        # Each branch retains the same numeric, depth and collection bounds.
+        matches = 0
+        for choice in schema["oneOf"]:
+            try:
+                validate(value, choice, path, depth)
+                matches += 1
+            except AutomationError:
+                pass
+        if matches != 1:
+            raise AutomationError("INVALID_ARGUMENT", "Argument must match exactly one schema branch", {"path": path})
+        return
     kind = schema.get("type")
     valid = {
         "object": isinstance(value, dict),

@@ -123,17 +123,26 @@ def _export_steps_impl(tree, output_node, config, expected_revision, requested_s
             textures.plan_for_job(job)
         if textures.is_running():
             raise AutomationError("TEXTURE_CONVERSION_BUSY", "Another texture conversion batch is active")
-        converted = textures.start_conversion(jobs) if jobs else 0
+        cache_root = absolute_path(textures.cache_root())  # Conversion caches are writes, even before Mod output allocation.
+        if contained(cache_root, Path(config["workspace"])) or contained(Path(config["workspace"]), cache_root):
+            raise AutomationError("SOURCE_WRITE_FORBIDDEN", "Texture conversion cache must remain outside original source assets")
+        for job in jobs:
+            for key in ("source", "original_path"):
+                if job.get(key) and contained(absolute_path(job[key], "file"), cache_root):
+                    raise AutomationError("SOURCE_WRITE_FORBIDDEN", "Conversion input files cannot belong to the mutable conversion cache")
+        outcome = {}  # This exact batch owns its completion evidence; later user batches cannot replace it.
+        tracker["conversion"] = outcome
+        converted = textures.start_conversion(jobs, outcome=outcome) if jobs else 0
         if converted:
             tracker["worker"] = getattr(textures, "_WORKER", None)
-    while converted and textures.is_running():
-        snapshot = textures.progress_snapshot()
+    while converted and not outcome.get("finished"):
+        snapshot = textures.progress_snapshot()  # Global progress is advisory only while this exact worker runs.
         yield {"phase": "converting", "done": snapshot.get("done", 0), "total": snapshot.get("total", 0),
                "current": snapshot.get("current", ""), "output": config["output"]}
-    if converted:
-        snapshot = textures.progress_snapshot()
-        if snapshot.get("cancelled") or snapshot.get("errors"):
-            raise AutomationError("TEXTURE_CONVERSION_FAILED", "Native texture conversion did not complete", snapshot)
+    if outcome.get("cancelled") or outcome.get("errors"):
+        raise AutomationError("TEXTURE_CONVERSION_FAILED", "Native texture conversion did not complete", dict(outcome))
+    if config.get("source_revision") and scan_workspace(config["workspace"])[3] != config["source_revision"]:
+        raise AutomationError("STALE_SOURCE", "Source buffers changed during export preparation; bind the new source explicitly")
     if blueprint_revision(tree) != expected_revision:
         raise AutomationError("USER_EDIT_DETECTED", "User changed the graph during export preparation")
     verify_scene_snapshot(source_state)
@@ -142,6 +151,9 @@ def _export_steps_impl(tree, output_node, config, expected_revision, requested_s
     yield {"phase": "exporting", "done": 0, "total": 1, "output": str(output)}  # Let the real desktop redraw before native generation.
     if blueprint_revision(tree) != expected_revision:
         raise AutomationError("USER_EDIT_DETECTED", "User changed the graph before native generation")
+    if config.get("source_revision") and scan_workspace(config["workspace"])[3] != config["source_revision"]:
+        raise AutomationError("STALE_SOURCE", "Source buffers changed before native generation")
+    verify_scene_snapshot(source_state)  # User geometry/material edits after the phase yield must interrupt before any writer.
     native_state = data_snapshot()
     log = io.StringIO()
     try:

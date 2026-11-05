@@ -21,6 +21,7 @@ from pathlib import Path
 import sys
 import unittest
 import uuid
+from unittest.mock import patch
 
 import bpy
 
@@ -83,6 +84,134 @@ class ExportTests(unittest.TestCase):
         state = self.call("blueprint.inspect", {"tree": tree.name})  # Read the current revision instead of reusing a stale import token.
         return {"tree": tree.name, "revision": state["revision"],
                 "output_directory": str(self.base / ("mod-" + uuid.uuid4().hex))}
+
+    def test_conversion_cache_cannot_write_original_source(self):
+        # Cache creation is a write even before the Mod directory exists.
+        # A source-contained user override must fail with no source-byte changes.
+        # Native import/export context stays active only during bounded steps.
+        params = self.params()
+        params["settings"] = {"texture_format_cache_folder": str(self.source / "cache")}
+        before = source_hashes(self.source)
+        result = self.finish(self.call("mod.export", params)["id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error"]["code"], "SOURCE_WRITE_FORBIDDEN")
+        self.assertFalse((self.source / "cache").exists())
+        self.assertEqual(source_hashes(self.source), before)
+
+    def test_user_mesh_edit_after_phase_yield_stops_native_writer(self):
+        # Resume manual editing after preparation yielded the visible desktop.
+        # Recheck actual scene state before any native buffer writer is invoked.
+        # The user's new coordinate is retained instead of being rolled back.
+        params = self.params()
+        started = self.call("mod.export", params)
+        jobs.step_job(started["id"])
+        self.obj.data.vertices[0].co.x += 0.5
+        changed = self.obj.data.vertices[0].co.x
+        result = self.finish(started["id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error"]["code"], "SOURCE_SCENE_CHANGED")
+        self.assertEqual(self.obj.data.vertices[0].co.x, changed)
+        self.assertFalse(list(Path(params["output_directory"]).glob("*.ini")))
+
+    def test_owned_conversion_cancel_retains_partial_work(self):
+        # Mock only the non-bpy conversion worker boundary, never native exporters.
+        # Cooperative cancellation closes its owning generator and no later batch.
+        # A current native step is deliberately not advertised as interruptible.
+        from MIMIBlender.common import texture_format_service as textures
+        flag = {"running": False}
+        def start(batch, outcome=None):
+            flag["running"] = True
+            return 1
+        image = self.base / "input.png"
+        image.write_bytes(b"fixture conversion input")
+        batch = [{"source": str(image), "label": "fixture"}]
+        worker = object()
+        params = self.params()
+        with patch.object(textures, "collect_tree_jobs", return_value=batch), patch.object(textures, "plan_for_job", return_value=object()), \
+             patch.object(textures, "start_conversion", side_effect=start), patch.object(textures, "is_running", side_effect=lambda: flag["running"]), \
+             patch.object(textures, "_WORKER", worker), patch.object(textures, "cancel_conversion") as cancel:
+            started = self.call("mod.export", params)
+            jobs.step_job(started["id"])
+            self.assertEqual(jobs.JOBS[started["id"]]["progress"]["phase"], "converting")
+            self.call("job.cancel", {"job": started["id"]})
+            result = self.finish(started["id"])
+            self.assertEqual(result["status"], "cancelled", result)
+            cancel.assert_called_once()
+            flag["running"] = False  # A later export must not own a replacement user's independent worker.
+            later = self.call("mod.export", self.params())
+            jobs.step_job(later["id"])
+            with patch.object(textures, "_WORKER", object()):
+                self.call("job.cancel", {"job": later["id"]})
+                self.assertEqual(self.finish(later["id"])["status"], "cancelled")
+            cancel.assert_called_once()  # The unrelated newer worker was never cancelled by the old owner.
+        self.assertFalse(Path(params["output_directory"]).exists())
+        self.assertEqual(image.read_bytes(), b"fixture conversion input")
+
+    def test_conversion_stage_failure_keeps_exact_batch_error(self):
+        # Exercise the production plain-file worker bookkeeping with a broken stage.
+        # Later global success must not replace an earlier owner's failed outcome.
+        # Restore unrelated native service display state after this fixture probe.
+        from MIMIBlender.common import texture_format_service as textures
+        saved = json.loads(json.dumps(textures._STATE))  # Preserve independent copies of mutable diagnostic lists.
+        outcome = {}
+        try:
+            with patch.object(textures.dds_match, "DDSReplacementStage", side_effect=RuntimeError("fixture stage failure")):
+                textures._worker([], None, outcome)
+            self.assertTrue(outcome["finished"])
+            self.assertTrue(any("fixture stage failure" in item for item in outcome["errors"]))
+            textures._STATE["errors"] = []
+            self.assertTrue(outcome["errors"])
+        finally:
+            textures._STATE.clear()
+            textures._STATE.update(saved)
+
+    def test_owned_conversion_failure_is_not_global_success(self):
+        # A later/global success cannot authorize this exact failed conversion.
+        # Mock file conversion only; the real export generator evaluates outcome.
+        # Failed preparation must not allocate a successful Mod artifact folder.
+        from MIMIBlender.common import texture_format_service as textures
+        image = self.base / "failed-input.png"
+        image.write_bytes(b"owned conversion fixture")
+        def start(batch, outcome=None):
+            outcome.update(finished=True, errors=["fixture owned conversion failure"], cancelled=False)
+            return 1
+        params = self.params()
+        with patch.object(textures, "collect_tree_jobs", return_value=[{"source": str(image), "label": "fixture"}]), \
+             patch.object(textures, "plan_for_job", return_value=object()), patch.object(textures, "start_conversion", side_effect=start):
+            result = self.finish(self.call("mod.export", params)["id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error"]["code"], "TEXTURE_CONVERSION_FAILED")
+        self.assertFalse(Path(params["output_directory"]).exists())
+
+    def test_changed_source_after_export_yield_is_not_reused(self):
+        # Source observations must be refreshed after the user-visible yield.
+        # Retain a new fixture source version instead of silently exporting old data.
+        # File-generation success cannot be inherited from this changed source.
+        params = self.params()
+        started = self.call("mod.export", params)
+        jobs.step_job(started["id"])
+        source = next(self.source.rglob("*.buf"))
+        changed = source.read_bytes() + b"fixture source edit"
+        source.write_bytes(changed)
+        result = self.finish(started["id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error"]["code"], "STALE_SOURCE")
+        self.assertEqual(source.read_bytes(), changed)
+        self.assertFalse(list(Path(params["output_directory"]).glob("*.ini")))
+
+    def test_native_generation_failure_retains_output_and_user_data(self):
+        # An allocated partial artifact folder remains recoverable on failure.
+        # Independent signatures verify that unrelated original objects survive.
+        # No generated-file failure is promoted into game or artifact success.
+        from MIMIBlender.automation.contract import AutomationError
+        params = self.params()
+        before = scene_snapshot()
+        with patch("MIMIBlender.ui.ui_func_export._export_regular_output", side_effect=AutomationError("NATIVE_EXPORT_FAILED", "fixture")):
+            result = self.finish(self.call("mod.export", params)["id"])
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(result["error"]["code"], "NATIVE_EXPORT_FAILED")
+        self.assertTrue(Path(params["output_directory"]).is_dir())
+        verify_scene_snapshot(before)
 
     def test_native_export_has_real_files_and_preserves_scene_source(self):
         # Byte hashes and geometry snapshots independently verify preservation.

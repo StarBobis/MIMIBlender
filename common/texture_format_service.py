@@ -605,7 +605,7 @@ def _progress_end():
         pass
 
 
-def _worker(jobs, cache):
+def _worker(jobs, cache, outcome=None):
     """Convert a batch of jobs on a background thread (no bpy calls)."""
     completed = 0
     errors = []
@@ -626,11 +626,21 @@ def _worker(jobs, cache):
                     errors.append(job["label"] + ": " + str(error))
                     print("TextureFormat: conversion failed for " + job["source"] + ": " + str(error))
                 completed = index + 1
+    except Exception as error:
+        # Stage/cache initialization and finalization can fail outside one image.
+        # Retain that failure in the exact batch outcome instead of false success.
+        # Already cached partial products remain available for explicit recovery.
+        errors.append("Texture conversion batch failed: " + str(error))
     finally:
         with _STATE_LOCK:
             _STATE["done"] = completed
             _STATE["cancelled"] = bool(_CANCEL.is_set() and completed < len(jobs))
             _STATE["errors"].extend(errors)
+            if outcome is not None:
+                # Retain this exact batch outcome even if a user starts a later batch.
+                # The AI owner must not inherit global historical success or errors.
+                # Publish before releasing running state so ownership cannot race.
+                outcome.update(finished=True, cancelled=_STATE["cancelled"], errors=list(_STATE["errors"]), done=completed, total=len(jobs))
             _STATE["running"] = False
 
 
@@ -675,7 +685,7 @@ def last_message():
         return str(_STATE.get("finished_message", "") or "")
 
 
-def start_conversion(jobs, on_done=None):
+def start_conversion(jobs, on_done=None, outcome=None):
     """Start converting the given jobs; returns the number of planned jobs.
 
     Jobs whose source already matches the original are skipped, so pressing
@@ -698,6 +708,10 @@ def start_conversion(jobs, on_done=None):
             continue
         prepared.append(job)
     if not prepared:
+        if outcome is not None:
+            # A failed planning pass is not a successful no-op conversion batch.
+            # The owner must observe current errors rather than old global state.
+            outcome.update(finished=True, cancelled=False, errors=list(plan_errors), done=0, total=0)
         if plan_errors:
             with _STATE_LOCK:
                 _STATE["errors"] = plan_errors
@@ -717,7 +731,7 @@ def start_conversion(jobs, on_done=None):
     _ON_DONE[0] = on_done
     _progress_begin(len(prepared))
     _WORKER = threading.Thread(
-        target=_worker, args=(prepared, cache), name="MIMITextureFormat", daemon=True,
+        target=_worker, args=(prepared, cache, outcome), name="MIMITextureFormat", daemon=True,
     )
     _WORKER.start()
     # Prefer the live registration check: a file load can purge timers, and a

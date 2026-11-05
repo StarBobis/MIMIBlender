@@ -251,6 +251,29 @@ add_action("mesh.restore", "Restore an independent checkpoint after verifying cu
     "checkpoint": string_schema("Exact returned independent checkpoint ID"), "present": {"type": "boolean"},
 }, ("object", "revision", "checkpoint"), mutates=True)
 
+# Material edits retain the complete native shader graph and shared source data.
+# Only one explicit object slot changes; existing images are bound, never rewritten.
+# Scalar sockets use discovered identifiers and current revision-bearing observations.
+# Restore keeps both the historical shader and the restored-away current version.
+MATERIAL_TARGET = {"object": string_schema("Exact current-scene mesh object"),
+                   "slot": {"type": "integer", "minimum": 0, "maximum": 1024}}
+add_action("material.inspect", "Inspect one native material slot, shader inputs/image bindings and retained checkpoints.",
+           MATERIAL_TARGET, ("object", "slot"))
+add_action("material.patch", "Copy a native shader graph and edit explicit unlinked numeric inputs or existing image bindings on one object slot.", {
+    **MATERIAL_TARGET, "revision": string_schema("Fresh material inspection revision"), "present": {"type": "boolean"},
+    "inputs": {"type": "array", "maxItems": 512, "items": object_schema({
+        "node": string_schema("Exact native shader node instance name"), "socket": string_schema("Discovered socket identifier"),
+        "value": {"oneOf": [{"type": "number"}, {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "number"}}]},
+    }, ("node", "socket", "value"))},
+    "images": {"type": "array", "maxItems": 128, "items": object_schema({
+        "node": string_schema("Exact image-texture node instance"), "image": string_schema("Existing image datablock name"),
+    }, ("node", "image"))},
+}, ("object", "slot", "revision"), mutates=True)
+add_action("material.restore", "Restore a retained native material version on one object slot with current-revision protection.", {
+    **MATERIAL_TARGET, "revision": string_schema("Fresh material inspection revision"),
+    "checkpoint": string_schema("Exact retained material checkpoint identity"), "present": {"type": "boolean"},
+}, ("object", "slot", "revision", "checkpoint"), mutates=True)
+
 # Reverse outputs retain their native candidate/segment component identities.
 # They are not silently converted into a normal extraction workspace.
 # Export needs an explicit original-workspace binding after review/editing.

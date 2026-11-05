@@ -61,7 +61,10 @@ def dispatch(request):
         try:
             # Import only the selected implementation boundary. Query-only
             # clients do not need to initialize graph mutation helpers.
-            if name == "state.inspect":  # The UI and MCP observe one current-scene journal.
+            if name in {"material.inspect", "material.patch", "material.restore"}:  # Native shader edits use independent slot checkpoints.
+                from .materials import HANDLERS
+                handler = HANDLERS[name]
+            elif name == "state.inspect":  # The UI and MCP observe one current-scene journal.
                 from .state import state_inspect
                 handler = state_inspect
             elif name in {"reverse.inspect", "reverse.import"}:  # Native candidate imports retain their reverse representation.
