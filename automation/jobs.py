@@ -33,7 +33,7 @@ import uuid
 import bpy
 
 from .contract import AutomationError
-from .presentation import desktop_window
+from .presentation import desktop_window, redraw
 
 
 # Keep status records alive across development reloads without retaining a lock.
@@ -74,7 +74,11 @@ def finish_job(record, status, result=None, error=None):
         record["warnings"] = deepcopy(result.get("warnings", record["warnings"]))
     generator = record.pop("generator", None)
     if generator is not None:
-        generator.close()
+        try:
+            generator.close()  # Always retain explicit terminal state if cleanup itself fails.
+        except Exception as cleanup_error:
+            record["warnings"].append("Workflow cleanup failed: " + str(cleanup_error))
+    redraw(bpy.context.window)  # Terminal errors and recovery notices belong in the real desktop.
 
 
 def step_job(identifier):
@@ -89,17 +93,18 @@ def step_job(identifier):
         desktop_window()  # Restore/require the actual visible collaborative desktop.
         if bpy.context.scene.as_pointer() != record["scene_pointer"]:  # Never switch the user back to an old scene.
             raise AutomationError("SCENE_CHANGED", "User changed scenes; workflow was interrupted")
+        if record.get("cancel_requested"):  # Cancellation is allowed while the user continues editing.
+            finish_job(record, "cancelled")  # Retain already committed partial artifacts without forcing any mode.
+            return None
         if bpy.context.mode != "OBJECT":  # A user's ongoing edit/pose/paint mode owns current input.
             raise AutomationError("USER_EDIT_IN_PROGRESS", "User entered edit/pose mode; workflow was interrupted")
-        if record.get("cancel_requested"):  # Cancellation takes effect before starting another native step.
-            finish_job(record, "cancelled")  # Retain already committed partial artifacts.
-            return None
         record["status"] = "running"  # Progress is not an artifact-acceptance claim.
         record["updated_at"] = time.time()  # Let clients observe when a real step ran.
         try:
             progress = next(record["generator"])
             json.dumps(progress, allow_nan=False)
             record["progress"] = progress
+            redraw(bpy.context.window)  # Publish actual completed progress to both visible sidebars.
         except StopIteration as completion:
             json.dumps(completion.value, allow_nan=False)
             finish_job(record, "succeeded", result=completion.value)

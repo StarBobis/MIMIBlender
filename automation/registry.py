@@ -36,6 +36,10 @@ def tools():
     return [deepcopy(ACTIONS[name]) for name in sorted(ACTIONS)]
 
 
+# Collaboration status is an observation, never a promise of game acceptance.
+# The real desktop panel and MCP clients read the same retained job journal.
+add_action("state.inspect", "Inspect current-scene collaboration tasks, progress, errors and retained recovery observations.")
+
 # Query actions never save host configuration or silently choose an export.
 # Larger scenes are paginated instead of being claimed complete after truncation.
 # RNA descriptions use stable identifiers rather than localized UI captions.

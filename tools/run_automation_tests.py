@@ -33,7 +33,7 @@ import bpy
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py", "test_automation_workspaces_blender.py", "test_automation_exports_blender.py", "test_automation_meshes_blender.py", "test_automation_reverse_blender.py")
+SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py", "test_automation_workspaces_blender.py", "test_automation_exports_blender.py", "test_automation_meshes_blender.py", "test_automation_reverse_blender.py", "test_automation_collaboration_blender.py")
 
 
 def run_visible_tests(suites=SUITES):

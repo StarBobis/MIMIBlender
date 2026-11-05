@@ -166,6 +166,10 @@ def _register_steps():
     # Install wrappers only after all original node/operator classes exist.
     from .automation import collaboration
     yield collaboration.register
+    # Task/recovery panels share the native desktop and never start a transport.
+    # Register only these new owned classes, after original native classes exist.
+    from .automation import ui as automation_ui
+    yield automation_ui.register
 
 
 def unregister():
@@ -180,7 +184,10 @@ def unregister():
         addon_updater_ops.unregister()
 
     from .automation import collaboration
+    from .automation import ui as automation_ui
     steps = [
+        # Remove only the collaboration-owned panels before their native peers.
+        automation_ui.unregister,
         # Restore native callbacks before unregistering the owned RNA classes.
         collaboration.unregister,
         gimi_body_outline.unregister,

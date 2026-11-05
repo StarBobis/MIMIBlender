@@ -5,6 +5,7 @@ Example: from MIMIBlender import automation; automation.dispatch(
 The same request/result contract will back dedicated MCP tools and local tests.
 """
 import json
+import sys
 import threading
 import traceback
 
@@ -20,6 +21,20 @@ from .registry import ACTIONS, tools
 _LOCK = threading.Lock()
 
 
+def publish(action, params, envelope):
+    """Best-effort UI observation must never change a committed action outcome."""
+    # Ordinary Python contract clients have no bpy and need no UI imports.
+    # A journal/redraw failure cannot turn an already committed edit into failure.
+    # Record only validated parameter dictionaries, never raw malformed input.
+    if "bpy" in sys.modules and action is not None and threading.current_thread() is threading.main_thread():
+        try:
+            from .state import record
+            record(action, params, envelope)
+        except Exception:
+            traceback.print_exc()
+    return envelope
+
+
 def dispatch(request):
     """Validate a request, run its named handler and return a JSON envelope.
 
@@ -27,6 +42,8 @@ def dispatch(request):
     worker thread merely to make an external MCP call appear asynchronous.
     """
     request_id = None
+    name = None  # Malformed requests never create a guessed task identity.
+    params = {}  # Journal targets come only from successfully validated input.
     try:
         parsed = parse_request(request)
         request_id = parsed.get("request_id")
@@ -44,7 +61,10 @@ def dispatch(request):
         try:
             # Import only the selected implementation boundary. Query-only
             # clients do not need to initialize graph mutation helpers.
-            if name in {"reverse.inspect", "reverse.import"}:  # Native candidate imports retain their reverse representation.
+            if name == "state.inspect":  # The UI and MCP observe one current-scene journal.
+                from .state import state_inspect
+                handler = state_inspect
+            elif name in {"reverse.inspect", "reverse.import"}:  # Native candidate imports retain their reverse representation.
                 from .reverse import HANDLERS
                 handler = HANDLERS[name]
             elif name in {"mesh.inspect", "mesh.patch", "mesh.restore"}:  # Same-object visible edits and independent checkpoint recovery.
@@ -77,15 +97,15 @@ def dispatch(request):
             result = handler(params)
             # Non-JSON results are bugs; never leak pointers into MCP responses.
             json.dumps(result, allow_nan=False)
-            return response(request_id, result=result)
+            return publish(name, params, response(request_id, result=result))
         finally:
             _LOCK.release()
     except AutomationError as error:
-        return response(request_id, error=error)
+        return publish(name, params if isinstance(params, dict) else {}, response(request_id, error=error))
     except Exception as error:
         # Tracebacks stay in Blender's diagnostic console, not in tool content.
         traceback.print_exc()
-        return response(request_id, error=AutomationError("INTERNAL_ERROR", str(error)))
+        return publish(name, params if isinstance(params, dict) else {}, response(request_id, error=AutomationError("INTERNAL_ERROR", str(error))))
 
 
 def dispatch_json(request):
