@@ -74,6 +74,35 @@ class CollaborationTests(unittest.TestCase):
         finally:
             bpy.ops.object.mode_set(mode=next(item for item in modes if item == "OBJECT"))
 
+    def test_user_pose_and_weight_paint_modes_are_not_forced(self):
+        # Both modes belong to the user; a mutation must wait rather than exit them.
+        # The mesh and armature below are newly owned visible acceptance fixtures.
+        # Restore only those fixtures' test modes afterward, never an existing rig.
+        # Native mode enum identifiers are discovered from actual registered RNA.
+        modes = [item.identifier for item in bpy.ops.object.mode_set.get_rna_type().properties["mode"].enum_items]
+        self.obj.vertex_groups.new(name="0")
+        observed = self.call("mesh.inspect", {"object": self.obj.name})
+        params = {"object": self.obj.name, "revision": observed["revision"], "vertices": [{"index": 0, "value": [-4, -1, -1]}]}
+        before = list(self.obj.data.vertices[0].co)
+        bpy.ops.object.mode_set(mode=next(item for item in modes if item == "WEIGHT_PAINT"))
+        try:
+            result = automation.dispatch({"action": "mesh.patch", "params": params})
+            self.assertEqual(result["error"]["code"], "USER_EDIT_IN_PROGRESS")
+            self.assertEqual(bpy.context.mode, "PAINT_WEIGHT")  # The AI cannot change the active user's paint mode.
+        finally:
+            bpy.ops.object.mode_set(mode=next(item for item in modes if item == "OBJECT"))
+        bpy.ops.object.armature_add()  # Create a new fixture rig without modifying any existing user's armature.
+        rig = bpy.context.active_object
+        rig.name = "collaboration-rig-" + uuid.uuid4().hex[:8]
+        bpy.ops.object.mode_set(mode=next(item for item in modes if item == "POSE"))
+        try:
+            result = automation.dispatch({"action": "mesh.patch", "params": params})
+            self.assertEqual(result["error"]["code"], "USER_EDIT_IN_PROGRESS")
+            self.assertEqual(bpy.context.mode, "POSE")  # Reject edits without interrupting the user's pose operation.
+        finally:
+            bpy.ops.object.mode_set(mode=next(item for item in modes if item == "OBJECT"))
+        self.assertEqual(list(self.obj.data.vertices[0].co), before)  # Both rejected mutations leave real native geometry unchanged.
+
     def test_cleanup_failure_is_terminal_and_visible(self):
         # A broken cleanup must not leave the scene permanently busy.
         # Keep the terminal diagnostic warning rather than losing the record.

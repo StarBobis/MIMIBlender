@@ -55,7 +55,7 @@ class McpTests(unittest.TestCase):
         self.assertEqual([item["name"] for item in tools], ["mesh.patch"])
         self.assertFalse(tools[0]["annotations"]["readOnlyHint"])  # Mutation hints do not accidentally advertise writes as read-only.
         result = server.handle(self.message("tools/call", {"name": "mesh.patch", "arguments": {"revision": "old"}}))
-        self.assertTrue(result["result"]["isError"])
+        self.assertTrue(result["result"]["isError"])  # An automation failure must remain a dedicated MCP tool error.
         self.assertEqual(seen[-1]["request"]["request_id"], "7")  # Correlate action errors with the original MCP request identity.
 
     def test_timeout_is_never_replayed(self):

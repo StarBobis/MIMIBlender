@@ -185,6 +185,21 @@ def queue_graph_focus(window, area, tree):
                 with bpy.context.temp_override(window=window, area=area, region=region):
                     if bpy.ops.node.view_all.poll():
                         bpy.ops.node.view_all()
+                        # Blender's overlay sidebar can cover the framed output node.
+                        # Measure actual projected node bounds instead of assuming one zoom step fits.
+                        # This changes navigation only, never node layout or revision data.
+                        sidebar = next((item for item in area.regions if item.type == "UI"), None)
+                        if area.spaces.active.show_region_ui and sidebar and bpy.ops.view2d.zoom_out.poll():
+                            from .revisions import absolute_node_location
+                            limit = region.width - sidebar.width - 16  # Keep a small visible margin beside the overlay.
+                            for attempt in range(12):  # Bound native navigation work; never busy-poll a redraw or worker.
+                                right = 0
+                                for node in tree.nodes:
+                                    x, y = absolute_node_location(node)  # Frame-relative child positions require their real world layout.
+                                    right = max(right, region.view2d.view_to_region(x + node.dimensions.x, y, clip=False)[0])
+                                if right <= limit:
+                                    break  # The complete node graph fits beside the visible collaboration sidebar.
+                                bpy.ops.view2d.zoom_out()
                 area.tag_redraw()
         except (ReferenceError, RuntimeError):
             # Closed windows or a replaced editor invalidate the deferred target.
