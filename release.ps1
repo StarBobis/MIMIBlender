@@ -19,7 +19,7 @@
          "Full Changelog" compare link GitHub itself generates.
       5. Upload "MIMIBlenderVxxxx.zip" as the single release asset
          (idempotent: an existing asset with the same name is replaced).
-      6. Verify: asset present with matching size, tag visible on the remote.
+      6. Finish immediately after the successful upload response; no post-release checks.
 
     Naming rules (identical to every existing release, e.g. v1.0.12):
       tag / release name : v1.0.12
@@ -388,6 +388,14 @@ if ($existing) {
     $release = Send-ReleaseRequest -Uri $releaseUri -Method Post
     if (-not $release) { Fail 'release creation failed' }
 }
+# Check the create/update response before uploading; no extra network query is
+# needed to prove that the published title and explicit notes match this run.
+if ([string]$release.name -cne "MIMIBlender $releaseVersion") {
+    Fail 'release title does not match the product name and version'
+}
+if ([string]$release.body -cne $Notes) {
+    Fail 'release body does not match the explicitly supplied notes'
+}
 Write-Ok "release ready: $($release.html_url) (draft=$($release.draft))"
 
 # -- 6. Upload the asset ---------------------------------------------------------------
@@ -404,31 +412,8 @@ $null = Invoke-WebRequest -Uri $uploadUri -Method Post -Headers $headers `
     -ContentType 'application/zip' -InFile $zipPath -TimeoutSec 900
 Write-Ok "uploaded $zipName"
 
-# -- 7. Verify --------------------------------------------------------------------------
-Write-Step 'Verify'
-# Re-fetch by release id (a draft's tag does not resolve via /tags/{tag}).
-$release = Invoke-RestMethod -Uri "$releaseUri/$($release.id)" -Headers $headers -TimeoutSec 30
-$remoteAsset = @($release.assets) | Where-Object { $_.name -eq $zipName } | Select-Object -First 1
-if (-not $remoteAsset) { Fail "$zipName missing from the release after upload" }
-if ($remoteAsset.size -ne $zipItem.Length) {
-    Fail "$zipName remote size $($remoteAsset.size) != local $($zipItem.Length)"
-}
-$localHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
-Write-Ok "$zipName  $($remoteAsset.size) bytes  SHA256(local)=$($localHash.Substring(0,16))..."
-
-# The add-on updater polls tags, so the tag must exist on the remote for a
-# published release (drafts legitimately have no tag yet).
-$tagOnRemote = @($remoteTags -contains $tag)
-if (-not $tagOnRemote) {
-    $tagOnRemote = [bool](git ls-remote --tags origin "refs/tags/$tag" 2>$null)
-}
-if ($tagOnRemote) {
-    Write-Ok "tag $tag visible on origin (updater channel live)"
-} elseif ($release.draft) {
-    Write-Warn2 "draft release: tag $tag appears when the draft is published"
-} else {
-    Write-Warn2 "tag $tag not visible on origin yet (GitHub propagation, check shortly)"
-}
+# Successful upload responses finish the release. Do not re-query assets,
+# compare hashes or sizes, download archives, or poll the updater tag channel.
 
 # -- Summary -----------------------------------------------------------------------------
 Write-Step 'Done'

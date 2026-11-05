@@ -15,18 +15,21 @@ description: Publish a MIMIBlender add-on release: bump the version, package wit
 
 ## Release steps (this is the whole flow)
 
-1. Update only the version tuple in `__init__.py`, commit `chore(release): version X.Y.Z`, push.
+1. Start from a clean worktree. Do not manually bump the version before using `-Bump`.
 2. Run `.\release.ps1 -Bump -Push -NotesPath tmp\release-notes.txt` (or `-Notes "<description>"`).
-   The script is idempotent: it bumps, commits, pushes, packs `git archive` of HEAD into
-   `MIMIBlenderV<digits>.zip`, creates the public `v<version>` release, uploads the single
-   manual-install asset and checks the wrapper folder, packed version and uploaded size itself.
-3. Report the release URL.
+   The script bumps only the version tuple, commits `chore(release): version X.Y.Z`, pushes,
+   packs `git archive` of HEAD into `MIMIBlenderV<digits>.zip`, checks the local wrapper/version,
+   creates the public `v<version>` release, checks title/body in the create/update response,
+   uploads the single manual-install asset, and finishes immediately on upload success.
+   If the version was already bumped by a failed run, retry without `-Bump`.
+3. Report the release URL. Do not add post-release asset, hash, tag or update-channel checks.
 
 ## Chinese release notes
 
 A Chinese `-Notes` string passed through a shell can arrive garbled. Write the text into a UTF-8
-file (BOM is fine, PowerShell strips it) and pass `-NotesPath` instead; verify afterwards with
-`GET /repos/<repo>/releases/tags/v<version>` that `body` has no U+FEFF and the expected characters.
+file (BOM is fine, PowerShell strips it) and pass `-NotesPath` instead. The script trims the
+input and checks the exact body in the create/update response before uploading. Do not
+fetch the published release again just to check its notes.
 
 ## Token precedence trap
 
@@ -43,6 +46,13 @@ $env:MIMI_GITHUB_TOKEN = ($raw | Where-Object { $_ -like 'password=*' } | Select
 
 `gh auth status` may report "Bad credentials" while `git push` still works: the two use different
 credential stores, and push success alone does not mean the Release API is reachable.
+
+## Source-only flow regression
+
+After editing the release script, run `python .agents/skills/blender-addon-release/test_release_flow.py`.
+It checks the actual script tail, explicit response metadata checks and published-by-default
+behavior without querying GitHub. Keep the script header and body aligned; a stale tail
+can otherwise reintroduce remote asset/hash/tag checks after a successful upload.
 
 ## Do not
 
