@@ -66,6 +66,8 @@ def blender_call(payload, port=9877, timeout=120):
             if not chunk:  # Closed transport is not evidence that a queued action rolled back.
                 raise ConnectionError("Blender disconnected before a complete response")
             buffer.extend(chunk)  # Parse only after preserving all bytes received for this call.
+            if len(buffer) > MAX_BYTES:
+                raise ValueError("Blender response exceeds the transport byte limit")  # Reject oversize complete responses before decoding.
             try:
                 response = json.loads(buffer.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):

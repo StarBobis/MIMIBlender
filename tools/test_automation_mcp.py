@@ -17,6 +17,7 @@ import socket
 import sys
 import threading
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]  # Read production source directly rather than a copied adapter fixture.
@@ -68,6 +69,25 @@ class McpTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)  # Timeout handling must never duplicate an ambiguous mutation.
         self.assertFalse(result["error"]["data"]["retry_safe"])
         self.assertTrue(result["error"]["data"]["outcome_unknown"])
+
+    def test_complete_oversized_response_is_rejected_before_decode(self):
+        # A complete single recv packet must obey the same byte limit as fragments.
+        # Replace only the socket boundary, not production length/JSON checks.
+        # No real network endpoint or user Blender scene is touched in this case.
+        class Connection:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def sendall(self, data):
+                pass
+            def settimeout(self, value):
+                pass
+            def recv(self, size):
+                return b'{"status":"success"}'  # This syntactically complete packet exceeds the injected byte limit.
+        with patch.object(bridge, "MAX_BYTES", 4), patch.object(bridge.socket, "create_connection", return_value=Connection()):
+            with self.assertRaisesRegex(ValueError, "byte limit"):
+                bridge.blender_call({"operation": "tools"})
 
     def test_socket_template_keeps_payload_inert(self):
         # The fake endpoint only reads the command and returns a split response.

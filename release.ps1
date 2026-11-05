@@ -269,7 +269,20 @@ if ($remoteSha -ne $headSha) {
 # -- 3. Pack the zip --------------------------------------------------------------
 Write-Step "Pack $zipName"
 if (-not (Test-Path -LiteralPath $TmpDir)) { New-Item -ItemType Directory -Force -Path $TmpDir | Out-Null }
-if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+if (Test-Path -LiteralPath $zipPath) {
+    # Preserve older local packages rather than deleting or overwriting them.
+    # Resolve and verify this exact owned tmp archive before moving anything.
+    # Backup names are lowercase and exclusive; no user data is discarded.
+    $oldPackage = Get-Item -LiteralPath $zipPath
+    $expectedPackage = [System.IO.Path]::GetFullPath($zipPath)
+    if ($oldPackage.FullName -ne $expectedPackage -or $oldPackage.DirectoryName -ne $TmpDir) {
+        Fail 'Existing package path is not the expected repository tmp archive'
+    }
+    $historyFolder = Join-Path $TmpDir 'archive-history'
+    New-Item -ItemType Directory -Force -Path $historyFolder | Out-Null
+    $historyPath = Join-Path $historyFolder ('package-' + [guid]::NewGuid().ToString('N') + '.zip')
+    Move-Item -LiteralPath $oldPackage.FullName -Destination $historyPath
+}
 
 # git archive packs exactly the tracked files of HEAD with the required wrapper
 # folder as --prefix: matches existing releases (includes .gitignore/AGENTS.md,
@@ -297,7 +310,18 @@ try {
     if ($packedVersion -ne ($releaseVersion -replace '\.', ',')) {
         Fail "packed bl_info version ($packedVersion) != release version ($releaseVersion)"
     }
-    Write-Ok "archive verified: $($entryNames.Count) entries, all under $baseName/, version $releaseVersion"
+    # These implemented runtime modules must ship in the real plugin archive.
+    # An untracked or export-ignored automation folder cannot silently pass.
+    # Keep this native check dependency-free; no Python installation is needed.
+    # Local tools/check_automation_package.py also compiles the complete surface.
+    $automationModules = @('__init__', 'contract', 'registry', 'inspection', 'properties', 'blueprints', 'presentation',
+        'paths', 'context', 'revisions', 'workspaces', 'jobs', 'binding', 'exports', 'audits',
+        'preservation', 'collaboration', 'meshes', 'reverse', 'materials', 'mcp_bridge', 'state', 'ui')
+    foreach ($module in $automationModules) {
+        $runtimePath = "$baseName/automation/$module.py"
+        if ($entryNames -notcontains $runtimePath) { Fail "archive misses automation runtime file: $runtimePath" }
+    }
+    Write-Ok "archive verified: $($entryNames.Count) entries, all under $baseName/, version $releaseVersion, automation included"
 } finally {
     $zip.Dispose()
 }
