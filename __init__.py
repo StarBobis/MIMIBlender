@@ -162,6 +162,11 @@ def _register_steps():
     # are registered. Files opened later are handled by the load_post handler.
     yield blueprint_node_base.migrate_legacy_node_titles
 
+    # Bound AI blueprints keep using their own source workspace in native UI.
+    # Install wrappers only after all original node/operator classes exist.
+    from .automation import collaboration
+    yield collaboration.register
+
 
 def unregister():
     # Unregister in the reverse order of register to avoid type dependency issues.
@@ -174,7 +179,10 @@ def unregister():
         ui_panel_updater.unregister()
         addon_updater_ops.unregister()
 
+    from .automation import collaboration
     steps = [
+        # Restore native callbacks before unregistering the owned RNA classes.
+        collaboration.unregister,
         gimi_body_outline.unregister,
         # Remove MMD controls before the earlier texture-combiner module.
         ui_panel_mmd.unregister,

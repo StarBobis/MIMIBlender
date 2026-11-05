@@ -352,7 +352,11 @@ def read_only(handler):
 # An explicit handler map prevents an action name from becoming arbitrary getattr.
 # Later mutation modules extend the dispatch map through their own public actions.
 # Keeping queries separate makes read-only capability checks easy to test.
-HANDLERS = {name: read_only(handler) for name, handler in {
+from .context import tree_scoped
+
+# Scoped graph reads resolve dynamic mark enums from the saved AI workspace.
+# Other queries continue observing the user's ordinary current scene settings.
+HANDLERS = {name: read_only(tree_scoped(handler) if name == "blueprint.inspect" else handler) for name, handler in {
     "system.capabilities": system_capabilities, "scene.inspect": scene_inspect,
     "settings.inspect": settings_inspect, "rna.describe": rna_describe,
     "blueprint.inspect": blueprint_inspect,

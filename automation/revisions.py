@@ -112,7 +112,8 @@ def tree_state(tree, ancestors=()):
     links = sorted((link.from_node.name, link.from_socket.identifier, link.to_node.name,
                     link.to_socket.identifier, getattr(link, "multi_input_sort_id", 0)) for link in tree.links)
     interface = [(item.name, item.in_out, item.socket_type) for item in tree.interface.items_tree if item.item_type == "SOCKET"]
-    return {"nodes": nodes, "links": links, "interface": interface}
+    return {"nodes": nodes, "links": links, "interface": interface,
+            "workflow": tree.get("mimi_ai_workflow")}
 
 
 def blueprint_revision(tree):

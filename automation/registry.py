@@ -151,3 +151,36 @@ add_action("job.inspect", "Read a cooperative job's actual progress, error or te
 add_action("job.cancel", "Cancel future steps of a visible workflow while retaining partial user-visible work.", {
     "job": string_schema("Exact returned workflow job identifier"),
 }, ("job",), mutates=True)
+
+# Existing user geometry can be handed to AI without another import pass.
+# Binding creates a new recoverable graph version and private type record.
+add_action("workspace.bind", "Bind a partially edited user blueprint to explicit read-only native workspace data.", {
+    "tree": string_schema("Existing user blueprint name"),
+    "revision": string_schema("Fresh graph revision token"),
+    "name": string_schema("Optional new bound blueprint version name"),
+    "source": string_schema("Absolute source workspace directory"),
+    "logic": string_schema("Registered native game exporter logic"),
+    "workspace_name": string_schema("Native workspace identity"),
+    "work_directory": string_schema("Absolute isolated working root"),
+    "types": {"type": "object", "additionalProperties": string_schema("Explicit data type")},
+    "settings": {"type": "object", "additionalProperties": {}},
+    "present": {"type": "boolean"},
+}, ("tree", "revision", "source", "logic", "work_directory"), mutates=True)
+
+# Export is a visible cooperative job, not an in-game validation claim.
+# Output directories must be new and outside source assets.
+# Native conversion and generation use the tree's own persisted source context.
+# Artifact hashes establish local files, not correct in-game rendering.
+# Manual Generate Mod routes bound trees through this same job contract.
+# Source-binding changes are covered by the graph revision token.
+# A user edit during preparation interrupts rather than updating old output.
+add_action("mod.export", "Generate a native Mod into a new directory and independently audit files/scene preservation.", {
+    "tree": string_schema("Exact bound blueprint name"),
+    "revision": string_schema("Current graph revision token"),
+    "output_node": string_schema("Output node identity; required for multiple outputs"),
+    "output_directory": string_schema("Absolute new Mod directory outside source assets"),
+    "settings": {"type": "object", "additionalProperties": {}},
+}, ("tree", "revision", "output_directory"), mutates=True)
+add_action("mod.audit", "Read-only offline INI/resource-file closure and artifact hash audit; does not run a game.", {
+    "output_directory": string_schema("Absolute generated Mod directory"),
+}, ("output_directory",))

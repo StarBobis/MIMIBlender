@@ -22,26 +22,36 @@ class FaceModExportError(ValueError):
     pass
 
 
+class _FaceObjectListSource:
+    """Read-only Object List adapter for the existing Face part builder."""
+    bl_idname = "MIMINode_Object_Info"
+
+    def __init__(self, item):
+        # Native pointers follow user renames without rewriting the blueprint.
+        # Do not create extra Object Info nodes or UUID metadata during export.
+        obj = item.object_ref or bpy.data.objects.get(item.object_name)
+        self.name = item.name
+        self.object_name = obj.name if obj else item.object_name
+        self.object_id = ""
+        self.submesh_name = item.submesh_name
+        self.skip_draw = item.skip_draw
+
+    def _get_effective_parse_name(self):
+        return self.submesh_name or self.object_name
+
+
 def _collect_object_nodes(node, visited=None, *, is_root=True):
-    """Resolve Object Info nodes upstream of a face-export node in socket order."""
-    visited = visited if visited is not None else set()
-    if node is None or node in visited:
-        return []
-    visited.add(node)
-
-    if getattr(node, "bl_idname", "") == "MIMINode_Object_Info":
-        return [node]
-
-    # Output nodes are composition boundaries.  Their object graph must not
-    # silently become a part of this face export as well.
-    if not is_root and getattr(node, "bl_idname", "") in {
-        "MIMINode_Result_Output", "MIMINode_Face_Mod_Export",
-    }:
-        return []
-
+    """Resolve exact upstream Object Info/List ports, including custom groups."""
+    from .blueprint_graph import iter_object_sources
+    # The shared strict traversal preserves per-row and group-output identity.
+    # Collecting a whole Object List from one selected port would export bodies
+    # into the Face branch and silently deduplicate the wrong Submesh objects.
     result = []
-    for source_node in BlueprintExportHelper.get_connected_nodes(node):
-        result.extend(_collect_object_nodes(source_node, visited, is_root=False))
+    for source in iter_object_sources(node, strict=True):
+        if getattr(source, "bl_idname", "") == "MIMINode_Object_Info":
+            result.append(source)
+        else:
+            result.append(_FaceObjectListSource(source))
     return result
 
 
@@ -162,7 +172,11 @@ def export_face_mod_from_node(node) -> tuple[str, int]:
         parts.append(_build_face_part(object_node))
 
     output_folder = str(getattr(node, "output_folder", "") or "").strip()
-    if not getattr(node, "use_specific_output_folder", False) or not output_folder:
+    if isinstance(getattr(GlobalConfig, "_automation_override", None), dict):
+        # An AI/native handoff export owns one explicit new artifact root.
+        # A saved node override must not redirect writes into another user folder.
+        output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
+    elif not getattr(node, "use_specific_output_folder", False) or not output_folder:
         output_folder = os.path.join(GlobalConfig.path_generate_mod_folder(), "Face")
     write_face_mod(output_folder, parts, diffuse_hash=node.diffuse_hash)
     # ``write_face_mod`` returns the directory; report the actual Face.ini

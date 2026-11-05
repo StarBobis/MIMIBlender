@@ -47,6 +47,7 @@ that legacy Object Info callbacks may have added to referenced source objects.
 import bpy
 
 from .contract import AutomationError
+from .context import tree_scoped
 from .inspection import addon_classes, blueprint_inspect, require_tree
 from .properties import set_node_properties
 
@@ -176,6 +177,7 @@ def add_interface(tree, entries):
         tree.interface.new_socket(entry["name"], in_out=entry["direction"], socket_type="MIMISocketObject")
 
 
+@tree_scoped
 def blueprint_build(params):
     """Build a new graph version, discarding only an invalid disposable stage."""
     from ..blueprint.blueprint_node_obj import OBJECT_PERSISTENT_ID_KEY

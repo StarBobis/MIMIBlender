@@ -90,6 +90,13 @@ def generate_mod_from_output_node(tree, context, output_node, report_callback):
         report_callback({'ERROR'}, tr("Please select a valid Output node"))
         return {'CANCELLED'}
 
+    # AI-bound trees retain their own source/preset metadata after manual handoff.
+    # Route the user's button through the same validated cooperative export job.
+    if tree is not None and hasattr(tree, "get") and tree.get("mimi_ai_workflow"):
+        if not isinstance(getattr(GlobalConfig, "_automation_override", None), dict):
+            from ..automation.exports import export_for_ui
+            return export_for_ui(tree, output_node, report_callback)
+
     TimerUtils.Start("GenerateMod Mod")
     GlobalConfig.initialize_key_count()
     BlueprintExportHelper.runtime_output_node = None
@@ -189,6 +196,10 @@ class MMTGenerateModBlueprint(I18nOperator):
         # exactly the historical one.
         tree, output_node = self._resolve_target(context)
         if tree is None or output_node is None:
+            return self.execute(context)
+        if tree.get("mimi_ai_workflow"):
+            # The AI/native handoff job owns conversion and validated generation.
+            # Do not start a second modal conversion against host-selected data.
             return self.execute(context)
         jobs = self._pending_jobs(tree)
         if not jobs:

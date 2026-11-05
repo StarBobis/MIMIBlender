@@ -33,7 +33,7 @@ import bpy
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py", "test_automation_workspaces_blender.py")
+SUITES = ("test_automation_blender.py", "test_automation_graph_blender.py", "test_automation_workspaces_blender.py", "test_automation_exports_blender.py")
 
 
 def run_visible_tests(suites=SUITES):
@@ -49,13 +49,10 @@ def run_visible_tests(suites=SUITES):
     records = bpy.app.driver_namespace.get("mimi_ai_jobs", {})
     if any(item["status"] not in {"succeeded", "failed", "cancelled", "interrupted"} for item in records.values()):
         raise RuntimeError("Finish active workflow jobs before running/reloading the test suite")
-    # Reload only already loaded automation implementations, preserving bpy data.
-    # Pure contract tests are run separately in ordinary Python, not in Blender.
-    prefix = ROOT.name + ".automation"
-    for suffix in ("registry", "paths", "revisions", "inspection", "properties", "presentation", "context", "jobs", "blueprints", "workspaces", ""):
-        name = prefix + ("." + suffix if suffix else "")
-        if name in sys.modules:
-            importlib.reload(sys.modules[name])
+    # Refresh fixed authored code with class identities and user data preserved.
+    # UI wrappers are restored/reinstalled around the dependency-ordered reload.
+    from MIMIBlender.tools.reload_automation_live import reload_visible_automation
+    reload_visible_automation()
     stream = io.StringIO()
     records = []
     for filename in suites:

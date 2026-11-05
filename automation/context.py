@@ -27,6 +27,7 @@ Source workspaces are read-only; selection records live in the session directory
 # - An import/export adapter still owns its artifact and source validation.
 from contextlib import contextmanager
 from copy import deepcopy
+from functools import wraps
 
 from .contract import AutomationError
 
@@ -51,10 +52,10 @@ def workflow_context(config, settings=None):
     try:
         # Legacy enum callbacks must not reread and replace the scoped host state.
         # Prepare all explicit assignments before changing the scene properties.
-        GlobalConfig._automation_override = dict(config)
-        GlobalConfig.logic_name = config["logic"]
-        GlobalConfig.gamename = config.get("game_name", config["logic"])
-        GlobalConfig.workspacename = config["workspace_name"]
+        GlobalConfig._automation_override = dict(config)  # Scope paths without modifying persistent host JSON.
+        GlobalConfig.logic_name = config["logic"]  # Native preset-specific rules use this explicit game logic.
+        GlobalConfig.gamename = config.get("game_name", config["logic"])  # Retain an optional caller-declared game label.
+        GlobalConfig.workspacename = config["workspace_name"]  # INI identity remains tied to this bound workspace.
         prepared = {name: prepared_value(owner, name, value) for name, value in (settings or {}).items()}
         for name, value in prepared.items():
             setattr(owner, name, value)
@@ -72,6 +73,45 @@ def workflow_context(config, settings=None):
             BlueprintExportHelper.runtime_output_node = previous_output
 
 
+@contextmanager
+def readonly_workflow_context(config):
+    """Scope legacy path/game lookups without writing RNA during UI drawing.
+
+    Node draw callbacks are read-only Blender contexts. Python configuration
+    fields may be scoped, but scene PropertyGroups must never be assigned here.
+    """
+    from ..common.global_config import GlobalConfig
+    types = (str, int, float, bool, dict, list, tuple, type(None))
+    snapshot = {name: deepcopy(value) for name, value in vars(GlobalConfig).items()
+                if not name.startswith("_") and isinstance(value, types)}
+    previous = GlobalConfig._automation_override
+    try:
+        GlobalConfig._automation_override = dict(config)  # Scope paths without modifying persistent host JSON.
+        GlobalConfig.logic_name = config["logic"]  # Native preset-specific rules use this explicit game logic.
+        GlobalConfig.gamename = config.get("game_name", config["logic"])  # Retain an optional caller-declared game label.
+        GlobalConfig.workspacename = config["workspace_name"]  # INI identity remains tied to this bound workspace.
+        yield
+    finally:
+        GlobalConfig._automation_override = previous
+        for name, value in snapshot.items():
+            setattr(GlobalConfig, name, value)
+
+
+def tree_scoped(handler):
+    """Bind a request's explicit tree metadata for native property/source lookups."""
+    @wraps(handler)
+    def guarded(params):
+        from .inspection import require_tree
+        name = params.get("base_tree") or params.get("tree")
+        tree = require_tree(name) if name else None
+        if tree is None or not tree.get("mimi_ai_workflow"):
+            return handler(params)
+        config = require_session_config(tree)
+        with readonly_workflow_context(config):
+            return handler(params)
+    return guarded
+
+
 def require_session_config(tree):
     """Read persisted workflow metadata from a user-saveable blueprint tree."""
     import json
@@ -85,4 +125,17 @@ def require_session_config(tree):
     required = {"workspace", "workspace_name", "logic", "import_selection", "work_directory"}
     if not isinstance(config, dict) or not required.issubset(config):
         raise AutomationError("INVALID_SESSION", "Blueprint workflow metadata is incomplete")
+    from pathlib import Path
+    from .contract import validate
+    from .paths import safe_workspace_name
+    validate(config, {}, "workflow")
+    for name in required:
+        if not isinstance(config[name], str) or not config[name]:
+            raise AutomationError("INVALID_SESSION", "Workflow identity/path fields must be nonempty strings", {"field": name})
+    if "import_settings" in config and not isinstance(config["import_settings"], dict):
+        raise AutomationError("INVALID_SESSION", "Saved import settings must be an object")
+    for name in ("workspace", "work_directory", "import_selection", "output"):
+        if name in config and (not isinstance(config[name], str) or not Path(config[name]).is_absolute()):
+            raise AutomationError("INVALID_SESSION", "Workflow paths must be absolute", {"field": name})
+    safe_workspace_name(config["workspace_name"])
     return config

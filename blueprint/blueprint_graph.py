@@ -81,7 +81,13 @@ def iter_object_sources(root, strict=False):
             # Output nodes are composition boundaries, except the preview root.
             if node != root and kind in {'MIMINode_Result_Output', 'MIMINode_Face_Mod_Export'}:
                 return
-            yield from links(node.inputs, instances)
+            inputs = node.inputs
+            if kind in {"MIMINode_Texture_Bind", "MIMINode_Hash_Texture_Bind"} and output is not None:
+                # Output channel N belongs only to input channel N, including
+                # native Face export paths and nested object-source previews.
+                from .texture_bind_channels import channel_inputs
+                inputs = channel_inputs(node, output)
+            yield from links(inputs, instances)
         finally:
             active.remove(key)
 

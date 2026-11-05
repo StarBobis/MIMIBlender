@@ -543,7 +543,9 @@ class MMTWorkSpace:
         # Try new-format parsing first
         ws_model = WorkSpaceModel(workspace_path=workspace_folder)
         parsed = ws_model.parse_new_format_name(submesh_name)
-        if parsed is not None and parsed["draw_ib"] and parsed["lod"]:
+        if parsed is not None and parsed["draw_ib"]:
+            # The empty LOD key is the supported legacy no-LOD workspace layout.
+            # Requiring a prefix silently lost marked textures for new short names.
             folder_path = ws_model.get_folder_path(parsed["lod"], parsed["draw_ib"], parsed["component"])
             if folder_path and os.path.isdir(folder_path):
                 return folder_path
