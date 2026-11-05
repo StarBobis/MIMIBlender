@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Simplified Chinese translations for MIMIBlender.
 
 Every key is the original English source string (msgid) used in the addon's
@@ -1367,4 +1367,18 @@ TRANSLATIONS_ZH_CN = {
     "Clear Cache": "清除缓存",
     "{count} replacement texture(s) need conversion before export": "导出前有 {count} 张替换贴图需要转换",
     "Replacement texture conversion failed; export stopped": "替换贴图转换失败；导出已停止",
+    # Persistent atlas output and generated diffuse selection.
+    "Default Output Folder": "\u9ed8\u8ba4\u8f93\u51fa\u76ee\u5f55",
+    "Choose Folder": "\u9009\u62e9\u76ee\u5f55",
+    "Choose once; future merges use this folder": "\u9009\u62e9\u4e00\u6b21\uff0c\u4ee5\u540e\u5408\u5e76\u76f4\u63a5\u4f7f\u7528\u6b64\u76ee\u5f55",
+    "Please select an existing output folder": "\u8bf7\u9009\u62e9\u5df2\u5b58\u5728\u7684\u8f93\u51fa\u76ee\u5f55",
+    "Add-on preferences are unavailable": "\u65e0\u6cd5\u8bbf\u95ee\u63d2\u4ef6\u504f\u597d\u8bbe\u7f6e",
+    "Could not save the default output folder": "\u65e0\u6cd5\u4fdd\u5b58\u9ed8\u8ba4\u8f93\u51fa\u76ee\u5f55",
+    "Remember this folder for future texture merges": "\u8bb0\u4f4f\u6b64\u76ee\u5f55\uff0c\u4ee5\u540e\u5408\u5e76\u8d34\u56fe\u65f6\u76f4\u63a5\u4f7f\u7528",
+    "Default output folder saved": "\u5df2\u4fdd\u5b58\u9ed8\u8ba4\u8f93\u51fa\u76ee\u5f55",
+    "Sizes are generated or recalculated automatically when combining": "\u5408\u5e76\u65f6\u81ea\u52a8\u751f\u6210\u6216\u91cd\u7b97\u5c3a\u5bf8\u5206\u5e03",
+    "Choose Merged DiffuseMap": "\u9009\u62e9\u5408\u5e76\u7684 DiffuseMap",
+    "Use a generated diffuse atlas as this row's replacement texture": "\u4f7f\u7528\u5408\u5e76\u751f\u6210\u7684\u6f2b\u53cd\u5c04\u8d34\u56fe\u66ff\u6362\u5f53\u524d\u884c\u7684\u8d34\u56fe",
+    "No merged DiffuseMap results available": "\u6682\u65e0\u53ef\u7528\u7684\u5408\u5e76 DiffuseMap \u7ed3\u679c",
+    "Merged DiffuseMap file was not found": "\u627e\u4e0d\u5230\u5408\u5e76 DiffuseMap \u6587\u4ef6",
 }

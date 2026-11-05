@@ -366,7 +366,10 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
         Args:
             layout: The layout to draw into.
         """
-        # Planning stays available even when no valid merge can run yet.
+        from ..output_settings import draw_output_directory
+        # The global destination remains available before any distribution exists.
+        draw_output_directory(layout, bpy.context)
+        # Planning remains available for artists who want to inspect sizes first.
         row = layout.row(align=True)
         row.operator("mimi.generate_size_distribution", text=tr("Generate Size Distribution"))
         recalculate = row.row(align=True)
@@ -435,12 +438,12 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
             layout.label(text=tr("Valid distribution: {width} x {height}").format(
                 width=scene.mimi_smc_distribution_width, height=scene.mimi_smc_distribution_height), icon="CHECKMARK")
         else:
-            # Any edit or source change blocks export until another successful run.
-            layout.label(text=tr("Generate or recalculate a valid size distribution before combining"), icon="ERROR")
+            # Missing or stale plans are repaired by the merge entry point.
+            layout.label(text=tr("Sizes are generated or recalculated automatically when combining"), icon="INFO")
             if scene.mimi_smc_distribution_message:
                 layout.label(text=scene.mimi_smc_distribution_message, icon="INFO")
         col = layout.column()
-        col.enabled = ready
+        # Do not require a separate planning click before the merge action.
         col.scale_y = 1.5
         col.operator(
             "mimi.combiner",

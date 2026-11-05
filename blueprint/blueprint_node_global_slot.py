@@ -150,6 +150,12 @@ class MIMINode_Texture_Global(MIMINodeBase):
     items: bpy.props.CollectionProperty(type=GlobalSlotItem)
     index: bpy.props.IntProperty(default=0)
 
+    def width_texts(self):
+        """Provide the title-width contract used after a saved blueprint loads."""
+        # Both socketless managers participate in title/language migration.
+        # Missing this method would interrupt load_post for subsequent nodes.
+        return [self.label]
+
     def init(self, context):
         # Green marks a global manager; connected overrides use other colors.
         # No sockets means this node does not participate in object traversal.

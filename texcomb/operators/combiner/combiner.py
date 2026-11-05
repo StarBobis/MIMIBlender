@@ -9,6 +9,7 @@ Usage example:
     bpy.ops.mimi.combiner(directory=r'/path/to/save/directory')
 """
 
+import os
 from typing import Set
 
 import bpy
@@ -16,6 +17,7 @@ from bpy.props import BoolProperty, StringProperty
 
 from ....i18n.i18n import I18nOperator, tr
 from ...core import texconv
+from ...output_settings import default_output_directory, remember_output_directory
 from .combiner_ops import (
     align_uvs,
     assign_comb_mats,
@@ -54,8 +56,9 @@ class Combiner(I18nOperator):
         description=tr("Directory for saving the atlas"),
         maxlen=1024,
         default="",
-        subtype="FILE_PATH",
-        options={"HIDDEN"},
+        subtype="DIR_PATH",
+        # Remembered operator arguments must not override a newly chosen default.
+        options={"HIDDEN", "SKIP_SAVE"},
     )
     filter_glob: StringProperty(default="", options={"HIDDEN"})
     cats: BoolProperty(
@@ -83,13 +86,19 @@ class Combiner(I18nOperator):
             Set containing operation status.
         """
         scn = context.scene
-        # Check again after the file picker: selections or settings may change.
-        if not distribution_ready(scn):
-            self.report({"ERROR"}, tr("Generate or recalculate a valid size distribution before combining"))
-            return {"CANCELLED"}
-
+        # Validate the folder before planning or touching live UV coordinates.
+        # Explicit programmatic paths do not overwrite persistent user defaults.
+        self.directory = self.directory or default_output_directory(context)
         if not self.directory:
-            return self._return_with_message("ERROR", tr("No save directory selected"))
+            self.report({"ERROR"}, tr("No save directory selected"))
+            return {"CANCELLED"}
+        self.directory = os.path.normpath(bpy.path.abspath(self.directory))
+        if not os.path.isdir(self.directory):
+            self.report({"ERROR"}, tr("Please select an existing output folder"))
+            return {"CANCELLED"}
+        # Recheck after browsing: sources and settings may have changed meanwhile.
+        if not self._ensure_distribution(context):
+            return {"CANCELLED"}
 
         # DDS output is produced by texconv.exe; refuse early with a clear
         # message instead of crashing halfway through the pipeline.
@@ -134,6 +143,13 @@ class Combiner(I18nOperator):
         assign_comb_mats(scn, self.data, comb_mats)
         clear_mats(scn, self.mats_uv)
         bpy.ops.mimi.refresh_ob_data()
+        # A first interactive merge also remembers the selected destination.
+        # Failure to save preferences must not misreport a completed merge.
+        if getattr(self, "_remember_directory", False):
+            try:
+                remember_output_directory(context, self.directory)
+            except (ValueError, RuntimeError, OSError) as error:
+                self.report({"WARNING"}, str(error))
         self.report({"INFO"}, tr("Materials combined successfully"))
         return {"FINISHED"}
 
@@ -157,11 +173,10 @@ class Combiner(I18nOperator):
             Set containing operation status.
         """
         scn = context.scene
-        # Reject an absent/stale plan before refreshing or touching the model.
-        if not distribution_ready(scn):
-            self.report({"ERROR"}, tr("Generate or recalculate a valid size distribution before combining"))
-            return {"CANCELLED"}
         bpy.ops.mimi.refresh_ob_data()
+        # Automatic planning is read-only; impossible locks still stop the merge.
+        if not self._ensure_distribution(context):
+            return {"CANCELLED"}
 
         validation_result = validate_ob_data(scn.mimi_smc_ob_data)
         if validation_result:
@@ -189,10 +204,31 @@ class Combiner(I18nOperator):
                 tr("Only one unique material was selected; no merging needed"),
             )
 
-        if event is not None:
-            context.window_manager.fileselect_add(self)
-
+        # Skip the browser whenever the caller or preferences supply a folder.
+        self.directory = self.directory or default_output_directory(context)
+        if self.directory:
+            return self.execute(context)
+        if event is None:
+            self.report({"ERROR"}, tr("No save directory selected"))
+            return {"CANCELLED"}
+        self._remember_directory = True
+        context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
+
+    def _ensure_distribution(self, context):
+        """Generate missing defaults or recalculate existing manual locks."""
+        scene = context.scene
+        if distribution_ready(scene):
+            return True
+        try:
+            # Recalculation preserves the artist's locked dimensions. Never
+            # fall back to fresh defaults when those constraints cannot fit.
+            result = bpy.ops.mimi.generate_size_distribution(
+                recalculate=bool(scene.mimi_smc_distribution))
+        except RuntimeError as error:
+            self.report({"ERROR"}, str(error))
+            return False
+        return result == {"FINISHED"} and distribution_ready(scene)
 
     def draw(self, context: bpy.types.Context) -> None:
         """Draw the operator UI.

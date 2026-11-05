@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Traditional Chinese (zh-TW) translations for MIMIBlender.
 
 Every key is the original English source string (msgid) used in the addon's
@@ -1371,4 +1371,18 @@ TRANSLATIONS_ZH_TW = {
     "Clear Cache": "清除快取",
     "{count} replacement texture(s) need conversion before export": "匯出前有 {count} 張替換貼圖需要轉換",
     "Replacement texture conversion failed; export stopped": "替換貼圖轉換失敗；匯出已停止",
+    # Persistent atlas output and generated diffuse selection.
+    "Default Output Folder": "\u9810\u8a2d\u8f38\u51fa\u8cc7\u6599\u593e",
+    "Choose Folder": "\u9078\u64c7\u8cc7\u6599\u593e",
+    "Choose once; future merges use this folder": "\u9078\u64c7\u4e00\u6b21\uff0c\u4ee5\u5f8c\u5408\u4f75\u76f4\u63a5\u4f7f\u7528\u6b64\u8cc7\u6599\u593e",
+    "Please select an existing output folder": "\u8acb\u9078\u64c7\u5df2\u5b58\u5728\u7684\u8f38\u51fa\u8cc7\u6599\u593e",
+    "Add-on preferences are unavailable": "\u7121\u6cd5\u5b58\u53d6\u5916\u639b\u504f\u597d\u8a2d\u5b9a",
+    "Could not save the default output folder": "\u7121\u6cd5\u5132\u5b58\u9810\u8a2d\u8f38\u51fa\u8cc7\u6599\u593e",
+    "Remember this folder for future texture merges": "\u8a18\u4f4f\u6b64\u8cc7\u6599\u593e\uff0c\u4ee5\u5f8c\u5408\u4f75\u8cbc\u5716\u6642\u76f4\u63a5\u4f7f\u7528",
+    "Default output folder saved": "\u5df2\u5132\u5b58\u9810\u8a2d\u8f38\u51fa\u8cc7\u6599\u593e",
+    "Sizes are generated or recalculated automatically when combining": "\u5408\u4f75\u6642\u81ea\u52d5\u7522\u751f\u6216\u91cd\u7b97\u5c3a\u5bf8\u5206\u5e03",
+    "Choose Merged DiffuseMap": "\u9078\u64c7\u5408\u4f75\u7684 DiffuseMap",
+    "Use a generated diffuse atlas as this row's replacement texture": "\u4f7f\u7528\u5408\u4f75\u7522\u751f\u7684\u6f2b\u53cd\u5c04\u8cbc\u5716\u66ff\u63db\u76ee\u524d\u5217\u7684\u8cbc\u5716",
+    "No merged DiffuseMap results available": "\u66ab\u7121\u53ef\u7528\u7684\u5408\u4f75 DiffuseMap \u7d50\u679c",
+    "Merged DiffuseMap file was not found": "\u627e\u4e0d\u5230\u5408\u4f75 DiffuseMap \u6a94\u6848",
 }

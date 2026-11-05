@@ -11,6 +11,7 @@ from . import (
     extend_types,
     globs,
     operators,
+    output_settings,
     ui,
 )
 
@@ -24,6 +25,7 @@ __bl_classes = [
     operators.combine_list.SelectAllMaterials,
     operators.combine_list.SelectNoneMaterials,
     operators.combine_list.RemoveUnusedMaterials,
+    output_settings.ChooseAtlasOutputDirectory,
     operators.combiner.Combiner,
     operators.size_distribution.GenerateSizeDistribution,
     extend_types.MIMIDistributionMember,

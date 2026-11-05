@@ -217,6 +217,8 @@ def draw_file_picker(layout, node, item, index):
             icon='FILE_FOLDER',
         )
         _target_row_operator(select, node, row_key, index)
+    if row_key:
+        draw_merged_result_picker(layout, node, item, index)
     # Clearing is a separate action, not another file browser: an empty path is
     # a meaningful state ("keep the original"), so it must always be reachable.
     if not replacement:
@@ -224,6 +226,103 @@ def draw_file_picker(layout, node, item, index):
     row = row or layout.row(align=True)
     clear = row.operator("mimi.texture_row_clear_file", text="", icon='X')
     _target_row_operator(clear, node, row_key, index)
+
+
+def draw_merged_result_picker(layout, node, item, index):
+    """Offer tagged diffuse atlases without opening the filesystem browser."""
+    select = layout.operator(
+        "mimi.texture_row_select_merged", text=tr("Choose Merged DiffuseMap"), icon="IMAGE_DATA")
+    profile = profile_for(node)
+    # Targeted Slot owns different RNA and has no shared row profile.
+    # Its pointer remains stable while this short result popup is open.
+    key = str(profile.key(item) or "") if profile else str(item.as_pointer())
+    _target_row_operator(select, node, key, index)
+
+
+# Blender retains enum string pointers and stores the numeric item value.
+# Keep tuples alive and assign stable numbers so removing one result cannot
+# silently change the popup's selection to the next image in the list.
+_MERGED_RESULT_ITEMS = []
+_MERGED_RESULT_IDS = {}
+_MERGED_RESULT_STRINGS = {}
+
+
+def _merged_result_items(self, context):
+    from ..common.merged_texture_results import diffuse_results
+    global _MERGED_RESULT_ITEMS
+    items = []
+    for name, path in diffuse_results():
+        number = _MERGED_RESULT_IDS.setdefault(name, len(_MERGED_RESULT_IDS) + 1)
+        key = (name, path)
+        if key not in _MERGED_RESULT_STRINGS:
+            _MERGED_RESULT_STRINGS[key] = (name, "DiffuseMap: " + os.path.basename(path), path, 0, number)
+        items.append(_MERGED_RESULT_STRINGS[key])
+    # A sentinel keeps the dialog drawable when every output was moved away.
+    if not items:
+        label = tr("No merged DiffuseMap results available")
+        key = ("__none__", label)
+        _MERGED_RESULT_STRINGS.setdefault(key, ("__none__", label, "", 0, 0))
+        items.append(_MERGED_RESULT_STRINGS[key])
+    _MERGED_RESULT_ITEMS = items
+    return _MERGED_RESULT_ITEMS
+
+
+class MIMI_OT_TextureRowSelectMerged(I18nOperator):
+    """Assign one actual generated diffuse atlas through the row's own writer."""
+    bl_idname = "mimi.texture_row_select_merged"
+    bl_label = "Choose Merged DiffuseMap"
+    bl_description = "Use a generated diffuse atlas as this row's replacement texture"
+    bl_options = {"REGISTER", "UNDO"}
+    node_name: bpy.props.StringProperty()
+    tree_name: bpy.props.StringProperty()
+    row_key: bpy.props.StringProperty(default="", options={"HIDDEN"})
+    row_index: bpy.props.IntProperty(default=-1, options={"HIDDEN"})
+    result_image: bpy.props.EnumProperty(name="DiffuseMap", items=_merged_result_items)
+
+    def invoke(self, context, event):
+        from ..common.merged_texture_results import diffuse_results
+        results = diffuse_results()
+        if not results:
+            self.report({"WARNING"}, tr("No merged DiffuseMap results available"))
+            return {"CANCELLED"}
+        # Do not silently pick an arbitrary latest result when several exist.
+        self.result_image = results[0][0]
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, "result_image", text="DiffuseMap")
+
+    def execute(self, context):
+        from ..common.merged_texture_results import result_path
+        path = result_path(self.result_image)
+        if not path:
+            self.report({"ERROR"}, tr("Merged DiffuseMap file was not found"))
+            return {"CANCELLED"}
+        node = _resolve_node(self, context)
+        profile = profile_for(node)
+        if profile is not None:
+            row = _resolve_row(self, node, profile)
+            if row is not None:
+                # Hash and global Slot rows keep their existing conversion hooks.
+                profile.set_file(row, path)
+                return {"FINISHED"}
+        elif getattr(node, "bl_idname", "") == "MIMINode_Texture_Bind":
+            rows = list(node.texture_slot_items)
+            matches = [row for row in rows if str(row.as_pointer()) == self.row_key]
+            row = matches[0] if matches else None
+            if not self.row_key and 0 <= self.row_index < len(rows):
+                row = rows[self.row_index]
+            if row is not None:
+                # Keep a semantic mark's precise capture lookup and automatic slot.
+                # Plain files retain their manually chosen physical slot instead.
+                if row.source_type == "MARK":
+                    row.mark_file_path = path
+                else:
+                    row.source_type = "FILE"
+                    row.file_path = path
+                return {"FINISHED"}
+        self.report({"ERROR"}, tr("Texture row no longer exists"))
+        return {"CANCELLED"}
 
 
 class MIMI_UL_TextureRows(bpy.types.UIList):
@@ -468,6 +567,7 @@ class MIMI_OT_TextureRowRefresh(I18nOperator):
 classes = (
     MIMI_UL_TextureRows,
     MIMI_OT_TextureRowSelectFile,
+    MIMI_OT_TextureRowSelectMerged,
     MIMI_OT_TextureRowClearFile,
     MIMI_OT_TextureRowRefresh,
 )

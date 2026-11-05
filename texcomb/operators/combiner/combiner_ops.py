@@ -803,7 +803,10 @@ def _add_ids_from_existing_files(scn: Scene, existed_ids: Set[int]) -> None:
         scn: The current scene.
         existed_ids: Set to add IDs to.
     """
-    atlas_file_pattern = re.compile(r"{}(\d+).png".format(atlas_prefix))
+    # A persistent directory can contain previous runs in every output format.
+    # Reserve all channel IDs so switching PNG/DDS never overwrites an atlas.
+    atlas_file_pattern = re.compile(
+        r"{}(?:[A-Za-z]+_)?(\d+)\.(?:png|dds|tga|tif|bmp)".format(atlas_prefix), re.IGNORECASE)
     for file_name in os.listdir(scn.mimi_smc_save_path):
         match = atlas_file_pattern.fullmatch(file_name)
         if match:
@@ -885,6 +888,9 @@ def _create_texture(
 
     texture = bpy.data.textures.new(texture_name, "IMAGE")
     image = bpy.data.images.load(path)
+    # Explicit role metadata lets blueprint choosers ignore non-diffuse maps.
+    from ....common.merged_texture_results import mark_atlas_image
+    mark_atlas_image(image, tex_type, unique_id)
     texture.image = image
     return texture
 

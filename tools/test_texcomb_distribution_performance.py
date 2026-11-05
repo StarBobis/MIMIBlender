@@ -13,8 +13,8 @@ Acceptance checks:
 - A dimension edit must still immediately revoke approval through RNA callbacks.
 - Replanning approval must retain the separate deep source fingerprint.
 - A direct UV edit may leave lightweight UI state ready until the merge check.
-- Actual merge execution must reject that changed UV before modifying meshes.
-- No image must be created for a stale plan.
+- Actual merge execution must request recalculation for changed UV sources.
+- No image may be created if that recalculation fails.
 - Strict comparison remains the default for callers outside the panel.
 - Timing output compares checks on the same mesh in the same process.
 - Speed assertions use a generous ratio, not a fragile millisecond threshold.
@@ -149,12 +149,19 @@ def main():
     assert planner.distribution_ready(scene, check_sources=False)
     assert not planner.distribution_ready(scene)
     assert not planner.distribution_ready(scene, check_sources=False)
-    output = tempfile.mkdtemp(prefix="mimi_performance_rejected_")
-    try:
+    output = tempfile.mkdtemp(prefix="mimi_performance_rejected_", dir=os.path.join(ROOT, "tmp"))
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from MIMIBlender.texcomb.operators.combiner import combiner
+    # The large fixture simulates approval rather than valid atlas placements.
+    # Prove repair is attempted, and a failed repair never mutates its meshes.
+    repair = Mock(return_value={"CANCELLED"})
+    fake_bpy = SimpleNamespace(path=bpy.path, ops=SimpleNamespace(
+        mimi=SimpleNamespace(generate_size_distribution=repair)))
+    with patch.object(combiner, "bpy", fake_bpy):
         result = bpy.ops.mimi.combiner(directory=output)
-    except RuntimeError:
-        result = {"CANCELLED"}
     assert result == {"CANCELLED"}
+    repair.assert_called_once_with(recalculate=True)
     assert mesh.uv_layers.active.data[0].uv.x == 0.25
     assert not os.listdir(output)
     bpy.ops.preferences.addon_disable(module="MIMIBlender")

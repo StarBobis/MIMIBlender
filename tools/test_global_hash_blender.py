@@ -630,6 +630,8 @@ class GlobalHashTests(unittest.TestCase):
             ('operator', 'mimi.texture_row_refresh'),
             ('list', 'MIMI_UL_texture_rows'),
             ('operator', 'mimi.texture_row_select_file'),
+            # Generated DiffuseMap selection must be shared by both managers.
+            ('operator', 'mimi.texture_row_select_merged'),
             ('operator', 'mimi.texture_row_clear_file'),
             ('prop', 'enabled'),
             ('prop', 'force_original_size'),

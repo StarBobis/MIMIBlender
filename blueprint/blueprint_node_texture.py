@@ -875,6 +875,8 @@ class MIMINode_Texture_Bind(MIMINodeBase):
             # two different pictures on the same slot, which is exactly what a
             # key switch compares.
             box.prop(item, "mark_file_path")
+            from .texture_row_ui import draw_merged_result_picker
+            draw_merged_result_picker(box, self, item, index)
             draw_file_missing_warning(box, item.mark_file_path)
             if str(item.mark_file_path or "").strip():
                 # The row owns an image, so it converts exactly like an
@@ -906,6 +908,8 @@ class MIMINode_Texture_Bind(MIMINodeBase):
                 )
         elif source_type == 'FILE':
             box.prop(item, "file_path")
+            from .texture_row_ui import draw_merged_result_picker
+            draw_merged_result_picker(box, self, item, index)
             _draw_image_format_controls(box, self, item, index, tree)
         else:
             box.prop(item, "resource_name")

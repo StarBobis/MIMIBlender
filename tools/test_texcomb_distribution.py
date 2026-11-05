@@ -46,8 +46,8 @@ Test boundaries:
 - The test may be rerun safely because each run owns its factory-startup scene.
 - Actual add-on registration is checked again by the existing smoke suite.
 - The tests document compatibility requirements for direct operator callers.
-- Those callers must generate a valid distribution before asking for a merge.
-- No test bypasses the execution-time approval check to produce an atlas.
+- Those callers may request a merge without a separate planning operation.
+- Automatic planning still requires valid placements before producing an atlas.
 - The approved placement data is used verbatim by the merge operator.
 - Every generated path belongs to this synthetic integration run only.
 - User configuration files and add-on preferences are never saved by the test.
@@ -144,9 +144,13 @@ def main():
     scene.mimi_smc_image_format = "PNG"
     bpy.context.view_layer.objects.active = objects[0][0]
     bpy.ops.mimi.refresh_ob_data()
-    directory = tempfile.mkdtemp(prefix="texcomb_distribution_")
+    directory = tempfile.mkdtemp(prefix="texcomb_distribution_", dir=os.path.join(ROOT, "tmp"))
     before = snapshot(objects)
-    expect_rejected(directory)
+    from types import SimpleNamespace
+    from MIMIBlender.texcomb.operators.combiner.combiner import Combiner
+    # Automatic entry-point planning is read-only until the actual merge runs.
+    planner_operator = SimpleNamespace(report=lambda *args: None)
+    assert Combiner._ensure_distribution(planner_operator, bpy.context)
     assert snapshot(objects) == before
     assert not os.listdir(directory)
 
@@ -200,7 +204,10 @@ def main():
     hero.width = 512
     hero.height = 512
     assert hero.locked and not distribution_ready(scene)
-    expect_rejected(directory)
+    # A stale but feasible lock is recalculated automatically, not rejected.
+    assert Combiner._ensure_distribution(planner_operator, bpy.context)
+    hero = next(entry for entry in scene.mimi_smc_distribution if entry.mat == objects[0][1])
+    assert hero.locked and (hero.width, hero.height) == (512, 512)
     assert snapshot(objects) == before
     assert bpy.ops.mimi.generate_size_distribution(recalculate=True) == {"FINISHED"}
     hero = next(entry for entry in scene.mimi_smc_distribution if entry.mat == objects[0][1])

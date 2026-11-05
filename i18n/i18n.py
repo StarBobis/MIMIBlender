@@ -228,6 +228,15 @@ class MIMIAddonPreferences(bpy.types.AddonPreferences):
         update=_on_ui_language_update,
     )  # type: ignore
 
+    # One application-wide default survives new scenes and Blender restarts.
+    # Only the explicit folder chooser writes and saves this preference.
+    atlas_output_directory: bpy.props.StringProperty(
+        name="Default Output Folder",
+        description="Remember this folder for future texture merges",
+        subtype="DIR_PATH",
+        default="",
+    )  # type: ignore
+
     # ---- Addon updater settings ----
     # These preferences are read by addon_updater_ops (check interval gating)
     # and are always drawn with an explicit text=tr(...) override there, so
