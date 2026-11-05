@@ -18,6 +18,7 @@ description: Maintain automatic atlas planning, persistent output folders, and b
 
 - A missing distribution is generated automatically. Recalculate stale existing rows without discarding manual locks. Impossible constraints still cancel before UV mutation.
 - Never scan geometry or decode images during panel redraws.
+- DDS converter discovery is silent when a usable texconv executable is found. Hide both its path chooser and success status; show the chooser and missing-tool warning only when the existing resolver cannot find any candidate. Preserve resolver precedence and saved custom paths rather than introducing another discovery rule.
 - The default folder is an add-on preference, not a Scene property. Save it explicitly when chosen, independent of Blender automatic preference saving.
 - Programmatic exports with an explicit directory must not change the user's persistent defaults.
 - Identify generated albedo images by explicit metadata, not filename guesses. Never offer metallic, normal, or roughness atlases as DiffuseMap.
@@ -41,7 +42,7 @@ Use the installed executable at `C:/Program Files/Blender Foundation/Blender 5.2
 1. Set `BLENDER_USER_CONFIG` to a fresh absolute directory under project `tmp/`.
 2. Run `--python tools/test_texcomb_workflow.py`. This saves isolated preferences even with auto-save disabled, exercises PNG/DDS, fresh execute and stale invoke, validates all four texture node types, preserves manual locks, rejects missing files/rows, and writes a synthetic blend.
 3. In a second process with the same isolated configuration, run `--python tools/test_texcomb_workflow.py -- --reopen <config directory>/atlases`. Factory startup skips preferences, so the test explicitly calls `read_userpref()` before verifying the default and reopening the blend.
-4. Run `tools/test_texcomb_distribution.py`, `tools/test_texcomb_distribution_performance.py`, and `tools/test_global_hash_blender.py` under factory-startup Blender.
+4. Run `tools/test_texcomb_distribution.py`, `tools/test_texcomb_distribution_performance.py`, and `tools/test_global_hash_blender.py` under factory-startup Blender. For converter UI changes, also run `tools/test_texcomb_dds_controls.py`: it covers bundled discovery, stale custom paths with a working bundle, missing candidates, explicit recovery paths, and environment discovery without saving preferences.
 5. Run the aspect, fixed-block, shared-repeat, shared-texture, UV-regression, UV-repeat-cost, and solid-preview Blender suites when changing merge preparation.
 6. Run plain-Python `tools/test_texture_bind_ini.py` and `tools/test_hash_texture_bind_ini.py` for unchanged resource-copy and conversion contracts.
 7. Run `tools/check_i18n.py` and `git diff --check`. The current baseline has 11 missing keys in the retired component-routing code; this feature must add no new missing translations. Both Chinese dictionaries carry the same new English msgids.

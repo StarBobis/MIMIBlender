@@ -314,16 +314,16 @@ class MIMIMaterialCombinerPanel(bpy.types.Panel):
     ) -> None:
         """Add the DDS-specific options shown when the output format is DDS.
 
-        DDS conversion is done by texconv.exe; the section always shows
-        whether a usable exe was found so a failed combine never surprises.
+        Use an available converter silently. Only a missing converter needs
+        user attention, so its path chooser and warning are recovery controls.
         """
         dds_col = layout.column(align=True)
         dds_col.prop(scene, "mimi_smc_dds_format", text=tr("DDS Pixel Format"))
         dds_col.prop(scene, "mimi_smc_dds_mipmaps", text=tr("Generate Mipmaps"))
-        dds_col.prop(scene, "mimi_smc_texconv_path", text=tr("texconv.exe Path"))
-        if texconv.is_available(scene.mimi_smc_texconv_path):
-            dds_col.label(text=tr("texconv.exe found"), icon="CHECKMARK")
-        else:
+        # Reuse execution-time discovery, including bundled and saved paths.
+        # A working converter needs neither confirmation nor another decision.
+        if not texconv.is_available(scene.mimi_smc_texconv_path):
+            dds_col.prop(scene, "mimi_smc_texconv_path", text=tr("texconv.exe Path"))
             dds_col.label(
                 text=tr("texconv.exe not found; DDS output unavailable"),
                 icon="ERROR",
