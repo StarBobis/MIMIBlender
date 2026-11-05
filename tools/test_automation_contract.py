@@ -60,7 +60,9 @@ class ContractTests(unittest.TestCase):
         # Mutation annotations and schemas are the client discovery contract.
         # Returning a deepcopy prevents a client from widening later validation.
         first = automation.tools()
-        self.assertEqual(len(first), 5)
+        self.assertTrue({"system.capabilities", "scene.inspect", "settings.inspect", "rna.describe",
+                         "blueprint.inspect", "settings.update", "blueprint.build", "blueprint.validate"}
+                        .issubset({item["name"] for item in first}))
         self.assertTrue(all(item["inputSchema"]["additionalProperties"] is False for item in first))
         first[0]["inputSchema"]["properties"]["injected"] = {}
         self.assertFalse(any("injected" in item["inputSchema"]["properties"] for item in automation.tools()))

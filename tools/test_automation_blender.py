@@ -1,6 +1,6 @@
 """Verify structured read-only AI inspection in an isolated Blender process.
 
-Run Blender --background --factory-startup --python-exit-code 1 --python this_file.
+Run through the visible MCP test runner in a designated unsaved test scene.
 No host settings, saved scene, original workspace or output directory is changed.
 This suite exercises real bpy metadata rather than replacing its RNA layer.
 """
@@ -40,8 +40,11 @@ import bpy
 # Each query is compared against current live counts instead of a frozen baseline.
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))
+if bpy.app.background or bpy.data.filepath or not bpy.context.scene.name.startswith("MIMIBlender MCP Capability Probe"):
+    raise RuntimeError("Use the designated visible unsaved MCP test scene, not a user project")
 addon = importlib.import_module(ROOT.name)
-addon.register()
+if not hasattr(bpy.types.Scene, "mimi_global_properties"):
+    addon.register()
 automation = importlib.import_module(ROOT.name + ".automation")
 
 

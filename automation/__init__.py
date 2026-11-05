@@ -42,8 +42,21 @@ def dispatch(request):
         if not _LOCK.acquire(blocking=False):
             raise AutomationError("BUSY", "Another automation action is running")
         try:
-            from .inspection import HANDLERS
-            result = HANDLERS[name](params)
+            # Import only the selected implementation boundary. Query-only
+            # clients do not need to initialize graph mutation helpers.
+            if name == "scene.present":
+                from .presentation import scene_present
+                handler = scene_present
+            elif name == "settings.update":
+                from .properties import settings_update
+                handler = settings_update
+            elif name in {"blueprint.build", "blueprint.validate"}:
+                from .blueprints import HANDLERS
+                handler = HANDLERS[name]
+            else:
+                from .inspection import HANDLERS
+                handler = HANDLERS[name]
+            result = handler(params)
             # Non-JSON results are bugs; never leak pointers into MCP responses.
             json.dumps(result, allow_nan=False)
             return response(request_id, result=result)

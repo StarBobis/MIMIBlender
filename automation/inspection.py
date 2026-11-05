@@ -318,7 +318,8 @@ def blueprint_inspect(params):
                        "location": list(node.location), "parent": node.parent.name if node.parent else None,
                        "properties": property_values(node, custom_only=True),
                        "inputs": sockets(node.inputs), "outputs": sockets(node.outputs)})
-    return {"tree": tree.name, "total_nodes": len(nodes), "nodes": result,
+    from .revisions import blueprint_revision
+    return {"tree": tree.name, "revision": blueprint_revision(tree), "total_nodes": len(nodes), "nodes": result,
             "next_offset": end if end < len(nodes) else None,
             "links": [{"from_node": link.from_node.name, "from_socket": link.from_socket.identifier,
                        "to_node": link.to_node.name, "to_socket": link.to_socket.identifier} for link in tree.links]}
@@ -332,6 +333,8 @@ def read_only(handler):
     This wrapper does not monkeypatch getters or hide their real enum metadata.
     """
     def guarded(params):
+        from .presentation import desktop_window
+        desktop_window()
         from ..common.global_config import GlobalConfig
         types = (str, int, float, bool, dict, list, tuple, type(None))
         # Snapshot configuration data only, not classmethods or service objects.
