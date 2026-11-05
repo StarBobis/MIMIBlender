@@ -184,3 +184,84 @@ add_action("mod.export", "Generate a native Mod into a new directory and indepen
 add_action("mod.audit", "Read-only offline INI/resource-file closure and artifact hash audit; does not run a game.", {
     "output_directory": string_schema("Absolute generated Mod directory"),
 }, ("output_directory",))
+
+# Incremental model edits keep the same object identity for user/AI handoff.
+# Every mutation requires a fresh revision and returns an independent checkpoint.
+# Coordinate data is local-space and finite; no caller expressions are evaluated.
+# The scene object retains its identity so existing blueprints still target it.
+# Shared mesh data is copied before local edits or sparse weight updates.
+# Checkpoints are independently retained meshes, not mutable references to originals.
+# A failed visible presentation also rolls back the newly assigned mesh data.
+# Native UV loop indices are distinct from mesh vertex indices.
+# Named shape keys are explicit targets; generic vertices do not imply Basis.
+# Locked vertex groups are not silently unlocked by the AI edit.
+# Restore itself checkpoints current work before changing the object again.
+# A missing or spoofed checkpoint marker cannot select unrelated user data.
+# User Edit/Pose/Paint mode prevents starting a new mutation transaction.
+# Topology replacement never infers weights or missing raw game channels.
+VECTOR3 = {"type": "array", "items": {"type": "number", "minimum": -1e20, "maximum": 1e20}, "minItems": 3, "maxItems": 3}
+VECTOR2 = {"type": "array", "items": {"type": "number", "minimum": -1e20, "maximum": 1e20}, "minItems": 2, "maxItems": 2}
+VERTEX_EDIT = object_schema({"index": {"type": "integer", "minimum": 0}, "value": VECTOR3}, ("index", "value"))
+UV_EDIT = object_schema({"index": {"type": "integer", "minimum": 0}, "value": VECTOR2}, ("index", "value"))
+add_action("mesh.inspect", "Inspect an editable current-scene mesh, local vertices/weights and recoverable history.", {
+    "object": string_schema("Exact current-scene mesh object name"),
+    "offset": {"type": "integer", "minimum": 0},
+    "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+}, ("object",))
+
+# Topology replacement is explicit and cannot silently erase source channels.
+# Existing raw attributes/shape keys require acknowledged replacement.
+# UVs and weights are required for replacement of existing textured/skinned data.
+add_action("mesh.patch", "Stage typed geometry, weights, UVs, shape keys or transforms and commit visibly with a checkpoint.", {
+    "object": string_schema("Exact target mesh object"), "revision": string_schema("Current mesh revision token"),
+    "vertices": {"type": "array", "items": VERTEX_EDIT, "maxItems": 10000},
+    "weights": {"type": "array", "maxItems": 512, "items": object_schema({
+        "group": string_schema("Named native vertex group"),
+        "values": {"type": "array", "maxItems": 10000, "items": object_schema({
+            "index": {"type": "integer", "minimum": 0}, "weight": {"type": "number", "minimum": 0, "maximum": 1},
+        }, ("index", "weight"))},
+    }, ("group", "values"))},
+    "uvs": {"type": "array", "maxItems": 16, "items": object_schema({
+        "layer": string_schema("Exact UV layer name"), "create": {"type": "boolean"},
+        "values": {"type": "array", "items": UV_EDIT, "maxItems": 10000},
+    }, ("layer", "values"))},
+    "shape_keys": {"type": "array", "maxItems": 256, "items": object_schema({
+        "name": string_schema("Basis or exact named shape key"), "create": {"type": "boolean"},
+        "vertices": {"type": "array", "items": VERTEX_EDIT, "maxItems": 10000},
+        "value": {"type": "number"}, "mute": {"type": "boolean"},
+    }, ("name",))},
+    "transform": object_schema({"location": VECTOR3, "rotation_euler": VECTOR3, "scale": VECTOR3}),
+    "geometry": object_schema({
+        "positions": {"type": "array", "items": VECTOR3, "minItems": 1, "maxItems": 20000},
+        "faces": {"type": "array", "maxItems": 50000, "items": {"type": "array", "minItems": 3, "maxItems": 64,
+                  "items": {"type": "integer", "minimum": 0}}},
+    }, ("positions", "faces")),
+    "drop_shape_keys": {"type": "boolean"}, "drop_raw_attributes": {"type": "boolean"},
+    "present": {"type": "boolean"},
+}, ("object", "revision"), mutates=True)
+
+# Restore is a versioned transaction, not a destructive return to stale data.
+# The current user version receives its own checkpoint before older data is used.
+add_action("mesh.restore", "Restore an independent checkpoint after verifying current mesh revision, preserving current work too.", {
+    "object": string_schema("Current mesh object name"), "revision": string_schema("Fresh current mesh revision"),
+    "checkpoint": string_schema("Exact returned independent checkpoint ID"), "present": {"type": "boolean"},
+}, ("object", "revision", "checkpoint"), mutates=True)
+
+# Reverse outputs retain their native candidate/segment component identities.
+# They are not silently converted into a normal extraction workspace.
+# Export needs an explicit original-workspace binding after review/editing.
+# Candidate choice is made per original DrawIB, not scene collection ordering.
+# Partial/cancelled reverse imports keep visible data for user recovery.
+# Source hashes/stats are observations rather than proof of game rendering.
+add_action("reverse.inspect", "Inspect native ssmt_fmt DrawIB candidates and source dependency framing.", {
+    "source": string_schema("Absolute read-only reverse output directory"),
+    "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+}, ("source",))
+add_action("reverse.import", "Import one chosen native reverse layout per DrawIB cooperatively into the visible user scene.", {
+    "source": string_schema("Absolute read-only reverse output root"),
+    "source_revision": string_schema("Optional fresh reverse inspection revision"),
+    "name": string_schema("New result collection name"), "logic": string_schema("Native source game preset"),
+    "work_directory": string_schema("Absolute isolated working root outside source"),
+    "types": {"type": "object", "additionalProperties": string_schema("Chosen native candidate type per DrawIB")},
+    "settings": {"type": "object", "additionalProperties": {}}, "present": {"type": "boolean"},
+}, ("source", "name", "logic", "work_directory"), mutates=True)

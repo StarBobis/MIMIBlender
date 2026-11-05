@@ -88,7 +88,7 @@ def reload_visible_automation():
     # Registered class objects remain valid; refresh only their implementation API.
     # Existing user data must not be reinitialized to obtain new helper functions.
     for suffix in ("registry", "paths", "context", "revisions", "inspection", "properties", "presentation",
-                   "preservation", "audits", "jobs", "blueprints", "workspaces", "binding", "exports", "collaboration", ""):
+                   "preservation", "audits", "jobs", "blueprints", "workspaces", "binding", "exports", "meshes", "reverse", "collaboration", ""):
         name = prefix + ".automation" + ("." + suffix if suffix else "")
         if name in sys.modules:
             importlib.reload(sys.modules[name])

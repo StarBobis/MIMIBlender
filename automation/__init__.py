@@ -44,7 +44,13 @@ def dispatch(request):
         try:
             # Import only the selected implementation boundary. Query-only
             # clients do not need to initialize graph mutation helpers.
-            if name == "workspace.bind":  # Bind existing manual work without replacing scene geometry.
+            if name in {"reverse.inspect", "reverse.import"}:  # Native candidate imports retain their reverse representation.
+                from .reverse import HANDLERS
+                handler = HANDLERS[name]
+            elif name in {"mesh.inspect", "mesh.patch", "mesh.restore"}:  # Same-object visible edits and independent checkpoint recovery.
+                from .meshes import HANDLERS
+                handler = HANDLERS[name]
+            elif name == "workspace.bind":  # Bind existing manual work without replacing scene geometry.
                 from .binding import workspace_bind
                 handler = workspace_bind
             elif name in {"mod.export", "mod.audit"}:

@@ -68,9 +68,21 @@ Face export now reuses strict Object Info/List/custom-group source traversal and
 
 A real no-LOD PGR export exposed an existing short-name texture lookup bug: `MMTWorkSpace.get_submesh_folder_path` incorrectly required a nonempty LOD key. Removing that requirement restored both marked DDS files in the generated Mod. Native Hash auto-fill intentionally deduplicates by mark name; two captured DiffuseMap hashes still produce one per-mark row, so do not mistake that original behavior for a lost source-context wrapper.
 
+## Incremental model edits
+
+`mesh.inspect` reports local-space vertices/weights, current signatures and checkpoint history. `mesh.patch` stages a private object/mesh copy, edits vertices, named sparse weight groups, UV loops, explicit Basis/named shape keys, transforms or acknowledged replacement topology, then swaps new data onto the same visible scene object. Shared original mesh users and existing blueprint/rig references stay intact. Invalid indices, locked groups, existing user Edit/Pose mode and stale observations fail rather than being silently coerced.
+
+Independent fake-user meshes retain recoverable checkpoints; `mesh.restore` checkpoints current work before restoring an older version. Checkpoint markers prevent history records from selecting unrelated user meshes. A presentation/commit failure resets group definitions on rejected private data before reconnecting the untouched original shared mesh. Restoration keeps the original rotation mode and world matrix. Topology replacement requires explicit acknowledgement of shape/raw channel loss and new weights/UVs when those channels existed. Existing non-Euler objects cannot be silently reinterpreted by Euler transform requests.
+
+## Reverse output imports
+
+`reverse.inspect` discovers native ssmt_fmt DrawIB JSON candidates and source dependencies. `reverse.import` chooses one valid layout per DrawIB and uses the existing MMT buffer parser plus native component-map/skeleton helpers in cooperative visible steps. Source bytes stay read-only; partial imported models remain after cancellation. Reverse viewer success is explicitly not a normal extraction/export workspace: create a blueprint over reviewed objects and call `workspace.bind` with an original native workspace before Mod generation. The fixture handoff through binding/native export was verified without guessing a folder conversion.
+
+The current data-edit milestone adds eight visible mesh transaction cases and five native reverse cases. Those verify linked shared-data preservation, current-object identity, independent checkpoint restore, weight/UV/shape-key commits, staging/UI failure rollback, explicit topology/raw-channel loss guards, native reverse component identities, candidate ambiguity, source-byte preservation and reverse-model binding to an original workspace before native export. All tests use the existing visible desktop; no background Blender is used.
+
 ## Workflows still under implementation
 
-Implement safe mesh operations, reverse-output imports, dedicated MCP tool exposure, collaborative job/state UI and packaging checks. Add broader conversion/failure/preservation coverage before full completion. Do not mark the overall objective complete from the normal import/export milestone. Existing native functions may log benign missing optional metadata or report partial success, so artifact and source coverage checks must stay independent.
+Implement dedicated MCP tool exposure, collaborative job/state UI, packaging checks and additional material/model adapters where needed. Add broader conversion/failure/preservation coverage before full completion. Do not mark the overall objective complete from the currently accepted data-edit/import/export milestones. Existing native functions may log benign missing optional metadata or report partial success, so artifact and source coverage checks must stay independent.
 
 Do not write `Import.json` into an original extraction workspace just to preserve an AI session's type selection. Isolate selection records and export artifacts in a managed working copy or explicit output directory. Restore transient global exporter state and scene settings even on exceptions. Do not make every operation asynchronous by running bpy in a background worker; timer-based jobs must retain main-thread ownership and bounded polling.
 
