@@ -82,6 +82,27 @@ Rules to keep:
   `tools/test_global_hash_blender.py::test_socketless_managers_share_one_panel`; extend that test
   when a control is added instead of letting the two nodes drift again.
 
+## Legacy "conversion could not start" report
+
+The old manual Convert operator treated `start_conversion(...) == 0` as failure,
+even when a validated matching DDS had no plan and should be copied unchanged.
+That is a historical false error, not proof that texconv is missing or the DDS
+is damaged. The same generic report could also hide a real planning error; ask
+for the first console exception when the supplied file is unavailable.
+
+The operator was removed in `f6bfe1e`. Current file selection only assigns the
+replacement; Generate Mod owns required conversion. Updating MMT does not
+reload the Blender add-on: update MIMIBlender and restart Blender. Do not bring
+back the old Convert button to make a screenshot look familiar.
+
+Pin the no-op boundary with
+`tools/test_global_hash_blender.py::test_matching_dds_is_a_successful_noop_not_a_startup_failure`.
+It checks real file selection, no executable call, exact exported DDS bytes,
+and a truncated-DDS negative that preserves prior output. A zero result with
+current planning errors must not be reclassified as success.
+
+[Diagnostic and user recovery steps](../../../docs/texture_conversion_startup_message.md).
+
 ## Channels: one node, several branches
 
 `Slot Texture Bind` and `Hash Texture Bind` expose N pass-through channel pairs. **Channel N is

@@ -255,6 +255,60 @@ class GlobalHashTests(unittest.TestCase):
         self.assertEqual((output / '6077b727_DiffuseMap.dds').read_bytes(), Path(original).read_bytes())
         self.assertFalse(any(section.SectionLineList for section in builder.ini_section_list))
 
+    def test_matching_dds_is_a_successful_noop_not_a_startup_failure(self):
+        # Older conversion buttons treated zero started jobs as an error.
+        # A matching DDS legitimately has no conversion plan and no worker.
+        # Exercise the real picker, planner and exported texture consumer.
+        from MIMIBlender.common import texture_format_service as service
+        from MIMIBlender.texcomb.core import texconv
+        self.mark_json('LOD0', '94517393-10-0', [self.mark('568e874d', 'NormalMap')])
+        self.refresh()
+        item = self.node.texture_hash_items[0]
+        original = Path(item.mark_source_file_path)
+        original_bytes = original.read_bytes()
+        # Non-ASCII folders and spaces must remain valid file-browser inputs.
+        # The copied DDS retains the original storage, dimensions and mips.
+        replacement = self.root / '\u66ff\u6362 textures' / 'colombinabodybnormalmap.dds'
+        replacement.parent.mkdir()
+        replacement.write_bytes(original_bytes)
+        # Picking an image must not try to start a conversion job.
+        # Generate Mod owns conversion; assignment only stores the path.
+        with patch.object(service, 'start_conversion', side_effect=AssertionError('picker started conversion')):
+            status = bpy.ops.mimi.texture_row_select_file(
+                node_name=self.node.name, tree_name=self.tree.name,
+                row_key='568e874d', filepath=str(replacement),
+            )
+        self.assertEqual(status, {'FINISHED'})
+        self.assertEqual(item.file_path, str(replacement))
+        job = service.job_for_row(self.node, item)
+        self.assertIsNotNone(job)
+        self.assertIsNone(service.plan_for_job(job))
+        outcome = {}
+        # No executable is needed for this path; the bytes are copied as-is.
+        # Even a missing conversion tool must not reject a matching DDS.
+        with patch.object(texconv, '_run_texconv', side_effect=AssertionError('unnecessary texconv')):
+            self.assertEqual(service.start_conversion([job], outcome=outcome), 0)
+            self.assertTrue(outcome['finished'])
+            self.assertEqual(outcome['errors'], [])
+            self.assertFalse(service.is_running())
+            bindings = BluePrintModel._collect_global_hash_texture_bindings(self.tree)
+            output = self.root / 'output'
+            with patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(output)):
+                M_IniHelper.generate_hash_style_global_texture_ini(M_IniBuilder(), bindings)
+        self.assertEqual((output / '568e874d_NormalMap.dds').read_bytes(), original_bytes)
+        self.assertEqual(replacement.read_bytes(), original_bytes)
+        self.assertEqual(original.read_bytes(), original_bytes)
+        # A truncated DDS is not a successful zero-job batch.
+        # Keep the failure observable instead of suppressing every return of zero.
+        # Previously written output must survive the rejected replacement.
+        replacement.write_bytes(original_bytes[:128])
+        invalid = {}
+        self.assertEqual(service.start_conversion([job], outcome=invalid), 0)
+        self.assertTrue(invalid['errors'])
+        with self.assertRaises(ValueError):
+            M_IniHelper.generate_hash_style_global_texture_ini(M_IniBuilder(), bindings)
+        self.assertEqual((output / '568e874d_NormalMap.dds').read_bytes(), original_bytes)
+
     def test_whole_model_preflight_is_output_free(self):
         from MIMIBlender.model import blueprint_model as models
         # Exercise the shared model-return boundary used by every game exporter.
