@@ -112,6 +112,24 @@ Completion covers these implemented collaboration, transport, recovery, native a
 
 Do not write `Import.json` into an original extraction workspace just to preserve an AI session's type selection. Isolate selection records and export artifacts in a managed working copy or explicit output directory. Restore transient global exporter state and scene settings even on exceptions. Do not make every operation asynchronous by running bpy in a background worker; timer-based jobs must retain main-thread ownership and bounded polling.
 
+## Native UI callback signatures
+
+Keep native drawing wrappers explicitly `(self, context, layout)` for both
+`draw_buttons` and `draw_buttons_ext`, and operator execution wrappers explicitly
+`(self, context)`. Blender's callback dispatch depends on concrete positional
+slots; `*args` and `functools.wraps` metadata do not supply the missing layout.
+The shared source-context helper may be variadic, but the registered callbacks
+must not be. This applies to ordinary unbound user blueprints as well as AI trees.
+
+Run `python -B tools/test_automation_ui_callbacks.py` before changing collaboration
+wrappers. Its seven Blender-free cases model positional-slot dispatch, preserve
+original callback identity, check error reporting/context restoration, and exercise
+registration/unregistration for both draw callbacks. The old implementation failed
+with the same missing-layout exception reported for cross-IB blueprint nodes.
+This is offline signature regression coverage, not actual desktop drawing proof.
+Recheck the native node editor and extended properties in a visible desktop before
+claiming visual acceptance; do not reuse the historical visible-test counts above.
+
 ## Tests
 
 Run the Blender-free protocol tests with `python tools/test_automation_contract.py`. For Blender regressions, use an already open visible MCP desktop with the designated unsaved scene name `MIMIBlender MCP Capability Probe`:

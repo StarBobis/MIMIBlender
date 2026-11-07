@@ -87,6 +87,33 @@ the shared node path.
 - **Unverified in game**: none of this change was run in either game. The
   regression tests only prove the generated INI.
 
+## Blueprint node display callback regression (2026-11-07)
+
+The reported failure was a `TypeError` for missing `layout` in Object List,
+Object Group and Result Output node drawing. Their original methods accept
+`(self, context, layout)`, but the shared collaboration wrapper declared only
+`(self, context, *args, **kwargs)`. This affected ordinary unbound blueprints too.
+
+The wrapper now gives both `draw_buttons` and `draw_buttons_ext` an explicit
+three-argument callback. Operator `execute` retains its two-argument contract.
+The shared read-only source context, original callbacks and failure handling
+remain in use. No cross-IB export rules or user project resources are changed.
+
+**Verified offline**: `python -B tools/test_automation_ui_callbacks.py` first
+reproduced the missing-layout failures with the old wrapper, then passed all
+seven cases with the corrected wrapper. Dispatch is modeled from the callable's
+actual positional slots, not `inspect.signature`, whose wrapped metadata would
+hide the bug. Tests also cover keyword layout diagnostics, bound context cleanup,
+operator errors and restoration of both draw callbacks during unregister.
+
+**Not verified this run**: actual native Blender redraw and in-game output.
+No Blender desktop was running and MCP was unavailable. Do not inherit earlier
+visible-test results as evidence for this fix. On a visible desktop, reopen the
+cross-IB blueprint and check Object List, Object Group and Result Output controls
+in both the node editor and extended properties without repeated tracebacks.
+A fresh Blender session loads the corrected callbacks; no project rewrite is
+needed. If the old session is still running elsewhere, save work before restarting.
+
 ## Acceptance
 
 ```text

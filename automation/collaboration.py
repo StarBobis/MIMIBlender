@@ -48,8 +48,10 @@ def owner_tree(owner, context):
 
 def wrap_callback(original, drawing):
     """Use the same original callback under a lightweight source context."""
-    @wraps(original)
-    def guarded(self, context, *args, **kwargs):
+    # Blender RNA dispatch counts concrete positional slots, not *args.
+    # wraps preserves metadata but cannot add a missing native layout slot.
+    # Keep shared context/error routing separate from the native signatures.
+    def invoke(self, context, *args, **kwargs):
         tree = owner_tree(self, context)  # Resolve this callback's actual explicit target.
         if tree is None or not tree.get("mimi_ai_workflow"):  # Unbound workflows keep the original host behavior.
             return original(self, context, *args, **kwargs)  # Do not alter existing authorization or edit rules.
@@ -64,7 +66,20 @@ def wrap_callback(original, drawing):
                 return None
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-    return guarded
+    if drawing:
+        # Both draw_buttons and draw_buttons_ext require an explicit layout.
+        # Pass it positionally so workspace errors use the same UI surface.
+        @wraps(original)
+        def guarded_draw(self, context, layout):
+            return invoke(self, context, layout)
+        return guarded_draw
+
+    # Native execute callbacks have only self and context, never a layout.
+    # Do not change the original operator return or authorization behavior.
+    @wraps(original)
+    def guarded_execute(self, context):
+        return invoke(self, context)
+    return guarded_execute
 
 
 def register():
