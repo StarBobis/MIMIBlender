@@ -16,6 +16,14 @@ import json
 
 PROPERTY_NAME = "mimi_wwmi_reverse_shape_metadata"
 
+# Fields that describe the game's original dispatch, not the compact Mod buffer.
+RUNTIME_FIELDS = ("vertex_offset", "dispatch_y", "checksum")
+RUNTIME_LIMITS = {
+    "vertex_offset": (0, 0xFFFFFFFF),
+    "dispatch_y": (1, 0xFFFFFFFF),
+    "checksum": (0, 0xFFFFFFFF),
+}
+
 
 def capture_reverse_shape_metadata(obj, shapekey_buffers):
     """Store portable source metadata on each reverse-imported object.
@@ -46,34 +54,116 @@ def _integer(value, fail):
     return number
 
 
-def _runtime_batches(shapes, fail):
-    """Normalize only recorded runtime fields, never compact buffer addresses.
+def _read_batch(batch, fail):
+    """Copy one recorded batch and classify how much of it is evidence.
 
-    Every batch must be complete before it can supplement an extraction.
-    Shape IDs are consecutive across the recorded per-batch key counts.
-    Missing count fields retain the established legacy 127-slot convention.
-    The original vertex base is unrelated to the compact buffer's vertex base.
+    A batch is trusted only while its writer did not invalidate it: an
+    explicit ``runtime_metadata_complete: false`` means the values were
+    defaulted instead of recovered, so they are cleared rather than compared.
+    Legacy records without the marker keep whatever fields they actually hold.
+    Present values are always type-checked and range-checked, even when the
+    record later turns out to be incomplete; only absent fields are ignored.
+    """
+    # Older writers could omit the marker entirely; only an explicit false
+    # disqualifies a record. A missing marker must stay backward compatible.
+    if batch.get("runtime_metadata_complete") is False:
+        batch = {key: value for key, value in batch.items() if key not in RUNTIME_FIELDS}
+        batch.update({field: None for field in RUNTIME_FIELDS})
+    for field in RUNTIME_FIELDS:
+        value = batch.get(field)
+        if value is None:
+            continue
+        number = _integer(value, fail)
+        LOWER, UPPER = RUNTIME_LIMITS[field]
+        if not LOWER <= number <= UPPER:
+            fail("invalid original runtime batch metadata")
+        batch[field] = number
+    count = batch.get("shapekey_count", 127)
+    if count is not None:
+        number = _integer(count, fail)
+        # 127 populated slots per batch is the runtime's hard limit.
+        if not 0 <= number <= 127:
+            fail("invalid original runtime batch metadata")
+        batch["shapekey_count"] = number
+    offset = batch.get("shapekey_offset")
+    if offset is not None:
+        batch["shapekey_offset"] = _integer(offset, fail)
+    return batch
+
+
+def _merge_source(selected, incoming, fail):
+    """Merge one source's recorded batches into the current sequence.
+
+    Overlapping batches may fill fields the extraction never recorded, but
+    every field both sides record must agree. A batch only the source records
+    extends the extraction only when all of it is original runtime data;
+    otherwise the export would need a fabricated checksum or dispatch size.
+    Compact buffer addresses and counts never enter the runtime identity.
+    """
+    merged = [deepcopy(row) for row in selected]
+    rows = [_read_batch(raw, fail) for raw in incoming]
+    # Verify the source's own sequence before it can touch any target batch.
+    # Compact offsets restart at zero for every source, like the extraction.
+    source_offset = 0
+    for row in rows:
+        recorded = row.get("shapekey_offset")
+        if recorded is not None and recorded != source_offset:
+            fail("nonconsecutive original shape key ID boundaries")
+        source_offset += 127 if row.get("shapekey_count") is None else row["shapekey_count"]
+    for index, row in enumerate(rows):
+        if index < len(merged):
+            target = merged[index]
+            for field in RUNTIME_FIELDS:
+                value = row.get(field)
+                if value is None:
+                    continue
+                current = target.get(field)
+                if current is None:
+                    target[field] = deepcopy(value)
+                elif _integer(current, fail) != value:
+                    fail("conflicts with an existing original runtime batch")
+            for field in ("shapekey_count", "shapekey_offset"):
+                value = row.get(field)
+                if value is None:
+                    continue
+                if target.get(field) is None:
+                    target[field] = deepcopy(value)
+                elif _integer(target[field], fail) != value:
+                    fail("conflicts with an existing original runtime batch")
+            continue
+        missing = [field for field in RUNTIME_FIELDS if row.get(field) is None]
+        if missing:
+            fail("batch " + str(index) + " is missing original runtime batch metadata ("
+                 + ", ".join(missing) + ")")
+        # A compact address or Mod vertex count is not a runtime identity.
+        merged.append({key: value for key, value in row.items()
+                       if key not in ("buffer_vertex_offset", "vertex_count")})
+    return merged
+
+
+def _finalize_batches(batches, fail):
+    """Validate the batch sequence and recompute its recorded completeness.
+
+    Shape key IDs are consecutive across the per-batch key counts, so a
+    recorded boundary that disagrees with the accumulated total is corrupt.
+    Completeness is derived from the stored values, not from a copied flag.
     """
     result = []
     key_offset = 0
-    for batch in shapes.get("batches", []):
-        if batch.get("runtime_metadata_complete") is False:
-            fail("incomplete original runtime batch metadata")
-        required = ("vertex_offset", "dispatch_y", "checksum")
-        if any(batch.get(field) is None for field in required):
-            fail("missing original runtime batch metadata")
-        values = {field: _integer(batch[field], fail) for field in required}
-        count = _integer(batch.get("shapekey_count", 127), fail)
-        if (values["vertex_offset"] < 0 or values["dispatch_y"] <= 0
-                or not 0 <= values["checksum"] <= 0xFFFFFFFF
-                or not 0 <= count <= 127):
-            fail("invalid original runtime batch metadata")
-        if _integer(batch.get("shapekey_offset", key_offset), fail) != key_offset:
+    for batch in batches:
+        if not isinstance(batch, dict):
+            fail("contains a malformed runtime batch record")
+        count = batch.get("shapekey_count", 127)
+        count = 127 if count is None else _integer(count, fail)
+        recorded = batch.get("shapekey_offset")
+        if recorded is not None and _integer(recorded, fail) != key_offset:
             fail("nonconsecutive original shape key ID boundaries")
-        values["shapekey_count"] = count
-        values["shapekey_offset"] = key_offset
-        values["runtime_metadata_complete"] = True
-        result.append(values)
+        row = deepcopy(batch)
+        row["shapekey_count"] = count
+        row["shapekey_offset"] = key_offset
+        row["runtime_metadata_complete"] = all(
+            row.get(field) is not None for field in RUNTIME_FIELDS)
+        result.append(row)
         key_offset += count
     if not result:
         fail("no original runtime batches were recorded")
@@ -86,17 +176,24 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib):
     Native component palettes and vertex counts remain authoritative.
     All overlapping runtime dispatches must agree, including shape boundaries.
     Multiple source objects may repeat or extend the same batch sequence.
-    Conflicting sources fail rather than silently winning by object order.
+    Conflicting complete sources fail rather than silently winning by order.
+    A source that records less than the target already has cannot block the
+    export: it contributes no batch, so its missing fields are simply unused.
     """
     original = info.shapekeys
-    selected = deepcopy(original.batches)
+
+    def fail_workspace(reason):
+        raise ValueError("WWMI DrawIB " + draw_ib + ", workspace: shape metadata "
+                         + reason + ".")
+
+    # Copy first so a later failure leaves even in-memory metadata unchanged.
+    selected = [deepcopy(batch) for batch in original.batches]
     seen = set()
     for obj in objects:
         if obj is None:
             continue
         # Include the source object so a mismatched blueprint binding is visible.
         # Do not mutate the native info until every participating source passes.
-        # A failure therefore leaves even this in-memory metadata unchanged.
         def fail(reason):
             name = getattr(obj, "name", "unknown")
             raise ValueError("WWMI DrawIB " + draw_ib + ", object '" + name
@@ -131,16 +228,11 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib):
             scale = shapes.get("scale_hash")
             if scale and original.scale_hash and scale != original.scale_hash:
                 fail("does not match the target shape scale hash")
-            batches = _runtime_batches(shapes, fail)
-            native = _runtime_batches({"batches": selected}, fail) if selected else []
-            if batches[:min(len(batches), len(native))] != native[:min(len(batches), len(native))]:
-                fail("conflicts with an existing original runtime batch")
-            if len(batches) > len(selected):
-                selected = batches
+            selected = _merge_source(selected, shapes.get("batches", []), fail)
         except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as error:
             fail("is malformed (" + str(error) + ")")
 
     # Preserve the native header and skeleton; only validated batches change.
     # No source object's property or shape data is rewritten during resolution.
     # Compact reverse vertex counts never replace original mesh vertex counts.
-    original.batches = selected
+    original.batches = _finalize_batches(selected, fail_workspace)

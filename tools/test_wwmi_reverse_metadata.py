@@ -136,6 +136,41 @@ class ReverseMetadataTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'runtime batch metadata'):
                     self.resolve([self.object(buffers)])
 
+    def test_incomplete_overlapping_source_does_not_block_the_export(self):
+        # The reuse case: the target extraction already carries every batch the
+        # source would add, so the source contributes no runtime identity.
+        # Its unrecorded fields are unused rather than an export-wide failure.
+        # Values a writer invalidated must not win a conflict against the target.
+        for change in ({'checksum': None, 'runtime_metadata_complete': False},
+                       {'checksum': 999, 'dispatch_y': 1, 'runtime_metadata_complete': False},
+                       {'checksum': None}):
+            with self.subTest(change=change):
+                buffers = deepcopy(self.buffers)
+                buffers['metadata']['batches'] = buffers['metadata']['batches'][:1]
+                buffers['metadata']['batches'][0].update(change)
+                self.resolve([self.object(buffers)])
+                self.assertEqual(len(self.info.shapekeys.batches), 1)
+                self.assertEqual(self.info.shapekeys.batches[0]['checksum'], 1019)
+                self.assertEqual(self.info.shapekeys.batches[0]['dispatch_y'], 2360)
+
+    def test_overlapping_source_can_fill_fields_the_extraction_omitted(self):
+        # A legacy extraction may record the batch boundary without the runtime
+        # identity. The reverse INI is then the only recorded source of it.
+        # Filling it must not invent a value the source never carried.
+        self.info.shapekeys.batches[0]['checksum'] = None
+        self.resolve([self.object(deepcopy(self.buffers))])
+        self.assertEqual(self.info.shapekeys.batches[0]['checksum'], 1019)
+        self.assertTrue(self.info.shapekeys.batches[0]['runtime_metadata_complete'])
+        # When neither side records it, the batch stays incomplete for the
+        # exporter to reject instead of this helper guessing a checksum.
+        self.info.shapekeys.batches[0]['checksum'] = None
+        buffers = deepcopy(self.buffers)
+        buffers['metadata']['batches'] = buffers['metadata']['batches'][:1]
+        buffers['metadata']['batches'][0]['checksum'] = None
+        self.resolve([self.object(buffers)])
+        self.assertIsNone(self.info.shapekeys.batches[0]['checksum'])
+        self.assertFalse(self.info.shapekeys.batches[0]['runtime_metadata_complete'])
+
     def test_invalid_sizes_and_offsets_fail(self):
         for change in ({'shapekey_count': 128}, {'shapekey_count': -1}, {'vertex_offset': -1}, {'checksum': -1}):
             with self.subTest(change=change):

@@ -214,3 +214,37 @@ The same factory-startup, disabled-autoexec, read-only project probe was rerun a
 Both MergedComponent attempts correctly cancel with a complete report. Proposed reassignment counts are **not applied changes** when other faces remain blocked. The original project still cannot be fully exported through local palettes without explicit repairs or architectural choice; routing does not pretend otherwise.
 
 The independent **Merged export still succeeds** with the preserved native two-batch shape metadata. All three project probes retain identical source geometry, weights, group names, and shape coordinates, leave no temporary objects or meshes, and preserve the original blend SHA-256 `44b363e30ddc2c497cf316c654e06d605431f5e305c6ce4e53160989c4fd72a5`. No game-side appearance verification is claimed.
+
+### An incomplete reverse source no longer blocks an export it cannot inform
+
+**Reported symptom (verified from the message alone):** exporting a WWMI DrawIB
+raised `WWMI DrawIB a88c9399_LOD0, object '691e4f5f-Component 0.19719-0':
+reverse shape metadata incomplete original runtime batch metadata.` on the
+current build, while an older add-on build exported the same scene. The message
+is produced only by `workspace/wwmi_reverse_metadata.py`, and its DrawIB/IB hashes
+match the local MoNing export (`tmp/wwmi_roundtrip_moning_per_component`, DrawIB
+`a88c9399_LOD0`, IB hash `691e4f5f`, one 512-byte offset block).
+
+**Cause:** the validation added with `e26745d` normalized the reverse source with
+`_runtime_batches`, which failed on any batch whose writer marked
+`runtime_metadata_complete: false` – *before* checking whether that batch was
+already covered by the workspace extraction. A batch the source would not add is
+therefore unused data, yet it aborted the whole export. The pre-`e26745d` export
+path never consulted the attached source at all, which is why an older add-on
+build still exported (its batches came from the workspace SubMeshJson).
+
+**Change ([reverse metadata](<workspace/wwmi_reverse_metadata.py>)):** overlapping
+batches only have to agree on the fields both sides record; a field only the
+source records may fill a gap the extraction left. Only a batch that would
+*extend* the sequence must be complete, and the failure now names the batch index
+and the missing fields. `runtime_metadata_complete` is recomputed from the merged
+values rather than copied, so an invalidated record can never be upgraded by
+accident. A source that records nothing usable contributes nothing.
+
+**Verified** with `python tools/test_wwmi_reverse_metadata.py` (17 tests) and
+`python tools/test_wwmi_batches.py` (21 tests, 1 skipped): the three new cases
+cover an incomplete overlapping source (including one carrying wrong invalidated
+values), a source filling a checksum the extraction omitted, and the unchanged
+rule that an incomplete *extension* still fails. **Not verified:** the user's exact project/mod was not available, so
+this is not an in-game shape-key acceptance, and an export whose scene really
+needs an unrecorded batch still refuses by design.
