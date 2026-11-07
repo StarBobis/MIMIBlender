@@ -196,6 +196,8 @@ def main():
           "GF2 is listed as a cross-IB preset")
     check(cross_ib_support.supports_cross_ib(logic_name_class.Naraka),
           "Naraka stays a cross-IB preset")
+    check(cross_ib_support.supports_cross_ib(logic_name_class.PGR),
+          "PGR is offered because its exporter owns the cross-IB sections")
     check(not cross_ib_support.supports_cross_ib(logic_name_class.GIMI),
           "a preset without the exporter code is not offered")
     check(cross_ib_support.CROSS_IB_ERROR_PREFIX == "Cross-IB Render: ",

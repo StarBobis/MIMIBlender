@@ -281,6 +281,20 @@ def test_support_list_decides_the_preset():
     print("PASS: a preset without exporter support is rejected")
 
 
+def test_pgr_uses_the_shared_cross_ib_path():
+    # PGR has its own exporter copy, but the blueprint-side scan is shared.
+    # Leaving PGR out of the support list hides the node even though the
+    # exporter already writes the guest backup and host draw blocks.
+    host_draw = make_draw("Host", HOST_SUBMESH)
+    frame_draw = make_draw("Frame0", GUEST_SUBMESH, TIMELINE_KEY)
+    model = make_model([host_draw, frame_draw], [TIMELINE_KEY])
+
+    run_with_logic(LogicName.PGR, make_tree([make_time_node()]), model)
+
+    assert frame_draw.cross_render_at_submesh == HOST_SUBMESH
+    print("PASS: PGR uses the shared cross-IB blueprint path")
+
+
 def main():
     # The provenance helper itself must stay stable because the parser and the
     # post-processor independently rebuild it from the same node.
@@ -298,6 +312,7 @@ def main():
     test_host_with_multiple_submeshes_is_rejected()
     test_source_equal_to_target_is_rejected()
     test_support_list_decides_the_preset()
+    test_pgr_uses_the_shared_cross_ib_path()
     print("ALL NARAKA CROSS-IB BATCH CHECKS PASSED")
     return 0
 

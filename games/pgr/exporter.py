@@ -14,9 +14,9 @@ Kept identical to the Naraka exporter for now:
 - the Texcoord VB is replaced by a resource buffer directly,
 - every submesh IB draw is skipped and re-emitted manually.
 
-The cross-IB rendering blocks are copied along with the rest: the blueprint
-node that fills DrawCallModel.cross_render_at_submesh is still Naraka-only,
-so these blocks simply stay idle for PGR until a PGR node exists.
+The cross-IB rendering blocks are copied along with the rest. The shared
+Cross-IB Render node fills DrawCallModel.cross_render_at_submesh for PGR too,
+while this exporter owns the PGR-branded host and guest INI sections.
 
 Everything else (pipeline, texcoord overrides, texture sections) comes from
 the shared base in games/base/.
@@ -150,8 +150,8 @@ class PGRExporter(StandardExporter):
 
     def add_pgr_cs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # IB overrides: skip every original draw and re-emit it manually with
-        # the modded index buffer. Cross-IB rendering (copied from Naraka and
-        # idle until PGR gets its own node) is applied here:
+        # the modded index buffer. Cross-IB rendering (the PGR copy of the
+        # compute-shader path) is applied here:
         # - guest draw calls are suppressed from their own Submesh section,
         # - guest Submesh sections capture their DrawIB's VB bindings (backup),
         # - host Submesh sections re-emit the guest draws after their own.

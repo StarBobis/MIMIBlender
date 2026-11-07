@@ -29,8 +29,11 @@ diverge later. **Copy, rename, register — never alias and never subclass.**
 - Do **not** copy `games/naraka/nodes.py` or `games/naraka/cross_ib.py`.
   Blueprint node classes register globally by `bl_idname` (`__init__.py`
   yields `blueprint_node_naraka.register`), and the tree post-processor is
-  selected in `games/__init__.get_tree_post_processor`, both per game. The
-  cross-IB *sections* inside the exporter stay inert until a PGR node exists.
+  selected in `games/__init__.get_tree_post_processor`, both per game. If the
+  copied exporter owns working cross-IB host/guest sections, add its
+  `LogicName` to `common/cross_ib_support.py`; that one list controls the Add
+  menu, the timeline panel, and the shared tree post-processor. Do not copy
+  the node class itself.
 - Do not copy `resources/Shapes.hlsl`; it is a shared asset addressed by the
   shape key module through the addon root.
 
@@ -92,6 +95,8 @@ A standing character is much taller on the up axis with its feet at 0.
 
 ```bash
 python tools/test_pgr_preset.py          # registry, independence, INI, sections
+python tools/test_gf2_cross_ib.py        # shared cross-IB preset registry
+blender -b --factory-startup --python-exit-code 1 --python tools/test_naraka_cross_ib_blender.py
 python tools/test_mod_generation_guard.py # every preset reaches the export flow
 python tools/test_mod_output_detection.py # real INI path validation
 python tools/test_naraka_shapekeys.py    # the sibling did not regress

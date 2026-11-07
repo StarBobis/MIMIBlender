@@ -1,4 +1,4 @@
-# Cross-IB rendering (Naraka / GF2)
+# Cross-IB rendering (Naraka / GF2 / PGR)
 
 Status labels used here: **verified** (reproduced from the current source or a
 committed test), **hypothesis** (consistent with the code but not observed),
@@ -51,6 +51,7 @@ resource declarations).
 | Naraka | `vb0`, `vb1` | Its compute path writes the skinned position into the game's own VB and replaces the texcoord stream; the blend data never reaches the final draw. |
 | GF2 (GPU types) | `vb0`, `vb1`, `vb2` | The blend stream (BLENDWEIGHTS/BLENDINDICES) has its own slot and the game's own skinning reads it. |
 | GF2 (CPU-drawn types) | `vb0` | The whole vertex stream lives in one slot. |
+| PGR | `vb0`, `vb1` | Its compute path has the same position/texcoord backup shape as Naraka, while the exporter remains PGR-branded. |
 
 The list is derived from the game type
 (`GF2Exporter.get_cross_ib_backup_slot_list`), not hard-coded, so a type with a
@@ -58,6 +59,11 @@ different slot split works without editing the exporter.
 
 **Verified**: `tools/test_gf2_cross_ib.py` asserts all three slots for a GPU
 type and exactly one for a CPU type.
+
+PGR uses the shared blueprint post-processor and its own exporter copy.
+**Verified**: `tools/test_pgr_preset.py` checks the generated PGR host/guest
+sections, and `tools/test_naraka_cross_ib_blender.py` checks that PGR reaches
+the shared node path.
 
 ## Constraints the exporter enforces
 
@@ -85,6 +91,7 @@ type and exactly one for a CPU type.
 
 ```text
 python tools/test_gf2_cross_ib.py
+python tools/test_pgr_preset.py
 blender -b --factory-startup --python-exit-code 1 --python tools/test_naraka_cross_ib_blender.py
 ```
 

@@ -28,9 +28,12 @@ CROSS_IB_ERROR_PREFIX = "Cross-IB Render: "
 #   buffers by a compute shader, so the guest backup captures those buffers.
 # - GF2: the vertex buffer slots themselves are replaced by the mod's own
 #   resource buffers, so the backup captures the mod's buffers.
+# - PGR: its exporter owns the same compute-shader backup path as Naraka,
+#   and its preset regression already verifies the generated host/guest INI.
 CROSS_IB_SUPPORTED_LOGIC_NAMES = (
     LogicName.Naraka,
     LogicName.GF2,
+    LogicName.PGR,
 )
 
 
