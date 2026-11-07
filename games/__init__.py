@@ -73,10 +73,14 @@ def get_tree_post_processor(logic_name):
 
     A tree post-processor runs right after BluePrintModel finishes parsing
     the node tree and may annotate the parsed DrawCallModels with
-    game-specific data (Naraka uses it for its cross-IB rendering pairs).
+    game-specific data (the presets listed in common/cross_ib_support.py use
+    it for their cross-IB rendering pairs).
     Imported lazily so the shared model layer never depends on game code.
     """
-    if logic_name == LogicName.Naraka:
+    # The support list is the single source of truth, so this registry can
+    # never offer a preset whose exporter does not write the sections.
+    from ..common.cross_ib_support import supports_cross_ib
+    if supports_cross_ib(logic_name):
         from .naraka.cross_ib import apply_cross_ib_render_nodes
         return apply_cross_ib_render_nodes
     return None

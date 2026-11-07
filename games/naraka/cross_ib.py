@@ -1,5 +1,5 @@
 """
-Naraka cross-IB blueprint tree post-processor.
+Cross-IB blueprint tree post-processor shared by the supporting presets.
 
 BluePrintModel calls this module after the whole blueprint tree has been
 parsed into DrawCallModels (see games.get_tree_post_processor).  It scans
@@ -15,16 +15,12 @@ The nodes are standalone config: they are found by scanning, not by link
 parsing, so they never need to be connected anywhere.
 """
 
-from ...common.global_config import GlobalConfig, LogicName
+from ...common.global_config import GlobalConfig
+from ...common.cross_ib_support import CROSS_IB_ERROR_PREFIX, supports_cross_ib
 from ...blueprint.blueprint_node_group import GROUP_NODE_IDNAME
 from ...blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch, time_switch_owner_key
 from ...utils.log_utils import LOG
 from .nodes import MIMINode_NarakaCrossIBRender
-
-
-# Every diagnostic uses one prefix, so a user can search the console output
-# and the tests can assert the feature that failed instead of any exception.
-CROSS_IB_ERROR_PREFIX = "Naraka Cross-IB Render: "
 
 
 def apply_cross_ib_render_nodes(tree, blueprint_model):
@@ -38,8 +34,11 @@ def apply_cross_ib_render_nodes(tree, blueprint_model):
     if not cross_node_list and not time_node_list:
         return
 
-    if GlobalConfig.logic_name != LogicName.Naraka:
-        raise ValueError("The Naraka Cross-IB Render node is only supported under the Naraka game preset")
+    if not supports_cross_ib(GlobalConfig.logic_name):
+        raise ValueError(
+            CROSS_IB_ERROR_PREFIX
+            + "this preset has no cross-IB export; turn the cross-IB settings off"
+        )
 
     # Resolve every request into one desired host per DrawCall first.  This
     # makes the application atomic: a later conflicting request cannot leave

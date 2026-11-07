@@ -25,7 +25,8 @@ playback on/off: off selects frame zero, and re-enabling starts a fresh loop.
 '''
 import bpy
 
-from ..common.global_config import GlobalConfig, LogicName
+from ..common.global_config import GlobalConfig
+from ..common.cross_ib_support import supports_cross_ib
 from ..i18n.i18n import I18nOperator, tr, translatable
 from .blueprint_node_base import MIMINodeBase
 
@@ -240,14 +241,15 @@ class MIMINode_TimeSwitch(MIMINodeBase):
         tree = self.id_data if getattr(self, "id_data", None) else None
         op_bake.tree_name = tree.name if tree else ""
 
-        # Naraka only: one host object for the whole timeline.  This replaces
-        # the old workflow of adding one Cross-IB pair per frame object, which
-        # became unmaintainable for baked animations with dozens of frames.
-        if GlobalConfig.logic_name == LogicName.Naraka:
+        # Only the presets that can export cross-IB sections show this panel:
+        # one host object for the whole timeline replaces the old workflow of
+        # adding one pair per frame object, which became unmaintainable for
+        # baked animations with dozens of frames.
+        if supports_cross_ib(GlobalConfig.logic_name):
             layout.separator()
             box = layout.box()
-            box.label(text=tr("Naraka Cross-IB"), icon='LINKED')
-            box.prop(self, "cross_ib_enabled", text=tr("Cross-IB Render"))
+            box.label(text=tr("Cross-IB Render"), icon='LINKED')
+            box.prop(self, "cross_ib_enabled", text=tr("Enable Cross-IB"))
             host_column = box.column()
             host_column.enabled = self.cross_ib_enabled
             host_column.prop(self, "cross_ib_host_object", text=tr("Host Object"))

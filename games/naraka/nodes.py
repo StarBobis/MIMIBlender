@@ -1,8 +1,12 @@
 '''
-Naraka-only blueprint nodes.
+Cross-IB blueprint nodes.
 
-Currently this module holds the cross-IB render configuration node:
-a standalone node (no sockets, no connections required) that stores
+This module holds the cross-IB render configuration node.  The node class
+lives with the Naraka preset because that is where the feature started, but
+it is offered to every preset listed in common/cross_ib_support.py: the node
+only stores configuration, and the preset decides how the pairs become INI.
+
+The node is standalone (no sockets, no connections required) and stores
 source -> target object pairs. At mod generation time every pair is
 resolved by BluePrintModel:
 
@@ -12,7 +16,8 @@ resolved by BluePrintModel:
 - Target object (host): its Submesh section receives the cross-IB block
   (guest IB + guest VB backups switched in) after its own drawindexed.
 - The guest Submesh section also captures its DrawIB's VB bindings into
-  backup resources (ref vb0 / ref vb1) so the host side can rebind them.
+  backup resources (ref vb0 / ref vb1, plus every other slot the preset
+  overrides) so the host side can rebind them.
 
 The generated resource names carry the Submesh identity and the slot,
 e.g. Resource_LOD0_fd1dede6_0_BK_VB0, so any number of pairs never collide.
@@ -21,7 +26,7 @@ import bpy
 from bpy.types import PropertyGroup, UIList
 
 from ...common.global_config import GlobalConfig
-from ...common.global_config import LogicName
+from ...common.cross_ib_support import supports_cross_ib
 from ...i18n.i18n import I18nOperator, tr, translatable
 from ...blueprint.blueprint_node_base import MIMINodeBase
 
@@ -107,9 +112,9 @@ def _find_cross_ib_node(context, tree_name: str, node_name: str):
 
 @translatable
 class MIMINode_NarakaCrossIBRender(MIMINodeBase):
-    '''Cross-IB render pairs for the Naraka preset (standalone config node, no connections needed)'''
+    '''Cross-IB render pairs for every preset with cross-IB export support (standalone config node, no connections needed)'''
     bl_idname = 'MIMINode_NarakaCrossIBRender'
-    bl_label = 'Naraka Cross-IB Render'
+    bl_label = 'Cross-IB Render'
     bl_icon = 'LINKED'
 
     # The pair list is the whole state of this node; it is scanned globally
@@ -119,14 +124,14 @@ class MIMINode_NarakaCrossIBRender(MIMINodeBase):
 
     def init(self, context):
         # The default title is instance data, so bake in the active language.
-        self.label = tr("Naraka Cross-IB Render")
+        self.label = tr("Cross-IB Render")
         self.width = 420
         self.use_custom_color = True
         self.color = (0.54, 0.34, 0.54)
 
     def draw_buttons(self, context, layout):
-        if GlobalConfig.logic_name != LogicName.Naraka:
-            layout.label(text=tr("This node only works under the Naraka game preset"), icon='ERROR')
+        if not supports_cross_ib(GlobalConfig.logic_name):
+            layout.label(text=tr("This node only works under game presets that support cross-IB rendering"), icon='ERROR')
 
         layout.label(text=tr("Each row: source object's draws are rendered in the target object's draw call"), icon='INFO')
 

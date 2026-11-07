@@ -14,6 +14,7 @@ path comes from the shared section builders.
 """
 
 from ...common.global_config import GlobalConfig
+from ...common.cross_ib_support import CROSS_IB_ERROR_PREFIX
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
@@ -83,7 +84,7 @@ class Exporter(StandardExporter):
 
                 for host_submesh_name, draw_call_list in crossed_per_host.items():
                     if host_submesh_name not in submesh_lookup:
-                        raise ValueError("Naraka Cross-IB Render: host Submesh '" + host_submesh_name + "' does not exist in this export")
+                        raise ValueError(CROSS_IB_ERROR_PREFIX + "host Submesh '" + host_submesh_name + "' does not exist in this export")
                     entry = {
                         "guest_drawib_model": drawib_model,
                         "guest_submesh_model": submesh_model,

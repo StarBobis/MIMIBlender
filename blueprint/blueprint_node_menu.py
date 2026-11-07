@@ -5,7 +5,7 @@ import time
 import bpy
 
 from ..common.global_config import GlobalConfig
-from ..common.global_config import LogicName
+from ..common.cross_ib_support import supports_cross_ib
 from ..common import texture_format_service
 from ..i18n.i18n import I18nOperator, tr, translatable
 
@@ -1078,10 +1078,11 @@ def draw_node_add_menu(self, context):
     # so the flat add menu stays short and readable.
     layout.menu(MIMIMT_TextureAssignMenu.bl_idname, icon='TEXTURE')
     layout.menu(MIMIMT_DynamicModMenu.bl_idname, icon='TIME')
-    # The cross-IB render node only produces INI for the Naraka preset,
-    # so only offer it there to keep the other presets' menus clean.
-    if GlobalConfig.logic_name == LogicName.Naraka:
-        layout.operator("node.add_node", text=tr("Naraka Cross-IB Render"), icon='LINKED').type = "MIMINode_NarakaCrossIBRender"
+    # The cross-IB render node only produces INI for the presets that list
+    # cross-IB export support, so only offer it there to keep the other
+    # presets' menus clean.
+    if supports_cross_ib(GlobalConfig.logic_name):
+        layout.operator("node.add_node", text=tr("Cross-IB Render"), icon='LINKED').type = "MIMINode_NarakaCrossIBRender"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper

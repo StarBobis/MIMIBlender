@@ -1,11 +1,15 @@
-"""Naraka timeline-level Cross-IB batch regression tests.
+"""Cross-IB timeline-level batch regression tests.
 
 The batch feature has two layers:
 
 1. the parser stamps every draw of a DrawIndex timeline with the timeline's
    graph-provenance key (covered by test_dynamic_animation_blender.py),
-2. the Naraka post-processor turns that key into one host Submesh and rejects
+2. the shared post-processor turns that key into one host Submesh and rejects
    ambiguous or contradictory configurations (covered here).
+
+The post-processor lives with the Naraka preset but serves every preset in
+common/cross_ib_support.py, so the last check also proves that the support
+list, not a hard-coded game name, decides which presets may use it.
 
 Run with:
     blender -b --factory-startup --python-exit-code 1 --python this_file
@@ -256,16 +260,25 @@ def test_source_equal_to_target_is_rejected():
     print("PASS: a self-referencing manual pair is rejected")
 
 
-def test_non_naraka_preset_is_rejected():
+def test_support_list_decides_the_preset():
+    # GF2 ships the same exporter support, so the shared post-processor has to
+    # accept it; a preset outside the support list must still fail loudly
+    # instead of silently producing a mod without the sections.
     host_draw = make_draw("Host", HOST_SUBMESH)
     frame_draw = make_draw("Frame0", GUEST_SUBMESH, TIMELINE_KEY)
     model = make_model([host_draw, frame_draw], [TIMELINE_KEY])
 
+    run_with_logic(LogicName.GF2, make_tree([make_time_node()]), model)
+    assert frame_draw.cross_render_at_submesh == HOST_SUBMESH
+    print("PASS: a second supported preset is accepted")
+
+    unsupported_draw = make_draw("Frame0", GUEST_SUBMESH, TIMELINE_KEY)
+    unsupported_model = make_model([make_draw("Host", HOST_SUBMESH), unsupported_draw], [TIMELINE_KEY])
     rejects(
-        lambda: run_with_logic(LogicName.GIMI, make_tree([make_time_node()]), model),
-        "only supported under the Naraka",
+        lambda: run_with_logic(LogicName.GIMI, make_tree([make_time_node()]), unsupported_model),
+        "no cross-IB export",
     )
-    print("PASS: the batch stays Naraka-only")
+    print("PASS: a preset without exporter support is rejected")
 
 
 def main():
@@ -284,7 +297,7 @@ def main():
     test_muted_timeline_is_ignored()
     test_host_with_multiple_submeshes_is_rejected()
     test_source_equal_to_target_is_rejected()
-    test_non_naraka_preset_is_rejected()
+    test_support_list_decides_the_preset()
     print("ALL NARAKA CROSS-IB BATCH CHECKS PASSED")
     return 0
 

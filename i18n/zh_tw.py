@@ -1123,11 +1123,10 @@ TRANSLATIONS_ZH_TW = {
     "texconv.exe found": "已找到 texconv.exe",
     "texconv.exe not found; DDS output unavailable": "找不到 texconv.exe；DDS 輸出無法使用",
     "DDS output requires texconv.exe, but it could not be found. Set the texconv.exe path in the Output Format settings or the TEXCONV_PATH environment variable.": "DDS 輸出需要 texconv.exe，但找不到。請在輸出格式設定中指定 texconv.exe 路徑，或設定 TEXCONV_PATH 環境變數。",
-    "Naraka Cross-IB Render": "Naraka 跨 IB 算繪",
     "Target Object": "目標物件",
     "Add Pair": "新增一對",
     "Remove Pair": "移除一對",
-    "This node only works under the Naraka game preset": "此節點僅在 Naraka 遊戲預設下生效",
+    "This node only works under game presets that support cross-IB rendering": "此節點僅在支援跨IB算繪的遊戲預設下生效",
     "Each row: source object's draws are rendered in the target object's draw call": "每一列：來源物件的繪製會在目標物件的 DrawCall 中算繪",
 
     # ---- Addon updater: sidebar panel and operator labels ----
@@ -1255,9 +1254,8 @@ TRANSLATIONS_ZH_TW = {
     "Baking produced no objects": "烘焙未產生任何物件",
     "Baked {count} frames and wired them into this node": "已烘焙 {count} 幀並連線到此節點",
 
-    # ---- Naraka cross-IB batch on the DrawIndexed timeline ----
+    # ---- Cross-IB batch on the DrawIndexed timeline ----
     # One host object for the whole timeline replaces one pair per frame.
-    "Naraka Cross-IB": "Naraka 跨IB",
     "Enable Cross-IB": "啟用跨IB",
     "Render this timeline's frames inside the host object's draw call so they use the host's material and textures": "將本時間軸的所有幀放到宿主物件的DrawCall中繪製，從而使用宿主的材質和貼圖",
     "Host Object": "宿主物件",

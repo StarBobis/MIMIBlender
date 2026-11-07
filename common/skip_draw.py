@@ -108,8 +108,7 @@ def validate_skip_draw(drawib_model_list):
       the whole Submesh disappears while those objects still ship data,
     - a hard error when the hidden Submesh takes part in a feature that cannot
       be expressed without its draw (Position.buf animation frames, or the
-      Naraka / PGR cross-IB rendering that captures VB backups in the guest
-      section).
+      cross-IB rendering that captures VB backups in the guest section).
 
     Raising here keeps the export silent-free: no half-hidden mod is written.
     """
@@ -160,7 +159,7 @@ def validate_skip_draw(drawib_model_list):
             if submesh_name in guest_submesh_name_set or submesh_name in host_submesh_name_set:
                 raise ValueError(
                     "Skip Draw: Submesh '" + submesh_name + "' of DrawIB " + draw_ib
-                    + " is used by Naraka Cross-IB rendering; "
+                    + " is used by Cross-IB rendering; "
                     + "remove that cross-IB pair, or turn Skip Draw off for it"
                 )
 
