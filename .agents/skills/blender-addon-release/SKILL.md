@@ -9,14 +9,15 @@ description: Publish a MIMIBlender add-on release: bump the version, package wit
 
 - The version source is `bl_info.version` in `__init__.py`. Increment the patch independently of MMT.
 - The public title is `MIMIBlender <version>`. Preserve `v<version>` tags and `MIMIBlenderV<digits>.zip` asset/wrapper names.
-- The release body is a short description passed with `-Notes`. Default body: `修复了部分已知问题`.
-  Never use the script's automatic compare/changelog default.
+- The release body must describe concrete user-visible changes in plain language. Review it before publishing and pass `-CustomNotes` with explicit `-Notes` or `-NotesPath`.
+  Never use generic known-problem wording, automatic compare/changelog defaults, or commit-history-generated notes. Do not disclose internal implementation, diagnostics, authorization or other sensitive user-state details.
+- `-CustomNotes` rejects missing or empty notes before version commits, pushes or public changes.
 - Commit and push before packaging. The updater downloads GitHub tag zipballs; unpushed local changes are not an update.
 
 ## Release steps (this is the whole flow)
 
 1. Start from a clean worktree. Do not manually bump the version before using `-Bump`.
-2. Run `.\release.ps1 -Bump -Push -NotesPath tmp\release-notes.txt` (or `-Notes "<description>"`).
+2. Review the concrete public description, then run `.\release.ps1 -Bump -Push -CustomNotes -NotesPath tmp\release-notes.txt` (or `-Notes "<description>"`).
    The script bumps only the version tuple, commits `chore(release): version X.Y.Z`, pushes,
    packs `git archive` of HEAD into `MIMIBlenderV<digits>.zip`, checks the local wrapper/version,
    creates the public `v<version>` release, checks title/body in the create/update response,

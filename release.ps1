@@ -48,6 +48,9 @@
 .PARAMETER DryRun
     Run preflight only: shows what would be released, changes nothing.
 
+.PARAMETER CustomNotes
+    Require explicit nonempty reviewed Notes or NotesPath before version changes.
+
 .PARAMETER Notes / NotesPath
     Custom release body (inline text or a UTF-8 file). Default: the usual
     "**Full Changelog**: <compare link>" line, same as past releases.
@@ -70,6 +73,8 @@ param(
     [switch]$Push,
     [switch]$Draft,
     [switch]$DryRun,
+    # Reviewed notes must be explicit when the strict publishing mode is used.
+    [switch]$CustomNotes,
     [string]$Version,
     [string]$Notes,
     [string]$NotesPath,
@@ -144,6 +149,17 @@ $repoRoot = (Get-Location).Path
 # APIs disagree and the script fail with "Could not find file ...tmp\....zip".
 $TmpDir = Join-Path $repoRoot 'tmp'
 Write-Ok "repository root $repoRoot"
+
+# Validate reviewed notes before any version commit, push, or public mutation.
+# CustomNotes never falls back to automatic compare links or generic wording.
+# Read the explicit UTF-8 file once so publishing uses this reviewed content.
+if ($CustomNotes) {
+    if (-not $Notes -and $NotesPath) {
+        if (-not (Test-Path -LiteralPath $NotesPath -PathType Leaf)) { Fail "notes file not found: $NotesPath" }
+        $Notes = (Get-Content -LiteralPath $NotesPath -Raw -Encoding utf8).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($Notes)) { Fail '-CustomNotes requires nonempty -Notes or -NotesPath' }
+}
 
 # Read bl_info version from __init__.py: the single version source of truth.
 $initContent = Get-Content -LiteralPath $InitPyPath -Raw

@@ -27,4 +27,10 @@ assert source.index('[string]$release.body -cne $Notes') < source.index(marker)
 # Do not silently enable automatic commit-history notes in the release request.
 assert "draft            = [bool]$Draft" in source
 assert not re.search(r"generate_release_notes\s*=\s*\$true", source)
-print("PASS release policy: explicit metadata, published by default, no post-release checks")
+# Strict custom notes must fail before version changes or public mutations.
+# Validate actual parameter and guard ordering, not the descriptive header.
+assert '[switch]$CustomNotes' in source
+assert "if ($CustomNotes) {" in source
+assert "[string]::IsNullOrWhiteSpace($Notes)" in source
+assert source.index("if ($CustomNotes) {") < source.index("# -- 1. Version bump")
+print("PASS release policy: reviewed notes, explicit metadata, published by default, no post-release checks")
