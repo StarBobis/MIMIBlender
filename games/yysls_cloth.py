@@ -13,25 +13,24 @@ from ..common.global_config import GlobalConfig
 from ..common.m_ini_builder import M_IniSection, M_SectionType
 
 
-# The first marker and constants remain stable for existing generated mods.
+# The supported hash for the current game build. The 2026-11 update recompiled
+# this vertex shader: the hash moved from ab148fe238420411 to c01b8886cbc05321
+# while the input/output signature, constant buffers and resource bindings
+# stayed identical. Older hashes are no longer supported by this asset.
+# The filter value keeps its historical number so an already exported mod and a
+# newly exported one resolve to the same `vs` slot instead of drifting apart.
 # Keep filter values exactly representable as float32, as required by 3Dmigoto.
 # Never reuse a value for another hash or an unrelated shader family.
-CLOTH_VS_HASH = "ab148fe238420411"
+CLOTH_VS_HASH = "c01b8886cbc05321"
 CLOTH_VS_FILTER = 823114
 CLOTH_SHADER_FILENAME = "yysls_no_cloth.hlsl"
 
-# The supplied second replacement has a TEXCOORD1 input and therefore needs a
-# separate asset. Its constant-buffer and resource ABI otherwise follows the
-# same YYSLS cloth-result path as the first supported shader.
-CLOTH_VS_HASH_49BF = "49bf02a13c364cd9"
-CLOTH_VS_FILTER_49BF = 823115
-CLOTH_SHADER_FILENAME_49BF = "yysls_no_cloth_49bf02a13c364cd9.hlsl"
-
 # Tuple fields are original hash, filter value, packaged filename, and a stable
 # name suffix used only for sections belonging to variants after the first.
+# The tuple stays so a later game build can add a hash without rewriting the
+# marker, route, or packaging code around it.
 CLOTH_SHADER_VARIANTS = (
     (CLOTH_VS_HASH, CLOTH_VS_FILTER, CLOTH_SHADER_FILENAME, "default"),
-    (CLOTH_VS_HASH_49BF, CLOTH_VS_FILTER_49BF, CLOTH_SHADER_FILENAME_49BF, "49bf02a13c364cd9"),
 )
 
 

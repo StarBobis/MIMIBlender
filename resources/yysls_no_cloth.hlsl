@@ -1,5 +1,7 @@
-// YYSLS local no-cloth vertex shader for hash ab148fe238420411 only.
-// Derived from the user's working no-cloth ShaderFixes replacement.
+// YYSLS local no-cloth vertex shader for hash c01b8886cbc05321 only.
+// Derived from that hash's 2026-11-08 ShaderFixes dump plus the reviewed
+// ab148fe238420411 no-cloth replacement it superseded. The two dumps differ
+// only in the last-frame clip-position write kept below.
 // This file is an asset for CustomShader, never a global hash replacement.
 // The exporter checks the original VS before binding any mod resources.
 // CustomShader installs VS before the shared resource/draw list executes.
@@ -402,8 +404,11 @@ void main(
   r2.y = dot(r4.xyzw, LastWorldViewProjTex._m01_m11_m21_m31);
   r2.z = dot(r4.xyzw, LastWorldViewProjTex._m03_m13_m23_m33);
   r2.xyz = float3(0.00100000005,0.00100000005,0.00100000005) * r2.xyz;
-  o8.xyz = r6.yyy ? r2.xyz : float3(10,10,1);
-  o8.w = 1;
+  // The current build folds the validity flag into w instead of writing w = 1
+  // unconditionally, so the sentinel branch carries (10,10,1,0) rather than
+  // (10,10,1,1). Reproduce that split exactly to keep the output contract.
+  r2.w = 1;
+  o8.xyzw = r6.yyyy ? r2.xyzw : float4(10,10,1,0);
   o7.x = CameraInfo.z * r0.z;
 
   // Preserve local-position effects and all remaining interpolator channels.

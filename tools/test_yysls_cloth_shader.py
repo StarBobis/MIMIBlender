@@ -1,13 +1,18 @@
-"""Compile the shipped YYSLS vertex shader variants.
+"""Compile the shipped YYSLS no-cloth vertex shader.
 
 This tool uses the Windows system HLSL compiler without installing the Windows
 SDK. No game process, mod-loader DLL, graphics hook, or shader cache is
-modified. The optional reference comparison ignores reflection/debug metadata
-and compares executable DXBC plus the input/output signatures. Matching those
-chunks demonstrates that the original supported shader's dead cloth branches
-were removed without changing its compiled path. The second supplied variant
-is compiled independently because it has a different input signature and UV
-ABI; it has no no-cloth reference in the repository.
+modified. Two optional comparisons are available:
+
+--reference      another no-cloth asset from the same game build. Executable
+                 DXBC and every signature chunk must match byte-for-byte, which
+                 shows a rewrite did not change the compiled path.
+--reference-abi  a dumped game shader for the same draw, cloth path included.
+                 Semantic names, indices, component formats and input slots
+                 must match, so the asset still binds where the game binds it.
+                 Per-component read masks may differ: the cloth solver is what
+                 makes the game shader read SV_VertexID, and this asset removes
+                 it. Executables never match across builds by design.
 """
 
 import argparse
@@ -25,7 +30,6 @@ HRESULT = ct.c_int32
 ROOT = Path(__file__).resolve().parents[1]
 SHADERS = (
     ROOT / "resources" / "yysls_no_cloth.hlsl",
-    ROOT / "resources" / "yysls_no_cloth_49bf02a13c364cd9.hlsl",
 )
 
 
@@ -82,6 +86,30 @@ def dxbc_chunks(data):
     return result
 
 
+def signature_elements(data):
+    """Decode one DXBC signature chunk into layout-relevant elements.
+
+    The chunk is a count, a reserved dword, then one 24-byte element per
+    semantic and a string table of absolute name offsets. The trailing
+    read/write "used" byte is deliberately dropped: it records which
+    components the shader body happens to read, so removing the cloth solver
+    changes it for SV_VertexID without changing the input layout the game
+    binds. D3D11 validates a layout against semantic, index, format and slot,
+    never against that read mask.
+    """
+    assert data[:4] != b""
+    count = struct.unpack_from("<I", data, 0)[0]
+    elements = []
+    for index in range(count):
+        base = 8 + index * 24
+        name_offset, semantic, system_value, component, register = struct.unpack_from("<5I", data, base)
+        mask = data[base + 20]
+        end = data.index(b"\0", name_offset)
+        elements.append((data[name_offset:end].decode("ascii"), semantic,
+                         system_value, component, register, mask))
+    return elements
+
+
 def compare_reference(shipped, reference):
     """Require executable and signature chunks to match a working reference."""
     # Reflection differs because unused declarations were intentionally removed.
@@ -91,11 +119,26 @@ def compare_reference(shipped, reference):
 
 
 def compare_signatures(shipped, reference):
-    """Require only input/output signatures to match a supplied source."""
+    """Require the bound input/output ABI, ignoring per-component read masks."""
     # A no-cloth variant must remove cloth execution while retaining the source
     # input layout and pixel-shader-facing output contract.
     for key in (b"ISGN", b"OSGN"):
-        assert shipped.get(key) == reference.get(key), "Signature mismatch: " + str(key)
+        mine, theirs = signature_elements(shipped[key]), signature_elements(reference[key])
+        assert mine == theirs, "%s ABI mismatch:\n  shipped=%r\n  reference=%r" % (key, mine, theirs)
+
+
+def compare_read_masks(shipped, reference):
+    """Report which elements the two sources read differently, if any."""
+    report = []
+    for key in (b"ISGN", b"OSGN"):
+        mine, theirs = shipped[key], reference[key]
+        for index, element in enumerate(signature_elements(mine)):
+            base = 8 + index * 24
+            used_mine, used_theirs = mine[base + 21], theirs[base + 21]
+            if used_mine != used_theirs:
+                report.append("%s[%d] %s used 0x%02x vs 0x%02x"
+                              % (key.decode(), index, element[0], used_mine, used_theirs))
+    return report
 
 
 def assert_no_cloth_deformation(path, bytecode):
@@ -110,8 +153,10 @@ def assert_no_cloth_deformation(path, bytecode):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reference", type=Path)
-    parser.add_argument("--reference-49bf-signature", type=Path)
+    parser.add_argument("--reference", type=Path,
+                        help="same-build asset whose executable DXBC must match exactly")
+    parser.add_argument("--reference-abi", type=Path,
+                        help="game dump whose input/output ABI this asset must still satisfy")
     args = parser.parse_args()
 
     compiled = []
@@ -123,17 +168,22 @@ def main():
         compiled.append(chunks)
         print("PASS: " + shader.name + " compiles as vs_5_0 and has no t11 cloth path")
 
-    # The optional reference is for the original ab148 no-cloth asset only.
-    # The 49bf asset has a different input signature and is validated separately.
+    # The executable reference is only meaningful within one game build: a
+    # recompiled build changes scheduled instructions without changing the ABI.
     if args.reference:
         reference = dxbc_chunks(compile_shader(args.reference))
         compare_reference(compiled[0], reference)
-        print("PASS: first variant matches its executable and signatures exactly")
+        print("PASS: variant matches its executable and signatures exactly")
 
-    if args.reference_49bf_signature:
-        reference = dxbc_chunks(compile_shader(args.reference_49bf_signature))
-        compare_signatures(compiled[1], reference)
-        print("PASS: second variant matches the supplied input/output signatures")
+    # The ABI reference is a dumped game shader, cloth path included. Element
+    # names, indices, formats and slots must match; read masks may not, because
+    # the cloth solver is what makes the game shader read SV_VertexID.
+    if args.reference_abi:
+        reference = dxbc_chunks(compile_shader(args.reference_abi))
+        compare_signatures(compiled[0], reference)
+        print("PASS: input/output ABI matches " + args.reference_abi.name)
+        for line in compare_read_masks(compiled[0], reference):
+            print("NOTE: read mask differs, cloth path removed: " + line)
 
 
 if __name__ == "__main__":

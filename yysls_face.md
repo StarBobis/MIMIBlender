@@ -35,7 +35,7 @@ is also wrong: it can produce a combined byte-weight sum of 510 instead of 255.
   Independent replacement buffers are valid: shared source allocation identity
   does not have to be reproduced for ordinary IA vertex-buffer reads.
 
-The existing no-cloth override remains restricted to VS `ab148fe238420411`.
+The existing no-cloth override remains restricted to VS `c01b8886cbc05321`.
 The face shaders in this capture are different and are **not** replaced by it.
 
 ## Migration

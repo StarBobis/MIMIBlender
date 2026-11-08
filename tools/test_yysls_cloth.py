@@ -258,7 +258,7 @@ class ClothTests(unittest.TestCase):
         _, builder = build([make_model()])
         sections = parse_sections(builder)
         marker = sections["ShaderOverride_YYSLS_ClothVS"]
-        self.assertEqual(marker, ["hash = ab148fe238420411", "allow_duplicate_hash = true", "filter_index = 823114"])
+        self.assertEqual(marker, ["hash = c01b8886cbc05321", "allow_duplicate_hash = true", "filter_index = 823114"])
         self.assertEqual(simulate(sections, "ShaderOverride_YYSLS_ClothVS")[0], [])
 
     def test_matching_shader_is_scoped_to_one_draw(self):
@@ -267,21 +267,6 @@ class ClothTests(unittest.TestCase):
         trace, restored = simulate(parse_sections(builder), "TextureOverride_LOD0.31e22cc3_0")
         self.assertEqual([x for x in trace if x[0] == "draw"], [("draw", CLOTH.CLOTH_SHADER_FILENAME, "924,0,0")])
         self.assertEqual(restored, CLOTH.CLOTH_VS_FILTER)
-
-    def test_second_shader_variant_uses_its_own_abi_asset(self):
-        # A second supported hash must select the shader with its TEXCOORD1 ABI.
-        _, builder = build([make_model()])
-        sections = parse_sections(builder)
-        trace, restored = simulate(
-            sections,
-            "TextureOverride_LOD0.31e22cc3_0",
-            shader=CLOTH.CLOTH_VS_FILTER_49BF,
-        )
-        self.assertEqual(
-            [x for x in trace if x[0] == "draw"],
-            [("draw", CLOTH.CLOTH_SHADER_FILENAME_49BF, "924,0,0")],
-        )
-        self.assertEqual(restored, CLOTH.CLOTH_VS_FILTER_49BF)
 
     def test_other_shader_and_unbound_shader_never_use_custom_vs(self):
         # Other passes retain their original Mod draw, not the original mesh.
@@ -373,21 +358,19 @@ class ClothTests(unittest.TestCase):
             NS(mark_type="Slot", mark_slot="ps-t8", get_resource_name=lambda: "ResourceSubmesh")]
         _, builder = build([model])
         sections = parse_sections(builder)
-        for shader in (CLOTH.CLOTH_VS_FILTER, CLOTH.CLOTH_VS_FILTER_49BF, 123456):
-            # Both replacement routes use identical bindings, but each has its
-            # own VS asset and the unknown path keeps the caller's shader.
+        for shader in (CLOTH.CLOTH_VS_FILTER, 123456):
+            # The replacement route binds identical resources to its own VS
+            # asset; the unknown path keeps the caller's shader instead.
             events = []
             simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader, events=events)
             bound = [event for event in events if event[0] == "bind"]
             if shader == CLOTH.CLOTH_VS_FILTER:
                 expected_shader = CLOTH.CLOTH_SHADER_FILENAME
-            elif shader == CLOTH.CLOTH_VS_FILTER_49BF:
-                expected_shader = CLOTH.CLOTH_SHADER_FILENAME_49BF
             else:
                 expected_shader = shader
             self.assertEqual(len(bound), 7)
             self.assertTrue(all(event[1] == expected_shader for event in bound))
-            if shader in (CLOTH.CLOTH_VS_FILTER, CLOTH.CLOTH_VS_FILTER_49BF):
+            if shader == CLOTH.CLOTH_VS_FILTER:
                 self.assertEqual(events[0][0], "vs_enter")
                 self.assertEqual(events[-1][0], "vs_restore")
             else:
@@ -405,13 +388,10 @@ class ClothTests(unittest.TestCase):
         suffix = "LOD0.31e22cc3_0"
         parent = sections["TextureOverride_" + suffix]
         custom = "CustomShader_YYSLS_NoCloth_" + suffix
-        custom_49bf = custom + "_49bf02a13c364cd9"
         shared = "CommandList_YYSLS_Draw_" + suffix
         self.assertFalse(any(line.startswith(("vb", "ib =", "ps-t", "vs-t", "drawindexed")) for line in parent))
         self.assertEqual(sections[custom], ["vs = " + CLOTH.CLOTH_SHADER_FILENAME, "run = " + shared])
-        self.assertEqual(sections[custom_49bf], ["vs = " + CLOTH.CLOTH_SHADER_FILENAME_49BF, "run = " + shared])
         self.assertIn("run = " + custom, parent)
-        self.assertIn("run = " + custom_49bf, parent)
         self.assertIn("run = " + shared, parent)
         self.assertTrue(sections[shared][0].startswith("vb2 = "))
         self.assertIn("drawindexed = 924,0,0", sections[shared])
@@ -432,14 +412,11 @@ class ClothTests(unittest.TestCase):
             output = Path(directory)
             self.assertEqual((output / CLOTH.CLOTH_SHADER_FILENAME).read_bytes(),
                              (ROOT / "resources" / CLOTH.CLOTH_SHADER_FILENAME).read_bytes())
-            self.assertEqual((output / CLOTH.CLOTH_SHADER_FILENAME_49BF).read_bytes(),
-                             (ROOT / "resources" / CLOTH.CLOTH_SHADER_FILENAME_49BF).read_bytes())
             text = (output / "fixture.ini").read_text()
             self.assertEqual(text.count("[ShaderOverride_YYSLS_ClothVS]"), 1)
-            self.assertEqual(text.count("[ShaderOverride_YYSLS_ClothVS_49bf02a13c364cd9]"), 1)
             self.assertIn("if $costume_mods", text)
             self.assertIn("if vs == 823114", text)
-            self.assertIn("if vs == 823115", text)
+            self.assertNotIn("if vs == 823115", text)
             self.assertNotIn("ShaderFixes\\", text)
 
 
