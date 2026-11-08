@@ -69,7 +69,7 @@ bl_info = {
     "description": "The Blender add-on for MIMITools",
     "blender": (5, 2, 0),
     # Keep the updater and manual-install package on the same release version.
-    "version": (1, 0, 79),
+    "version": (1, 0, 80),
     "location": "View3D",
     "category": "Generic"
 }
