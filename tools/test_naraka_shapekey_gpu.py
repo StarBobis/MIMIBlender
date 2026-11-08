@@ -83,7 +83,8 @@ def succeeded(hr, label):
         raise RuntimeError(label + " failed: 0x" + format(hr & 0xffffffff, "08x"))
 
 
-def run(base, shape, stride=40, animated_seed=False, shader_source=None, result_checker=None, seed_data=None):
+def run(base, shape, stride=40, animated_seed=False, shader_source=None, result_checker=None, seed_data=None,
+        output_desc=None):
     """Compile real shaders and check base + deltas, including animated seeds.
 
     The position-only and full-vertex shaders share the same slot contract.
@@ -229,6 +230,23 @@ def run(base, shape, stride=40, animated_seed=False, shader_source=None, result_
         raw = buffer(bind=8 | 1, misc=32)
         raw_desc = (UINT * 6)(39, 11, 0, len(base) // 4, 1, 0)
         create(7, [PTR, PTR], raw, ct.byref(raw_desc))
+        # YYSLS supplies the descriptor derived from its generated INI section.
+        # Do not silently add SRV binding capability missing from production.
+        copied_output = raw
+        if output_desc is not None:
+            assert output_desc.ByteWidth == len(base), "Output size must match the structured source"
+            copied_output = create(3, [ct.POINTER(BufferDesc), PTR], ct.byref(output_desc), None)
+            # Reproduce both original YYSLS failures: copy-time RAW+VB and
+            # the zero-byte lazy allocation reported by SubstantiateBuffer.
+            for byte_width in (len(base), 0):
+                legacy = BufferDesc(byte_width, 0, 1, 0, 32, stride)
+                invalid = PTR()
+                hr = call(device, 3, HRESULT, [ct.POINTER(BufferDesc), PTR, ct.POINTER(PTR)],
+                          ct.byref(legacy), None, ct.byref(invalid))
+                if invalid:
+                    owned.append(invalid)
+                assert hr == -2147024809, "Legacy YYSLS descriptor must fail with E_INVALIDARG"
+            print("OK: YYSLS legacy descriptors rejected; emitted output descriptor accepted")
         readback = buffer(bind=0, misc=0, staging=True)
         original = struct.unpack("<" + "f" * (len(base) // 4), base)
         target = struct.unpack("<" + "f" * (len(shape) // 4), shape)
@@ -267,10 +285,10 @@ def run(base, shape, stride=40, animated_seed=False, shader_source=None, result_
                 srv(120, view(texture))
                 call(context, 41, None, [UINT, UINT, UINT], (count + 63) // 64, 1, 1)
 
-            # Copy structured bytes into raw, then into a CPU-readable buffer.
-            # These are real D3D11 operations, not a CPU-only interpolation test.
-            call(context, 47, None, [PTR, PTR], raw, working)
-            call(context, 47, None, [PTR, PTR], readback, raw)
+            # Copy into the supplied output (or the shared raw default), then
+            # read back every byte. Actual descriptors must preserve the data.
+            call(context, 47, None, [PTR, PTR], copied_output, working)
+            call(context, 47, None, [PTR, PTR], readback, copied_output)
             mapped = MappedData()
             succeeded(call(context, 14, HRESULT, [PTR, UINT, UINT, UINT, ct.POINTER(MappedData)],
                            readback, 0, 1, 0, ct.byref(mapped)), "Map readback")

@@ -95,8 +95,19 @@ class ShapeTests(unittest.TestCase):
         # Every borrowed UAV/SRV is restored after the output copy.
         # No compute-only resource is ever referenced directly by a VB slot.
         self.assertEqual(compute[-4:], [slot + " = ref " + root + "YYSLSShapeBackup_" + slot for slot in SHAPES.SLOTS])
-        self.assertIn("misc_flags = buffer_allow_raw_views", sections[root + "YYSLSShapeComputed"])
-        self.assertIn("bind_flags = vertex_buffer", sections[root + "YYSLSShapeComputed"])
+        # The IA-only result must not request raw views without SRV/UAV binds.
+        # Explicit RAW replaces, rather than ORs, the inherited structured bit.
+        output = sections[root + "YYSLSShapeComputed"]
+        self.assertIn("type = ByteAddressBuffer", output)
+        self.assertIn("misc_flags = buffer_allow_raw_views", output)
+        self.assertIn("bind_flags = vertex_buffer shader_resource", output)
+        # Numeric zero is not in 3Dmigoto's named misc flag enum table.
+        # Omitting the override would keep STRUCTURED on a copy from cs-u5.
+        self.assertNotIn("misc_flags = 0", output)
+        # SubstantiateBuffer starts at zero bytes when no file/data is supplied.
+        # Array also keeps copy-time allocation equal to the full source size.
+        self.assertIn("stride = 28", output)
+        self.assertIn("array = 65", output)
         self.assertIn("type = StructuredBuffer", sections[root + "YYSLSShapeBase"])
         self.assertIn("stride = 32", sections[root + "YYSLSShapeScratch"])
         self.assertIn("array = 1", sections[root + "YYSLSShapeScratch"])
@@ -195,6 +206,11 @@ class ShapeTests(unittest.TestCase):
         sections, shaders = render([model])
         self.assertIn("Dispatch = 1025,1,1", sections["CustomShader_YYSLS_Shape_b08e2121"])
         self.assertIn("#define POSITION_UNORM16 1", shaders[SHAPES.shader_filename(model)])
+        # Size must use full vertex count for both float and compressed layouts.
+        # Large meshes cannot truncate the output at the old 65535-group boundary.
+        output = sections["Resourceb08e2121YYSLSShapeComputed"]
+        self.assertIn("stride = 24", output)
+        self.assertIn("array = 65537", output)
 
     def test_invalid_layout_and_buffer_fail_before_assets(self):
         """Reject corrupt inputs before even the first shader file is emitted.

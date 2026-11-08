@@ -22,7 +22,7 @@ import sys
 import tempfile
 
 import test_yysls_shapekeys as support
-from test_naraka_shapekey_gpu import run
+from test_naraka_shapekey_gpu import BufferDesc, run
 
 
 def normalize(values, fallback=(0.0, 0.0, 1.0)):
@@ -46,7 +46,7 @@ def read_position(vertex, compressed):
     return struct.unpack_from("<3f", vertex)
 
 
-def check_result(base, shape, seed, result, weights, compressed=False):
+def check_result(base, shape, seed, result, weights, compressed=False, compact=False):
     """Check every output vertex and every field, not only a sample position.
 
     GPU float arithmetic may differ slightly from Python's double precision.
@@ -55,8 +55,10 @@ def check_result(base, shape, seed, result, weights, compressed=False):
     A zero-weight run bypasses normalization, allowing an exact whole-file check.
     Negative weights and cancellation share the same additive delta contract.
     """
-    stride = 24 if compressed else 28
-    normal_offset = 12 if compressed else 16
+    # The reported fbc213aa mesh is float3 + normal + UV, without color.
+    # It shares stride 24 with UNORM16 fixtures but not their position codec.
+    stride = 24 if compressed or compact else 28
+    normal_offset = 12 if compressed or compact else 16
     if all(weight == 0 for weight in weights):
         assert result == seed, "Zero weights changed the seed"
         return
@@ -107,7 +109,7 @@ def synthetic(count, compressed=False, opposing=False):
     return bytes(base), bytes(shape), bytes(seed)
 
 
-def exercise(base, shape, compressed=False, seed=None):
+def exercise(base, shape, compressed=False, seed=None, compact=False):
     """Build the shader through the production writer, then run actual D3D11.
 
     The output directory is temporary, with no edits to the supplied reference.
@@ -115,8 +117,14 @@ def exercise(base, shape, compressed=False, seed=None):
     Generated layout constants are therefore exactly those used by real exports.
     The GPU harness also reproduces the invalid legacy resource flag failures.
     """
-    stride = 24 if compressed else 28
+    stride = 24 if compressed or compact else 28
     model = support.make_model(count=len(base) // stride, compressed=compressed)
+    if compact:
+        # fbc213aa stores NORMAL immediately after float3 POSITION.
+        # Removing the synthetic color field reproduces its exported layout.
+        elements = model.d3d11_game_type.D3D11ElementList
+        model.d3d11_game_type.D3D11ElementList = [e for e in elements if e.SemanticName != "COLOR"]
+        model.d3d11_game_type.CategoryStrideDict["Position"] = stride
     model.category_buffer_dict["Position"] = base
     model.shapekey_name_bytelist_dict["blink"] = shape
     support.support.TEST_SHAPEKEY_DICT["blink"] = support.KEY(key_name="$shapekey0")
@@ -126,8 +134,26 @@ def exercise(base, shape, compressed=False, seed=None):
         source = (Path(directory) / support.SHAPES.shader_filename(model)).read_bytes()
     # Preserve a clean boundary between shader output and the CPU oracle.
     # The callback sees read-back bytes, never a simulated GPU result.
-    checker = lambda a, b, s, result, weights: check_result(a, b, s, result, weights, compressed)
-    run(base, shape, stride=stride, shader_source=source, result_checker=checker, seed_data=seed)
+    checker = lambda a, b, s, result, weights: check_result(a, b, s, result, weights, compressed, compact)
+    # Use production section output, not the shared harness's raw SRV+VB default.
+    # Follow SubstantiateBuffer/OverrideBufferDesc for this fileless IA resource.
+    sections, _ = support.render([model])
+    lines = sections["Resource" + model.draw_ib + "YYSLSShapeComputed"]
+    values = dict(line.split(" = ", 1) for line in lines)
+    assert values["type"] == "ByteAddressBuffer"
+    # Match the named flag tables; numeric misc_flags=0 is not valid INI syntax.
+    # Use the emitted bindings rather than assuming the harness's default flags.
+    binds = {"vertex_buffer": 1, "shader_resource": 8}
+    flags = {"buffer_allow_raw_views": 32}
+    output_bind = sum(binds[name] for name in values["bind_flags"].split())
+    output_misc = sum(flags[name] for name in values["misc_flags"].split())
+    output_stride = int(values["stride"])
+    output_size = output_stride * int(values["array"])
+    # The same overrides replace a copied structured descriptor's flags.
+    # CopyResource below checks that the actual output size and bytes agree.
+    output_desc = BufferDesc(output_size, 0, output_bind, 0, output_misc, output_stride)
+    run(base, shape, stride=stride, shader_source=source, result_checker=checker, seed_data=seed,
+        output_desc=output_desc)
 
 
 def main():
@@ -137,11 +163,18 @@ def main():
         return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("buffers", nargs="*", type=Path)
+    # Some 24-byte YYSLS categories use UNORM16 positions instead of float3.
+    # Keep the default compatible with the original float reference fixture.
+    layouts = parser.add_mutually_exclusive_group()
+    layouts.add_argument("--compressed", action="store_true")
+    # The reported mod uses 24-byte float3 vertices with no color field.
+    # Do not infer compressed positions from a 24-byte stride alone.
+    layouts.add_argument("--compact", action="store_true")
     args = parser.parse_args()
     if args.buffers:
         if len(args.buffers) != 2:
             parser.error("Pass the reference base and shape buffer paths together")
-        exercise(*[path.read_bytes() for path in args.buffers])
+        exercise(*[path.read_bytes() for path in args.buffers], compressed=args.compressed, compact=args.compact)
     else:
         # Test both layouts, odd tails, opposing normals, and seed composition.
         for compressed, count, opposing in ((False, 65, False), (True, 65, False),

@@ -203,7 +203,7 @@ def add_model_sections(ini_builder, model, keys):
         commands.append("z88 = " + str(int(index == len(names) - 1)))
         commands.append("cs-t51 = ref " + root + "YYSLSShapeTarget" + str(index))
         commands.append("Dispatch = " + str((model.vertex_count + 63) // 64) + ",1,1")
-    # Explicit RAW-only destination flags prevent inherited structured flags.
+    # Explicit RAW-only misc flags remove the inherited structured buffer flag.
     # Referring cs-u5 directly as a VB is not legal on standard D3D11 drivers.
     commands.append(root + "YYSLSShapeComputed = copy cs-u5")
     for slot in SLOTS:
@@ -213,10 +213,18 @@ def add_model_sections(ini_builder, model, keys):
     resources = M_IniSection(M_SectionType.ResourceBuffer)
     stride = model.d3d11_game_type.CategoryStrideDict["Position"]
     resources.append("[" + root + "YYSLSShapeComputed]")
+    # OverrideBufferDesc replaces misc_flags last, clearing inherited STRUCTURED.
+    # The INI flag parser accepts named flags, not numeric zero.
     resources.append("type = ByteAddressBuffer")
     resources.append("misc_flags = buffer_allow_raw_views")
-    resources.append("bind_flags = vertex_buffer")
+    # D3D11 requires SRV or UAV binding capability for ALLOW_RAW_VIEWS.
+    # A raw buffer bound only as VERTEX_BUFFER fails with E_INVALIDARG.
+    # SRV capability is required even though YYSLS consumes only the IA buffer.
+    resources.append("bind_flags = vertex_buffer shader_resource")
     resources.append("stride = " + str(stride))
+    # A fileless resource starts with ByteWidth=0 during substantiation.
+    # Declare its full size for both lazy creation and source-descriptor copies.
+    resources.append("array = " + str(model.vertex_count))
     resources.new_line()
     # Float scratch avoids quantizing/normalizing after every individual key.
     # Each first dispatch initializes its own vertex; no CPU clearing is needed.
