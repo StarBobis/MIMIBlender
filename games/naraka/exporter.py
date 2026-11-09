@@ -157,15 +157,12 @@ class Exporter(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_ib_namesuffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
-            texture_override_ib_section.append("checktextureoverride = vb1")
 
-            # Hash-marked textures join the override check so the mod only
-            # applies when the original textures are bound.
-            if not MIMIGlobalProperties.forbid_auto_texture_ini():
-                for texture_markup_info in drawib_model.get_submesh_texture_markup_info_list(submesh_model):
-                    if texture_markup_info.mark_type == "Hash":
-                        texture_override_ib_section.append("checktextureoverride = " + texture_markup_info.mark_slot)
-
+            # No checktextureoverride gate is written here on purpose.  The
+            # removed "vb1" line and the per-mark "ps-tN" lines only re-ran
+            # the texture overrides that the hash matching already applies,
+            # and they tied this override to whatever texture happened to be
+            # bound, so a replaced texture could stop the mod from working.
             texture_override_ib_section.append("handling = skip")
 
             # Skip Draw: the Submesh is hidden, so its VB bindings, texture

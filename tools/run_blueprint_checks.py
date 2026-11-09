@@ -25,6 +25,7 @@ TESTS = (
     'test_wwmi_components_blender.py',
     'test_wwmi_multi_drawib_ini.py',
     'test_naraka_shapekeys.py',
+    'test_naraka_ini_texture_check.py',
     'test_yysls_shapekeys.py',
 )
 
