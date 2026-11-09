@@ -186,6 +186,7 @@ class MMTImportHelper:
 				nanocat_texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
 					submesh_json=submesh_json,
 					ib_entry_index=segment_info["ib_index"],
+					segment_texture_name=segment_info.get("nanocat_texture", ""),
 				)
 				if nanocat_texture_path:
 					MMTImportHelper.apply_nanocat_part_texture(segment_obj, nanocat_texture_path)
@@ -334,6 +335,8 @@ class MMTImportHelper:
 						# segment can be attributed to the right Component.
 						"match_first_index": draw_call_segment.MatchFirstIndex,
 						"match_index_count": draw_call_segment.MatchIndexCount,
+					# Per-segment preview texture assigned by NanoCat (MMT).
+					"nanocat_texture": draw_call_segment.NanoCatPartTexture,
 					},
 				))
 		elif len(submesh_json.DrawCallIndexList) > 0:
@@ -732,21 +735,27 @@ class MMTImportHelper:
 		return numpy.dtype(fields)
 
 	@staticmethod
-	def resolve_nanocat_part_texture_path(submesh_json:SubmeshJson, ib_entry_index:int):
+	def resolve_nanocat_part_texture_path(submesh_json:SubmeshJson, ib_entry_index:int, segment_texture_name:str = ""):
 		'''
-		Resolve the NanoCat (MMT) preview texture recorded on one IndexBufferList entry.
+		Resolve the NanoCat (MMT) preview texture of one imported part.
 
 		The MMT host writes "NanoCatPartTexture" into the SubMeshJson when the agent
 		assigns a base-color texture to a part. The value is a bare PNG file name and
 		the file itself lies flat in the reverse output root (the parent folder of the
 		variant folder holding the JSON), so both the JSON folder and its parent are
 		probed. Returns the absolute image path, or None when nothing usable is found.
-		'''
-		# A negative index is the DrawCallIndexList fallback (no IB entry mapping).
-		if ib_entry_index < 0 or ib_entry_index >= len(submesh_json.IndexBufferList):
-			return None
 
-		texture_name = str(submesh_json.IndexBufferList[ib_entry_index].NanoCatPartTexture or "").strip()
+		A single-IB multi-component group (WWMI) shares one index buffer between all
+		components, so the per-component assignment is recorded on the draw-call
+		segment instead of the IndexBufferList entry: the segment name wins, the
+		entry stays the fallback.
+		'''
+		texture_name = str(segment_texture_name or "").strip()
+		if not texture_name:
+			# A negative index is the DrawCallIndexList fallback (no IB entry mapping).
+			if ib_entry_index < 0 or ib_entry_index >= len(submesh_json.IndexBufferList):
+				return None
+			texture_name = str(submesh_json.IndexBufferList[ib_entry_index].NanoCatPartTexture or "").strip()
 		if not texture_name:
 			return None
 
@@ -768,6 +777,16 @@ class MMTImportHelper:
 			texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
 				submesh_json=submesh_json,
 				ib_entry_index=entry_index,
+			)
+			if texture_path:
+				return texture_path
+		# A single-IB multi-component group (WWMI) records the per-component
+		# assignment on the draw-call segments instead of the IB entry.
+		for draw_call_segment in submesh_json.DrawCallSegmentList:
+			texture_path = MMTImportHelper.resolve_nanocat_part_texture_path(
+				submesh_json=submesh_json,
+				ib_entry_index=draw_call_segment.IBIndex,
+				segment_texture_name=draw_call_segment.NanoCatPartTexture,
 			)
 			if texture_path:
 				return texture_path

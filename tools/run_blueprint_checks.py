@@ -22,6 +22,7 @@ TESTS = (
     'test_texture_bind_ini.py',
     'test_hash_texture_bind_ini.py',
     'test_material_texture_apply.py',
+    'test_nanocat_part_texture.py',
     'test_wwmi_components_blender.py',
     'test_wwmi_multi_drawib_ini.py',
     'test_naraka_shapekeys.py',

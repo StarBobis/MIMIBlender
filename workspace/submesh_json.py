@@ -54,6 +54,10 @@ class SubmeshDrawCallSegment:
 	# values, and finally to the Json top-level IndexOffset/IndexCount.
 	MatchFirstIndex:int = 0
 	MatchIndexCount:int = 0
+	# Preview texture assigned by NanoCat (MMT) for THIS segment. A WWMI mod
+	# keeps every component in one index buffer, so the IndexBufferList entry
+	# can only carry one texture; the per-component assignment lives here.
+	NanoCatPartTexture:str = ""
 
 
 @dataclass
@@ -167,6 +171,8 @@ class SubmeshJson:
 				# Per-segment match identity; absent on older reverse outputs (defaults 0).
 				MatchFirstIndex=int(draw_call_segment_json.get("MatchFirstIndex", 0) or 0),
 				MatchIndexCount=int(draw_call_segment_json.get("MatchIndexCount", 0) or 0),
+				# Per-segment preview texture assigned by NanoCat (MMT).
+				NanoCatPartTexture=str(draw_call_segment_json.get("NanoCatPartTexture", "") or "").strip(),
 			)
 			self.DrawCallSegmentList.append(draw_call_segment)
 
