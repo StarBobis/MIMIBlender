@@ -107,6 +107,14 @@ def append_time_position_sections(ini_builder: M_IniBuilder, blueprint_model, dr
         def resource(name, filename):
             resources.append("[" + name + "]")
             resources.append("type = " + resource_type)
+            if resource_type == "ByteAddressBuffer":
+                # A file-backed raw buffer is substantiated with whatever
+                # bind_flags the section gives it, and these frame buffers are
+                # only ever copy sources, so nothing adds a slot flag later.
+                # D3D11 rejects ALLOW_RAW_VIEWS without SRV/UAV capability, so
+                # a bare raw declaration would never create the buffer and the
+                # copies into the Position resource would then null it.
+                resources.append("bind_flags = shader_resource")
             resources.append("stride = " + str(stride))
             resources.append("filename = " + GlobalConfig.ini_buffer_filename(filename))
             resources.new_line()
