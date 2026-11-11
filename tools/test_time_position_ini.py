@@ -390,8 +390,8 @@ def test_time_shapekey_full_sections(modules):
     # ALLOW_RAW_VIEWS when the buffer can also be an SRV or UAV, so the
     # destination has to carry SHADER_RESOURCE as well; a vertex-buffer-only
     # descriptor fails CreateBuffer with E_INVALIDARG and would leave the
-    # Position binding null. The descriptor matrix behind this rule runs on a
-    # real device in tools/test_naraka_shapekey_gpu.py.
+    # Position binding null. tools/test_shapekey_descriptor_gpu.py creates
+    # this descriptor and the legacy one on a D3D11 device.
     assert "Resource65b9cf5aPosition = ref cs-u5" not in ini_text
     assert "PositionComputed = copy cs-u5" in ini_text
     assert "bind_flags = vertex_buffer shader_resource" in ini_text
