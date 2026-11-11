@@ -253,6 +253,43 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1, events
 
 
 class ClothTests(unittest.TestCase):
+    def test_shadow_marker_pairs_each_visible_draw_and_preserves_textures(self):
+        # The shadow path must use the original shader while receiving markers.
+        # Multiple objects need separate bind/reset pairs, not a submesh flag.
+        first = make_draw("300,17,-2", "$variant == 1")
+        first.texture_lines = ["ps-t0 = ResourceObject"]
+        first.restore_lines = ["ps-t0 = ResourceOriginal"]
+        second = make_draw("6,924,5", "$variant == 1")
+        _, builder = build([make_model(draws=[first, second])])
+        sections = parse_sections(builder)
+        trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0",
+                                   shader=CLOTH.SHADOW_VS_FILTER)
+        self.assertEqual(restored, CLOTH.SHADOW_VS_FILTER)
+        draws = [i for i, event in enumerate(trace) if event[0] == "draw"]
+        self.assertEqual(len(draws), 2)
+        for index in draws:
+            self.assertEqual(trace[index - 1],
+                             ("vs-t119", "ref " + CLOTH.SHADOW_MARKER_RESOURCE))
+            self.assertEqual(trace[index + 1], ("vs-t119", "null"))
+        index = draws[0]
+        self.assertEqual(trace[index - 2], ("ps-t0", "ResourceObject"))
+        self.assertEqual(trace[index + 2], ("ps-t0", "ResourceOriginal"))
+
+    def test_shadow_marker_never_leaks_from_disabled_or_unselected_objects(self):
+        # F6 and existing object selection still gate the whole injected draw.
+        # Neither a marker binding nor its reset should execute on these paths.
+        draw = make_draw(condition="$variant == 1")
+        _, builder = build([make_model(draws=[draw])])
+        sections = parse_sections(builder)
+        for enabled, variant in ((0, 1), (1, 0)):
+            trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0",
+                                shader=CLOTH.SHADOW_VS_FILTER,
+                                enabled=enabled, variant=variant)
+            self.assertFalse(any(event[0] in ("draw", "vs-t119") for event in trace))
+        for shader in (0, 123456, CLOTH.CLOTH_VS_FILTER):
+            trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader)
+            self.assertFalse(any(event[0] == "vs-t119" for event in trace))
+
     def test_exact_hash_marker_has_no_render_commands(self):
         # Merely encountering the shader on another mesh must do nothing.
         _, builder = build([make_model()])
@@ -416,7 +453,14 @@ class ClothTests(unittest.TestCase):
             self.assertEqual(text.count("[ShaderOverride_YYSLS_ClothVS]"), 1)
             self.assertIn("if $costume_mods", text)
             self.assertIn("if vs == 823114", text)
-            self.assertNotIn("if vs == 823115", text)
+            # The shadow family is identified by the package's structural rule,
+            # not by another hardcoded hash marker emitted into the Mod.
+            self.assertIn("if vs == 823115", text)
+            self.assertNotIn("filter_index = 823115", text)
+            self.assertIn("vs-t119 = ref ResourceYYSLSShadowMarkerV2", text)
+            self.assertIn("vs-t119 = null", text)
+            self.assertIn("remove BOTH marker guards", text)
+            self.assertIn("Keep the drawindexed line", text)
             self.assertNotIn("ShaderFixes\\", text)
 
 

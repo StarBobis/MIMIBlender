@@ -25,6 +25,12 @@ CLOTH_VS_HASH = "c01b8886cbc05321"
 CLOTH_VS_FILTER = 823114
 CLOTH_SHADER_FILENAME = "yysls_no_cloth.hlsl"
 
+# YYSLS-Package v0.1.5 owns this structurally matched shadow filter and resource.
+# Do not emit another ShaderOverride or duplicate the package's resource here.
+# The marker is immutable; only the current draw context's SRV binding changes.
+SHADOW_VS_FILTER = 823115
+SHADOW_MARKER_RESOURCE = "ResourceYYSLSShadowMarkerV2"
+
 # Tuple fields are original hash, filter value, packaged filename, and a stable
 # name suffix used only for sections belonging to variants after the first.
 # The tuple stays so a later game build can add a hash without rewriting the
@@ -134,5 +140,26 @@ def append_scoped_submesh(section, command_section, mod_lines, name_suffix):
     command_section.append("; Reached with a selected replacement VS or the original VS.")
     command_section.append("; Keep resource bindings before the original conditional draws.")
     for line in mod_lines:
+        # Keep the marker inside each existing object condition, immediately
+        # around its draw. Neither buffer setup nor texture restoration moves.
+        # Unknown shader families and older packages never enter these guards.
+        is_draw = line.strip().lower().startswith("drawindexed =")
+        if is_draw:
+            command_section.append("; BEGIN YYSLS shadow fix: requires YYSLS-Package v0.1.5 or newer.")
+            command_section.append("; Use the edited mesh positions instead of original cloth deformation.")
+            command_section.append("; Only the package-matched shadow VS receives the read-only t119 marker.")
+            command_section.append("; To disable this fix, remove BOTH marker guards around this draw.")
+            command_section.append("; Keep the drawindexed line and all existing mesh/texture commands.")
+            command_section.append("if vs == " + str(SHADOW_VS_FILTER))
+            command_section.append("  vs-t119 = ref " + SHADOW_MARKER_RESOURCE)
+            command_section.append("endif")
         command_section.append(line)
+        if is_draw:
+            # Reset before the next object or pass; never use shared IniParams.
+            # t119 is reserved by the package and must be unbound on entry.
+            command_section.append("; Release reserved VS t119 immediately after this replacement draw.")
+            command_section.append("if vs == " + str(SHADOW_VS_FILTER))
+            command_section.append("  vs-t119 = null")
+            command_section.append("endif")
+            command_section.append("; END YYSLS shadow fix: no marker remains for the next draw.")
     command_section.new_line()
