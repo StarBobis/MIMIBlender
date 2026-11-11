@@ -386,10 +386,15 @@ def test_time_shapekey_full_sections(modules):
     assert "cs-t50 = ref Resource65b9cf5aPosition.1" in ini_text
     assert "cs-u5 = ref Resource65b9cf5aShapeBackup_cs-u5" in ini_text
     # A structured accumulator is compute-only: copy into a raw VB before
-    # referencing it from the game's vertex slot (verified with D3D11 WARP).
+    # referencing it from the game's vertex slot. D3D11 only accepts
+    # ALLOW_RAW_VIEWS when the buffer can also be an SRV or UAV, so the
+    # destination has to carry SHADER_RESOURCE as well; a vertex-buffer-only
+    # descriptor fails CreateBuffer with E_INVALIDARG and would leave the
+    # Position binding null. The descriptor matrix behind this rule runs on a
+    # real device in tools/test_naraka_shapekey_gpu.py.
     assert "Resource65b9cf5aPosition = ref cs-u5" not in ini_text
     assert "PositionComputed = copy cs-u5" in ini_text
-    assert "bind_flags = vertex_buffer" in ini_text
+    assert "bind_flags = vertex_buffer shader_resource" in ini_text
     print("test_time_shapekey_full_sections OK")
 
 

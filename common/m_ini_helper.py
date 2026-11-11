@@ -1652,11 +1652,17 @@ class M_IniHelper:
                 continue
 
             # Explicit flags replace the structured descriptor inherited by
-            # CopyResource. RAW permits vertex binding; STRUCTURED does not.
+            # CopyResource. STRUCTURED must go; the result is the vb0 the game
+            # reads back. D3D11 only allows ALLOW_RAW_VIEWS on a buffer that can
+            # also be bound as an SRV or UAV, so the destination needs
+            # SHADER_RESOURCE next to VERTEX_BUFFER: a bare "vertex_buffer"
+            # descriptor makes CreateBuffer fail with E_INVALIDARG, which leaves
+            # this resource null and, through the "Position = ref" line below,
+            # nulls the game's Position binding on the next frame.
             resource_section.append("[Resource" + drawib + "PositionComputed]")
             resource_section.append("type = ByteAddressBuffer")
             resource_section.append("misc_flags = buffer_allow_raw_views")
-            resource_section.append("bind_flags = vertex_buffer")
+            resource_section.append("bind_flags = vertex_buffer shader_resource")
             resource_section.append("stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
             resource_section.new_line()
             # Scratch resources hold the game's borrowed CS bindings.
