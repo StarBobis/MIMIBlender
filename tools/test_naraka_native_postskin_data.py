@@ -29,6 +29,9 @@ sys.modules["naraka_test.native_postskin_data"] = DATA
 BIND_SPEC = importlib.util.spec_from_file_location("naraka_test.native_postskin_binding", ROOT / "games/naraka/native_postskin_binding.py")
 BIND = importlib.util.module_from_spec(BIND_SPEC)
 BIND_SPEC.loader.exec_module(BIND)
+BUFFER_SPEC = importlib.util.spec_from_file_location("naraka_test.native_postskin_buffers", ROOT / "games/naraka/native_postskin_buffers.py")
+BUFFERS = importlib.util.module_from_spec(BUFFER_SPEC)
+BUFFER_SPEC.loader.exec_module(BUFFERS)
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -100,6 +103,17 @@ class NativeEvidenceTests(unittest.TestCase):
         if reference:
             # This independent probe baseline produced the visually tested Mod.
             self.assertTrue(np.array_equal(parents, np.load(reference)))
+        generated = BUFFERS.build_native_buffers(evidence, parents, triangles)
+        self.assertEqual(generated["vertex_dispatch"], 830)
+        self.assertEqual(generated["frame_dispatch"], 6)
+        self.assertEqual(generated["normal_dispatch"], 95)
+        baseline = os.environ.get("NARAKA_POSTSKIN_REFERENCE_BUFFERS")
+        if baseline:
+            # Check every binary input against the installed, visually tested
+            # experiment. This includes signed influences and both CSR tables.
+            for name, array in generated["arrays"].items():
+                expected = (Path(baseline) / (name + ".buf")).read_bytes()
+                self.assertEqual(array.tobytes(), expected, name)
 
 
 if __name__ == "__main__":
