@@ -26,6 +26,9 @@ from .shapekeys import (
     collect_usable_drawib_model_list,
     get_compute_command_list_name,
 )
+from .native_postskin_export import prepare_native_export, emit_native_ini, check_package_runtime
+from .native_postskin_data import NativePostSkinError
+from pathlib import Path
 
 
 class Exporter(StandardExporter):
@@ -43,6 +46,38 @@ class Exporter(StandardExporter):
         # overrides (which "run" them) and the closing shape key sections
         # (which define them) stay in sync.
         self.usable_shapekey_drawib_model_list = collect_usable_drawib_model_list(self.drawib_model_list)
+        # Preflight every affected model before any output buffers are written.
+        # Existing workspaces without evidence keep the legacy export path.
+        self.native_exports = {}
+        used_outputs, used_markers = set(), set()
+        for model in self.drawib_model_list:
+            metadata = getattr(model, "import_json_dict", {}).get("NarakaPostSkin")
+            if not metadata:
+                continue
+            # Affine source interpolation currently describes the exported
+            # basis mesh. Animated position variants need their own bindings.
+            if model in self.usable_shapekey_drawib_model_list or getattr(model, "time_pos_frame_groups", None):
+                raise NativePostSkinError("Native post-skin position animation is not supported by this binding recipe")
+            plan = prepare_native_export(model.import_json_path, metadata, model.draw_ib,
+                                         model.vertex_limit_hash, model.category_buffer_dict,
+                                         model.submesh_ib_dict.values())
+            if plan["output_hash"] in used_outputs or plan["marker"] in used_markers:
+                raise NativePostSkinError("Native outputs share a resource or marker; export them separately")
+            used_outputs.add(plan["output_hash"])
+            used_markers.add(plan["marker"])
+            self.native_exports[model.draw_ib] = plan
+        if self.native_exports:
+            check_package_runtime(GlobalConfig.current_game_migoto_folder)
+
+    def generate_buffer_files(self):
+        # Native data was validated in __init__. Keep its files in the same
+        # Buffers folder as ordinary IB/VB output, with DrawIB-scoped names.
+        super().generate_buffer_files()
+        folder = Path(GlobalConfig.path_generatemod_buffer_folder())
+        for plan in self.native_exports.values():
+            _, files, _ = emit_native_ini(plan)
+            for filename, content in files.items():
+                (folder / filename).write_bytes(content)
 
     @staticmethod
     def get_cross_ib_backup_resource_name(drawib_model, submesh_model, vb_slot: int) -> str:
@@ -98,7 +133,9 @@ class Exporter(StandardExporter):
 
     def add_drawib_sections(self, ini_builder: M_IniBuilder, drawib_model):
         # Naraka always uses the compute-shader (GPU pre-skinning) path.
-        sections.add_unity_vs_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model)
+        native = self.native_exports.get(drawib_model.draw_ib)
+        sections.add_unity_vs_texture_override_vlr_section(ini_builder=ini_builder, drawib_model=drawib_model,
+                                                         filter_index=native["marker"] if native else None)
 
         # When this DrawIB carries shape keys, its Position VB override runs
         # the matching compute command list first, so the game's skinning
@@ -107,6 +144,15 @@ class Exporter(StandardExporter):
         if drawib_model in self.usable_shapekey_drawib_model_list:
             drawib_index = self.usable_shapekey_drawib_model_list.index(drawib_model)
             shapekey_run_command_list = get_compute_command_list_name(drawib_index)
+        if native:
+            # Retain live bone matrices before the game rebinds its later CS
+            # inputs. Package helpers consume this model-owned reference.
+            lines, _, capture = emit_native_ini(native)
+            native_section = M_IniSection(M_SectionType.CommandList)
+            for line in lines:
+                native_section.append(line)
+            ini_builder.append_section(native_section)
+            shapekey_run_command_list = capture
 
         sections.add_unity_cs_texture_override_vb_sections(
             ini_builder=ini_builder,

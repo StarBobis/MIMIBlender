@@ -110,7 +110,7 @@ def add_unity_vs_texture_override_ib_sections(ini_builder: M_IniBuilder, drawib_
     ini_builder.append_section(texture_override_ib_section)
 
 
-def add_unity_vs_texture_override_vlr_section(ini_builder: M_IniBuilder, drawib_model, include_uav_byte_stride: bool = True):
+def add_unity_vs_texture_override_vlr_section(ini_builder: M_IniBuilder, drawib_model, include_uav_byte_stride: bool = True, filter_index=None):
     """VertexLimitRaise: enlarge the game's original Position VB."""
     d3d11_game_type = drawib_model.d3d11_game_type
     if not d3d11_game_type.GPU_PreSkinning:
@@ -120,6 +120,10 @@ def add_unity_vs_texture_override_vlr_section(ini_builder: M_IniBuilder, drawib_
     vertexlimit_section_name_suffix = drawib_model.draw_ib + "_" + drawib_model.draw_ib_alias + "_VertexLimitRaise"
     vertexlimit_section.append("[TextureOverride_" + vertexlimit_section_name_suffix + "]")
     vertexlimit_section.append("hash = " + drawib_model.vertex_limit_hash)
+    # Native post-skin callers can identify their own output without changing
+    # the default behavior of every other preset using this shared builder.
+    if filter_index is not None:
+        vertexlimit_section.append("filter_index = " + str(filter_index))
     vertexlimit_section.append("override_byte_stride = " + str(d3d11_game_type.CategoryStrideDict["Position"]))
     vertexlimit_section.append("override_vertex_count = " + str(drawib_model.draw_number))
     if include_uav_byte_stride:

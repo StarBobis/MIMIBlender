@@ -32,6 +32,11 @@ BIND_SPEC.loader.exec_module(BIND)
 BUFFER_SPEC = importlib.util.spec_from_file_location("naraka_test.native_postskin_buffers", ROOT / "games/naraka/native_postskin_buffers.py")
 BUFFERS = importlib.util.module_from_spec(BUFFER_SPEC)
 BUFFER_SPEC.loader.exec_module(BUFFERS)
+sys.modules["naraka_test.native_postskin_binding"] = BIND
+sys.modules["naraka_test.native_postskin_buffers"] = BUFFERS
+EXPORT_SPEC = importlib.util.spec_from_file_location("naraka_test.native_postskin_export", ROOT / "games/naraka/native_postskin_export.py")
+EXPORT = importlib.util.module_from_spec(EXPORT_SPEC)
+EXPORT_SPEC.loader.exec_module(EXPORT)
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -114,6 +119,28 @@ class NativeEvidenceTests(unittest.TestCase):
             for name, array in generated["arrays"].items():
                 expected = (Path(baseline) / (name + ".buf")).read_bytes()
                 self.assertEqual(array.tobytes(), expected, name)
+        plan = EXPORT.prepare_native_export(file, evidence["metadata"], "c00f48ca", "caa1c4c4",
+            {"Position": vertices.view(np.uint8).ravel(), "Texcoord": uv.view(np.uint8).ravel()}, [triangles.ravel()])
+        lines, files, capture = EXPORT.emit_native_ini(plan)
+        text = "\n".join(lines)
+        self.assertEqual(len(files), 16)
+        self.assertIn("run = CommandList\\NBPv1\\DeformNative", text)
+        self.assertIn("run = CommandList\\NBPv1\\RecalculateNormals", text)
+        self.assertNotIn("[CustomShader", text)
+        self.assertIn("[" + capture + "]", text)
+        self.assertIn("ResourceNative_c00f48ca_Bones = ref cs-t2", text)
+        for name, array in generated["arrays"].items():
+            self.assertEqual(files["native_c00f48ca_" + name + ".buf"], array.tobytes())
+        # A second DrawIB gets distinct symbols and filenames even when its
+        # generated array shapes happen to match this model exactly.
+        second = dict(plan, draw_ib="01234567")
+        other_lines, other_files, _ = EXPORT.emit_native_ini(second)
+        self.assertFalse(set(files) & set(other_files))
+        sections = {line for line in lines if line.startswith("[")}
+        self.assertFalse(sections & {line for line in other_lines if line.startswith("[")})
+        runtime = os.environ.get("NARAKA_POSTSKIN_RUNTIME_FOLDER")
+        if runtime:
+            EXPORT.check_package_runtime(runtime)
 
 
 if __name__ == "__main__":
