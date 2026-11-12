@@ -26,6 +26,19 @@ def prepare_native_export(json_path, metadata, draw_ib, output_hash, categories,
         raise NativePostSkinError("Invalid native DrawIB/output hash")
     if metadata.get("OutputHash", "").lower() != output_hash.lower():
         raise NativePostSkinError("Native evidence belongs to a different output buffer")
+    # Old collectors did not prove the indexed draw's live VB binding/epoch.
+    # Do not keep using potentially misattributed metadata after this fix.
+    # Unrelated models returned above and never acquire this re-extract rule.
+    association = metadata.get("Association", {})
+    if not isinstance(association, dict) or association.get("Status") != "VerifiedDrawBinding":
+        raise NativePostSkinError("DrawIB " + draw_ib + ": re-extract and re-import this workspace with the updated MMT; native draw association is missing")
+    if (association.get("DrawIB") != draw_ib.lower()
+            or association.get("IndexedVertexOverlap") is not True
+            or association.get("VertexBufferResource") != metadata.get("SourceResource")
+            or not association.get("VertexBufferResource")
+            or association.get("DrawCallIndex") != metadata.get("FirstDrawCallIndex")
+            or metadata.get("DrawInputs", {}).get("ib", {}).get("ResourceHash") != draw_ib.lower()):
+        raise NativePostSkinError("DrawIB " + draw_ib + ": native evidence does not match this indexed draw")
     evidence = load_native_postskin(json_path, metadata)
     try:
         vertices = np.frombuffer(np.asarray(categories["Position"], dtype=np.uint8).tobytes(), "<f4").reshape(-1, 10)
@@ -109,5 +122,11 @@ def emit_native_ini(plan):
     for index, (command, resources, dispatch) in enumerate(calls):
         lines += ["", "[ShaderOverrideNative_" + draw + "_" + command + "]", "hash = " + plan["shader_hashes"][index], "allow_duplicate_hash = true", "if $costume_mods && cs-u0 == " + str(plan["marker"]), "  if $\\NBPv1\\native_postskin_api == 1"]
         lines += ["    Resource\\NBPv1\\" + name + " = ref " + prefix + name for name in resources]
+        if command == "DeformNative":
+            # Generated influences already contain absolute frame IDs. Bind a
+            # zero first frame base so the game table cannot add its base again.
+            # PositionOffsets is an existing uint SRV whose first value is zero;
+            # sharing it here avoids another file or a Package API revision.
+            lines += ["    cs-t1 = ref " + prefix + "PositionOffsets"]
         lines += ["    $\\NBPv1\\vertex_dispatch = " + str(plan["vertex_dispatch"]), "    $\\NBPv1\\" + dispatch + " = " + str(plan[dispatch]), "    run = CommandList\\NBPv1\\" + command, "  endif", "endif"]
     return lines, files, capture

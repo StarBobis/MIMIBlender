@@ -2,10 +2,64 @@
 
 The returned arrays are model-owned resources. Package shaders only execute
 the shared operations; they do not infer topology or bindings at runtime.
-This first recipe supports the measured single-batch, 40-byte output layout.
+Source batches are resolved into absolute frame references for 40-byte output.
 """
 import numpy as np
 from .native_postskin_data import NativePostSkinError
+
+
+def _active_position_records(evidence):
+    """Resolve the original shader's batch selection before affine expansion.
+
+    Batch x stores the first mapping-row ID and batch z selects a frame base.
+    Native selection uses the last start not greater than the dispatch ID.
+    Negative/out-of-range selectors skip that batch; one thread group may also
+    be excluded by cb0[0].z. Only effective rows contribute deformation terms.
+    The original shader ignores batch y/w when selecting mapping records.
+    Return copies so captured bytes remain immutable across multiple exports.
+    """
+    inputs = evidence["position_inputs"]
+    cb = np.frombuffer(inputs["cs-cb0"], "<u4")
+    raw_batches = np.frombuffer(inputs["cs-t0"], "<u4")
+    bases = np.frombuffer(inputs["cs-t1"], "<u4")
+    if len(cb) < 12 or len(raw_batches) % 4:
+        raise NativePostSkinError("Malformed native batch parameter layout")
+    batches = raw_batches.reshape(-1, 4)
+    base_count, batch_count = map(int, cb[:2])
+    if not 0 < batch_count <= len(batches) or base_count > len(bases):
+        raise NativePostSkinError("Native batch/frame-base counts exceed their buffers")
+    batches = batches[:batch_count]
+    # Valid captures begin at row zero. Reject unordered/ambiguous starts:
+    # guessing here could assign a different simulation frame to a vertex.
+    if batches[0, 0] != 0 or np.any(batches[1:, 0] <= batches[:-1, 0]):
+        raise NativePostSkinError("Invalid native batch start ordering")
+    records = evidence["position_records"]
+    if cb[4] > cb[3] or int(cb[3]) - int(cb[4]) > len(records):
+        raise NativePostSkinError("Native active mapping count exceeds its buffer")
+    active_count = int(cb[3]) - int(cb[4])
+    source_terms = evidence["position_influences"]
+    resolved, terms = [], []
+    for index in range(active_count):
+        if index // 64 == int(cb[2]):
+            continue
+        batch_index = int(np.searchsorted(batches[:, 0], index, side="right")) - 1
+        selector = int(batches[batch_index, 2])
+        # The unsigned comparison also rejects the signed negative sentinel.
+        # An inactive batch must retain the original skinned position instead.
+        if selector >= base_count:
+            continue
+        row = records[index].copy()
+        left, right = map(int, row.view("<u4")[1:3])
+        selected = source_terms[left:right].copy()
+        frame_ids = selected.view("<u4")[:, 4].astype(np.uint64) + int(bases[selector])
+        if np.any(frame_ids >= evidence["frame_count"]):
+            raise NativePostSkinError("Native batch frame base exceeds simulation frames")
+        selected.view("<u4")[:, 4] = frame_ids.astype("<u4")
+        row.view("<u4")[1:3] = len(terms), len(terms) + len(selected)
+        resolved.append(row)
+        terms.extend(selected)
+    return (np.asarray(resolved, "<f4").reshape(-1, 8),
+            np.asarray(terms, "<f4").reshape(-1, 8), int(cb[6]))
 
 
 def build_native_buffers(evidence, parents, triangles):
@@ -61,17 +115,10 @@ def build_native_buffers(evidence, parents, triangles):
     if not triangles.size or triangles.min() < 0 or triangles.max() >= count:
         raise NativePostSkinError("Native normal triangles exceed exported vertices")
 
-    # The measured recipe uses one batch and local-depth mode zero. The helper
-    # preserves dynamic g/scale, but multi-batch offset selection needs another
-    # validated recipe rather than interpreting those records as this format.
-    inputs = evidence["position_inputs"]
-    cb = np.frombuffer(inputs["cs-cb0"], "<u4")
-    batch = np.frombuffer(inputs["cs-t0"], "<u4")
-    frame_offsets = np.frombuffer(inputs["cs-t1"], "<u4")
-    if len(cb) != 12 or tuple(cb[:2]) != (1, 1) or cb[4] != 0 or cb[6] != 0:
-        raise NativePostSkinError("Unsupported native batch or depth-conversion mode")
-    if len(batch) != 4 or batch[0] != 0 or batch[2] != 0 or not len(frame_offsets) or frame_offsets[0] != 0:
-        raise NativePostSkinError("Unsupported native frame-base selection")
+    # Collapse source batch routing into absolute simulation-frame indices.
+    # Keep the captured depth selector: the native shader still implements its
+    # multiply/identity/divide operation on the live simulation frame data.
+    records, influences, depth_mode = _active_position_records(evidence)
     source = evidence["source_vertices"]
     blend = np.frombuffer(evidence["source_blend_bytes"], dtype=np.dtype([("w", "<f4", 4), ("i", "<i4", 4)]))
     bone_count, frame_count = evidence["bone_count"], evidence["frame_count"]
@@ -79,9 +126,7 @@ def build_native_buffers(evidence, parents, triangles):
         raise NativePostSkinError("Invalid native source skinning weights")
     if np.any(blend["i"] < 0) or np.any(blend["i"] >= bone_count):
         raise NativePostSkinError("Source bone index exceeds captured skeleton")
-    records = evidence["position_records"]
     record_int = records.view("<u4")
-    influences = evidence["position_influences"]
     by_group = {int(row[0]): index for index, row in enumerate(record_int)}
     rows, terms = [], []
     for vertex, pair in enumerate(parents):
@@ -134,7 +179,7 @@ def build_native_buffers(evidence, parents, triangles):
     assert np.array_equal(np.sort(adjacency), np.arange(len(flat)))
     vertex_dispatch = (count + 63) // 64
     total_frames = frame_count + 2 * bone_count
-    position_cb = np.array([1, 1, vertex_dispatch, count, 0, 0, 0, 0x3f800000, 0x3f800000, 0, 0, 0], "<u4")
+    position_cb = np.array([1, 1, vertex_dispatch, count, 0, 0, depth_mode, 0x3f800000, 0x3f800000, 0, 0, 0], "<u4")
     arrays = {
         "position-mapping": np.asarray(rows, dtype="<f4"),
         "position-influences": np.asarray(terms, dtype="<f4"),

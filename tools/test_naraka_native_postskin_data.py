@@ -42,12 +42,146 @@ EXPORT_SPEC.loader.exec_module(EXPORT)
 class NativeEvidenceTests(unittest.TestCase):
     """Reject changed files and incompatible contracts before export begins."""
 
+    def test_multiple_batches_and_depth_modes_preserve_native_positions(self):
+        """Preserve the full native blend, not only frame-index selection.
+
+        The reference first skins each original point with one identity bone,
+        then applies its own active row and selected simulation-frame base.
+        The expected source result is skin*(1-alpha*g)+simulation*alpha*g*scale.
+        A midpoint must equal the mean of those complete source results.
+
+        The generated path evaluates the emitted signed influences against
+        extended live frames: simulation*g*scale, bone, and bone*g families.
+        It must match the reference even with unequal source alpha values.
+        Mode one leaves depth y out, mode two divides by it, and other modes
+        multiply by it; synthetic bone frames keep both depth factors at one.
+        Every simulation matrix has a different translation and depth factor.
+        This prevents an accidental zero-base or identity-depth shortcut from
+        passing merely because all frame transforms happen to be identical.
+        """
+        # Compare generated affine terms with an independent direct evaluation
+        # of the original shader. Use two frame bases and live depth factors,
+        # not just multiple batches that happen to share a zero frame offset.
+        count = 3
+        source = np.zeros((count, 10), "<f4")
+        source[:, :3] = [[0.2, 0.3, 0.4], [0.6, -0.2, 0.8], [-0.3, 0.5, 0.9]]
+        blend = np.zeros(count, dtype=np.dtype([("w", "<f4", 4), ("i", "<i4", 4)]))
+        blend["w"][:, 0] = 1
+        records = np.zeros((count, 8), "<f4")
+        records.view("<u4")[:, :3] = [[0, 0, 1], [1, 1, 2], [2, 2, 3]]
+        records[:, 4] = [0.2, 0.5, 0.8]
+        influences = np.zeros((count, 8), "<f4")
+        influences[:, 0] = 1
+        influences[:, 1:4] = source[:, :3] * 0.7
+        influences.view("<u4")[:, 4] = [0, 1, 0]
+        parents = np.array([[0, -1], [1, -1], [2, -1], [0, 2]], "<i4")
+        triangles = np.array([[0, 1, 3], [1, 2, 3]], "<u4")
+        # Nonidentity frames and nonunit depth factors distinguish each mode.
+        frames = np.tile(np.eye(4, dtype=np.float32), (4, 1, 1))
+        frames[:, :3, 3] = [[0.1, 0.2, 0.3], [0.4, -0.2, 0.1],
+                               [-0.2, 0.3, 0.5], [0.7, 0.1, -0.4]]
+        depth = np.array([[0.7, 1.3], [1.2, 0.8], [0.9, 1.4], [1.1, 0.6]])
+        g, scale = 0.65, 0.8
+        for mode in [0, 1, 2, 3]:
+            for inactive in [False, True]:
+                cb = np.array([2, 2, 99, count, 0, 0, mode, 0, 0, 0, 0, 0], "<u4")
+                batches = np.array([[0, 2, 0, 0], [2, 3, 1, 0]], "<u4")
+                if inactive:
+                    batches[1, 2] = 0xffffffff
+                bases = np.array([1, 2], "<u4")
+                evidence = {"source_vertices": source, "source_blend_bytes": blend.tobytes(),
+                    "members": np.arange(count), "offsets": np.arange(count + 1),
+                    "position_records": records, "position_influences": influences,
+                    "frame_count": 4, "bone_count": 1, "normal_targets": np.arange(count),
+                    "position_inputs": {"cs-cb0": cb.tobytes(), "cs-t0": batches.tobytes(),
+                                        "cs-t1": bases.tobytes()}}
+                generated = BUFFERS.build_native_buffers(evidence, parents, triangles)["arrays"]
+                self.assertEqual(generated["position-cb"][6], mode)
+                expected = source[:, :3].astype(float).copy()
+                for index, row in enumerate(records):
+                    # Linear native batch search, independent of the generator's
+                    # searchsorted/normalization implementation and term copies.
+                    selected_batch = batches[0]
+                    for candidate in batches:
+                        if index >= int(candidate[0]):
+                            selected_batch = candidate
+                    selector = int(selected_batch[2])
+                    if selector >= len(bases):
+                        continue
+                    term = influences[index]
+                    frame_id = int(term.view("<u4")[4]) + int(bases[selector])
+                    local = np.append(term[1:4].astype(float), 1)
+                    local[2] *= depth[frame_id, 0]
+                    if mode == 2:
+                        local[2] /= depth[frame_id, 1]
+                    elif mode != 1:
+                        local[2] *= depth[frame_id, 1]
+                    alpha = float(row[4]) * g
+                    expected[index] = expected[index] * (1 - alpha) + (frames[frame_id] @ local)[:3] * alpha * scale
+                result = []
+                for row in generated["position-mapping"]:
+                    left, right = map(int, row.view("<u4")[1:3])
+                    total = np.zeros(3)
+                    for term in generated["position-influences"][left:right]:
+                        frame_id = int(term.view("<u4")[4])
+                        local = np.append(term[1:4].astype(float), 1)
+                        if frame_id < 4:
+                            local[2] *= depth[frame_id, 0]
+                            if mode == 2:
+                                local[2] /= depth[frame_id, 1]
+                            elif mode != 1:
+                                local[2] *= depth[frame_id, 1]
+                            transformed = (frames[frame_id] @ local)[:3] * g * scale
+                        else:
+                            # Synthetic bone depth factors are both one, so all
+                            # native depth selectors preserve their local xyz.
+                            transformed = local[:3] * (1 if frame_id == 4 else g)
+                        total += float(term[0]) * transformed
+                    result.append(total)
+                wanted = np.vstack((expected, (expected[0] + expected[2]) / 2))
+                with self.subTest(mode=mode, inactive=inactive):
+                    np.testing.assert_allclose(result, wanted, atol=2e-7, rtol=2e-7)
+                # Source evidence stays immutable; another export may reuse it.
+                self.assertEqual(evidence["position_influences"].tobytes(), influences.tobytes())
+
+    def test_native_active_ranges_and_invalid_batch_bounds(self):
+        # The native shader can omit a trailing mapping range and one complete
+        # dispatch group. Preserve these masks before looking up source alpha.
+        records = np.zeros((128, 8), "<f4")
+        records.view("<u4")[:, 0] = np.arange(128)
+        cb = np.array([1, 1, 1, 128, 16, 0, 2, 0, 0, 0, 0, 0], "<u4")
+        batches = np.array([[0, 128, 0, 0]], "<u4")
+        evidence = {"position_records": records, "position_influences": np.empty((0, 8), "<f4"),
+            "frame_count": 1, "position_inputs": {"cs-cb0": cb.tobytes(),
+            "cs-t0": batches.tobytes(), "cs-t1": np.array([0], "<u4").tobytes()}}
+        active, _, mode = BUFFERS._active_position_records(evidence)
+        np.testing.assert_array_equal(active.view("<u4")[:, 0], np.arange(64))
+        self.assertEqual(mode, 2)
+        # The count must be bounded by captured records, not trusted as a loop
+        # limit that could allocate unbounded data or read another model's rows.
+        cb[3] = 145
+        evidence["position_inputs"]["cs-cb0"] = cb.tobytes()
+        with self.assertRaisesRegex(DATA.NativePostSkinError, "active mapping count"):
+            BUFFERS._active_position_records(evidence)
+
     def test_legacy_workspace_is_optional(self):
         self.assertIsNone(DATA.load_native_postskin(ROOT / "unused.json", {}))
 
     def test_unknown_schema_is_not_guessed(self):
         with self.assertRaises(DATA.NativePostSkinError):
             DATA.load_native_postskin(ROOT / "unused.json", {"SchemaVersion": 2})
+
+    def test_native_export_requires_exact_drawib_association(self):
+        # A known shader in a dump does not establish ownership by this model.
+        # Export must reject old unproven records or another DrawIB's record
+        # before reading any native file or touching the output directory.
+        metadata = {"SchemaVersion": 1, "OutputHash": "caa1c4c4", "Stages": [
+            {"ShaderHash": "ade59729c33f1db5"}, {"ShaderHash": "3e301419231eeeff"}]}
+        with self.assertRaisesRegex(DATA.NativePostSkinError, "re-extract and re-import"):
+            EXPORT.prepare_native_export(ROOT / "missing.json", metadata, "c00f48ca", "caa1c4c4", {}, [])
+        metadata["Association"] = {"Status": "VerifiedDrawBinding", "DrawIB": "11111111"}
+        with self.assertRaisesRegex(DATA.NativePostSkinError, "does not match this indexed draw"):
+            EXPORT.prepare_native_export(ROOT / "missing.json", metadata, "c00f48ca", "caa1c4c4", {}, [])
 
     def test_unrelated_compute_evidence_keeps_legacy_export(self):
         # The collector is allowed to retain zero, one or many unrelated CS
@@ -127,6 +261,35 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertEqual(loaded["frame_count"], 168)
         self.assertEqual(loaded["bone_count"], 89)
 
+    @unittest.skipUnless(os.environ.get("NARAKA_POSTSKIN_MIXED_WORKSPACE"), "requires mixed MMT workspace fixture")
+    def test_real_mixed_workspace_keeps_drawib_ownership(self):
+        # Both documents come from one capture containing the native shaders.
+        # The ordinary DrawIB must have no native metadata or export dependency;
+        # the affected DrawIB exercises an actual two-batch native input table.
+        root = Path(os.environ["NARAKA_POSTSKIN_MIXED_WORKSPACE"])
+        checked = set()
+        for path in root.rglob("*.json"):
+            document = json.loads(path.read_text())
+            draw_ib = path.name[:8]
+            if draw_ib not in ["051ea211", "8305a460"]:
+                continue
+            categories = {item["D3D11ElementList"][0]["Category"]:
+                          np.fromfile(path.parent / item["FileName"], np.uint8)
+                          for item in document["CategoryBufferList"]}
+            indices = [np.fromfile(path.parent / item["FileName"], "<u4")
+                       for item in document["IndexBufferList"]]
+            metadata = document.get("NarakaPostSkin")
+            plan = EXPORT.prepare_native_export(path, metadata, draw_ib,
+                                                document["VertexLimitVB"], categories, indices)
+            self.assertEqual(plan is not None, draw_ib == "8305a460")
+            if plan:
+                evidence = DATA.load_native_postskin(path, metadata)
+                self.assertEqual(np.frombuffer(evidence["position_inputs"]["cs-cb0"], "<u4")[1], 2)
+            else:
+                self.assertNotIn("NarakaPostSkin", document)
+            checked.add(draw_ib)
+        self.assertEqual(checked, {"051ea211", "8305a460"})
+
     @unittest.skipUnless(os.environ.get("NARAKA_POSTSKIN_MOD_BUFFERS"), "requires local subdivision fixture")
     def test_real_subdivision_correspondence(self):
         # Validate all exported vertices and triangle ownership using data from
@@ -164,6 +327,8 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertNotIn("[CustomShader", text)
         self.assertIn("[" + capture + "]", text)
         self.assertIn("ResourceNative_c00f48ca_Bones = ref cs-t2", text)
+        # Flattened frame IDs must not inherit an additional nonzero game base.
+        self.assertIn("cs-t1 = ref ResourceNative_c00f48ca_PositionOffsets", text)
         for name, array in generated["arrays"].items():
             self.assertEqual(files["native_c00f48ca_" + name + ".buf"], array.tobytes())
         # A second DrawIB gets distinct symbols and filenames even when its
