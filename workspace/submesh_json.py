@@ -93,6 +93,9 @@ class SubmeshJson:
 	GamePreset:str = field(init=False, default="")
 	VertexLimitVB:str = field(init=False, default="")
 	CSOutputVertexLimitVB:str = field(init=False, default="")
+	# Extraction evidence remains distinct from generated runtime resources.
+	# An empty value keeps old workspaces compatible with the new importer.
+	NarakaPostSkin:dict = field(init=False, default_factory=dict)
 	CategoryHash:dict = field(init=False, default_factory=dict)
 	CategoryDrawCategoryMap:dict = field(init=False, default_factory=dict)
 	WorkGameType:str = field(init=False, default="")
@@ -134,6 +137,14 @@ class SubmeshJson:
 		self.GamePreset = self.JsonDict.get("GamePreset", "")
 		self.VertexLimitVB = self.JsonDict.get("VertexLimitVB", "")
 		self.CSOutputVertexLimitVB = self.JsonDict.get("CSOutputVertexLimitVB", "")
+		# Do not infer native stages from model names or from a known shader hash.
+		# Export validation will interpret the schema and verify its asset files.
+		native_post_skin = self.JsonDict.get("NarakaPostSkin", {})
+		if native_post_skin is None:
+			native_post_skin = {}
+		if not isinstance(native_post_skin, dict):
+			raise ValueError("NarakaPostSkin metadata must be an object")
+		self.NarakaPostSkin = dict(native_post_skin)
 		self.CategoryHash = self.JsonDict.get("CategoryHash", {})
 		self.CategoryDrawCategoryMap = self.JsonDict.get("CategoryDrawCategoryMap", {})
 		self.WorkGameType = self.JsonDict.get("WorkGameType", "")
