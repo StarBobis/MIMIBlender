@@ -49,6 +49,41 @@ class NativeEvidenceTests(unittest.TestCase):
         with self.assertRaises(DATA.NativePostSkinError):
             DATA.load_native_postskin(ROOT / "unused.json", {"SchemaVersion": 2})
 
+    def test_unrelated_compute_evidence_keeps_legacy_export(self):
+        # The collector is allowed to retain zero, one or many unrelated CS
+        # writers. None of them opts a model into the two-stage native recipe.
+        # Deliberately omit paths, output hashes and geometry to ensure that
+        # legacy selection happens before native-only resource validation.
+        for hashes in [[], ["1111111111111111"], ["1111111111111111"] * 3]:
+            metadata = {"SchemaVersion": 1, "Stages": [{"ShaderHash": shader} for shader in hashes]}
+            with self.subTest(hashes=hashes):
+                self.assertFalse(DATA.requires_native_postskin(metadata))
+                self.assertIsNone(DATA.load_native_postskin(ROOT / "missing.json", metadata))
+                self.assertIsNone(EXPORT.prepare_native_export(ROOT / "missing.json", metadata,
+                                                              "", "", {}, []))
+
+    def test_known_native_chain_selection_is_explicit(self):
+        # Editable Role strings must not substitute for the actual shader IDs.
+        # Preserve errors for partial, reversed, repeated or mixed known chains;
+        # silently using legacy output there could reintroduce mesh tearing.
+        position, normal = "ade59729c33f1db5", "3e301419231eeeff"
+        pair = {"SchemaVersion": 1, "Stages": [{"ShaderHash": shader} for shader in [position, normal]]}
+        self.assertTrue(DATA.requires_native_postskin(pair))
+        for hashes in [[position], [normal], [normal, position], [position, normal, normal],
+                       [position, "1111111111111111", normal]]:
+            metadata = dict(pair, Stages=[{"ShaderHash": shader} for shader in hashes])
+            with self.subTest(hashes=hashes):
+                with self.assertRaisesRegex(DATA.NativePostSkinError, "found " + hashes[0]):
+                    DATA.load_native_postskin(ROOT / "missing.json", metadata)
+        # Invalid stage shapes remain metadata errors, not unrelated-CS cases.
+        for stages in [None, {}, [None]]:
+            with self.assertRaisesRegex(DATA.NativePostSkinError, "list of stage objects"):
+                DATA.requires_native_postskin(dict(pair, Stages=stages))
+        # Incomplete identity must never be interpreted as an unknown writer.
+        for stage in [{}, {"ShaderHash": None}, {"ShaderHash": "invalid"}]:
+            with self.assertRaisesRegex(DATA.NativePostSkinError, "ShaderHash must"):
+                DATA.requires_native_postskin(dict(pair, Stages=[stage]))
+
     def test_displaced_unbound_vertex_is_rejected(self):
         # A newly moved vertex is not silently snapped to the old surface.
         # Such edits require a different binding method, outside this recipe.

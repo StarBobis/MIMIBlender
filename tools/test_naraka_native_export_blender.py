@@ -124,3 +124,26 @@ for name in ["Position", "Texcoord", "Blend"]:
     target = output / "Buffers" / model.get_category_buffer_filename(name)
     assert target.read_bytes() == (geometry / ("LOD0.c00f48ca-" + name + ".buf")).read_bytes()
 print("PASS real Naraka exporter wrote complete native Package-linked Mod:", output)
+
+# Exercise the production preflight and complete writer on unrelated metadata.
+# Missing Package files must not affect these legacy exports. Supplying truthy
+# animation state during preflight also guards the order of native-only checks.
+GlobalConfig.current_game_migoto_folder = str(output / "package-does-not-exist")
+for hashes in [[], ["1111111111111111"], ["1111111111111111"] * 3]:
+    legacy_output = Path(tempfile.mkdtemp(prefix="legacy_export_smoke_", dir=temporary))
+    GlobalConfig._automation_override["output"] = str(legacy_output)
+    model.import_json_dict = {"NarakaPostSkin": {
+        "SchemaVersion": 1, "Stages": [{"ShaderHash": shader} for shader in hashes]}}
+    model.time_pos_frame_groups = {"fixture": {}}
+    legacy_exporter = Exporter(blueprint)
+    assert legacy_exporter.native_exports == {}
+    # This fixture does not model animated buffers; clear them after proving
+    # native preflight leaves unrelated animated models on the existing route.
+    model.time_pos_frame_groups = {}
+    legacy_exporter.export()
+    legacy_text = (legacy_output / "native_export_smoke.ini").read_text()
+    assert "NBPv1" not in legacy_text
+    assert not list((legacy_output / "Buffers").glob("native_*.buf"))
+    for filename in re.findall(r"^filename\s*=\s*(.+)$", legacy_text, re.M):
+        assert (legacy_output / filename.strip().replace("\\", "/")).is_file(), filename
+    print("PASS unrelated CS chain kept real legacy export:", len(hashes), legacy_output)

@@ -14,6 +14,42 @@ class NativePostSkinError(ValueError):
     """An explicit unsupported or damaged native-input contract."""
 
 
+def requires_native_postskin(metadata):
+    """Select the supported recipe separately from retaining CS evidence.
+
+    Extraction also records unrelated writers as Role=Unknown. Their presence
+    is not an opt-in to this two-stage recipe and must not block legacy export.
+    Use hashes rather than editable role labels to identify the native family.
+    A partial known chain still needs an explicit error: falling back there
+    would leave the original topology-dependent writer on the edited mesh.
+    """
+    if not metadata:
+        return False
+    if not isinstance(metadata, dict) or metadata.get("SchemaVersion") != 1:
+        raise NativePostSkinError("Unsupported NarakaPostSkin schema version")
+    stages = metadata.get("Stages")
+    if not isinstance(stages, list) or any(not isinstance(stage, dict) for stage in stages):
+        raise NativePostSkinError("NarakaPostSkin Stages must be a list of stage objects")
+    expected = ["ade59729c33f1db5", "3e301419231eeeff"]
+    hashes = [stage.get("ShaderHash") for stage in stages]
+    # A missing/corrupt identity is not proof that a writer is unrelated.
+    # Keep malformed evidence explicit rather than hiding a damaged known chain.
+    if any(not isinstance(shader, str) or not re.fullmatch(r"[0-9a-f]{16}", shader) for shader in hashes):
+        raise NativePostSkinError("NarakaPostSkin ShaderHash must be a 16-digit lowercase hex string")
+    # No known topology-dependent stage means no native recipe dependency.
+    # Empty chains and unknown-only chains keep their original export route.
+    if not any(shader in expected for shader in hashes):
+        return False
+    if hashes != expected:
+        # Include the observed chain so missing, repeated, reversed and extra
+        # writers can be distinguished without guessing from a generic count.
+        observed = ", ".join(str(shader) for shader in hashes)
+        raise NativePostSkinError(
+            "Incomplete or unsupported native post-skin chain: expected "
+            + " -> ".join(expected) + "; found " + observed)
+    return True
+
+
 def _read(root, description):
     """Resolve one copied evidence file and verify its retained digest.
 
@@ -77,14 +113,10 @@ def load_native_postskin(json_path, metadata):
     exact recorded hash. If a captured artifact exists, its digest is checked as
     well; missing code is not represented as recovered source.
     """
-    if not metadata:
+    if not requires_native_postskin(metadata):
         return None
-    if not isinstance(metadata, dict) or metadata.get("SchemaVersion") != 1:
-        raise NativePostSkinError("Unsupported NarakaPostSkin schema version")
     root = Path(json_path).resolve().parent
-    stages = metadata.get("Stages", [])
-    if not isinstance(stages, list) or len(stages) != 2:
-        raise NativePostSkinError("Expected exactly two supported post-skin stages")
+    stages = metadata["Stages"]
     position_stage, normal_stage = stages
     skin = _stage(root, metadata.get("Skinning"), "09d91b2eee7e232f", ["cs-t0", "cs-t1", "cs-t2"])
     position = _stage(root, position_stage, "ade59729c33f1db5", ["cs-cb0"] + ["cs-t" + str(i) for i in range(7)])

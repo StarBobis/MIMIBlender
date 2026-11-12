@@ -27,7 +27,7 @@ from .shapekeys import (
     get_compute_command_list_name,
 )
 from .native_postskin_export import prepare_native_export, emit_native_ini, check_package_runtime
-from .native_postskin_data import NativePostSkinError
+from .native_postskin_data import NativePostSkinError, requires_native_postskin
 from pathlib import Path
 
 
@@ -52,8 +52,14 @@ class Exporter(StandardExporter):
         used_outputs, used_markers = set(), set()
         for model in self.drawib_model_list:
             metadata = getattr(model, "import_json_dict", {}).get("NarakaPostSkin")
-            if not metadata:
-                continue
+            # Recorded evidence alone does not select the two native shaders.
+            # Classify first, before animation, geometry or Package checks:
+            # unknown-only and empty chains must keep all legacy capabilities.
+            try:
+                if not requires_native_postskin(metadata):
+                    continue
+            except NativePostSkinError as error:
+                raise NativePostSkinError("DrawIB " + model.draw_ib + ": " + str(error)) from error
             # Affine source interpolation currently describes the exported
             # basis mesh. Animated position variants need their own bindings.
             if model in self.usable_shapekey_drawib_model_list or getattr(model, "time_pos_frame_groups", None):

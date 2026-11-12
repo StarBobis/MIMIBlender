@@ -6,7 +6,7 @@ the shared HLSL and execution sequence. No shader is copied into ShaderFixes.
 from pathlib import Path
 import re
 import numpy as np
-from .native_postskin_data import NativePostSkinError, load_native_postskin
+from .native_postskin_data import NativePostSkinError, load_native_postskin, requires_native_postskin
 from .native_postskin_binding import bind_subdivision_sources
 from .native_postskin_buffers import build_native_buffers
 
@@ -15,11 +15,12 @@ def prepare_native_export(json_path, metadata, draw_ib, output_hash, categories,
     """Validate and compute everything before the shared exporter writes files.
 
     Legacy workspaces have no evidence and retain their previous export path.
-    Evidence-bearing workspaces fail explicitly when a recipe cannot be used.
+    Unknown-only CS evidence does not opt a workspace into this native recipe.
+    Known native chains fail explicitly when their recipe cannot be used.
     This prevents incomplete native resources from silently becoming skip-only
     physics removal or a partially generated replacement configuration.
     """
-    if not metadata:
+    if not requires_native_postskin(metadata):
         return None
     if not re.fullmatch(r"[0-9a-fA-F]{8}", draw_ib) or not re.fullmatch(r"[0-9a-fA-F]{8}", output_hash):
         raise NativePostSkinError("Invalid native DrawIB/output hash")
