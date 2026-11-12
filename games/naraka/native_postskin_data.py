@@ -148,4 +148,40 @@ def load_native_postskin(json_path, metadata):
     if not np.array_equal(corner_groups, expected_groups):
         raise NativePostSkinError("Native adjacency corner ownership differs")
     result["source_group_triangles"] = triangles
+    draw = metadata.get("DrawInputs", {})
+    if not isinstance(draw, dict) or "vb1" not in draw or "ib" not in draw:
+        raise NativePostSkinError("Source UV/index evidence is missing; extract the workspace again")
+    # Index width and vertex stride are witnessed in hashed dump headers.
+    # Never infer an index format merely because a file length is divisible.
+    def header(item):
+        try:
+            text = _read(root, item.get("Header")).decode("utf-8-sig")
+            return dict(line.split(": ", 1) for line in text.split("vertex-data:", 1)[0].splitlines() if ": " in line)
+        except (UnicodeError, AttributeError) as error:
+            raise NativePostSkinError("Native source header is invalid") from error
+    vertex_header = header(draw["vb1"])
+    if vertex_header.get("stride") != "8" or vertex_header.get("first vertex") != "0":
+        raise NativePostSkinError("Unsupported native source UV layout")
+    source_uv = _array(_read(root, draw["vb1"]), "<f4", 2, "source UV")
+    if len(source_uv) != count or int(vertex_header.get("vertex count", -1)) != count:
+        raise NativePostSkinError("Source UV and skinning vertex counts differ")
+    index_header = header(draw["ib"])
+    dtype = {"DXGI_FORMAT_R16_UINT": "<u2", "DXGI_FORMAT_R32_UINT": "<u4"}.get(index_header.get("format"))
+    if dtype is None or index_header.get("topology") != "trianglelist":
+        raise NativePostSkinError("Unsupported native source index layout")
+    raw_indices = _array(_read(root, draw["ib"]), dtype, 1, "source indices").ravel()
+    offset = int(index_header.get("byte offset", -1))
+    first = int(index_header.get("first index", -1))
+    number = int(index_header.get("index count", -1))
+    width = np.dtype(dtype).itemsize
+    if offset < 0 or offset % width or first < 0 or number < 1 or number % 3:
+        raise NativePostSkinError("Invalid source triangle range")
+    start = offset // width + first
+    if start + number > len(raw_indices):
+        raise NativePostSkinError("Source triangle range exceeds its buffer")
+    source_triangles = raw_indices[start:start + number].astype("<u4").reshape(-1, 3)
+    if source_triangles.max(initial=0) >= count:
+        raise NativePostSkinError("Source triangle vertex exceeds skinning count")
+    result["source_uv"] = source_uv
+    result["source_triangles"] = source_triangles
     return result

@@ -9,12 +9,26 @@ import importlib.util
 import json
 import os
 import tempfile
+import sys
+import types
 import unittest
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("native_postskin_data", ROOT / "games/naraka/native_postskin_data.py")
 DATA = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(DATA)
+
+# Load the pure binding module without importing the Blender addon entry point.
+# This uses the same relative-import layout as production while keeping tests
+# independent of bpy and any running interactive Blender instance.
+PACKAGE = types.ModuleType("naraka_test")
+PACKAGE.__path__ = [str(ROOT / "games/naraka")]
+sys.modules["naraka_test"] = PACKAGE
+sys.modules["naraka_test.native_postskin_data"] = DATA
+BIND_SPEC = importlib.util.spec_from_file_location("naraka_test.native_postskin_binding", ROOT / "games/naraka/native_postskin_binding.py")
+BIND = importlib.util.module_from_spec(BIND_SPEC)
+BIND_SPEC.loader.exec_module(BIND)
 
 
 class NativeEvidenceTests(unittest.TestCase):
@@ -26,6 +40,21 @@ class NativeEvidenceTests(unittest.TestCase):
     def test_unknown_schema_is_not_guessed(self):
         with self.assertRaises(DATA.NativePostSkinError):
             DATA.load_native_postskin(ROOT / "unused.json", {"SchemaVersion": 2})
+
+    def test_displaced_unbound_vertex_is_rejected(self):
+        # A newly moved vertex is not silently snapped to the old surface.
+        # Such edits require a different binding method, outside this recipe.
+        vertices = np.zeros((3, 10), dtype=np.float32)
+        vertices[:, :3] = [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
+        vertices[:, 5] = 1
+        uv = vertices[:, :2].copy()
+        triangles = np.array([[0, 1, 2]], dtype=np.uint32)
+        evidence = {"source_vertices": vertices, "source_uv": uv, "source_triangles": triangles,
+                    "members": np.arange(3), "offsets": np.arange(4)}
+        edited = vertices.copy()
+        edited[0, 2] = 0.01
+        with self.assertRaises(DATA.NativePostSkinError):
+            BIND.bind_subdivision_sources(evidence, edited, uv, triangles)
 
     def test_changed_file_and_path_escape_are_rejected(self):
         # All disposable fixtures stay under the repository's tmp directory.
@@ -54,6 +83,23 @@ class NativeEvidenceTests(unittest.TestCase):
         self.assertEqual(len(loaded["position_records"]), 1545)
         self.assertEqual(loaded["frame_count"], 168)
         self.assertEqual(loaded["bone_count"], 89)
+
+    @unittest.skipUnless(os.environ.get("NARAKA_POSTSKIN_MOD_BUFFERS"), "requires local subdivision fixture")
+    def test_real_subdivision_correspondence(self):
+        # Validate all exported vertices and triangle ownership using data from
+        # the maintained collector, rather than the old hardcoded probe loader.
+        file = Path(os.environ["NARAKA_POSTSKIN_EVIDENCE_JSON"])
+        evidence = DATA.load_native_postskin(file, json.loads(file.read_text()))
+        folder = Path(os.environ["NARAKA_POSTSKIN_MOD_BUFFERS"])
+        vertices = np.fromfile(folder / "LOD0.c00f48ca-Position.buf", "<f4").reshape(-1, 10)
+        uv = np.fromfile(folder / "LOD0.c00f48ca-Texcoord.buf", "<f4").reshape(-1, 2)
+        triangles = np.fromfile(folder / "LOD0.c00f48ca-0-Index.buf", "<u4").reshape(-1, 3)
+        parents = BIND.bind_subdivision_sources(evidence, vertices, uv, triangles)
+        self.assertEqual(parents.shape, (53092, 2))
+        reference = os.environ.get("NARAKA_POSTSKIN_REFERENCE_PARENTS")
+        if reference:
+            # This independent probe baseline produced the visually tested Mod.
+            self.assertTrue(np.array_equal(parents, np.load(reference)))
 
 
 if __name__ == "__main__":
