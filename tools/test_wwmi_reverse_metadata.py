@@ -153,6 +153,50 @@ class ReverseMetadataTests(unittest.TestCase):
                 self.assertEqual(self.info.shapekeys.batches[0]['checksum'], 1019)
                 self.assertEqual(self.info.shapekeys.batches[0]['dispatch_y'], 2360)
 
+    def test_hashless_incomplete_prefix_uses_existing_target(self):
+        # Reproduce JinXi: a Basis-only component carries global reverse data.
+        # Its placeholder runtime fields must not override the native batch.
+        # Other components may carry actual shapes; geometry is not consulted.
+        buffers = deepcopy(self.buffers)
+        buffers['metadata'].update(offsets_hash='', scale_hash='')
+        buffers['metadata']['batches'] = [dict(
+            vertex_offset=0, checksum=0, dispatch_y=0,
+            runtime_metadata_complete=False, shapekey_count=127,
+            shapekey_offset=0, vertex_count=31805)]
+        obj = self.object(buffers)
+        before = deepcopy(self.info.shapekeys.batches)
+        source = deepcopy(obj)
+        self.resolve([obj, obj])
+        self.assertEqual(self.info.shapekeys.batches, before)
+        self.assertEqual(obj, source)
+
+    def test_missing_hash_cannot_supply_runtime_fields_or_batches(self):
+        # A missing hash is tolerable only if no source data is consumed.
+        # Both extending a sequence and filling a checksum require association.
+        # Failures must leave the target metadata unchanged.
+        for fill in (False, True):
+            with self.subTest(fill=fill):
+                buffers = deepcopy(self.buffers)
+                buffers['metadata']['offsets_hash'] = ''
+                if fill:
+                    buffers['metadata']['batches'] = buffers['metadata']['batches'][:1]
+                    self.info.shapekeys.batches[0]['checksum'] = None
+                before = deepcopy(self.info.shapekeys.batches)
+                with self.assertRaisesRegex(ValueError, 'target shape offsets hash'):
+                    self.resolve([self.object(buffers)])
+                self.assertEqual(self.info.shapekeys.batches, before)
+
+    def test_known_hash_conflict_is_rejected_for_unused_prefix(self):
+        # Redundant metadata is not permission to accept a known wrong model.
+        # Keep both offsets and scale hash checks on the no-contribution path.
+        # Missing values and conflicting values are distinct cases.
+        for key in ('offsets_hash', 'scale_hash'):
+            buffers = deepcopy(self.buffers)
+            buffers['metadata']['batches'] = buffers['metadata']['batches'][:1]
+            buffers['metadata'][key] = 'deadbeef'
+            with self.assertRaisesRegex(ValueError, 'does not match.*hash'):
+                self.resolve([self.object(buffers)])
+
     def test_overlapping_source_can_fill_fields_the_extraction_omitted(self):
         # A legacy extraction may record the batch boundary without the runtime
         # identity. The reverse INI is then the only recorded source of it.

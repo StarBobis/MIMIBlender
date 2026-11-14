@@ -220,15 +220,22 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib):
                 fail("does not match the target component draw ranges")
             shapes = payload["shapekeys"]
 
-            # Original resource hashes anchor this metadata to the target model.
-            # A scale hash may be absent, but two known scale hashes must agree.
-            # An empty offsets hash cannot establish a safe target association.
-            if not original.offsets_hash or shapes.get("offsets_hash") != original.offsets_hash:
+            # Known hashes must agree even when the source adds no metadata.
+            # Legacy reverse imports may omit hashes and runtime identities.
+            # Such records need no association when the target is unchanged.
+            offsets = shapes.get("offsets_hash")
+            if offsets and original.offsets_hash and offsets != original.offsets_hash:
                 fail("does not match the target shape offsets hash")
             scale = shapes.get("scale_hash")
             if scale and original.scale_hash and scale != original.scale_hash:
                 fail("does not match the target shape scale hash")
-            selected = _merge_source(selected, shapes.get("batches", []), fail)
+            merged = _merge_source(selected, shapes.get("batches", []), fail)
+            # Filling a field or extending batches still requires the original
+            # resource identity. Never infer it from component ranges alone.
+            # Merge on copies so rejected sources leave the target untouched.
+            if merged != selected and (not original.offsets_hash or offsets != original.offsets_hash):
+                fail("does not match the target shape offsets hash")
+            selected = merged
         except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as error:
             fail("is malformed (" + str(error) + ")")
 
