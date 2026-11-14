@@ -459,7 +459,7 @@ class GlobalConfig:
                 raise ValueError("Explicit AI output directory is required")
             return output
         # If the user enabled the "use a specified folder" option, return that folder location,
-        # otherwise return our default location. Note that SkipIB and VSCheck are not generated into the specified location.
+        # otherwise return our default location. Note that SkipIB is not generated into the specified location.
         if MIMIGlobalProperties.use_specific_generate_mod_folder_path():
             return MIMIGlobalProperties.generate_mod_folder_path()
         else:

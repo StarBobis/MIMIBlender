@@ -78,7 +78,8 @@ class M_SectionType:
     ResourceShapeKeysOverride = "ResourceShapeKeysOverride"
     ResourceSkeletonOverride = "ResourceSkeletonOverride"
 
-    VertexShaderCheck = "VertexShaderCheck"
+    # Active shader identification has its own group, independent of workspace checks.
+    ShaderOverride = "ShaderOverride"
 
     CreditInfo = "CreditInfo"
     CommandList = "CommandList"
@@ -274,7 +275,7 @@ class M_IniBuilder:
         self.__append_section_line(M_SectionType.ResourceModInfo)
 
 
-        self.__append_section_line(M_SectionType.VertexShaderCheck)
+        self.__append_section_line(M_SectionType.ShaderOverride)
         
         self.__append_section_line(M_SectionType.CreditInfo)
 

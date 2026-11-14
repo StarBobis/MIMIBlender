@@ -364,9 +364,3 @@ def add_unity_cs_resource_vertexlimit(ini_builder: M_IniBuilder, drawib_model):
     resource_vertex_limit_section.append("data = " + str(drawib_model.draw_number) + " 0 " + str(drawib_model.draw_number) + " 0")
     resource_vertex_limit_section.new_line()
     ini_builder.append_section(resource_vertex_limit_section)
-
-
-def add_unity_cs_vertex_shader_check(ini_builder: M_IniBuilder):
-    """Append an empty VertexShaderCheck marker section (kept for tooling)."""
-    vscheck_section = M_IniSection(M_SectionType.VertexShaderCheck)
-    ini_builder.append_section(vscheck_section)

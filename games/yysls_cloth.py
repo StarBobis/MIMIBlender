@@ -69,7 +69,7 @@ def add_shader_check(ini_builder):
     # custom shader. Each marker cooperates with independently generated mods.
     # Any duplicate ShaderOverride for the same hash must repeat this filter;
     # 3Dmigoto uses the last duplicate's filter_index when resolving `vs`.
-    section = M_IniSection(M_SectionType.VertexShaderCheck)
+    section = M_IniSection(M_SectionType.ShaderOverride)
     section.append("; Identify original VS hashes without replacing them globally.")
     section.append("; Each supported hash uses a separate float32-safe filter value.")
     for variant_index, variant in enumerate(CLOTH_SHADER_VARIANTS):
