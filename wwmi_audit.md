@@ -394,4 +394,3 @@ The current live blueprint was exported after backing up the previous INI and
 texture under repository tmp. Output c435fc2b_DiffuseMap.dds matched the converted
 replacement SHA256 bd6a2aee3eb49138c7d3a1f6a1dc31d9d7e93825d49962702956d338ab06b354.
 This verifies export bytes, not game reload or in-game appearance.
-
