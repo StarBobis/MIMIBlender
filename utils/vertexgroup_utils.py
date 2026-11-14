@@ -883,7 +883,7 @@ class VertexGroupUtils:
 
         if len(v_idx_list) == 0:
             # no weights at all: return zeros compatible with old interface
-            aligned_max_groups = max(4, blend_size)
+            aligned_max_groups = blend_size
             blendweights = np.zeros((n_loops, aligned_max_groups), dtype=np.float32)
             blendindices = np.zeros((n_loops, aligned_max_groups), dtype=np.uint32)
             return {0: blendweights}, {0: blendindices}
@@ -892,13 +892,12 @@ class VertexGroupUtils:
         g_arr = np.asarray(g_id_list, dtype=np.int32)
         w_arr = np.asarray(w_list, dtype=np.float32)
 
-        # 2) figure out aligned_max_groups (multiple of 4, at least blend_size)
-        # real_max_groups = max groups any vertex has
-        # we can compute counts via bincount
+        # 2) count entries for per-vertex offsets, retaining the declared width.
         counts = np.bincount(v_idx_arr, minlength=n_verts)
-        real_max_groups = int(counts.max()) if counts.size > 0 else 0
-        aligned_max_groups = 4 * math.ceil(real_max_groups / 4) if real_max_groups else 4
-        M = min(aligned_max_groups, blend_size)
+        # Buffer width is dictated by the declared format, not the number of
+        # influences present on this mesh. BI8/BW8 still need eight columns
+        # when every vertex has only one through four nonzero influences.
+        M = blend_size
 
         # 3) we want for each vertex the top-M groups sorted by weight
         # Strategy:

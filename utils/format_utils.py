@@ -222,7 +222,7 @@ class FormatUtils:
     
 
     @staticmethod    
-    def convert_4x_float32_to_r8g8b8a8_unorm_blendweights(input_array):
+    def convert_4x_float32_to_r8g8b8a8_unorm_blendweights(input_array, preserve_zero=False):
         # Ensure the input array is a float type
         # input_array_float = input_array.astype(numpy.float32)
     
@@ -260,6 +260,11 @@ class FormatUtils:
         
         # Compute the precision error
         precision_error = 255 - int_part.sum(axis=1)
+        # WWMI accepts unweighted vertices. Their missing influence must stay
+        # zero rather than assigning the entire quantization remainder to bone0.
+        # Other callers keep their established normalization behavior by default.
+        if preserve_zero:
+            precision_error[zero_sum_mask] = 0
         
         # Compute tickets
         tickets = numpy.zeros_like(normalized)

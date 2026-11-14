@@ -85,10 +85,33 @@ def _required_native_batches(batches, key_count):
     # Keep zero-length prefixes so stored runtime batch numbers never shift.
     end = 0
     for index, batch in enumerate(batches):
-        end += 127 if batch.get("shapekey_count") is None else int(batch["shapekey_count"])
+        if not isinstance(batch, dict):
+            raise ValueError("WWMI malformed required shape batch " + str(index))
+        count = batch.get("shapekey_count")
+        count = 127 if count is None else _integer(count, _fail_runtime)
+        if not 0 <= count <= 127:
+            _fail_runtime("invalid required shape batch size")
+        end += count
         if key_count <= end:
             return batches[:index + 1]
     return batches
+
+
+def _fail_runtime(reason):
+    raise ValueError("WWMI original shape runtime metadata: " + reason)
+
+
+def validate_runtime_batch(batch):
+    """Validate a consumed runtime identity even if a caller bypassed resolution.
+
+    Legacy single-batch defaults are normalized by their schema adapter before
+    this boundary. Explicit batches must contain all three runtime fields.
+    Integer conversion must never round a checksum or wrap an unsigned base.
+    """
+    row = _read_batch(deepcopy(batch), _fail_runtime)
+    if any(row.get(field) is None for field in RUNTIME_FIELDS):
+        _fail_runtime("incomplete required batch")
+    return row
 
 
 def capture_reverse_shape_metadata(obj, shapekey_buffers):
@@ -251,13 +274,7 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=No
     # our optional reverse sidecar when the requested export needs data that
     # the selected workspace does not already provide.
     if required_key_count == 0:
-        return
-    if (required_key_count is not None
-            and required_key_count <= _native_capacity(original.batches)
-            and all(batch.get("runtime_metadata_complete") is not False
-                    and all(batch.get(field) is not None for field in RUNTIME_FIELDS)
-                    and int(batch.get("dispatch_y", 0)) > 0
-                    for batch in _required_native_batches(original.batches, required_key_count))):
+        original.batches = []
         return
 
     def fail_workspace(reason):
@@ -265,7 +282,17 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=No
                          + reason + ".")
 
     # Copy first so a later failure leaves even in-memory metadata unchanged.
-    selected = [_read_batch(deepcopy(batch), fail_workspace) for batch in original.batches]
+    required = (original.batches if required_key_count is None else
+                _required_native_batches(original.batches, required_key_count))
+    selected = _finalize_batches(
+        [_read_batch(deepcopy(batch), fail_workspace) for batch in required], fail_workspace)
+    # Ignore historical sidecars, not the consumed native identity validation.
+    # Truncate unused metadata before converting/counting or validating it.
+    if (required_key_count is not None
+            and required_key_count <= _native_capacity(selected)
+            and all(row["runtime_metadata_complete"] for row in selected)):
+        original.batches = selected
+        return
     seen = set()
     for obj in objects:
         if obj is None:
@@ -321,4 +348,6 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=No
     # Preserve the native header and skeleton; only validated batches change.
     # No source object's property or shape data is rewritten during resolution.
     # Compact reverse vertex counts never replace original mesh vertex counts.
+    if required_key_count is not None:
+        selected = _required_native_batches(selected, required_key_count)
     original.batches = _finalize_batches(selected, fail_workspace)

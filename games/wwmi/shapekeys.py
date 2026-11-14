@@ -26,6 +26,7 @@ from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 from ...utils.format_utils import Fatal
 from .model import DrawIBModelWWMI
 from .names import scoped_global, scoped_name, scoped_section
+from ...workspace.wwmi_reverse_metadata import validate_runtime_batch
 
 
 def get_safe_shapekey_name(shapekey_name: str) -> str:
@@ -84,6 +85,10 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
     if len(shapekey_offsets) % 128:
         raise Fatal("WWMI shape key offsets contain an incomplete batch.")
     batch_count = len(shapekey_offsets) // 128
+    # The pinned WWMI Package exposes only batch0 and batch1 to its overrider.
+    # Do not emit batch2 variables that that public runtime cannot consume.
+    if batch_count > 2:
+        raise Fatal("WWMI runtime supports at most two native shape key batches.")
     metadata_batches = list(getattr(draw_ib_model.wwmi_info.shapekeys, "batches", []) or [])
     if not metadata_batches and getattr(draw_ib_model.wwmi_info.shapekeys, "checksum", None) is not None:
         metadata_batches = [{
@@ -109,7 +114,7 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
     for batch_id in range(batch_count):
         batch_offsets = shapekey_offsets[batch_id * 128:(batch_id + 1) * 128]
         custom_vertex_count = batch_offsets[-1] if batch_offsets else 0
-        metadata = metadata_batches[batch_id]
+        metadata = validate_runtime_batch(metadata_batches[batch_id])
         # A zero checksum may legitimately occur with empty early key slots.
         # New metadata records completeness; legacy metadata uses Dispatch Y.
         # Preserve unsigned checksum values exactly as recorded by the game.

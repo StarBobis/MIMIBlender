@@ -36,9 +36,59 @@ class WWMIInfoObject:
     shapekeys: WWMIInfoShapeKeys
 
 
+def _merge_shape_batches(sources, required_key_count):
+    """Merge one horizontal batch before deciding whether its successor is used.
+
+    A component can omit its key count while another records it. Per-component
+    early truncation would default that count and lose needed complementary
+    fields, or even conceal a real conflict in the next consumed batch.
+    """
+    result = []
+    key_end = 0
+    for index in range(max((len(rows) for rows in sources), default=0)):
+        merged = {}
+        for rows in sources:
+            if index >= len(rows):
+                continue
+            batch = deepcopy(rows[index])
+            if not isinstance(batch, dict):
+                raise ValueError("WWMI malformed required shape batch " + str(index))
+            # Invalidated numeric defaults cannot compete with actual evidence.
+            if batch.get("runtime_metadata_complete") is False:
+                for field_name in ("checksum", "dispatch_y", "vertex_offset"):
+                    batch.pop(field_name, None)
+            for field_name, value in batch.items():
+                if field_name == "runtime_metadata_complete":
+                    merged.setdefault(field_name, value)
+                    continue
+                if value is None:
+                    continue
+                previous = merged.get(field_name)
+                if previous is not None and previous != value:
+                    raise ValueError("WWMI conflicting shape key metadata for batches."
+                                     + str(index) + "." + field_name)
+                merged[field_name] = value
+        result.append(merged)
+        # Only the merged count can select the global consumed prefix.
+        count = merged.get("shapekey_count")
+        if count is not None:
+            try:
+                parsed = int(count)
+            except (ValueError, TypeError, OverflowError):
+                raise ValueError("WWMI invalid required shape batch size")
+            if isinstance(count, bool) or (not isinstance(count, str) and count != parsed) or not 0 <= parsed <= 127:
+                raise ValueError("WWMI invalid required shape batch size")
+            count = parsed
+        key_end += 127 if count is None else count
+        if required_key_count is not None and required_key_count <= key_end:
+            break
+    return result
+
+
 class WWMIInfoHelper:
     @staticmethod
-    def build_from_json_list(ordered_submesh_json_list: list) -> WWMIInfoObject:
+    def build_from_json_list(ordered_submesh_json_list: list, include_shapekeys=True,
+                             required_key_count=None) -> WWMIInfoObject:
         if not ordered_submesh_json_list:
             raise ValueError("No SubmeshJson provided to build WWMIInfoObject.")
 
@@ -80,10 +130,10 @@ class WWMIInfoHelper:
         # Upstream uses explicit batches when present and treats scalar checksum
         # / dispatch fields as deprecated. Mixing an old component header with
         # a newer batch record must not compare two different representations.
-        has_batches = any(row.ShapeKeysInfo.get("batches") for row in ordered_submesh_json_list)
+        has_batches = include_shapekeys and any(row.ShapeKeysInfo.get("batches") for row in ordered_submesh_json_list)
         legacy_fields = {"checksum", "dispatch_y", "vertex_count", "vertex_offset",
                          "shapekey_count", "runtime_metadata_complete"}
-        for submesh in ordered_submesh_json_list:
+        for submesh in ordered_submesh_json_list if include_shapekeys else []:
             for key, value in submesh.ShapeKeysInfo.items():
                 if value is None or value == "" or value == []:
                     continue
@@ -92,36 +142,13 @@ class WWMIInfoHelper:
                 if key.endswith("_hash") and isinstance(value, str):
                     value = value.lower()
                 if key == "batches":
-                    # Per-component copies may contain complementary fields or
-                    # only a prefix of the DrawIB's full dispatch list. Merge
-                    # these copies by batch index, retaining real conflicts.
-                    batches = sk_info.setdefault("batches", [])
-                    for index, batch in enumerate(value):
-                        batch = deepcopy(batch)
-                        # Explicitly incomplete rows may retain numeric defaults.
-                        # They can supply layout information, but not compete
-                        # with recovered dispatch identities from another copy.
-                        if batch.get("runtime_metadata_complete") is False:
-                            for field_name in ("checksum", "dispatch_y", "vertex_offset"):
-                                batch.pop(field_name, None)
-                        if index >= len(batches):
-                            batches.append(deepcopy(batch))
-                            continue
-                        for field_name, field_value in batch.items():
-                            if field_name == "runtime_metadata_complete":
-                                continue
-                            if field_value is None:
-                                continue
-                            previous = batches[index].get(field_name)
-                            if previous is not None and previous != field_value:
-                                raise ValueError("WWMI conflicting shape key metadata for batches."
-                                                 + str(index) + "." + field_name)
-                            batches[index][field_name] = deepcopy(field_value)
                     continue
                 if key in sk_info and sk_info[key] != value:
                     raise ValueError("WWMI conflicting shape key metadata for " + key)
                 sk_info[key] = deepcopy(value)
         if has_batches:
+            sources = [row.ShapeKeysInfo.get("batches") or [] for row in ordered_submesh_json_list]
+            sk_info["batches"] = _merge_shape_batches(sources, required_key_count)
             for batch in sk_info["batches"]:
                 # Completeness follows the merged evidence, never the order in
                 # which older and newer component copies were encountered.

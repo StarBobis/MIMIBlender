@@ -172,7 +172,8 @@ class DrawIBModelWWMI:
         
         # Build the WWMIInfoObject from the ordered SubmeshJson list;
         # it holds all component info of the current DrawIB and is used later when building MergedObject and exporting
-        self.wwmi_info = WWMIInfoHelper.build_from_json_list(ordered_submesh_json_list)
+        self.wwmi_info = WWMIInfoHelper.build_from_json_list(
+            ordered_submesh_json_list, include_shapekeys=False)
         self.merged_object = self.build_merged_object()
 
         obj_name_temp_object_dict: dict[str, TempObject] = {}
@@ -269,12 +270,17 @@ class DrawIBModelWWMI:
         # No source property or native palette is rewritten by this step.
         source_objects = [bpy.data.objects.get(model.obj_name)
                           for model in self.ordered_drawcall_model_list]
+        required_keys = required_shape_key_count([self.merged_object.object])
+        # Shape metadata is optional input until an actual native delta exists.
+        # Skeleton/geometry metadata was built independently before the merge.
+        if required_keys:
+            self.wwmi_info.shapekeys = WWMIInfoHelper.build_from_json_list(
+                ordered_submesh_json_list, required_key_count=required_keys).shapekeys
         resolve_reverse_shape_metadata(
             self.wwmi_info,
             source_objects,
             self.draw_ib,
-            required_key_count=required_shape_key_count(
-                [self.merged_object.object]),
+            required_key_count=required_keys,
         )
 
         # Preserve original batch boundaries on the disposable merged object.
@@ -282,11 +288,8 @@ class DrawIBModelWWMI:
         # would shift every key in subsequent runtime dispatches during export.
         batches = self.wwmi_info.shapekeys.batches
         batch_counts = []
-        for index, batch in enumerate(batches):
+        for batch in batches:
             count = 127 if batch.get("shapekey_count") is None else int(batch["shapekey_count"])
-            if index + 1 < len(batches) and batches[index + 1].get("shapekey_offset") is not None:
-                offset = batch.get("shapekey_offset")
-                count = int(batches[index + 1]["shapekey_offset"]) - (0 if offset is None else int(offset))
             batch_counts.append(count)
         if batch_counts:
             self.merged_object.object["wwmi_shapekey_batch_counts"] = batch_counts
@@ -406,6 +409,50 @@ class DrawIBModelWWMI:
         if self.blend_remap_vertex_vg_buffer is not None and self.blend_remap_vertex_vg_buffer.size != 0:
             BufferExportHelper.write_buf_blendindices_uint16(self.blend_remap_vertex_vg_buffer, self.draw_ib + "-BlendRemapVertexVG.buf")
 
+    @staticmethod
+    def normalize_vertex_group_names(obj):
+        """Choose one bone identity convention before any Blender join.
+
+        Fully numeric MMT imports retain their explicit sparse identities.
+        Mixed/display names use upstream's index convention for the whole
+        object; combining conventions could silently alias distinct bones.
+        Two-phase renaming prevents Blender's automatic .001 suffixes from
+        deciding identity when an old numeric name occupies a target slot.
+        """
+        groups = list(obj.vertex_groups)
+        if all(GLOBAL_GROUP_NAME.fullmatch(group.name) for group in groups):
+            return
+        for group in groups:
+            group.name = "__mimi_export_group_" + str(group.index)
+        for group in groups:
+            group.name = str(group.index)
+
+    @staticmethod
+    def prepare_export_modifiers(obj):
+        """Materialize base and native keys in the same disposable vertex domain.
+
+        The buffer builder evaluates visible modifiers even when the global
+        apply-all option is off. Native deltas cannot use raw vertex numbers
+        against that evaluated IB. Bake visible modifiers for every native key
+        on this copy, preserving the source mesh and the user's option value.
+        """
+        if MIMIGlobalProperties.apply_all_modifiers():
+            selected = [modifier.name for modifier in obj.modifiers]
+        else:
+            shapes = getattr(obj.data, "shape_keys", None)
+            keys = getattr(shapes, "key_blocks", [])
+            native = any(re.search(r'.*(?:deform|custom)[_ -]*(\d+).*', key.name.lower())
+                         for key in keys if key != shapes.reference_key) if shapes else False
+            selected = [modifier.name for modifier in obj.modifiers if modifier.show_viewport] if native else []
+        if selected:
+            with OpenObject(bpy.context, obj):
+                result = ShapeKeyUtils.apply_modifiers_for_object_with_shape_keys(
+                    bpy.context, selected, None)
+                # Different topology between key evaluations has no common
+                # vertex domain. Do not continue with a partly rebuilt copy.
+                if result is not None and not result[0]:
+                    raise ValueError("WWMI native shape modifier evaluation failed: " + str(result[1]))
+
     def build_merged_object(self) -> MergedObject:
         components: list[MergedObjectComponent] = []
         for _component in self.wwmi_info.components:
@@ -462,10 +509,7 @@ class DrawIBModelWWMI:
                     for shape_key in muted_shape_keys:
                         temp_obj.shape_key_remove(shape_key)
 
-                if MIMIGlobalProperties.apply_all_modifiers():
-                    with OpenObject(bpy.context, temp_obj) as opened_obj:
-                        selected_modifiers = [modifier.name for modifier in ObjUtils.get_modifiers(opened_obj)]
-                        ShapeKeyUtils.apply_modifiers_for_object_with_shape_keys(bpy.context, selected_modifiers, None)
+                self.prepare_export_modifiers(temp_obj)
 
                 # WWMI has its own component merge and game-space transform.
                 # Restore the import mirror before either operation so every
@@ -482,21 +526,15 @@ class DrawIBModelWWMI:
                 DrawRangeUtils.tag_object(temp_obj, owner)
 
                 vertex_groups = ObjUtils.get_vertex_groups(temp_obj)
-                # Numeric identities are resolved again after the final join.
-                # Never discard a weighted group merely for its internal index.
-                # Internal group order is not a bone identity in any architecture.
-                # Preserve sparse/reordered groups and validate active numeric
-                # identities later; only explicit ignore groups may be discarded.
+                # Fully numeric groups retain explicit identities after joining.
+                # Display/mixed names instead select upstream index semantics
+                # for the whole object. Only explicit ignore groups are removed.
                 ignore_list = [group for group in vertex_groups if "ignore" in group.name.lower()]
                 ObjUtils.remove_vertex_groups(temp_obj, ignore_list)
 
-                # Upstream accepts arbitrary display names and uses group order
-                # as bone identity. Preserve explicit numeric identities used by
-                # MMT's sparse/reordered imports; normalize only unnamed bone
-                # identities on disposable per-object copies before any join.
-                for group in temp_obj.vertex_groups:
-                    if GLOBAL_GROUP_NAME.fullmatch(group.name) is None:
-                        group.name = str(group.index)
+                # Use a single naming convention per temporary source object.
+                # Mixed groups cannot combine numeric IDs with index fallbacks.
+                self.normalize_vertex_group_names(temp_obj)
 
                 temp_object.vertex_count = len(temp_obj.data.vertices)
                 temp_object.index_count = len(temp_obj.data.polygons) * 3

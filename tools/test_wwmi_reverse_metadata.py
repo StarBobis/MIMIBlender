@@ -108,7 +108,39 @@ class ReverseMetadataTests(unittest.TestCase):
         # that neither the upstream packer nor its INI template needs.
         self.info.shapekeys.batches.append({'shapekey_count': 49})
         RESOLVE(self.info, [Object({PROPERTY: '{'})], 'first_batch', required_key_count=1)
-        self.assertEqual(len(self.info.shapekeys.batches), 2)
+        self.assertEqual(len(self.info.shapekeys.batches), 1)
+
+    def test_unused_corrupt_tail_is_not_even_converted(self):
+        # Only the first key is exported. Invalid counts/runtime fields in a
+        # later dispatch must not be converted before selecting this prefix.
+        # The working first batch still undergoes its own identity validation.
+        for tail in ([{'shapekey_count': 'bad'}, {'shapekey_count': 49}],
+                     [{'shapekey_count': -1000}, {'shapekey_count': 49}]):
+            self.info.shapekeys.batches = [deepcopy(self.batches[0])] + tail
+            RESOLVE(self.info, [Object({PROPERTY: '{'})], 'prefix', required_key_count=1)
+            self.assertEqual(len(self.info.shapekeys.batches), 1)
+
+    def test_native_fast_path_validates_consumed_values(self):
+        # Trusted workspace selection does not make unsigned integer limits
+        # optional. Historical sidecars are skipped after native validation.
+        # Fractions cannot silently become another checksum in the final INI.
+        for field in ('checksum', 'vertex_offset', 'dispatch_y'):
+            for invalid in (-1, 2**32, 1.5):
+                self.info.shapekeys.batches = [deepcopy(self.batches[0])]
+                self.info.shapekeys.batches[0][field] = invalid
+                with self.assertRaises(ValueError):
+                    RESOLVE(self.info, [], 'invalid', required_key_count=1)
+
+    def test_consumed_batch_boundaries_cannot_disagree(self):
+        # The model must use the same validated boundaries as the resolver.
+        # A conflicting second offset is not allowed to reassign Deform 130.
+        # An unused suffix is instead removed and cannot affect the first key.
+        self.info.shapekeys.batches = deepcopy(self.batches)
+        self.info.shapekeys.batches[1]['shapekey_offset'] = 40
+        with self.assertRaisesRegex(ValueError, 'nonconsecutive'):
+            RESOLVE(self.info, [], 'boundary', required_key_count=131)
+        RESOLVE(self.info, [], 'prefix', required_key_count=1)
+        self.assertEqual(len(self.info.shapekeys.batches), 1)
 
     def test_last_native_batch_has_unused_custom_slots(self):
         # 86 observed occupied slots still leave room in this 127-slot batch.

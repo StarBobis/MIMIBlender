@@ -547,14 +547,16 @@ class ObjBufferHelper:
             return FormatUtils.convert_4x_float32_to_r8g8b8a8_snorm(blendweights)
         elif d3d11_element.Format == D3D11Format.R8G8B8A8_UNORM:
             # print("BLENDWEIGHT R8G8B8A8_UNORM")
-            return FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm_blendweights(blendweights)
+            return FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm_blendweights(
+                blendweights, preserve_zero=GlobalConfig.logic_name == LogicName.WWMI)
         elif d3d11_element.Format == 'R16G16B16A16_FLOAT':
             return blendweights.astype(numpy.float16)
         elif d3d11_element.Format == 'R16G16B16A16_UNORM':
             return FormatUtils.convert_4x_float32_to_r16g16b16a16_unorm(blendweights)
         elif d3d11_element.Format == "R8_UNORM" and d3d11_element.ByteWidth == 8:
             # TimerUtils.Start("WWMI BLENDWEIGHT R8_UNORM special handling")
-            blendweights = FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm_blendweights(blendweights)
+            blendweights = FormatUtils.convert_4x_float32_to_r8g8b8a8_unorm_blendweights(
+                blendweights, preserve_zero=GlobalConfig.logic_name == LogicName.WWMI)
             # original_elementname_data_dict[d3d11_element_name] = blendweights
             print("WWMI R8_UNORM special handling")
             # TimerUtils.End("WWMI BLENDWEIGHT R8_UNORM special handling")

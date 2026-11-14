@@ -400,6 +400,18 @@ class ShapeKeyUtils:
         batch_counts = list(merged_obj.get("wwmi_shapekey_batch_counts", []))
         if not batch_counts:
             batch_counts = [127] * max(1, math.ceil((max_shapekey_id + 1) / 127))
+        # Select the consumed prefix before validating unrelated trailing rows.
+        # Counts of an unused dispatch cannot create a dependency for key zero.
+        required_counts = []
+        key_end = 0
+        for count in batch_counts:
+            if not isinstance(count, (int, numpy.integer)) or isinstance(count, bool) or not 0 <= count <= 127:
+                raise ValueError("Invalid WWMI original shape key batch sizes.")
+            required_counts.append(count)
+            key_end += count
+            if max_shapekey_id < key_end:
+                break
+        batch_counts = required_counts
         if any(count < 0 or count > 127 for count in batch_counts):
             raise ValueError("Invalid WWMI original shape key batch sizes.")
         # Captured key counts describe populated slots, not dispatch capacity.

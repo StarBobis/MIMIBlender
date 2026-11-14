@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
+from copy import copy
 from unittest.mock import patch
 import bpy
 
@@ -42,6 +44,20 @@ class Reporter:
             raise AssertionError(message)
 
 
+def _properties(owner):
+    # IDProperty arrays/dictionaries need value serialization; their repr may
+    # describe a container instead of its contents and miss in-place edits.
+    def value(item):
+        if hasattr(item, 'to_dict'):
+            return {key: value(data) for key, data in item.to_dict().items()}
+        if hasattr(item, 'to_list'):
+            return [value(data) for data in item.to_list()]
+        if isinstance(item, (list, tuple)):
+            return [value(data) for data in item]
+        return item
+    return {key: value(item) for key, item in owner.items()}
+
+
 def snapshot():
     # Hash source geometry, all weights, and every shape coordinate, not only
     # object counts. Export may create and remove copies but cannot modify any
@@ -53,8 +69,12 @@ def snapshot():
         values = [[list(v.co), [(g.group, g.weight) for g in v.groups]] for v in obj.data.vertices]
         shapes = []
         if obj.data.shape_keys:
-            shapes = [(key.name, [list(v.co) for v in key.data]) for key in obj.data.shape_keys.key_blocks]
-        properties = sorted((key, str(value)) for key, value in obj.items())
+            shapes = [(key.name, [list(v.co) for v in key.data], key.value, key.mute,
+                       key.slider_min, key.slider_max, key.interpolation,
+                       key.relative_key.name, key.vertex_group)
+                      for key in obj.data.shape_keys.key_blocks]
+        properties = [_properties(obj), _properties(obj.data),
+                      _properties(obj.data.shape_keys) if obj.data.shape_keys else {}]
         data = [values, shapes, [g.name for g in obj.vertex_groups], [list(p.vertices) for p in obj.data.polygons], properties]
         result[obj.name] = hashlib.sha256(json.dumps(data).encode()).hexdigest()
     return result
@@ -111,10 +131,17 @@ else:
                     group.name = 'Bone_' + str(group.index)
         original_info_builder = WWMIInfoHelper.build_from_json_list
 
-        def build_info(rows):
+        def build_info(rows, **kwargs):
             # A genuinely shape-less target must work without fake dispatches.
             # Existing native shapes keep their actual captured runtime records.
-            info = original_info_builder(rows)
+            if case == 'no_shapes':
+                rows = [copy(row) for row in rows]
+                for index, row in enumerate(rows):
+                    # Poison unused native shape metadata before construction,
+                    # not afterwards: geometry/skeleton-only loading must never
+                    # inspect these conflicting hashes or malformed tail rows.
+                    row.ShapeKeysInfo = {'offsets_hash': str(index), 'batches': ['unused corruption']}
+            info = original_info_builder(rows, **kwargs)
             if case == 'no_shapes':
                 info.shapekeys = WWMIInfoShapeKeys()
             return info
@@ -127,8 +154,8 @@ else:
         index_count = sum(len(obj.data.polygons) * 3 for obj in bpy.data.objects if obj.type == 'MESH' and obj.name.startswith('LOD'))
         for mode in modes:
             properties.import_merged_vgmap = mode
-            folder = ROOT / 'tmp' / ('wwmi_roundtrip_' + name.lower() + '_' + mode.lower() + '_' + case)
-            folder.mkdir(exist_ok=True)
+            folder = ROOT / 'tmp' / ('wwmi_roundtrip_' + name.lower() + '_' + mode.lower() + '_' + case + '_' + str(time.time_ns()))
+            folder.mkdir(exist_ok=False)
             exported = []
             original_write = DrawIBModelWWMI.write_buffer_files
 
@@ -148,11 +175,13 @@ else:
             assert actual_indices == index_count, (mode, actual_indices, index_count)
             # Every active filename is a load request in 3Dmigoto. Test actual
             # on-disk products, including the absence of optional shape files.
-            ini = next(folder.glob('*.ini')).read_text(encoding='utf-8-sig')
-            for line in ini.splitlines():
-                if line.strip().lower().startswith('filename ='):
-                    filename = line.split('=', 1)[1].strip()
-                    assert (folder / filename.replace('\\', '/')).is_file(), filename
+            inis = list(folder.glob('*.ini'))
+            assert inis, 'No new INI was generated'
+            for path in inis:
+                for line in path.read_text(encoding='utf-8-sig').splitlines():
+                    if line.strip().lower().startswith('filename ='):
+                        filename = line.split('=', 1)[1].strip()
+                        assert (folder / filename.replace('\\', '/')).is_file(), filename
             results.append({'mode': mode, 'source_preserved': True, 'models': exported})
     print('AUDIT_RESULT ' + json.dumps({'workspace': name, 'case': case, 'results': results}))
 addon.unregister()

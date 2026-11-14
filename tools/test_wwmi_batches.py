@@ -78,8 +78,9 @@ IMPORT = load_function('common/mesh_create_helper.py', 'import_shapekeys_wwmi', 
     'numpy': numpy, 'Fatal': ValueError,
     'capture_reverse_shape_metadata': REVERSE_METADATA['capture_reverse_shape_metadata'],
 })
-EXPORT = load_function('games/wwmi/shapekeys.py', 'get_wwmi_shapekey_batches', {'Fatal': ValueError})
-PACK = load_function('utils/shapekey_utils.py', 'extract_shapekey_data', {'math': math})
+EXPORT = load_function('games/wwmi/shapekeys.py', 'get_wwmi_shapekey_batches', {
+    'Fatal': ValueError, 'validate_runtime_batch': REVERSE_METADATA['validate_runtime_batch']})
+PACK = load_function('utils/shapekey_utils.py', 'extract_shapekey_data', {'math': math, 'numpy': numpy})
 
 
 def import_buffers(offsets, ids, deltas, origin=0, count=1, metadata=None):
@@ -231,6 +232,29 @@ class BatchTests(unittest.TestCase):
         helper.get_shapekey_cache = lambda *args: {175: {}}
         self.assertEqual(PACK(helper, obj, {}), ([], [], []))
 
+    def test_unused_invalid_tail_count_is_not_a_packer_dependency(self):
+        # The payload consumes one key in batch0, so batch1 is never parsed.
+        # Exercise the actual packer with tails the former validation order
+        # rejected, rather than checking only a metadata helper's return value.
+        for count in (-1, 128, 'bad'):
+            obj = Object(1)
+            obj['wwmi_shapekey_batch_counts'] = [127, count]
+            helper = SimpleNamespace(get_shapekey_cache=lambda *args: {0: {0: [1, 0, 0]}})
+            self.assertEqual(len(PACK(helper, obj, {})[0]), 128)
+
+    def test_final_runtime_consumer_checks_base_and_supported_batch_count(self):
+        # Explicit batches are not legacy schemas: a missing base cannot be
+        # supplied by int(..., default=0). The pinned Package also exposes only
+        # batch0/batch1, so extra buffers cannot imply a third runtime callback.
+        shape = SimpleNamespace(batches=[{'checksum': 7, 'dispatch_y': 2}])
+        model = SimpleNamespace(wwmi_info=SimpleNamespace(shapekeys=shape),
+                                obj_buffer_model_wwmi=SimpleNamespace(shapekey_offsets=[0] * 128))
+        with self.assertRaisesRegex(ValueError, 'incomplete'):
+            EXPORT(model)
+        model.obj_buffer_model_wwmi.shapekey_offsets = [0] * 384
+        with self.assertRaisesRegex(ValueError, 'two native'):
+            EXPORT(model)
+
     def test_truncated_sparse_buffers_fail(self):
         # Previously the importer filtered invalid entries and silently lost keys.
         # Validate full batch bounds before creating any Blender shape keys.
@@ -282,13 +306,13 @@ class MetadataCompatibilityTests(unittest.TestCase):
     # Every fixture is in-memory and cannot change a user's workspace records.
     helper = runpy.run_path(str(ROOT / 'workspace/wwmi_info.py'))['WWMIInfoHelper']
 
-    def load(self, records):
+    def load(self, records, **kwargs):
         components = [SimpleNamespace(VertexOffset=0, VertexCount=1, IndexOffset=i * 3,
                                       IndexCount=3, VGOffset=i, VGCount=1, VGMap={},
                                       VertexLimitVB='12345678', CB4Hash='87654321',
                                       JsonDict={'IndexOffset': i * 3, 'IndexCount': 3},
                                       ShapeKeysInfo=record) for i, record in enumerate(records)]
-        return self.helper.build_from_json_list(components).shapekeys
+        return self.helper.build_from_json_list(components, **kwargs).shapekeys
 
     def test_later_component_recovers_legacy_zero_checksum(self):
         # Empty leading component metadata cannot hide the face component.
@@ -326,6 +350,22 @@ class MetadataCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(shape.batches), 2)
         self.assertEqual(shape.batches[0]['dispatch_y'], 2)
         self.assertEqual(repr(records), before)
+
+    def test_global_prefix_is_chosen_after_horizontal_component_merge(self):
+        # A checksum-only component cannot default its first count to 127 and
+        # discard the next checksum before another component supplies count1.
+        # Required batch conflicts must remain visible in either source order.
+        checksums = {'batches': [{'checksum': 7}, {'checksum': 9}]}
+        layout = {'batches': [
+            {'shapekey_count': 1, 'dispatch_y': 2, 'vertex_offset': 0},
+            {'shapekey_count': 1, 'dispatch_y': 3, 'vertex_offset': 44}]}
+        for rows in ([checksums, layout], [layout, checksums]):
+            shape = self.load(rows, required_key_count=2)
+            self.assertEqual(shape.batches[1]['checksum'], 9)
+        conflicting = {'batches': [dict(layout['batches'][0]),
+                                    dict(layout['batches'][1], checksum=8)]}
+        with self.assertRaisesRegex(ValueError, 'batches.1.checksum'):
+            self.load([checksums, conflicting], required_key_count=2)
 
     def test_explicit_batches_replace_deprecated_shape_headers(self):
         # WWMI-Tools ignores its deprecated single-batch scalars once batches

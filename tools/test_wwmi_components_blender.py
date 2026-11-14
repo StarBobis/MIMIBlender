@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 import sys
 import unittest
+import numpy
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -33,8 +34,115 @@ from MIMIBlender.games.wwmi import blend_remap, exporter as wwmi_exporter, shape
 from MIMIBlender.games.wwmi.names import WWMI_REQUIRED_RUNTIME_VERSION, scoped_name
 from MIMIBlender.model.draw_call_model import DrawCallModel
 from MIMIBlender.workspace.wwmi_info import WWMIInfoComponent
+from MIMIBlender.games.wwmi.model import DrawIBModelWWMI
+from MIMIBlender.workspace.wwmi_reverse_metadata import required_shape_key_count
+from MIMIBlender.utils.shapekey_utils import ShapeKeyUtils
+from MIMIBlender.common.global_config import GlobalConfig
+from MIMIBlender.common.d3d11_gametype import D3D11GameType
+from MIMIBlender.utils.export_utils import ExportUtils
 
 DRAW_IB = '94517393'
+
+
+class WWMIAdversarialRegressionTests(unittest.TestCase):
+    """Exercise concrete failures found by independent adversarial probes."""
+
+    def test_mixed_group_names_do_not_alias_numeric_bones(self):
+        # One convention must apply to the whole source object. Check actual
+        # identities, not merely whether the export returns FINISHED.
+        for names, expected in ((['1', 'Bone_B'], ['0', '1']),
+                                (['Bone_A', '0'], ['0', '1']),
+                                (['256', '0'], ['256', '0'])):
+            mesh = bpy.data.meshes.new('group_regression')
+            obj = bpy.data.objects.new('group_regression', mesh)
+            try:
+                for name in names:
+                    obj.vertex_groups.new(name=name)
+                DrawIBModelWWMI.normalize_vertex_group_names(obj)
+                self.assertEqual([group.name for group in obj.vertex_groups], expected)
+            finally:
+                bpy.data.objects.remove(obj)
+                bpy.data.meshes.remove(mesh)
+
+    def test_visible_mask_modifier_uses_one_native_shape_vertex_domain(self):
+        # Keep only the second triangle. Its old raw vertex4 becomes evaluated
+        # vertex1, the exact mismatch that used to lose the native displacement.
+        # Evaluate on a disposable copy with apply-all disabled, preserving source.
+        original_objects = set(bpy.data.objects)
+        original_meshes = set(bpy.data.meshes)
+        mesh = bpy.data.meshes.new('shape_domain')
+        mesh.from_pydata([(0,0,0), (1,0,0), (0,1,0), (2,0,0), (3,0,0), (2,1,0)], [],
+                         [(0,1,2), (3,4,5)])
+        source = bpy.data.objects.new('shape_domain_source', mesh)
+        bpy.context.collection.objects.link(source)
+        source.shape_key_add(name='Rest')
+        source.shape_key_add(name='Custom_200').data[4].co.x += 0.25
+        group = source.vertex_groups.new(name='SecondTriangle')
+        group.add([3,4,5], 1, 'REPLACE')
+        modifier = source.modifiers.new('KeepSecond', 'MASK')
+        modifier.vertex_group = group.name
+        before = [(key.name, [tuple(point.co) for point in key.data])
+                  for key in source.data.shape_keys.key_blocks]
+        obj = source.copy()
+        obj.data = source.data.copy()
+        bpy.context.collection.objects.link(obj)
+        try:
+            with patch.object(wwmi_exporter.MIMIGlobalProperties, 'apply_all_modifiers', return_value=False):
+                DrawIBModelWWMI.prepare_export_modifiers(obj)
+            self.assertEqual(len(obj.data.vertices), 3)
+            self.assertEqual(len(obj.modifiers), 0)
+            self.assertEqual(required_shape_key_count([obj]), 201)
+            cache = ShapeKeyUtils.get_shapekey_cache(obj, {0:0, 1:1, 2:2})
+            self.assertAlmostEqual(cache[200][1][0], 0.25)
+            self.assertEqual([(key.name, [tuple(point.co) for point in key.data])
+                              for key in source.data.shape_keys.key_blocks], before)
+            self.assertEqual(len(source.data.vertices), 6)
+            self.assertEqual(len(source.modifiers), 1)
+        finally:
+            # Tests run in factory startup. Remove only fixture-owned datablocks.
+            for item in set(bpy.data.objects) - original_objects:
+                bpy.data.objects.remove(item, do_unlink=True)
+            for item in set(bpy.data.meshes) - original_meshes:
+                if item.users == 0:
+                    bpy.data.meshes.remove(item)
+
+    def test_declared_blend_width_and_zero_weights_survive_final_packing(self):
+        # The former bugs appeared only after the zero arrays were quantized,
+        # or only when BI8/BW8 had fewer than five active influences. Verify
+        # actual serialized category bytes, with unweighted vertices present.
+        for width in (4, 8):
+            for influences in (0, 1, 4, 5, 8, 11):
+                elements = []
+                for semantic, fmt, size, category in (
+                    ('POSITION', 'R32G32B32_FLOAT', 12, 'Position'),
+                    ('BLENDINDICES', 'R8_UINT', width, 'Blend'),
+                    ('BLENDWEIGHT', 'R8_UNORM' if width == 8 else 'R8G8B8A8_UNORM', width, 'Blend'),
+                ):
+                    elements.append(dict(SemanticName=semantic, SemanticIndex=0,
+                                         Format=fmt, ByteWidth=size, Category=category))
+                game = D3D11GameType.from_submesh_json_dict(
+                    {'CategoryBufferList': [{'D3D11ElementList': elements}]})
+                mesh = bpy.data.meshes.new('blend_regression')
+                mesh.from_pydata([(0,0,0), (1,0,0), (0,1,0)], [], [(0,1,2)])
+                mesh.uv_layers.new(name='TEXCOORD.xy')
+                obj = bpy.data.objects.new('blend_regression', mesh)
+                bpy.context.collection.objects.link(obj)
+                try:
+                    for index in range(influences):
+                        obj.vertex_groups.new(name=str(index)).add([0], index + 1, 'REPLACE')
+                    with patch.object(GlobalConfig, 'logic_name', 'WWMI'):
+                        context = ExportUtils.build_obj_element_context(game, obj)
+                        result = ExportUtils.build_wwmi_obj_buffer_result(context)
+                    raw = result.category_buffer_dict['Blend'].tobytes()
+                    self.assertEqual(len(raw), 3 * width * 2)
+                    rows = numpy.frombuffer(raw, dtype=numpy.uint8).reshape(3, width * 2)
+                    sums = sorted(rows[:, width:].sum(axis=1).tolist())
+                    self.assertEqual(sums, [0, 0, 255 if influences else 0])
+                    if not influences:
+                        self.assertFalse(numpy.any(rows))
+                finally:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                    bpy.data.meshes.remove(mesh)
 
 
 def make_component(index_offset, index_count, vg_offset, vg_count):
@@ -577,6 +685,7 @@ class WWMIHotkeyVisibilityTests(unittest.TestCase):
 if __name__ == '__main__':
     try:
         suite = unittest.TestSuite()
+        suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WWMIAdversarialRegressionTests))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WWMIComponentTests))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WWMISkeletonMergeGuardTests))
         suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(WWMINamingTests))
