@@ -21,6 +21,18 @@ Rules for editing this file:
   ``python tools/test_zh_tw_translations.py`` after editing.
 """
 TRANSLATIONS_ZH_TW = {
+    "WWMI Mod Info": "WWMI Mod 資訊",
+    "Mod Name": "Mod 名稱",
+    "Mod Author": "Mod 作者",
+    "Mod Description": "Mod 描述",
+    "Mod Link": "Mod 連結",
+    "Mod Logo (DDS)": "Mod 標誌（DDS）",
+    "This node is only available for WWMI": "此節點僅適用於 WWMI",
+    "Applies to this blueprint; no connection needed": "作用於目前藍圖，無需連線",
+    "Only one WWMI Mod Info node is allowed per blueprint": "每張藍圖只能有一個 WWMI Mod 資訊節點",
+    "Mod info text cannot contain double quotes or line breaks": "Mod 資訊文字不能包含雙引號或換行符",
+    "Mod Logo DDS file was not found: {path}": "找不到 Mod 標誌 DDS 檔案：{path}",
+    "Mod Logo must be a DDS file": "Mod 標誌必須是 DDS 檔案",
     "Skeleton Scale": "骨架縮放",
     "Scale the in-game merged skeleton; only supported in Merged mode": "縮放遊戲內的合併骨架，僅支援 Merged 模式",
     "Skeleton Scale requires Merged mode": "骨架縮放僅支援 Merged 模式",

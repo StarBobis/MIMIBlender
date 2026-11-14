@@ -543,6 +543,11 @@ class DrawIBModelWWMI:
                 component.vertex_count += temp_object.vertex_count
                 component.index_count += temp_object.index_count
 
+        # Only temporary WWMI copies reach this helper. Fill all components
+        # together before either join, preserving existing source attributes.
+        from .mesh_defaults import fill_missing_mesh_data
+        fill_missing_mesh_data([temp.object for component in components for temp in component.objects])
+
         drawib_merged_object: list[bpy.types.Object] = []
         drawib_vertex_count: int = 0
         drawib_index_count: int = 0

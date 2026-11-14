@@ -721,7 +721,9 @@ class BlueprintTests(unittest.TestCase):
         # Every registered node should be groupable without losing its ports.
         # This includes collection-backed shape and texture settings.
         child = bpy.data.node_groups.new('clones', self.tree.bl_idname)
-        node_types = [cls.bl_idname for cls in base.MIMINodeBase.__subclasses__()] + ['NodeReroute', 'NodeFrame']
+        # Preset-specific nodes are deliberately unavailable in other games.
+        # Clone the currently offered types; WWMI metadata has its own fixture.
+        node_types = [cls.bl_idname for cls in base.MIMINodeBase.__subclasses__() if cls.poll(self.tree)] + ['NodeReroute', 'NodeFrame']
         for node_type in node_types:
             with self.subTest(node=node_type):
                 node = self.tree.nodes.new(node_type)

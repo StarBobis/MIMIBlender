@@ -118,6 +118,11 @@ class BluePrintModel:
         # The fallback preserves older callers and saved output nodes.
         self.wwmi_skeleton_scale = float(getattr(output_node, "wwmi_skeleton_scale", 1.0))
 
+        # Socketless metadata is scoped to this top-level export tree.
+        # Collection also preflights user fields before any buffer writes.
+        from ..games.wwmi.mod_info import collect_mod_info
+        self.wwmi_mod_info = collect_mod_info(tree)
+
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])
 

@@ -17,6 +17,18 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    "WWMI Mod Info": "WWMI Mod 信息",
+    "Mod Name": "Mod 名称",
+    "Mod Author": "Mod 作者",
+    "Mod Description": "Mod 描述",
+    "Mod Link": "Mod 链接",
+    "Mod Logo (DDS)": "Mod 标志（DDS）",
+    "This node is only available for WWMI": "此节点仅适用于 WWMI",
+    "Applies to this blueprint; no connection needed": "作用于当前蓝图，无需连线",
+    "Only one WWMI Mod Info node is allowed per blueprint": "每张蓝图只能有一个 WWMI Mod 信息节点",
+    "Mod info text cannot contain double quotes or line breaks": "Mod 信息文本不能包含双引号或换行符",
+    "Mod Logo DDS file was not found: {path}": "找不到 Mod 标志 DDS 文件：{path}",
+    "Mod Logo must be a DDS file": "Mod 标志必须是 DDS 文件",
     "Skeleton Scale": "骨架缩放",
     "Scale the in-game merged skeleton; only supported in Merged mode": "缩放游戏内的合并骨架，仅支持 Merged 模式",
     "Skeleton Scale requires Merged mode": "骨架缩放仅支持 Merged 模式",

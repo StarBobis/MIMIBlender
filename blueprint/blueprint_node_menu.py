@@ -1072,6 +1072,9 @@ def draw_node_add_menu(self, context):
     layout.operator("node.add_node", text=tr("Object List"), icon='OUTLINER_OB_GROUP_INSTANCE').type = "MIMINode_Object_List"
     layout.operator("node.add_node", text=tr("Group"), icon='GROUP').type = "MIMINode_Object_Group"
     layout.operator("node.add_node", text=tr("Generate Mod"), icon='EXPORT').type = "MIMINode_Result_Output"
+    # Metadata is a WWMI runtime capability, not a generic export setting.
+    if GlobalConfig.logic_name == LogicName.WWMI:
+        layout.operator("node.add_node", text=tr("WWMI Mod Info"), icon='INFO').type = "MIMINode_WWMI_Mod_Info"
     layout.operator("node.add_node", text=tr("Export Face Mod"), icon='MOD_MASK').type = "MIMINode_Face_Mod_Export"
     layout.operator("node.add_node", text=tr("Switch Key"), icon='GROUP').type = "MIMINode_SwitchKey"
     # Texture assignment and dynamic mod entries live in their own submenus

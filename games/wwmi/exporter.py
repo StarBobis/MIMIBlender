@@ -15,6 +15,7 @@ makes the suffix necessary.
 """
 
 import os
+import shutil
 
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.global_config import GlobalConfig
@@ -496,6 +497,36 @@ class Exporter:
         and a repeated section would only be read from the first file anyway.
         """
         if self.mod_info_sections_written:
+            return
+        # No metadata node preserves the historical default resources below.
+        # A present node supplies one shared set for every DrawIB in this Mod.
+        info = getattr(getattr(self, "blueprint_model", None), "wwmi_mod_info", {})
+        if info:
+            section = M_IniSection(M_SectionType.ResourceModInfo)
+            for field, resource, fallback in (
+                ('mod_name', 'ModName', 'Unnamed Mod'),
+                ('mod_author', 'ModAuthor', 'Unknown Author'),
+                ('mod_desc', 'ModDesc', ''),
+                ('mod_link', 'ModLink', ''),
+            ):
+                section.append('[Resource' + resource + ']')
+                value = info.get(field) or fallback
+                if value:
+                    section.append('type = Buffer')
+                    section.append('data = "' + value + '"')
+                section.new_line()
+            section.append('[ResourceModLogo]')
+            if info.get('mod_logo'):
+                # Copy into an owned, predictable relative resource path.
+                # Re-exporting a Mod whose logo is already here is harmless.
+                folder = GlobalConfig.path_generatemod_texture_folder(draw_ib_model.draw_ib)
+                target = os.path.join(folder, 'WWMIModLogo.dds')
+                source = info['mod_logo']
+                if os.path.normcase(os.path.realpath(source)) != os.path.normcase(os.path.realpath(target)):
+                    shutil.copy2(source, target)
+                section.append('filename = ' + GlobalConfig.ini_texture_filename('WWMIModLogo.dds'))
+            ini_builder.append_section(section)
+            self.mod_info_sections_written = True
             return
         resource_mod_info_section = M_IniSection(M_SectionType.ResourceModInfo)
         resource_mod_info_section.append("[ResourceModName]")
