@@ -702,13 +702,37 @@ def test_global_hash_override(modules, texture_root):
             assert file.read() == source.read()
 
     # An explicit node selection refreshes an existing generated copy.
+    # An old downloaded image must also win over today's captured texture.
+    # File age cannot establish that the target was manually edited.
     Image.new('RGBA', (8, 8), (90, 10, 20, 255)).save(source_file)
+    os.utime(source_file, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(target_path, ns=(2_000_000_000, 2_000_000_000))
     ini_helper_mod.M_IniHelper.generate_hash_style_global_texture_ini(
         ini_builder=ini_builder_mod.M_IniBuilder(),
         global_hash_texture_binding_list=global_rows,
     )
     with open(target_path, "rb") as file:
         assert file.read() != before
+
+    # Automatic copies still protect newer hand-edited output. An explicit
+    # object binding uses the same copy helper with that protection disabled.
+    # Verify actual bytes and identical-output stability, not only timestamps.
+    helper = ini_helper_mod.M_IniHelper
+    source_bytes = open(marked_source_file, 'rb').read()
+    with open(marked_target_path, 'wb') as file:
+        file.write(b'hand edited')
+    os.utime(marked_source_file, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(marked_target_path, ns=(2_000_000_000, 2_000_000_000))
+    assert helper._refresh_generated_texture(marked_source_file, marked_target_path) == 'kept'
+    model = types.SimpleNamespace(draw_ib='global')
+    helper._copy_object_texture_binding_files(model, [
+        ('ResourceExplicit', marked_source_file, HASH_RED + '_global.dds', marked_source_file)])
+    with open(marked_target_path, 'rb') as file:
+        assert file.read() == source_bytes
+    stamp = os.stat(marked_target_path).st_mtime_ns
+    assert helper._refresh_generated_texture(marked_source_file, marked_target_path,
+                                             preserve_newer=False) == 'unchanged'
+    assert os.stat(marked_target_path).st_mtime_ns == stamp
 
     managed = ini_helper_mod.M_IniHelper._collect_hash_binding_managed_hashes(
         {}, global_hash_texture_binding_list=global_rows

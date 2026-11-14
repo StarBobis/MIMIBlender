@@ -374,3 +374,24 @@ endif
 ## 八、Post-v1.0.49 compatibility follow-up
 
 The [WWMI compatibility audit](wwmi_compatibility_audit.md) documents the later global-bone alias, extended runtime skeleton, shape metadata, UniComponent safety, and temporary-data cleanup fixes, together with focused regressions and the five-workspace/four-architecture roundtrip matrix. Its findings and verification boundaries are separate from the historical v1.0.30 implementation above.
+# Explicit texture replacement timestamps (2026-11-14)
+
+The live JinXi.005 global Hash node selected an older downloaded DiffuseMap
+for c435fc2b. The INI correctly referenced its generated resource, but the output
+still matched the captured original because `_refresh_generated_texture` treated
+the newer output timestamp as proof of a manual edit. File age alone cannot
+establish that interpretation for an explicit blueprint replacement.
+
+Explicit global Hash, targeted Hash and Slot copy paths now disable the
+newer-target timestamp guard. Automatic capture copies retain the default guard;
+identical bytes still skip writes. The picked source date remains the output stamp.
+Regression commands: `python tools/test_hash_texture_bind_ini.py` and
+`python tools/test_texture_bind_ini.py`. Tests cover an older replacement versus
+newer output, automatic hand-edit preservation, explicit object replacement, and
+identical-copy stability. Both suites pass.
+
+The current live blueprint was exported after backing up the previous INI and
+texture under repository tmp. Output c435fc2b_DiffuseMap.dds matched the converted
+replacement SHA256 bd6a2aee3eb49138c7d3a1f6a1dc31d9d7e93825d49962702956d338ab06b354.
+This verifies export bytes, not game reload or in-game appearance.
+

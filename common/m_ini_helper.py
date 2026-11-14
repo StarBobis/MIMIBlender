@@ -576,10 +576,12 @@ class M_IniHelper:
                     continue
                 target_path = os.path.join(output_folder, row["target_filename"])
                 if os.path.normcase(os.path.abspath(source_path)) != os.path.normcase(os.path.abspath(target_path)):
-                    # Same "newer wins" rule as the automatic texture copies: a
-                    # file the user re-saved in the Mod folder is kept.
+                    # An explicit blueprint choice wins over an older export,
+                    # even when the selected image has an old filesystem date.
+                    # Automatic capture copies retain their separate protection.
                     cls._refresh_generated_texture(
                         source_path, target_path, str(row.get("stamp_path", "") or ""),
+                        preserve_newer=False,
                     )
 
         # Keep resource declarations before all hash overrides. One section per
@@ -1003,7 +1005,8 @@ class M_IniHelper:
 
     @classmethod
     def _refresh_generated_texture(cls, source_path: str, target_path: str,
-                                   source_stamp_path: str = "") -> str:
+                                   source_stamp_path: str = "", *,
+                                   preserve_newer: bool = True) -> str:
         """Copy one texture into the generated Mod, or keep a hand-edited one.
 
         Two earlier rules were both wrong for somebody:
@@ -1022,6 +1025,10 @@ class M_IniHelper:
         ``source_stamp_path`` lets a converted replacement carry the timestamp
         of the user's own image instead of the temporary conversion product.
 
+        Explicit blueprint replacements disable ``preserve_newer``: choosing
+        a file is an instruction to replace the previous generated image.
+        Automatic capture copies keep the default hand-edit protection.
+
         Returns ``copied``, ``unchanged``, ``kept`` or ``missing``.
         """
         # ``exists`` (not ``isfile``) is deliberate: the copy tests patch the
@@ -1036,7 +1043,7 @@ class M_IniHelper:
             return "copied"
         if filecmp.cmp(source_path, target_path, shallow=False):
             return "unchanged"
-        if cls._texture_stamp_ns(target_path) > source_stamp:
+        if preserve_newer and cls._texture_stamp_ns(target_path) > source_stamp:
             print(
                 "M_IniHelper: kept the generated texture you edited by hand "
                 + "(newer than its source): " + target_path
@@ -1228,8 +1235,8 @@ class M_IniHelper:
             jobs = getattr(draw_ib_model, "exact_texture_jobs", {})
             for resource, source, filename in file_list:
                 row = jobs.get(resource)
-                # The user's own image stays the timestamp reference, so a
-                # generated file they edited later is still recognised as newer.
+                # Stamp output with the user's image date for future automatic
+                # copies; explicit choices are not gated by that timestamp.
                 stamp_path = source
                 if row:
                     # The conversion result is always a .dds file; the model
@@ -1279,7 +1286,7 @@ class M_IniHelper:
         # File resources and names stay local to the existing exporter namespace.
         # Entries are (resource, bytes_to_copy, target_name, timestamp_source):
         # the timestamp source is the picture the user picked, never the
-        # temporary conversion product, so "newer wins" keeps working.
+        # temporary conversion product, for later automatic-copy comparisons.
         texture_output_folder = GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib_model.draw_ib)
         os.makedirs(texture_output_folder, exist_ok=True)
 
@@ -1301,9 +1308,11 @@ class M_IniHelper:
             if source_key == target_key:
                 skipped_count += 1
                 continue
-            # Same rule as the automatic copies: a generated texture the user
-            # re-saved by hand is newer than its source and must survive.
-            result = cls._refresh_generated_texture(source_path, target_path, stamp_path)
+            # Explicit Slot and targeted Hash choices must replace stale output.
+            # Source timestamps can predate the original captured image by years.
+            # Automatic copies still use the default newer-file protection.
+            result = cls._refresh_generated_texture(
+                source_path, target_path, stamp_path, preserve_newer=False)
             if result == "kept":
                 kept_count += 1
                 continue
