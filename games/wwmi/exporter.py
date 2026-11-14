@@ -545,10 +545,9 @@ class Exporter:
         drawindexed lines are omitted, so that Submesh is not rendered while
         the mod is enabled.
 
-        Such a component also takes no part in the skeleton merge: its
-        component level VG range does not describe the merged vertex group
-        layout, so merging for it would overwrite skeleton data that another
-        component already collected correctly.
+        Every native component still contributes its captured skeleton range,
+        as in WWMI-Tools. Visible components can use bones belonging to a
+        hidden or unassigned component of the same merged skeleton.
         """
         draw_ib = draw_ib_model.draw_ib
         texture_override_component = M_IniSection(M_SectionType.TextureOverrideIB)
@@ -614,14 +613,15 @@ class Exporter:
                 # call is issued repeatedly.
                 status_var_str = scoped_global("merge_status_id_" + component_count_str, draw_ib)
                 shared_status_var_str = scoped_global("merge_status_id", draw_ib)
-                if component_has_objects:
-                    texture_override_component.append("  if " + status_var_str + " != 2")
-                    texture_override_component.append("    $\\WWMIv1\\vg_offset = " + str(component_object.vg_offset))
-                    texture_override_component.append("    $\\WWMIv1\\vg_count = " + str(component_object.vg_count))
-                    texture_override_component.append("    " + shared_status_var_str + " = " + status_var_str)
-                    texture_override_component.append("    run = " + scoped_name("CommandListMergeSkeleton", draw_ib))
-                    texture_override_component.append("    " + status_var_str + " = " + shared_status_var_str)
-                    texture_override_component.append("  endif")
+                # Skeleton collection follows native draws, independently of
+                # whether the blueprint emits custom geometry for this range.
+                texture_override_component.append("  if " + status_var_str + " != 2")
+                texture_override_component.append("    $\\WWMIv1\\vg_offset = " + str(component_object.vg_offset))
+                texture_override_component.append("    $\\WWMIv1\\vg_count = " + str(component_object.vg_count))
+                texture_override_component.append("    " + shared_status_var_str + " = " + status_var_str)
+                texture_override_component.append("    run = " + scoped_name("CommandListMergeSkeleton", draw_ib))
+                texture_override_component.append("    " + status_var_str + " = " + shared_status_var_str)
+                texture_override_component.append("  endif")
 
                 texture_override_component.append("  if " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
                 # Skipping the original draw is what removes an unassigned
@@ -754,26 +754,22 @@ class Exporter:
                 resource_buffer_section.append("filename = " + buffer_filename)
                 resource_buffer_section.new_line()
 
-        resource_buffer_section.append(scoped_section("ResourceShapeKeyOffsetBuffer", draw_ib))
-        resource_buffer_section.append("type = Buffer")
-        resource_buffer_section.append("format = DXGI_FORMAT_R32G32B32A32_UINT")
-        resource_buffer_section.append("stride = 16")
-        resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-ShapeKeyOffset.buf"))
-        resource_buffer_section.new_line()
-
-        resource_buffer_section.append(scoped_section("ResourceShapeKeyVertexIdBuffer", draw_ib))
-        resource_buffer_section.append("type = Buffer")
-        resource_buffer_section.append("format = DXGI_FORMAT_R32_UINT")
-        resource_buffer_section.append("stride = 4")
-        resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-ShapeKeyVertexId.buf"))
-        resource_buffer_section.new_line()
-
-        resource_buffer_section.append(scoped_section("ResourceShapeKeyVertexOffsetBuffer", draw_ib))
-        resource_buffer_section.append("type = Buffer")
-        resource_buffer_section.append("format = DXGI_FORMAT_R16_FLOAT")
-        resource_buffer_section.append("stride = 2")
-        resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-ShapeKeyVertexOffset.buf"))
-        resource_buffer_section.new_line()
+        # Native shape resources exist only when the packer produced their buffers.
+        # A shape-less component is valid; dangling filenames would still make
+        # 3Dmigoto try to load absent files even though no callback uses them.
+        # User-controlled position/vector shapes have separate resources below.
+        if draw_ib_model.obj_buffer_model_wwmi.shapekey_offsets:
+            for name, fmt, stride in (
+                ("ShapeKeyOffset", "DXGI_FORMAT_R32G32B32A32_UINT", 16),
+                ("ShapeKeyVertexId", "DXGI_FORMAT_R32_UINT", 4),
+                ("ShapeKeyVertexOffset", "DXGI_FORMAT_R16_FLOAT", 2),
+            ):
+                resource_buffer_section.append(scoped_section("Resource" + name + "Buffer", draw_ib))
+                resource_buffer_section.append("type = Buffer")
+                resource_buffer_section.append("format = " + fmt)
+                resource_buffer_section.append("stride = " + str(stride))
+                resource_buffer_section.append("filename = " + GlobalConfig.ini_buffer_filename(draw_ib + "-" + name + ".buf"))
+                resource_buffer_section.new_line()
 
         ini_builder.append_section(resource_buffer_section)
 

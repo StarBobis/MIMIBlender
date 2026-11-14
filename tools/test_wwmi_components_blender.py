@@ -6,7 +6,7 @@ Two behaviours are covered here:
    objects to only some Submeshes of a DrawIB, and every Submesh still needs
    its [TextureOverrideComponentN] section with its own match / vertex group
    metadata so the component numbering cannot drift. The unassigned Submesh
-   merely gets no draw and takes no part in the skeleton merge.
+   gets no custom draw but still supplies its native skeleton range.
 2. Every symbol that describes a draw range carries the DrawIB suffix, because
    all INI files of a mod share one 3Dmigoto namespace and a repeated section
    name or global variable is only read once (first file parsed wins).
@@ -179,17 +179,17 @@ class WWMIComponentTests(unittest.TestCase):
         self.assertIn('match_index_count = 111', first)
         self.assertIn('$object_detected = 1', first)
 
-        # The empty component keeps its own match range but must not take part
-        # in the skeleton merge: its component level VG range does not describe
-        # the merged vertex group layout.
+        # Native skeleton collection is independent of custom draw presence.
+        # Other visible components can reference bones from this hidden range.
+        # WWMI-Tools collects it at the same original offset and count.
         empty_section = sections['[' + scoped_name('TextureOverrideComponent1', DRAW_IB) + ']']
         self.assertIn('match_first_index = 111', empty_section)
         self.assertIn('match_index_count = 222', empty_section)
         self.assertIn('$object_detected = 1', empty_section)
-        self.assertFalse(any(line.startswith('$\\WWMIv1\\vg_offset') for line in empty_section), empty_section)
-        self.assertFalse(any(line.startswith('$\\WWMIv1\\vg_count') for line in empty_section), empty_section)
-        self.assertFalse(any('MergeSkeleton' in line for line in empty_section), empty_section)
-        self.assertFalse(any(line.startswith('run = ') for line in empty_section), empty_section)
+        self.assertIn('$\\WWMIv1\\vg_offset = 11', empty_section)
+        self.assertIn('$\\WWMIv1\\vg_count = 22', empty_section)
+        self.assertIn('run = ' + scoped_name('CommandListMergeSkeleton', DRAW_IB), empty_section)
+        self.assertFalse(any('OverrideSharedResources' in line for line in empty_section))
 
         # The following component is not shifted onto the empty one's data and
         # still merges for its own vertex group range.
@@ -332,6 +332,20 @@ class WWMISkeletonMergeGuardTests(unittest.TestCase):
 
 class WWMINamingTests(unittest.TestCase):
     """Every draw range symbol must be unique per DrawIB."""
+
+    def test_only_generated_native_shape_buffers_are_referenced(self):
+        # Resource declarations cause actual file loads, even without callbacks.
+        # Verify both the shape-less path and the ordinary populated path using
+        # the production writer, retaining geometry resources in either case.
+        for present in (False, True):
+            model = make_model()
+            model.obj_buffer_model_wwmi.shapekey_offsets = [0] * 128 if present else []
+            builder = M_IniBuilder()
+            make_exporter(model).add_resource_buffer(builder, model)
+            text = '\n'.join(render_lines(builder))
+            self.assertIn('-Position.buf', text)
+            for name in ('ShapeKeyOffset', 'ShapeKeyVertexId', 'ShapeKeyVertexOffset'):
+                self.assertEqual('-' + name + '.buf' in text, present)
 
     def render_full_ini(self, model, vgmap_mode='MERGED'):
         """Render every section the WWMI exporter writes for one DrawIB."""

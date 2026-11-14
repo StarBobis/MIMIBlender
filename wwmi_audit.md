@@ -430,3 +430,10 @@ converted replacement bytes. It does not rewrite the user's workspace or Mods.
 The running Blender loaded the fixes; its existing JinXi.005 blueprint also
 exported successfully under tmp without changing source geometry, weights,
 shape keys or custom properties. This is export validation, not in-game acceptance.
+
+## 2026-11-14 upstream export-condition compatibility review
+
+The subsequent comprehensive source comparison and its bounded regression results
+are recorded in [WWMI export compatibility](docs/wwmi_export_compatibility.md).
+That review supersedes the earlier requirement that unused reverse provenance
+must agree with an already sufficient native workspace.

@@ -19,6 +19,7 @@ MODULE = runpy.run_path(str(ROOT / 'workspace/wwmi_reverse_metadata.py'))
 CAPTURE = MODULE['capture_reverse_shape_metadata']
 RESOLVE = MODULE['resolve_reverse_shape_metadata']
 PROPERTY = MODULE['PROPERTY_NAME']
+REQUIRED = MODULE['required_shape_key_count']
 
 
 class Object(dict):
@@ -80,6 +81,54 @@ class ReverseMetadataTests(unittest.TestCase):
         self.assertNotIn(PROPERTY, self.object({'metadata': self.buffers['metadata']}))
         self.assertNotIn(PROPERTY, self.object({}))
 
+    def test_selected_workspace_wins_over_unused_reverse_history(self):
+        # A native target with 86 populated slots can use a source recorded
+        # with 127 slots and different old runtime fields. No source field
+        # is needed, so object provenance must not become an export condition.
+        self.info.shapekeys.batches[0]['shapekey_count'] = 86
+        for text in (self.object()[PROPERTY], '{broken old sidecar'):
+            obj = Object({PROPERTY: text})
+            before = deepcopy(self.info.shapekeys.batches)
+            RESOLVE(self.info, [obj], 'ce9c7f43_LOD0', required_key_count=86)
+            self.assertEqual(self.info.shapekeys.batches, before)
+
+    def test_no_shapes_never_require_a_runtime_batch(self):
+        # Ordinary static meshes and Basis-only components have no native
+        # sparse payload. Neither empty metadata nor a stale sidecar may stop
+        # their geometry export, and no dispatch identity should be fabricated.
+        self.info.shapekeys.batches = []
+        RESOLVE(self.info, [Object({PROPERTY: '{'})], 'static', required_key_count=0)
+        self.assertEqual(self.info.shapekeys.batches, [])
+        RESOLVE(self.info, [], 'static')
+        self.assertEqual(self.info.shapekeys.batches, [])
+
+    def test_unused_incomplete_trailing_batch_is_not_a_dependency(self):
+        # The exporter emits one batch when only its first key is changed.
+        # Requiring a checksum for another untouched dispatch adds a condition
+        # that neither the upstream packer nor its INI template needs.
+        self.info.shapekeys.batches.append({'shapekey_count': 49})
+        RESOLVE(self.info, [Object({PROPERTY: '{'})], 'first_batch', required_key_count=1)
+        self.assertEqual(len(self.info.shapekeys.batches), 2)
+
+    def test_last_native_batch_has_unused_custom_slots(self):
+        # 86 observed occupied slots still leave room in this 127-slot batch.
+        # Custom 100 belongs to that dispatch, not an invented second one.
+        self.info.shapekeys.batches[0]['shapekey_count'] = 86
+        RESOLVE(self.info, [Object({PROPERTY: '{'})], 'custom', required_key_count=101)
+        self.assertEqual(len(self.info.shapekeys.batches), 1)
+
+    def test_key_requirements_ignore_basis_and_omitted_muted_keys(self):
+        # The production model passes this requirement explicitly before it
+        # creates disposable meshes. Basis-only components contribute zero.
+        # Muted key handling must agree with the export node setting.
+        keys = [SimpleNamespace(name='Basis', mute=False),
+                SimpleNamespace(name='Deform 0', mute=False),
+                SimpleNamespace(name='Custom 175', mute=True)]
+        obj = SimpleNamespace(data=SimpleNamespace(shape_keys=SimpleNamespace(key_blocks=keys)))
+        self.assertEqual(REQUIRED([None, obj], True), 1)
+        self.assertEqual(REQUIRED([obj], False), 176)
+        self.assertEqual(REQUIRED([Object()]), 0)
+
     def test_extension_preserves_native_header_and_source(self):
         # Only batch runtime identities extend, never native skeleton/mesh counts.
         # Compact buffer addresses are discarded rather than exported as bases.
@@ -115,6 +164,16 @@ class ReverseMetadataTests(unittest.TestCase):
                 buffers['metadata'][key] = 'deadbeef'
                 with self.assertRaisesRegex(ValueError, 'does not match.*hash'):
                     self.resolve([self.object(buffers)])
+
+    def test_hash_spelling_is_case_insensitive(self):
+        # 3Dmigoto hexadecimal identities have no letter-case distinction.
+        # A portable reverse sidecar may have come from another JSON writer.
+        # This still extends a genuine batch, so it tests the association path.
+        buffers = deepcopy(self.buffers)
+        for key in ('offsets_hash', 'scale_hash'):
+            buffers['metadata'][key] = buffers['metadata'][key].upper()
+        self.resolve([self.object(buffers)])
+        self.assertEqual(len(self.info.shapekeys.batches), 2)
 
     def test_overlapping_runtime_identities_must_agree(self):
         # All four fields identify the original runtime dispatch and its slots.
@@ -212,6 +271,15 @@ class ReverseMetadataTests(unittest.TestCase):
         buffers['metadata']['batches'] = buffers['metadata']['batches'][:1]
         buffers['metadata']['batches'][0]['checksum'] = None
         self.resolve([self.object(buffers)])
+        self.assertIsNone(self.info.shapekeys.batches[0]['checksum'])
+        self.assertFalse(self.info.shapekeys.batches[0]['runtime_metadata_complete'])
+
+    def test_explicitly_invalid_native_placeholders_are_not_promoted(self):
+        # Native extraction can mark a batch incomplete while retaining default
+        # numeric fields. Presence of those placeholders is not completeness.
+        # A matching recovered sidecar may fill it, otherwise it stays unknown.
+        self.info.shapekeys.batches[0]['runtime_metadata_complete'] = False
+        RESOLVE(self.info, [], 'incomplete', required_key_count=1)
         self.assertIsNone(self.info.shapekeys.batches[0]['checksum'])
         self.assertFalse(self.info.shapekeys.batches[0]['runtime_metadata_complete'])
 

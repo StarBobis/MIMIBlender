@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
+from copy import deepcopy
 
 
 @dataclass
@@ -76,13 +77,64 @@ class WWMIInfoHelper:
         # Merge complementary records, but do not silently select conflicting
         # runtime hashes or checksums from another extraction of the character.
         sk_info = {}
+        # Upstream uses explicit batches when present and treats scalar checksum
+        # / dispatch fields as deprecated. Mixing an old component header with
+        # a newer batch record must not compare two different representations.
+        has_batches = any(row.ShapeKeysInfo.get("batches") for row in ordered_submesh_json_list)
+        legacy_fields = {"checksum", "dispatch_y", "vertex_count", "vertex_offset",
+                         "shapekey_count", "runtime_metadata_complete"}
         for submesh in ordered_submesh_json_list:
             for key, value in submesh.ShapeKeysInfo.items():
                 if value is None or value == "" or value == []:
                     continue
+                if has_batches and key in legacy_fields:
+                    continue
+                if key.endswith("_hash") and isinstance(value, str):
+                    value = value.lower()
+                if key == "batches":
+                    # Per-component copies may contain complementary fields or
+                    # only a prefix of the DrawIB's full dispatch list. Merge
+                    # these copies by batch index, retaining real conflicts.
+                    batches = sk_info.setdefault("batches", [])
+                    for index, batch in enumerate(value):
+                        batch = deepcopy(batch)
+                        # Explicitly incomplete rows may retain numeric defaults.
+                        # They can supply layout information, but not compete
+                        # with recovered dispatch identities from another copy.
+                        if batch.get("runtime_metadata_complete") is False:
+                            for field_name in ("checksum", "dispatch_y", "vertex_offset"):
+                                batch.pop(field_name, None)
+                        if index >= len(batches):
+                            batches.append(deepcopy(batch))
+                            continue
+                        for field_name, field_value in batch.items():
+                            if field_name == "runtime_metadata_complete":
+                                continue
+                            if field_value is None:
+                                continue
+                            previous = batches[index].get(field_name)
+                            if previous is not None and previous != field_value:
+                                raise ValueError("WWMI conflicting shape key metadata for batches."
+                                                 + str(index) + "." + field_name)
+                            batches[index][field_name] = deepcopy(field_value)
+                    continue
                 if key in sk_info and sk_info[key] != value:
                     raise ValueError("WWMI conflicting shape key metadata for " + key)
-                sk_info[key] = value
+                sk_info[key] = deepcopy(value)
+        if has_batches:
+            for batch in sk_info["batches"]:
+                # Completeness follows the merged evidence, never the order in
+                # which older and newer component copies were encountered.
+                if "runtime_metadata_complete" in batch:
+                    batch["runtime_metadata_complete"] = all(
+                        batch.get(field_name) is not None
+                        for field_name in ("checksum", "dispatch_y", "vertex_offset"))
+            first_batch = sk_info["batches"][0]
+            # Compatibility scalars describe the same first runtime dispatch.
+            # No deprecated header can replace an explicit batch identity.
+            for key in legacy_fields:
+                if key in first_batch:
+                    sk_info[key] = deepcopy(first_batch[key])
         shapekeys = WWMIInfoShapeKeys(
             offsets_hash=sk_info.get("offsets_hash", ""),
             scale_hash=sk_info.get("scale_hash", ""),

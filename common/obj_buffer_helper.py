@@ -66,7 +66,10 @@ class ObjBufferHelper:
             
             # Check if BLENDINDICES exists
             if d3d11_element_name.startswith("BLENDINDICES"):
-                if not obj.vertex_groups:
+                # WWMI-Tools accepts unweighted meshes and writes zero-filled
+                # blend streams. Do not impose a group requirement on that path;
+                # the existing packer already supplies its zero padding.
+                if not obj.vertex_groups and GlobalConfig.logic_name != LogicName.WWMI:
                     MMTErrorUtils.raise_fatal("your object [" +obj.name + "] need at leat one valid Vertex Group, Please check if your model's Vertex Group is correct.")
 
     @staticmethod

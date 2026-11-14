@@ -12,6 +12,8 @@ Only the selected draw's connected objects may contribute such records.
 
 from copy import deepcopy
 import json
+import re
+import numpy
 
 
 PROPERTY_NAME = "mimi_wwmi_reverse_shape_metadata"
@@ -23,6 +25,70 @@ RUNTIME_LIMITS = {
     "dispatch_y": (1, 0xFFFFFFFF),
     "checksum": (0, 0xFFFFFFFF),
 }
+
+
+def required_shape_key_count(objects, ignore_muted=False):
+    """Find the highest changed native slot without inspecting source provenance.
+
+    Shape-less components are valid input. Muted keys omitted by the exporter
+    must not make historical reverse metadata a prerequisite for generation.
+    Inspect the disposable export mesh, never edit source coordinates/properties.
+    """
+    highest = -1
+    for obj in objects:
+        shapes = getattr(getattr(obj, "data", None), "shape_keys", None)
+        keys = getattr(shapes, "key_blocks", [])
+        basis = getattr(shapes, "reference_key", None) or (keys[0] if keys else None)
+        candidates = []
+        for key in keys:
+            if key == basis:
+                continue
+            if ignore_muted and getattr(key, "mute", False):
+                continue
+            match = re.search(r'.*(?:deform|custom)[_ -]*(\d+).*', key.name.lower())
+            if match:
+                candidates.append((int(match.group(1)), key))
+        # Only inspect successively higher candidates. A high, untouched key
+        # or a changed loose vertex absent from the IB creates no sparse data.
+        # This matches get_shapekey_cache's threshold and avoids false capacity
+        # requirements from names alone. Small schema fixtures may omit geometry.
+        base = None
+        used = None
+        for key_id, key in sorted(candidates, key=lambda item: item[0], reverse=True):
+            if key_id < highest:
+                break
+            if hasattr(key, "data") and hasattr(basis, "data"):
+                if base is None:
+                    base = numpy.empty((len(basis.data), 3), dtype=numpy.float32)
+                    basis.data.foreach_get('co', base.ravel())
+                    used = sorted({loop.vertex_index for loop in obj.data.loops})
+                coords = numpy.empty_like(base)
+                key.data.foreach_get('co', coords.ravel())
+                if not numpy.any(numpy.linalg.norm(coords[used] - base[used], axis=1) >= 1e-9):
+                    continue
+            highest = max(highest, key_id)
+            break
+    return highest + 1
+
+
+def _native_capacity(batches):
+    # Earlier batches preserve imported ID boundaries. The last dispatch still
+    # has 127 addressable slots even when the capture populated fewer of them.
+    if not batches:
+        return 0
+    return sum(127 if batch.get("shapekey_count") is None else int(batch["shapekey_count"])
+               for batch in batches[:-1]) + 127
+
+
+def _required_native_batches(batches, key_count):
+    # An unused trailing dispatch is not a dependency of an earlier shape key.
+    # Keep zero-length prefixes so stored runtime batch numbers never shift.
+    end = 0
+    for index, batch in enumerate(batches):
+        end += 127 if batch.get("shapekey_count") is None else int(batch["shapekey_count"])
+        if key_count <= end:
+            return batches[:index + 1]
+    return batches
 
 
 def capture_reverse_shape_metadata(obj, shapekey_buffers):
@@ -165,12 +231,10 @@ def _finalize_batches(batches, fail):
             row.get(field) is not None for field in RUNTIME_FIELDS)
         result.append(row)
         key_offset += count
-    if not result:
-        fail("no original runtime batches were recorded")
     return result
 
 
-def resolve_reverse_shape_metadata(info, objects, draw_ib):
+def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=None):
     """Extend batches from explicitly attached, matching reverse sources.
 
     Native component palettes and vertex counts remain authoritative.
@@ -182,12 +246,26 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib):
     """
     original = info.shapekeys
 
+    # Upstream exports against the selected workspace Metadata.json. Source
+    # object provenance is not another required equality check. Only consult
+    # our optional reverse sidecar when the requested export needs data that
+    # the selected workspace does not already provide.
+    if required_key_count == 0:
+        return
+    if (required_key_count is not None
+            and required_key_count <= _native_capacity(original.batches)
+            and all(batch.get("runtime_metadata_complete") is not False
+                    and all(batch.get(field) is not None for field in RUNTIME_FIELDS)
+                    and int(batch.get("dispatch_y", 0)) > 0
+                    for batch in _required_native_batches(original.batches, required_key_count))):
+        return
+
     def fail_workspace(reason):
         raise ValueError("WWMI DrawIB " + draw_ib + ", workspace: shape metadata "
                          + reason + ".")
 
     # Copy first so a later failure leaves even in-memory metadata unchanged.
-    selected = [deepcopy(batch) for batch in original.batches]
+    selected = [_read_batch(deepcopy(batch), fail_workspace) for batch in original.batches]
     seen = set()
     for obj in objects:
         if obj is None:
@@ -223,17 +301,18 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib):
             # Known hashes must agree even when the source adds no metadata.
             # Legacy reverse imports may omit hashes and runtime identities.
             # Such records need no association when the target is unchanged.
-            offsets = shapes.get("offsets_hash")
-            if offsets and original.offsets_hash and offsets != original.offsets_hash:
+            offsets = (shapes.get("offsets_hash") or "").lower()
+            target_offsets = (original.offsets_hash or "").lower()
+            if offsets and target_offsets and offsets != target_offsets:
                 fail("does not match the target shape offsets hash")
-            scale = shapes.get("scale_hash")
-            if scale and original.scale_hash and scale != original.scale_hash:
+            scale = (shapes.get("scale_hash") or "").lower()
+            if scale and original.scale_hash and scale != original.scale_hash.lower():
                 fail("does not match the target shape scale hash")
             merged = _merge_source(selected, shapes.get("batches", []), fail)
             # Filling a field or extending batches still requires the original
             # resource identity. Never infer it from component ranges alone.
             # Merge on copies so rejected sources leave the target untouched.
-            if merged != selected and (not original.offsets_hash or offsets != original.offsets_hash):
+            if merged != selected and (not target_offsets or offsets != target_offsets):
                 fail("does not match the target shape offsets hash")
             selected = merged
         except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as error:

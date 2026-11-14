@@ -36,7 +36,8 @@ WWMI_RUNTIME_NAMESPACE = "\\WWMIv1\\"
 # a notification when the installed runtime is older than this value, which is
 # the safe behaviour: an older runtime is missing part of the API used here.
 # Keep it in sync with the WWMI package release the generator is tested with.
-WWMI_REQUIRED_RUNTIME_VERSION = "1.00"
+# Match the upstream Tools baseline, including configurable blend-remap strides.
+WWMI_REQUIRED_RUNTIME_VERSION = "1.10"
 
 
 def scoped_name(name: str, draw_ib: str) -> str:

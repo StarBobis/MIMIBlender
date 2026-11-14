@@ -384,7 +384,8 @@ class ShapeKeyUtils:
         uint offsets: a leading 0, one offset after every key, and the final
         value acts as the sentinel used by ShapeKeyLoader.
         '''
-        shapekey_cache = cls.get_shapekey_cache(merged_obj,index_vertex_id_dict)
+        shapekey_cache = {key: values for key, values in
+                          cls.get_shapekey_cache(merged_obj,index_vertex_id_dict).items() if values}
         if not shapekey_cache:
             return [], [], []
 
@@ -401,6 +402,11 @@ class ShapeKeyUtils:
             batch_counts = [127] * max(1, math.ceil((max_shapekey_id + 1) / 127))
         if any(count < 0 or count > 127 for count in batch_counts):
             raise ValueError("Invalid WWMI original shape key batch sizes.")
+        # Captured key counts describe populated slots, not dispatch capacity.
+        # Upstream packs 127 slots per dispatch, allowing custom keys in the
+        # unused tail of the last native batch without inventing a new batch.
+        if batch_counts and max_shapekey_id >= sum(batch_counts):
+            batch_counts[-1] = 127
         if max_shapekey_id >= sum(batch_counts):
             # Explicit Deform/Custom IDs address original runtime slots.
             # Automatic packing cannot create the missing dispatch identities.
@@ -414,6 +420,15 @@ class ShapeKeyUtils:
                 "batch metadata. Automatic shape ID packing cannot infer missing runtime "
                 "checksums; do not delete or renumber native Deform/Custom keys to hide this error."
             )
+
+        # Match upstream: export only batches reached by nonempty native keys.
+        # Metadata for unused trailing dispatches must not block this model.
+        key_end = 0
+        for batch_id, count in enumerate(batch_counts):
+            key_end += count
+            if max_shapekey_id < key_end:
+                batch_counts = batch_counts[:batch_id + 1]
+                break
 
         # Always emit 128 offsets per runtime batch, including trailing blanks.
         # Blank slots consume no sparse entries but preserve runtime block size.
@@ -461,7 +476,10 @@ class ShapeKeyUtils:
             vertex_to_indices[vertex_id].append(index_id)
 
         # Get the base coordinates
-        base_data = mesh_shapekeys.key_blocks['Basis'].data
+        # Blender identifies the basis by reference, not by its editable name.
+        # Keep renamed Basis keys valid, just as the upstream data extractor does.
+        basis = getattr(mesh_shapekeys, "reference_key", None) or mesh_shapekeys.key_blocks[0]
+        base_data = basis.data
         base_coords = numpy.empty((len(mesh.vertices), 3), dtype=numpy.float32)
         base_data.foreach_get('co', base_coords.ravel())
 
@@ -471,7 +489,7 @@ class ShapeKeyUtils:
         # Process each shape key
         for shapekey in mesh_shapekeys.key_blocks:
             # Skip the basis shape key
-            if shapekey.name == 'Basis':
+            if shapekey == basis:
                 continue
             
             # print(shapekey.name)

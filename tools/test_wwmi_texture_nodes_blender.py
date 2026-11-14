@@ -43,6 +43,10 @@ if not workspace.is_dir():
 folder = ROOT / 'tmp' / ('wwmi_texture_nodes_' + str(time.time_ns()))
 folder.mkdir(parents=True)
 GlobalConfig.read_from_main_json()
+# Keep the WWMI fixture independent of the host launcher's selected game.
+# Dynamic enum refreshes below must not switch its exporter to another preset.
+GlobalConfig.logic_name = 'WWMI'
+GlobalConfig.gamename = 'WWMI'
 
 # The optional capture fixture has Hash-style marks. Supply a Slot-style view
 # in memory for Slot tests, keeping the original resource paths and registers.
@@ -55,7 +59,8 @@ def slot_marks(*args, **kwargs):
             mark.mark_type = 'Slot'
     return result
 
-with patch.object(GlobalConfig, 'path_workspace_folder', return_value=str(workspace)), \
+with patch.object(GlobalConfig, 'read_from_main_json'), \
+     patch.object(GlobalConfig, 'path_workspace_folder', return_value=str(workspace)), \
      patch.object(GlobalConfig, 'get_workspace_name', return_value=name), \
      patch.object(JsonUtils, 'SaveToFile'), patch.object(CommandUtils, 'OpenGeneratedModFolder'):
     bpy.context.scene.mimi_global_properties.import_merged_vgmap = 'MERGED'

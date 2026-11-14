@@ -25,7 +25,7 @@ from ...utils.obj_utils import (
 from ...utils.shapekey_utils import ShapeKeyUtils
 from ...utils.vertexgroup_utils import VertexGroupUtils
 from ...workspace.wwmi_info import WWMIInfoObject, WWMIInfoHelper
-from ...workspace.wwmi_reverse_metadata import resolve_reverse_shape_metadata
+from ...workspace.wwmi_reverse_metadata import required_shape_key_count, resolve_reverse_shape_metadata
 from ...common.buffer_export_helper import BufferExportHelper
 from ...common.obj_buffer_helper import ObjBufferHelper
 from ...workspace.mmt_workspace import MMTWorkSpace
@@ -173,14 +173,6 @@ class DrawIBModelWWMI:
         # Build the WWMIInfoObject from the ordered SubmeshJson list;
         # it holds all component info of the current DrawIB and is used later when building MergedObject and exporting
         self.wwmi_info = WWMIInfoHelper.build_from_json_list(ordered_submesh_json_list)
-        # Reverse imports may preserve extra original shape runtime dispatches.
-        # Only explicitly attached metadata from connected objects is considered.
-        # Validate it before making temporary meshes; never change native palettes.
-        resolve_reverse_shape_metadata(
-            self.wwmi_info,
-            [bpy.data.objects.get(model.obj_name) for model in self.ordered_drawcall_model_list],
-            self.draw_ib,
-        )
         self.merged_object = self.build_merged_object()
 
         obj_name_temp_object_dict: dict[str, TempObject] = {}
@@ -271,15 +263,30 @@ class DrawIBModelWWMI:
             d3d11_game_type=self.d3d11_game_type,
         )
 
+        # Reverse imports may preserve extra original shape runtime dispatches.
+        # Only explicitly attached metadata from connected objects is considered.
+        # Resolve only the changed keys on the final disposable mesh.
+        # No source property or native palette is rewritten by this step.
+        source_objects = [bpy.data.objects.get(model.obj_name)
+                          for model in self.ordered_drawcall_model_list]
+        resolve_reverse_shape_metadata(
+            self.wwmi_info,
+            source_objects,
+            self.draw_ib,
+            required_key_count=required_shape_key_count(
+                [self.merged_object.object]),
+        )
+
         # Preserve original batch boundaries on the disposable merged object.
         # Raw game batches can end before slot 127, so fixed ID division alone
         # would shift every key in subsequent runtime dispatches during export.
         batches = self.wwmi_info.shapekeys.batches
         batch_counts = []
         for index, batch in enumerate(batches):
-            count = int(batch.get("shapekey_count", 127))
-            if index + 1 < len(batches) and "shapekey_offset" in batches[index + 1]:
-                count = int(batches[index + 1]["shapekey_offset"]) - int(batch.get("shapekey_offset", 0))
+            count = 127 if batch.get("shapekey_count") is None else int(batch["shapekey_count"])
+            if index + 1 < len(batches) and batches[index + 1].get("shapekey_offset") is not None:
+                offset = batch.get("shapekey_offset")
+                count = int(batches[index + 1]["shapekey_offset"]) - (0 if offset is None else int(offset))
             batch_counts.append(count)
         if batch_counts:
             self.merged_object.object["wwmi_shapekey_batch_counts"] = batch_counts
@@ -482,6 +489,14 @@ class DrawIBModelWWMI:
                 # identities later; only explicit ignore groups may be discarded.
                 ignore_list = [group for group in vertex_groups if "ignore" in group.name.lower()]
                 ObjUtils.remove_vertex_groups(temp_obj, ignore_list)
+
+                # Upstream accepts arbitrary display names and uses group order
+                # as bone identity. Preserve explicit numeric identities used by
+                # MMT's sparse/reordered imports; normalize only unnamed bone
+                # identities on disposable per-object copies before any join.
+                for group in temp_obj.vertex_groups:
+                    if GLOBAL_GROUP_NAME.fullmatch(group.name) is None:
+                        group.name = str(group.index)
 
                 temp_object.vertex_count = len(temp_obj.data.vertices)
                 temp_object.index_count = len(temp_obj.data.polygons) * 3

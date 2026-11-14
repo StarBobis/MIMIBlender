@@ -9,6 +9,7 @@ These tests verify buffer generation, not in-game rendering.
 import ast
 import math
 import runpy
+import re
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -203,6 +204,33 @@ class BatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'e590b8d4_LOD0: shape key ID 175.*127 slots'):
             PACK(helper, obj, {})
 
+    def test_custom_key_can_use_unpopulated_tail_of_last_batch(self):
+        # A capture with 86 populated slots does not impose an 86-key limit.
+        # The actual runtime format contains 127 slots; upstream fills their
+        # sparse offsets from edited Deform/Custom keys, including these tails.
+        obj = Object(1)
+        obj['wwmi_shapekey_batch_counts'] = [86]
+        helper = SimpleNamespace(get_shapekey_cache=lambda *args: {100: {0: [0.25, 0, 0]}})
+        offsets, ids, values = PACK(helper, obj, {})
+        self.assertEqual(len(offsets), 128)
+        self.assertEqual(offsets[100], 0)
+        self.assertEqual(offsets[101], 1)
+        self.assertEqual(ids, [0])
+        self.assertEqual(values[:3], [0.25, 0, 0])
+
+    def test_unused_trailing_batch_and_unreferenced_vertices_do_not_export(self):
+        # Native metadata can describe more dispatches than the edited mesh
+        # needs. An empty cache entry is not an exported shape, just as an
+        # affected loose vertex absent from the IB contributes no sparse data.
+        obj = Object(1)
+        obj['wwmi_shapekey_batch_counts'] = [127, 49]
+        helper = SimpleNamespace(get_shapekey_cache=lambda *args: {0: {0: [0.25, 0, 0]}, 175: {}})
+        offsets, ids, _ = PACK(helper, obj, {})
+        self.assertEqual(len(offsets), 128)
+        self.assertEqual(ids, [0])
+        helper.get_shapekey_cache = lambda *args: {175: {}}
+        self.assertEqual(PACK(helper, obj, {}), ([], [], []))
+
     def test_truncated_sparse_buffers_fail(self):
         # Previously the importer filtered invalid entries and silently lost keys.
         # Validate full batch bounds before creating any Blender shape keys.
@@ -282,6 +310,53 @@ class MetadataCompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'conflicting.*checksum'):
             self.load([{'checksum': 0}, {'checksum': 7}])
 
+    def test_complementary_component_batch_metadata_is_merged(self):
+        # The native shape header belongs to the entire DrawIB. One component
+        # may retain an older prefix while another contains the later batch.
+        # Matching original identities remain mandatory where both record them.
+        records = [
+            {'offsets_hash': 'ABCDEF12', 'batches': [{'checksum': 7}]},
+            {'offsets_hash': 'abcdef12', 'batches': [
+                {'checksum': 7, 'dispatch_y': 2, 'vertex_offset': 0},
+                {'checksum': 9, 'dispatch_y': 3, 'vertex_offset': 44}]},
+        ]
+        before = repr(records)
+        shape = self.load(records)
+        self.assertEqual(shape.offsets_hash, 'abcdef12')
+        self.assertEqual(len(shape.batches), 2)
+        self.assertEqual(shape.batches[0]['dispatch_y'], 2)
+        self.assertEqual(repr(records), before)
+
+    def test_explicit_batches_replace_deprecated_shape_headers(self):
+        # WWMI-Tools ignores its deprecated single-batch scalars once batches
+        # exist. Header defaults cannot block that richer representation.
+        # The resulting legacy scalar view must describe that same batch.
+        shape = self.load([
+            {'checksum': 0, 'dispatch_y': 0},
+            {'checksum': 99, 'batches': [{'checksum': 7, 'dispatch_y': 2, 'vertex_offset': 0}]},
+        ])
+        self.assertEqual((shape.checksum, shape.dispatch_y), (7, 2))
+
+    def test_real_native_batch_conflicts_remain_actionable(self):
+        # Coalescing prefixes is not permission to choose incompatible captures
+        # by component order. This field changes the runtime's matching checksum.
+        # Report the original batch index rather than treating lists as opaque.
+        with self.assertRaisesRegex(ValueError, r'batches.0.checksum'):
+            self.load([{'batches': [{'checksum': 7}]}, {'batches': [{'checksum': 8}]}])
+
+    def test_complete_component_can_fill_explicitly_incomplete_copy(self):
+        # An invalidated default checksum must not conflict with actual evidence.
+        # Check both source orders: component enumeration is not a preference
+        # between an old placeholder row and a fully recovered runtime record.
+        incomplete = {'batches': [{'checksum': 0, 'dispatch_y': 0, 'vertex_offset': 0,
+                                    'runtime_metadata_complete': False}]}
+        complete = {'batches': [{'checksum': 7, 'dispatch_y': 2, 'vertex_offset': 0,
+                                  'runtime_metadata_complete': True}]}
+        for rows in ([incomplete, complete], [complete, incomplete]):
+            shape = self.load(rows)
+            self.assertEqual(shape.batches[0]['checksum'], 7)
+            self.assertTrue(shape.batches[0]['runtime_metadata_complete'])
+
     def test_missing_checksum_does_not_become_zero(self):
         # Dispatch dimensions alone do not establish a valid runtime checksum.
         # Explicit batches also require the checksum field, not a default zero.
@@ -302,6 +377,38 @@ class MetadataCompatibilityTests(unittest.TestCase):
                               {'TimerUtils': SimpleNamespace(End=lambda name: None)})
         obj = SimpleNamespace(name='no_shapes', data=SimpleNamespace(shape_keys=None))
         self.assertEqual(cache(obj, {}), {})
+
+    def test_renamed_basis_uses_the_reference_coordinates(self):
+        # Reference-key identity is editable independently of its display name.
+        # Exercise production delta extraction with a real nonzero displacement
+        # so merely skipping a renamed basis cannot make this assertion pass.
+        cache = load_function('utils/shapekey_utils.py', 'get_shapekey_cache',
+                              {'numpy': numpy, 're': re})
+        obj = Object(1)
+        basis = obj.shape_key_add('Rest pose')
+        key = obj.shape_key_add('Deform 0')
+        basis.data.co[0] = 1.0
+        key.data.co[0] = 1.25
+        obj.data.shape_keys.reference_key = basis
+        self.assertEqual(cache(obj, {0: 0}), {0: {0: [0.25, 0.0, 0.0]}})
+
+    def test_wwmi_unweighted_mesh_has_no_extra_group_requirement(self):
+        # Upstream emits zero blend records for unweighted vertices. The same
+        # mesh remains subject to other presets' original validation rules.
+        # No dummy source group or hidden skeleton binding is added by this test.
+        config = SimpleNamespace(logic_name='WWMI')
+        namespace = dict(GlobalConfig=config, LogicName=SimpleNamespace(WWMI='WWMI'),
+                         D3D11Semantic=SimpleNamespace(COLOR='COLOR', TEXCOORD='TEXCOORD'),
+                         MMTErrorUtils=SimpleNamespace(raise_fatal=lambda message: (_ for _ in ()).throw(ValueError(message))))
+        verify = load_function('common/obj_buffer_helper.py', 'check_and_verify_attributes', namespace)
+        element = SimpleNamespace()
+        dtype = SimpleNamespace(OrderedFullElementList=['BLENDINDICES'],
+                                ElementNameD3D11ElementDict={'BLENDINDICES': element})
+        obj = SimpleNamespace(name='unweighted', vertex_groups=[])
+        verify(obj, dtype)
+        config.logic_name = 'GIMI'
+        with self.assertRaises(ValueError):
+            verify(obj, dtype)
 
     def test_legacy_direct_zero_checksum_is_accepted(self):
         # Some integrations pass the typed metadata directly without its loader.
