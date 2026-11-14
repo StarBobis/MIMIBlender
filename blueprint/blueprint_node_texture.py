@@ -136,8 +136,13 @@ class MIMITextureSlotItem(PropertyGroup):
         name=tr("Slot"),
         description=tr("Texture slot to replace right before this object's drawindexed, e.g. ps-t0"),
         default="ps-t0",
-        update=lambda self, context: _texture_slot_item_refresh_display(self),
+        update=lambda self, context: _texture_slot_item_slot_changed(self),
     ) # type: ignore
+
+    # Old saved rows default to literal slots. Only a new mark selection or
+    # explicit auto-fill opts into resolving the register per Submesh.
+    # Editing the slot withdraws that opt-in, even if its text is unchanged.
+    follow_mark_slot: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 
     source_type: bpy.props.EnumProperty(
         name=tr("Source"),
@@ -419,6 +424,12 @@ def _find_submesh_mark_by_name(item, find_owner_node):
     return None
 
 
+def _texture_slot_item_slot_changed(item):
+    """A typed register is an explicit override, not an autofill hint."""
+    item.follow_mark_slot = False
+    _texture_slot_item_refresh_display(item)
+
+
 def _texture_slot_item_mark_changed(item):
     '''Picking a mark fills the slot from the mark's own MarkSlot value.'''
     # Persist the identifier itself before anything reads the row: the enum
@@ -427,6 +438,8 @@ def _texture_slot_item_mark_changed(item):
     mark_dict = _find_submesh_mark_by_name(item, _find_owner_bind_node)
     if mark_dict and mark_dict["slot"]:
         item.slot = mark_dict["slot"]
+        # Set after the slot update callback so autofill retains provenance.
+        item.follow_mark_slot = True
     _texture_slot_item_refresh_display(item)
 
 

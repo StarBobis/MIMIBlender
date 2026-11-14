@@ -9,6 +9,7 @@ from .texture_output_naming import (
     alias_output_filename_with_suffix,
     ensure_ini_encodable,
     global_slot_output_filename,
+    object_resource_slug,
 )
 from ..texcomb.core.dds_match import DDSReplacementStage, prepare_replacement_job
 
@@ -96,7 +97,9 @@ def apply_global_slots(model, rows):
         # Names carry DrawIB scope to survive split-INI exporters.
         # Every generated target is DDS, regardless of replacement extension.
         # The copy stage uses the original metadata recorded in the job.
-        resource = 'ResourceGlobalSlot_' + model._object_texture_resource_slug(model.draw_ib, 16) + '_' + str(index)
+        # WWMI models share the naming helper, not DrawIBModel's methods.
+        # Calling a model-only method here broke independent exporters.
+        resource = 'ResourceGlobalSlot_' + object_resource_slug(model.draw_ib, 16) + '_' + str(index)
         # The generated default name comes from the shared naming module, so the
         # node UI shows exactly the file the export writes.
         filename = global_slot_output_filename(model.draw_ib, index)

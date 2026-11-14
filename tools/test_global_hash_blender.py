@@ -469,6 +469,36 @@ class GlobalHashTests(unittest.TestCase):
         self.assertIsNone(previews._collection)
         self.assertEqual(len(previews._stamps), 0)
 
+    def test_target_slot_collector_retains_autofill_register(self):
+        # A shared MARK name is offered once, although its physical register
+        # differs between components. Persist the first autofill register so
+        # the resolver can distinguish it from a deliberate user override.
+        first = self.mark('6077b727', 'DiffuseMap', 'Slot')
+        second = self.mark('0cefa11c', 'DiffuseMap', 'Slot')
+        first['MarkSlot'], second['MarkSlot'] = 'ps-t1', 'ps-t2'
+        self.mark_json('LOD0', '94517393-10-0', [first])
+        self.mark_json('LOD0', '94517393-10-10', [second])
+        lists = addon.blueprint_node_object_list
+        source = self.tree.nodes.new('MIMINode_Object_List')
+        for index, name in enumerate(('mesh_a', 'mesh_b')):
+            lists._append_object_list_item(source, name)
+            source.object_items[index].submesh_name = 'LOD0.94517393-' + str(index)
+        node = self.tree.nodes.new('MIMINode_Texture_Bind')
+        self.tree.links.new(source.outputs[0], node.inputs[0])
+        row = node.texture_slot_items.add()
+        row.source_type = 'MARK'
+        row.mark_name = 'DiffuseMap'
+        binding = BluePrintModel._collect_texture_bindings(node)[0]
+        self.assertEqual(binding['slot'], 'ps-t1')
+        self.assertEqual(binding['mark_default_slot'], 'ps-t1')
+        row.slot = 'ps-t5'
+        binding = BluePrintModel._collect_texture_bindings(node)[0]
+        self.assertEqual(binding['slot'], 'ps-t5')
+        self.assertEqual(binding['mark_default_slot'], '')
+        # Typing the same default register is still explicit user intent.
+        row.slot = 'ps-t1'
+        self.assertEqual(BluePrintModel._collect_texture_bindings(node)[0]['mark_default_slot'], '')
+
     def test_connected_scope_ports_refresh_and_export(self):
         from MIMIBlender.model.drawib_model import DrawIBModel
         lists = addon.blueprint_node_object_list

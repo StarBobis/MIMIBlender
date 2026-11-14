@@ -394,3 +394,39 @@ The current live blueprint was exported after backing up the previous INI and
 texture under repository tmp. Output c435fc2b_DiffuseMap.dds matched the converted
 replacement SHA256 bd6a2aee3eb49138c7d3a1f6a1dc31d9d7e93825d49962702956d338ab06b354.
 This verifies export bytes, not game reload or in-game appearance.
+
+## Other texture nodes: routing and original identity (2026-11-14)
+
+WWMI's independent model initialization resolved connected replacements but
+omitted `apply_global_slots`, so a socketless Global Slot node produced no draw
+bindings. It now applies defaults after local resolution inside guarded model
+initialization. The shared helper uses `object_resource_slug` directly because
+WWMI models do not implement the standard model's naming method. Invalid defaults
+remain inside temporary-geometry cleanup. Local bindings still override defaults,
+with reference restoration after each draw.
+
+Targeted Slot MARK autofill previously reused the first component's register for
+every component with the same semantic name. New mark selections explicitly set
+`follow_mark_slot`; the collector retains the autofill register and each draw
+resolves its own marked register. Typing a register clears that opt-in. Old saved
+rows default to literal registers to preserve manual choices; selecting their
+mark again enables automatic following. FILE registers and GIMI logical bindings
+retain their previous behavior. Do not infer autofill merely from equal text.
+
+Targeted Hash original-format lookup previously preferred a semantic name or
+slot over an explicit hash. A same-named map in another component could therefore
+become the wrong conversion authority. Exact hash now selects local originals;
+when absent, workspace lookup uses that same hash instead of a same-named map.
+
+Validation: `python tools/test_texture_bind_ini.py`,
+`python tools/test_hash_texture_bind_ini.py`, and
+`python tools/test_texture_format_conversion.py`; isolated Blender runs of
+`tools/test_global_hash_blender.py` (15 tests) and
+`tools/test_wwmi_texture_nodes_blender.py`. The latter uses the optional JinXi
+workspace, changing Hash marks to Slot views only in memory for the Slot cases.
+It exports all three nodes through the real WWMI writer under repository tmp,
+checks draw-local binding/restoration instructions, format metadata and exact
+converted replacement bytes. It does not rewrite the user's workspace or Mods.
+The running Blender loaded the fixes; its existing JinXi.005 blueprint also
+exported successfully under tmp without changing source geometry, weights,
+shape keys or custom properties. This is export validation, not in-game acceptance.

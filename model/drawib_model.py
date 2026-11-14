@@ -519,6 +519,13 @@ class DrawIBModel:
                 node_label = str(binding.get("node_label", "") or "Texture Bind")
                 owner_name = str(getattr(draw_model, "obj_name", "") or draw_model)
                 slot = str(binding.get("slot", "") or "").strip().lower()
+                # MARK rows follow each object's own captured register when
+                # the row still uses its autofilled default. Explicit FILE
+                # registers and manually changed MARK registers stay literal.
+                default_slot = str(binding.get("mark_default_slot", "") or "").strip().lower()
+                if not is_gimi and binding.get("source_type") == "MARK" and default_slot and slot == default_slot:
+                    mark = self._find_mark_markup(binding, markup_list, node_label, owner_name, submesh_model)
+                    slot = str(getattr(mark, "mark_slot", "") or slot).strip().lower()
                 logical_slot = None
                 if is_gimi and binding.get("source_type") == "MARK":
                     logical_slot = get_gimi_texture_slot(binding.get("mark_name"))
@@ -805,15 +812,17 @@ class DrawIBModel:
             mark = str(getattr(markup, "mark_name", "") or "").strip().lower()
             mark_slot = str(getattr(markup, "mark_slot", "") or "").strip().lower()
             mark_hash = str(getattr(markup, "mark_hash", "") or "").strip().lower()
-            # A name is the most specific selector; slot and hash are fallbacks.
-            if wanted_name:
+            # A Hash node identifies the original resource, even when another
+            # Submesh has a same-named map at a different format or register.
+            # Semantic names and registers remain selectors for Slot nodes.
+            if wanted_hash:
+                if mark_hash != wanted_hash:
+                    continue
+            elif wanted_name:
                 if mark != wanted_name:
                     continue
             elif wanted_slot:
                 if mark_slot != wanted_slot:
-                    continue
-            elif wanted_hash:
-                if mark_hash != wanted_hash:
                     continue
             else:
                 continue

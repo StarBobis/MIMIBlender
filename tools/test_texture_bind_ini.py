@@ -717,6 +717,41 @@ def test_mark_replacement_image_switch(modules, source_dir, texture_root):
     print("test_mark_replacement_image_switch OK")
 
 
+def test_mark_slots_follow_submesh(modules):
+    # The node autofills from the first upstream mark. The same semantic can
+    # live in a different register on another component of the same model.
+    # A manually overridden register must still remain an explicit choice.
+    draw_type = modules[TEST_PKG + '.model.draw_call_model'].DrawCallModel
+    calls = [draw_type(obj_name='part' + str(i), submesh_name='94517393-' + str(i)) for i in range(2)]
+    marks = [FakeMarkup('DiffuseMap', 'SharedSlot') for _ in calls]
+    marks[0].mark_slot, marks[1].mark_slot = 'ps-t1', 'ps-t2'
+    for call in calls:
+        call.texture_slot_binding_list = [make_binding('MARK', slot='ps-t1', mark_name='DiffuseMap', mark_default_slot='ps-t1')]
+    model = make_drawib(modules, '94517393', [FakeSubmeshModel(c.submesh_name, [c]) for c in calls],
+                       {c.submesh_name: [m] for c, m in zip(calls, marks)})
+    model.resolve_texture_slot_bindings()
+    assert calls[0].resolved_texture_slot_lines[1].startswith('ps-t1 = ')
+    assert calls[1].resolved_texture_slot_lines[1].startswith('ps-t2 = ')
+    calls[1].texture_slot_binding_list[0]['slot'] = 'ps-t5'
+    model.resolve_texture_slot_bindings()
+    assert calls[1].resolved_texture_slot_lines[1].startswith('ps-t5 = ')
+
+
+def test_hash_original_ignores_other_semantics(modules):
+    # Hash identifies the resource; same-named maps in the current Submesh
+    # must not override that identity while planning an exact conversion.
+    # If no local hash matches, the workspace fallback remains authoritative.
+    from unittest.mock import patch
+    model = make_drawib(modules, '94517393', [], {})
+    submesh = FakeSubmeshModel('94517393-0', [])
+    wrong, right = FakeMarkup('DiffuseMap', 'Hash'), FakeMarkup('OtherName', 'Hash')
+    wrong.mark_hash, right.mark_hash = '11111111', '22222222'
+    helper = modules[TEST_PKG + '.common.m_ini_helper'].M_IniHelper
+    with patch.object(helper, '_get_slot_texture_source_path', side_effect=lambda **kw: kw['texture_markup_info'].mark_hash + '.dds'):
+        paths = model._resolve_original_candidates([wrong, right], submesh, slot='ps-t1', mark_name='DiffuseMap', texture_hash='22222222')
+    assert paths == ['22222222.dds'], paths
+
+
 def main():
     ensure_parent_packages()
     install_stubs()
@@ -730,6 +765,8 @@ def main():
         source_dir = os.path.join(temp_dir, "sources")
         os.makedirs(source_dir, exist_ok=True)
         test_resolve_bindings(modules, source_dir)
+        test_mark_slots_follow_submesh(modules)
+        test_hash_original_ignores_other_semantics(modules)
         test_resolve_validation(modules, source_dir)
         test_drawindexed_line_emission(modules)
         test_resource_sections_and_copy(modules, temp_dir)

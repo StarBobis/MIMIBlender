@@ -245,6 +245,11 @@ class DrawIBModelWWMI:
         # The standard DrawIB constructor resolves bindings, but WWMI never
         # calls it. Resolve only after its Submesh views and marks are ready.
         DrawIBModel.resolve_texture_bindings_for_model(self)
+        # WWMI bypasses the standard model constructor and its global defaults.
+        # Apply them inside the guarded initialization so invalid defaults also
+        # clean up temporary geometry. Connected bindings retain precedence.
+        from ...common.global_slot_bindings import apply_global_slots
+        apply_global_slots(self, getattr(self.blueprint_model, 'global_slot_texture_binding_list', []))
 
         ObjBufferHelper.check_and_verify_attributes(obj=self.merged_object.object, d3d11_game_type=self.d3d11_game_type)
 

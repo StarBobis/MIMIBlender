@@ -687,6 +687,9 @@ class BluePrintModel:
             bindings.append({
                 "enabled": bool(getattr(item, "enabled", True)),
                 "slot": str(getattr(item, "slot", "") or ""),
+                # Keep the autofilled slot separate from a user's override.
+                # One mark name may use different registers per Submesh.
+                "mark_default_slot": BluePrintModel._default_mark_slot(item),
                 "source_type": str(getattr(item, "source_type", "") or ""),
                 "mark_name": mark_name_of(item),
                 "mark_file_path": mark_file_path,
@@ -707,6 +710,17 @@ class BluePrintModel:
                 "node_label": str(getattr(bind_node, "label", "") or getattr(bind_node, "name", "") or "Targeted Slot Texture Replacement"),
             })
         return bindings
+
+    @staticmethod
+    def _default_mark_slot(item):
+        """Read the slot used when the MARK dropdown autofilled this row."""
+        # Never infer intent from an old row's equality to today's default.
+        # Legacy rows and manually typed registers keep literal semantics.
+        if not getattr(item, 'follow_mark_slot', False):
+            return ''
+        from ..blueprint.blueprint_node_texture import _find_submesh_mark_by_name, _find_owner_bind_node
+        mark = _find_submesh_mark_by_name(item, _find_owner_bind_node)
+        return str((mark or {}).get('slot', '') or '').strip().lower()
 
     @staticmethod
     def _merge_texture_slot_bindings(inner_list, outer_list):
