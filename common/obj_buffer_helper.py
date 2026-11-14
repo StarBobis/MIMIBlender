@@ -1186,7 +1186,24 @@ class ObjBufferHelper:
         return vb
 
     @staticmethod
-    def calc_index_vertex_buffer_universal(element_vertex_ndarray,mesh,obj,d3d11_game_type,dtype):
+    def apply_outline_policy(obj, vertices, indices, game_type, dtype, options=None):
+        # Unsupported presets continue using the old global/object settings.
+        # A selected OFF policy bypasses both legacy reconstruction methods.
+        options = options or {}
+        if GlobalConfig.logic_name in (LogicName.GIMI, LogicName.SRMI, LogicName.HIMI, LogicName.ZZMI):
+            mode = options.get('mode', 'LEGACY')
+            if mode in ('OFF', 'MODERN'):
+                packed = numpy.frombuffer(b''.join(bytes(vertex) for vertex in vertices), dtype=dtype).copy()
+                if mode == 'OFF':
+                    return packed
+                from ..utils.outline_utils import rebuild_outline
+                return rebuild_outline(packed, indices, GlobalConfig.logic_name, options)
+        # Preserve legacy output, including object flags and tangent.w rules.
+        result = ObjBufferHelper.average_normal_tangent_xxmi(obj, vertices, indices, game_type, dtype)
+        return ObjBufferHelper.average_normal_color(obj, result, game_type, dtype)
+
+    @staticmethod
+    def calc_index_vertex_buffer_universal(element_vertex_ndarray,mesh,obj,d3d11_game_type,dtype,outline_options=None):
         '''
         Compute the IndexBuffer and CategoryBufferDict and return them
 
@@ -1208,20 +1225,10 @@ class ObjBufferHelper:
         flattened_ib = [item for sublist in ib for item in sublist]
         # TimerUtils.End("Calc IB VB")
 
-        # Recalculate TANGENT step
-        indexed_vertices = ObjBufferHelper.average_normal_tangent_xxmi(
-            obj=obj,
-            indexed_vertices=indexed_vertices,
-            flattened_ib=flattened_ib,
-            d3d11_game_type=d3d11_game_type,
-            dtype=dtype,
-        )
-        
-        # Recalculate COLOR step
-        indexed_vertices = ObjBufferHelper.average_normal_color(obj=obj, indexed_vertices=indexed_vertices, d3d11_game_type=d3d11_game_type,dtype=dtype)
-
-        # print("indexed_vertices:")
-        # print(str(len(indexed_vertices)))
+        # Apply the selected output policy before slicing the packed categories.
+        # Index/loop ownership stays unchanged across legacy and modern modes.
+        indexed_vertices = ObjBufferHelper.apply_outline_policy(
+            obj, indexed_vertices, flattened_ib, d3d11_game_type, dtype, outline_options)
 
         # (2) Convert to CategoryBufferDict
         # TimerUtils.Start("Calc CategoryBuffer")
@@ -1352,7 +1359,7 @@ class ObjBufferHelper:
         element_vertex_ndarray:numpy.ndarray, 
         obj:bpy.types.Object, 
         d3d11_game_type:D3D11GameType,
-        dtype:numpy.dtype):
+        dtype:numpy.dtype, outline_options=None):
         '''
         [Universal mode] Standard graphics export logic
         --------------------------------------------------
@@ -1420,17 +1427,10 @@ class ObjBufferHelper:
         flattened_ib = [item for sublist in ib for item in sublist]
         # TimerUtils.End("Calc IB VB")
 
-        # Recalculate TANGENT step
-        indexed_vertices = ObjBufferHelper.average_normal_tangent_xxmi(
-            obj=obj,
-            indexed_vertices=vertex_data_list,
-            flattened_ib=flattened_ib,
-            d3d11_game_type=d3d11_game_type,
-            dtype=dtype,
-        )
-        
-        # Recalculate COLOR step
-        indexed_vertices = ObjBufferHelper.average_normal_color(obj=obj, indexed_vertices=indexed_vertices, d3d11_game_type=d3d11_game_type,dtype=dtype)
+        # Apply the selected output policy before slicing the packed categories.
+        # Index/loop ownership stays unchanged across legacy and modern modes.
+        indexed_vertices = ObjBufferHelper.apply_outline_policy(
+            obj, vertex_data_list, flattened_ib, d3d11_game_type, dtype, outline_options)
 
         # (2) Convert to CategoryBufferDict
         # TimerUtils.Start("Calc CategoryBuffer")

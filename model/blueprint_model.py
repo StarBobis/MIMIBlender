@@ -117,6 +117,9 @@ class BluePrintModel:
         # Snapshot the selected output, never the first output or scene state.
         # The fallback preserves older callers and saved output nodes.
         self.wwmi_skeleton_scale = float(getattr(output_node, "wwmi_skeleton_scale", 1.0))
+        # Keep the configuration with the selected blueprint, not mutable scene state.
+        from ..blueprint.outline_settings import snapshot as snapshot_outline
+        self.outline_options = snapshot_outline(output_node)
 
         # Socketless metadata is scoped to this top-level export tree.
         # Collection also preflights user fields before any buffer writes.
@@ -1072,7 +1075,7 @@ class BluePrintModel:
         workspace_model = WorkSpaceModel()
 
         for submesh_name, draw_call_model_list in draw_call_model_dict.items():
-            submesh_model = SubMeshModel(drawcall_model_list=draw_call_model_list)
+            submesh_model = SubMeshModel(drawcall_model_list=draw_call_model_list, outline_options=getattr(self, 'outline_options', {}))
             # In the new format match_index_count/match_first_index start at -1; correct them with WorkSpaceModel
             submesh_model.fix_indices_from_workspace(workspace_model)
             submesh_model_list.append(submesh_model)

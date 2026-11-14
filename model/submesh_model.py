@@ -24,6 +24,8 @@ import os
 class SubMeshModel:
     # This attribute must be filled in at initialization
     drawcall_model_list:list[DrawCallModel] = field(default_factory=list)
+    # Immutable-by-convention snapshot from the selected Generate Mod node.
+    outline_options: dict = field(default_factory=dict, repr=False)
 
     # These attributes are computed in post_init
     match_draw_ib:str = field(init=False, default="")
@@ -127,6 +129,11 @@ class SubMeshModel:
         self.d3d11_game_type = D3D11GameType.from_submesh_json_dict(
             submesh_json.JsonDict, submesh_json_path
         )
+        # Layout failures must occur before any temporary source copies exist.
+        # Other presets and legacy policies keep their previous validation path.
+        if self.outline_options.get('mode') == 'MODERN' and GlobalConfig.logic_name in (LogicName.GIMI, LogicName.SRMI, LogicName.HIMI, LogicName.ZZMI):
+            from ..utils.outline_utils import validate_outline_layout
+            validate_outline_layout(self.d3d11_game_type.get_total_structured_dtype(), GlobalConfig.logic_name, self.outline_options)
         
         index_offset = 0
         submesh_temp_obj_list = []
@@ -212,6 +219,7 @@ class SubMeshModel:
             obj=submesh_merged_obj,
             d3d11_game_type=self.d3d11_game_type,
             drawcall_model_list=self.drawcall_model_list,
+            outline_options=self.outline_options,
         )
         # Final ranges are derived from the evaluated IB, including generated faces.
         # Do not reuse pre-merge counts when a modifier changes topology or order.

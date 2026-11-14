@@ -119,6 +119,7 @@ class ExportUtils:
         obj: bpy.types.Object,
         d3d11_game_type: D3D11GameType,
         drawcall_model_list: Optional[list] = None,
+        outline_options: Optional[dict] = None,
     ) -> UnityBufferBuildResult:
         ObjBufferHelper.check_and_verify_attributes(obj=obj, d3d11_game_type=d3d11_game_type)
 
@@ -139,6 +140,7 @@ class ExportUtils:
             element_vertex_ndarray=element_vertex_ndarray,
             d3d11_game_type=d3d11_game_type,
             dtype=element_context.total_structured_dtype,
+            outline_options=outline_options,
         )
         # Resolve ownership while the exact evaluated buffer mesh is still available.
         # Keep legacy standalone callers unchanged when no draw list is supplied.
@@ -152,6 +154,8 @@ class ExportUtils:
             d3d11_game_type=d3d11_game_type,
             dtype=element_context.total_structured_dtype,
             index_loop_id_dict=index_loop_id_dict,
+            outline_options=outline_options,
+            outline_indices=ib,
         )
 
         return UnityBufferBuildResult(
@@ -171,6 +175,7 @@ class ExportUtils:
         element_vertex_ndarray: numpy.ndarray,
         d3d11_game_type: D3D11GameType,
         dtype: numpy.dtype,
+        outline_options: Optional[dict] = None,
     ):
         if (
             GlobalConfig.logic_name == LogicName.CPUSkinning
@@ -189,6 +194,7 @@ class ExportUtils:
             d3d11_game_type=d3d11_game_type,
             dtype=dtype,
             obj=obj,
+            outline_options=outline_options,
         )
 
     @staticmethod
@@ -197,6 +203,8 @@ class ExportUtils:
         d3d11_game_type: D3D11GameType,
         dtype: numpy.dtype,
         index_loop_id_dict: Optional[dict],
+        outline_options: Optional[dict] = None,
+        outline_indices: Optional[list] = None,
     ) -> dict:
         shape_key_buffer_dict = {}
 
@@ -245,6 +253,15 @@ class ExportUtils:
                     indices_map=indices_map,
                     d3d11_game_type=d3d11_game_type,
                 )
+                # Position-category tangent morphs must use the same policy as
+                # the base. Keep fixed COLOR/UV outline streams out of this path.
+                options = outline_options or {}
+                if (options.get('mode') == 'MODERN' and outline_indices is not None
+                        and (GlobalConfig.logic_name in (LogicName.GIMI, LogicName.SRMI)
+                             or GlobalConfig.logic_name == LogicName.HIMI and options.get('himi_target') != 'COLOR')):
+                    from .outline_utils import rebuild_outline
+                    result = shape_key_buffer_dict[shapekey_name]
+                    result.element_vertex_ndarray = rebuild_outline(result.element_vertex_ndarray, outline_indices, GlobalConfig.logic_name, options)
         finally:
             ShapeKeyUtils.reset_all_shapekey_values(obj)
             TimerUtils.End(f"Processing {len(shape_keys)} ShapeKeys for {obj.name}")

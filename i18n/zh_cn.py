@@ -17,6 +17,23 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    'Outline rebuild is missing a required vertex semantic': '描边重算缺少必需的顶点语义，请检查当前数据类型',
+    'ZZMI outline rebuild requires floating TEXCOORD1': 'ZZMI 描边重算需要浮点 TEXCOORD1',
+    'Outline rebuild requires valid triangle indices': '描边重算需要有效的三角形索引',
+    'Outline Rebuild': '描边重算',
+    'Outline Method': '描边方式',
+    'Existing Settings': '沿用现有设置',
+    'Keep the previous global and object outline settings': '沿用原有全局和对象描边设置',
+    'Do Not Rebuild Outlines': '不重算描边',
+    'Do not rebuild outline attributes': '不重算描边属性',
+    'Angle-Weighted Rebuild': '角度加权重算',
+    'Rebuild outlines using the selected game policy': '按当前游戏规则重算描边',
+    'Outline Weld Precision': '描边焊接精度',
+    'Use Custom Normals for Outlines': '使用自定义法线计算描边',
+    'Outline Gate Angle': '描边角度阈值',
+    'HIMI Outline Target': 'HIMI 描边目标',
+    'Original Characters (TANGENT)': '旧角色（TANGENT）',
+    'Part 2 Characters (COLOR)': '第二部角色（COLOR）',
     "WWMI Mod Info": "WWMI Mod 信息",
     "Mod Name": "Mod 名称",
     "Mod Author": "Mod 作者",

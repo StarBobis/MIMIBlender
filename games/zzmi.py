@@ -38,6 +38,14 @@ class ExportZZMI(StandardExporter):
         ZZMITextureMarkName.LightMap: r"Resource\ZZMI\LightMap",
         ZZMITextureMarkName.MaterialMap: r"Resource\ZZMI\MaterialMap",
         ZZMITextureMarkName.StockingMap: r"Resource\ZZMI\WengineFx",
+        # Keep StockingMap as the historical alias while offering exact API names.
+        "GlowGradient": r"Resource\ZZMI\GlowGradient",
+        "GlowMap": r"Resource\ZZMI\GlowMap",
+        "GlowMap2": r"Resource\ZZMI\GlowMap2",
+        "GlowMap3": r"Resource\ZZMI\GlowMap3",
+        "WengineFx": r"Resource\ZZMI\WengineFx",
+        "WengineFx2": r"Resource\ZZMI\WengineFx2",
+        "WengineFx3": r"Resource\ZZMI\WengineFx3",
     }
 
     def add_drawib_sections(self, ini_builder: M_IniBuilder, drawib_model):

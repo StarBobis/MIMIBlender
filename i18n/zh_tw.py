@@ -21,6 +21,23 @@ Rules for editing this file:
   ``python tools/test_zh_tw_translations.py`` after editing.
 """
 TRANSLATIONS_ZH_TW = {
+    'Outline rebuild is missing a required vertex semantic': '描邊重算缺少必要的頂點語意，請檢查目前資料類型',
+    'ZZMI outline rebuild requires floating TEXCOORD1': 'ZZMI 描邊重算需要浮點 TEXCOORD1',
+    'Outline rebuild requires valid triangle indices': '描邊重算需要有效的三角形索引',
+    'Outline Rebuild': '描邊重算',
+    'Outline Method': '描邊方式',
+    'Existing Settings': '沿用現有設定',
+    'Keep the previous global and object outline settings': '沿用原有全域和物件描邊設定',
+    'Do Not Rebuild Outlines': '不重算描邊',
+    'Do not rebuild outline attributes': '不重算描邊屬性',
+    'Angle-Weighted Rebuild': '角度加權重算',
+    'Rebuild outlines using the selected game policy': '依目前遊戲規則重算描邊',
+    'Outline Weld Precision': '描邊焊接精度',
+    'Use Custom Normals for Outlines': '使用自訂法線計算描邊',
+    'Outline Gate Angle': '描邊角度門檻',
+    'HIMI Outline Target': 'HIMI 描邊目標',
+    'Original Characters (TANGENT)': '舊角色（TANGENT）',
+    'Part 2 Characters (COLOR)': '第二部角色（COLOR）',
     "WWMI Mod Info": "WWMI Mod 資訊",
     "Mod Name": "Mod 名稱",
     "Mod Author": "Mod 作者",

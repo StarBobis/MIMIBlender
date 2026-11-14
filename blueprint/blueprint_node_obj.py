@@ -564,6 +564,22 @@ class MIMINode_Result_Output(MIMINodeBase):
     bl_label = 'Generate Mod'
     bl_icon = 'EXPORT'
 
+    # Legacy is an explicit compatibility policy for saved blueprints.
+    # New algorithms are node-owned opt-ins; OFF also overrides object flags.
+    outline_settings_open: bpy.props.BoolProperty(default=False) # type: ignore
+    outline_mode: bpy.props.EnumProperty(name=tr("Outline Method"), items=[
+        ('LEGACY', tr("Existing Settings"), tr("Keep the previous global and object outline settings")),
+        ('OFF', tr("Do Not Rebuild Outlines"), tr("Do not rebuild outline attributes")),
+        ('MODERN', tr("Angle-Weighted Rebuild"), tr("Rebuild outlines using the selected game policy")),
+    ], default='LEGACY') # type: ignore
+    outline_precision: bpy.props.IntProperty(name=tr("Outline Weld Precision"), default=8, min=1, max=10) # type: ignore
+    outline_custom_normals: bpy.props.BoolProperty(name=tr("Use Custom Normals for Outlines"), default=False) # type: ignore
+    outline_gate: bpy.props.FloatProperty(name=tr("Outline Gate Angle"), default=10.0, min=0, max=90) # type: ignore
+    outline_himi_target: bpy.props.EnumProperty(name=tr("HIMI Outline Target"), items=[
+        ('TANGENT', tr("Original Characters (TANGENT)"), ''),
+        ('COLOR', tr("Part 2 Characters (COLOR)"), ''),
+    ], default='TANGENT') # type: ignore
+
     # Store this per output so separate Mods can use independent scales.
     # Existing blueprints receive Blender's default without any migration.
     wwmi_skeleton_scale: bpy.props.FloatProperty(
@@ -590,6 +606,8 @@ class MIMINode_Result_Output(MIMINodeBase):
 
         from .blueprint_node_shapekey import draw_shapekey_settings
         draw_shapekey_settings(self, layout)
+        from .outline_settings import draw as draw_outline_settings
+        draw_outline_settings(self, layout)
         
         if GlobalConfig.logic_name == LogicName.WWMI:
             # PerComponent does not invoke SkeletonMerger, so keep its value
@@ -603,11 +621,12 @@ class MIMINode_Result_Output(MIMINodeBase):
             layout.prop(context.scene.mimi_global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
             layout.prop(context.scene.mimi_global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))
 
-        if GlobalConfig.logic_name != LogicName.CPUSkinning:
+        use_legacy_outline = GlobalConfig.logic_name not in (LogicName.GIMI, LogicName.SRMI, LogicName.HIMI, LogicName.ZZMI) or self.outline_mode == 'LEGACY'
+        if GlobalConfig.logic_name != LogicName.CPUSkinning and use_legacy_outline:
             layout.prop(context.scene.mimi_global_properties,
                         "recalculate_tangent",text=tr("Store Vector-Normalized Normals in TANGENT (Global)"))
 
-        if GlobalConfig.logic_name == LogicName.HIMI:
+        if GlobalConfig.logic_name == LogicName.HIMI and use_legacy_outline:
             layout.prop(context.scene.mimi_global_properties,
                         "recalculate_color",text=tr("Store Arithmetic-Average Normals in COLOR (Global)"))
 
