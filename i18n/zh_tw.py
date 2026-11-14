@@ -21,6 +21,9 @@ Rules for editing this file:
   ``python tools/test_zh_tw_translations.py`` after editing.
 """
 TRANSLATIONS_ZH_TW = {
+    "Skeleton Scale": "骨架縮放",
+    "Scale the in-game merged skeleton; only supported in Merged mode": "縮放遊戲內的合併骨架，僅支援 Merged 模式",
+    "Skeleton Scale requires Merged mode": "骨架縮放僅支援 Merged 模式",
     # Routing consent is separate from bone compatibility and never inferred.
     # Editable atlas allocation and merge approval messages.
     "Solid Color": "純色",

@@ -564,6 +564,14 @@ class MIMINode_Result_Output(MIMINodeBase):
     bl_label = 'Generate Mod'
     bl_icon = 'EXPORT'
 
+    # Store this per output so separate Mods can use independent scales.
+    # Existing blueprints receive Blender's default without any migration.
+    wwmi_skeleton_scale: bpy.props.FloatProperty(
+        name=tr("Skeleton Scale"),
+        description=tr("Scale the in-game merged skeleton; only supported in Merged mode"),
+        default=1.0, min=0.001, soft_max=10.0, precision=3,
+    ) # type: ignore
+
     enable_shapekey: bpy.props.BoolProperty(
         name=tr("Use Shape Key Options"),
         description=tr("Export the checked shape key buffers and runtime control config"),
@@ -584,6 +592,13 @@ class MIMINode_Result_Output(MIMINodeBase):
         draw_shapekey_settings(self, layout)
         
         if GlobalConfig.logic_name == LogicName.WWMI:
+            # PerComponent does not invoke SkeletonMerger, so keep its value
+            # saved but disable the control instead of suggesting it applies.
+            scale_row = layout.row()
+            scale_row.enabled = MIMIGlobalProperties.import_merged_vgmap() == 'MERGED'
+            scale_row.prop(self, "wwmi_skeleton_scale", text=tr("Skeleton Scale"))
+            if not scale_row.enabled:
+                layout.label(text=tr("Skeleton Scale requires Merged mode"), icon='INFO')
             layout.prop(context.scene.mimi_global_properties, "ignore_muted_shape_keys", text=tr("Ignore Muted Shape Keys"))
             layout.prop(context.scene.mimi_global_properties, "apply_all_modifiers", text=tr("Apply All Modifiers"))
             layout.prop(context.scene.mimi_global_properties, "export_add_missing_vertex_groups", text=tr("Auto Add Missing Vertex Groups"))

@@ -198,6 +198,11 @@ def add_commandlist_merge_skeleton_section(ini_builder: M_IniBuilder, draw_ib_mo
     draw_ib = draw_ib_model.draw_ib
     commandlist_section = M_IniSection(M_SectionType.CommandList)
     if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+        # Both skeleton buffers must use the selected output node's scale.
+        # Keep the historical literal for default/legacy blueprint models.
+        blueprint = getattr(draw_ib_model, "blueprint_model", None)
+        scale = float(getattr(blueprint, "wwmi_skeleton_scale", 1.0))
+        scale_text = "1.00" if scale == 1.0 else format(scale, ".6g")
         status_var = scoped_global("merge_status_id", draw_ib)
         commandlist_section.append(scoped_section("CommandListMergeSkeleton", draw_ib))
 
@@ -207,7 +212,7 @@ def add_commandlist_merge_skeleton_section(ini_builder: M_IniBuilder, draw_ib_mo
         commandlist_section.append("  if vs-cb4 == " + BONE_DATA_FILTER_INDEX)
         commandlist_section.append("    cs-cb8 = ref vs-cb4")
         commandlist_section.append("    cs-u6 = " + scoped_name("ResourceMergedSkeletonRW", draw_ib))
-        commandlist_section.append("    $\\WWMIv1\\custom_mesh_scale = 1.00")
+        commandlist_section.append("    $\\WWMIv1\\custom_mesh_scale = " + scale_text)
         commandlist_section.append("    run = CustomShader\\WWMIv1\\SkeletonMerger")
         commandlist_section.append("    " + status_var + " = 1")
         commandlist_section.append("  endif")
@@ -221,7 +226,7 @@ def add_commandlist_merge_skeleton_section(ini_builder: M_IniBuilder, draw_ib_mo
         )
         commandlist_section.append("    cs-cb8 = ref vs-cb3")
         commandlist_section.append("    cs-u6 = " + scoped_name("ResourceExtraMergedSkeletonRW", draw_ib))
-        commandlist_section.append("    $\\WWMIv1\\custom_mesh_scale = 1.00")
+        commandlist_section.append("    $\\WWMIv1\\custom_mesh_scale = " + scale_text)
         commandlist_section.append("    run = CustomShader\\WWMIv1\\SkeletonMerger")
         commandlist_section.append("    " + status_var + " = 2")
         commandlist_section.append("  endif")

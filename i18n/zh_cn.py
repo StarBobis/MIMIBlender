@@ -17,6 +17,9 @@ Rules for editing this file:
 """
 
 TRANSLATIONS_ZH_CN = {
+    "Skeleton Scale": "骨架缩放",
+    "Scale the in-game merged skeleton; only supported in Merged mode": "缩放游戏内的合并骨架，仅支持 Merged 模式",
+    "Skeleton Scale requires Merged mode": "骨架缩放仅支持 Merged 模式",
     # Routing consent is separate from bone compatibility and never inferred.
     # Editable atlas allocation and merge approval messages.
     "Solid Color": "纯色",

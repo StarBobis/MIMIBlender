@@ -376,6 +376,47 @@ class WWMIComponentTests(unittest.TestCase):
 
 
 class WWMISkeletonMergeGuardTests(unittest.TestCase):
+    def test_output_node_scale_reaches_both_skeleton_merges(self):
+        # Build real output nodes so RNA defaults and per-node storage are
+        # exercised, rather than injecting the final exporter value directly.
+        from MIMIBlender.blueprint.blueprint_node_base import MIMIBlueprintTree
+        from MIMIBlender.model.blueprint_model import BluePrintModel
+        tree = bpy.data.node_groups.new('wwmi_scale_test', MIMIBlueprintTree.bl_idname)
+        try:
+            first = tree.nodes.new('MIMINode_Result_Output')
+            second = tree.nodes.new('MIMINode_Result_Output')
+            self.assertEqual(first.wwmi_skeleton_scale, 1.0)
+            second.wwmi_skeleton_scale = 1.375
+            # Select the second output explicitly: reading the first output
+            # or a scene-global setting would export the wrong Mod scale.
+            blueprint = BluePrintModel(tree=tree, output_node=second)
+            model = make_model()
+            model.blueprint_model = blueprint
+            ini = M_IniBuilder()
+            with patch.object(blend_remap.MIMIGlobalProperties, 'import_merged_vgmap', return_value='MERGED'):
+                blend_remap.add_commandlist_merge_skeleton_section(ini, model)
+            lines = [line.strip() for line in render_lines(ini)]
+            # Both regular and extra bone buffers need the same multiplier;
+            # scaling only one can break outline and anti-aliasing passes.
+            scale_line = '$\\WWMIv1\\custom_mesh_scale = 1.375'
+            self.assertEqual(lines.count(scale_line), 2)
+            self.assertEqual(first.wwmi_skeleton_scale, 1.0)
+            # Switching to PerComponent must stop emitting the merged API,
+            # even while the node retains its saved non-default multiplier.
+            component_ini = M_IniBuilder()
+            with patch.object(blend_remap.MIMIGlobalProperties, 'import_merged_vgmap', return_value='PER_COMPONENT'):
+                blend_remap.add_commandlist_merge_skeleton_section(component_ini, model)
+            self.assertNotIn('custom_mesh_scale', '\n'.join(render_lines(component_ini)))
+        finally:
+            # Remove only fixture data; never save or reopen the user's file.
+            bpy.data.node_groups.remove(tree)
+
+    def test_legacy_model_keeps_default_skeleton_scale(self):
+        # Synthetic/legacy callers without the new blueprint setting must
+        # retain the previous default in both runtime dispatches.
+        lines = self.merge_lines()
+        self.assertEqual(sum(line.strip() == '$\\WWMIv1\\custom_mesh_scale = 1.00' for line in lines), 2)
+
     """The merge shader copies whatever is in cs-cb8 without validating it."""
 
     def merge_lines(self):

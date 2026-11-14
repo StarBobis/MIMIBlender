@@ -114,6 +114,10 @@ class BluePrintModel:
         if not output_node:
             raise ValueError("The current blueprint is missing the Generate Mod output node")
 
+        # Snapshot the selected output, never the first output or scene state.
+        # The fallback preserves older callers and saved output nodes.
+        self.wwmi_skeleton_scale = float(getattr(output_node, "wwmi_skeleton_scale", 1.0))
+
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])
 
