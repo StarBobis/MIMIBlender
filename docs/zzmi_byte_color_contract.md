@@ -16,6 +16,37 @@ The four-policy Blender regression additionally checks all combinations,
 cross-preset independence and rejection of unknown values. This does not
 establish game rendering correctness for untested games.
 
+## Custom-layer conversion follow-up
+
+Explicit policies no longer block export solely because a custom model uses
+the other Blender storage type. Conversion reads native payload values from
+`color_srgb` for BYTE_COLOR or `color` for FLOAT_COLOR, then writes and reads
+the configured API on a scratch layer of the destination storage type.
+This is numeric payload migration: a native byte value of 128 remains 128
+when exported as FLOATCOLOR_LINEAR. It does not infer the API used to author
+the source layer or restore values changed by older workflows.
+
+The scratch mesh contains color samples only and is always removed. Source
+geometry, layer storage, domain and values remain unchanged, including for
+direct parser callers. POINT-domain colors are expanded to face corners.
+Matched storage continues using the configured API; legacy metadata keeps
+its previous interpretation. Byte destinations necessarily quantize and
+clamp values to their representable range.
+
+Seven color tests and nine outline tests pass. The custom-layer test covers
+both source storages, POINT/CORNER domains, both opposite-storage target
+spaces, native value preservation and scratch mesh cleanup.
+
+The actual saved `belle school.blend` body was also run through production
+Generate Mod using a temporary blueprint and a scratch copy of workspace
+metadata requiring FLOATCOLOR_LINEAR. Export completed from its original
+BYTE_COLOR layer, without changing source geometry, weights or either color
+API view. All COLOR bytes match the supplied working Mod; indices, position,
+normals, UVs and skinning fields match as well. This body-buffer check does
+not reproduce the user's original texture bindings or establish game rendering
+correctness. Retained scripts/results: `D:/Dev/SSMT5/tmp/zzmi-holes/`, including
+`full-auto-converted/result.json` and `comparison.json`.
+
 See the separate MIMITools manual page
 `docs/newbie/MIMIBlender/color-types/color-types.md` for the editable per-game
 record, fixed upstream versions and blank entries awaiting investigation.

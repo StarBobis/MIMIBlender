@@ -76,16 +76,53 @@ class ByteControlColors(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unknown BlenderColorType'):
             resolve_color_policy('BYTECOLOR_TYPO', 'ZZMI')
 
-    def test_policy_change_does_not_silently_reinterpret_old_layer(self):
-        # Explicit float metadata cannot silently read a legacy byte layer.
-        # Users must convert/reimport instead of merely renaming the policy.
-        mesh = bpy.data.meshes.new('mismatched_color_fixture')
-        mesh.from_pydata([(0,0,0), (1,0,0), (0,1,0)], [], [(0,1,2)])
-        mesh.color_attributes.new(name='COLOR', type='BYTE_COLOR', domain='CORNER')
-        color = element('COLOR', 'R8G8B8A8_UNORM', 4)
+    def test_custom_layer_conversion_preserves_payload_and_source(self):
+        # Both source storages and domains must work with all explicit targets.
+        # Two triangles share vertices, making POINT-to-CORNER mapping observable.
+        for source_storage in ('BYTE_COLOR', 'FLOAT_COLOR'):
+            for domain in ('POINT', 'CORNER'):
+                mesh = bpy.data.meshes.new('custom_color_fixture')
+                mesh.from_pydata([(0,0,0), (1,0,0), (1,1,0), (0,1,0)], [], [(0,1,2), (0,2,3)])
+                layer = mesh.color_attributes.new(name='COLOR', type=source_storage, domain=domain)
+                native_api = 'color_srgb' if source_storage == 'BYTE_COLOR' else 'color'
+                payload = np.array([[128,64,192,73], [32,224,96,128], [255,0,128,255],
+                                    [0,128,255,0], [192,64,128,224], [96,32,224,64]], np.float32)
+                payload = payload[:len(layer.data)] / 255
+                layer.data.foreach_set(native_api, payload.ravel())
+                original = np.empty_like(payload)
+                layer.data.foreach_get(native_api, original.ravel())
+                meshes_before = set(bpy.data.meshes)
+                for policy, (target_storage, target_api) in COLOR_POLICIES.items():
+                    if target_storage == source_storage:
+                        continue  # Matched-storage policy tests already cover this case.
+                    with self.subTest(source=source_storage, domain=domain, policy=policy):
+                        color = element('COLOR', 'R8G8B8A8_UNORM', 4)
+                        color.BlenderColorType = policy
+                        result = ObjBufferHelper._parse_color(mesh, len(mesh.loops), 'COLOR', color)
+                        expected = original
+                        if domain == 'POINT':
+                            expected = expected[[loop.vertex_index for loop in mesh.loops]]
+                        # Byte destinations have unavoidable storage quantization.
+                        # In particular BYTE->FLOAT must keep 128, never turn it into 55.
+                        np.testing.assert_allclose(result, np.rint(expected*255), atol=1)
+                        after = np.empty_like(original)
+                        layer.data.foreach_get(native_api, after.ravel())
+                        np.testing.assert_array_equal(after, original)
+                        self.assertEqual(layer.data_type, source_storage)
+                        self.assertEqual(layer.domain, domain)
+                        self.assertEqual(set(bpy.data.meshes), meshes_before)
+
+    def test_point_colors_with_matching_storage_expand_to_corners(self):
+        # A custom model may use POINT colors even when its storage already matches.
+        mesh = bpy.data.meshes.new('point_color_fixture')
+        mesh.from_pydata([(0,0,0), (1,0,0), (1,1,0), (0,1,0)], [], [(0,1,2), (0,2,3)])
+        layer = mesh.color_attributes.new(name='COLOR', type='FLOAT_COLOR', domain='POINT')
+        values = np.array([[.1,.2,.3,.4], [.2,.3,.4,.5], [.3,.4,.5,.6], [.4,.5,.6,.7]], np.float32)
+        layer.data.foreach_set('color', values.ravel())
+        color = element('COLOR', 'R32G32B32A32_FLOAT', 16)
         color.BlenderColorType = 'FLOATCOLOR_LINEAR'
-        with self.assertRaisesRegex(ValueError, 'requires FLOAT_COLOR'):
-            ObjBufferHelper._parse_color(mesh, 3, 'COLOR', color)
+        result = ObjBufferHelper._parse_color(mesh, len(mesh.loops), 'COLOR', color)
+        np.testing.assert_array_equal(result, values[[0,1,2,0,2,3]])
 
     def test_all_bytes_import_export(self):
         # Every source vertex participates in one nondegenerate triangle.

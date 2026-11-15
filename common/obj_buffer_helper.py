@@ -400,6 +400,43 @@ class ObjBufferHelper:
 
 
     @staticmethod
+    def _read_color_for_export(mesh, layer, hint, logic_name):
+        """Convert mismatched explicit storage without modifying the source layer."""
+        storage, color_property = resolve_color_policy(hint, logic_name, layer.data_type)
+        convert = hint.strip().upper() in COLOR_POLICIES and storage != layer.data_type
+        # A custom byte layer exposes its native payload through color_srgb;
+        # a float layer exposes it through color. Preserve those numbers when
+        # adapting to a different explicit representation, not their appearance.
+        source_property = color_property
+        if convert:
+            source_property = 'color_srgb' if layer.data_type == 'BYTE_COLOR' else 'color'
+        values = numpy.empty((len(layer.data), 4), dtype=numpy.float32)
+        layer.data.foreach_get(source_property, values.ravel())
+
+        if convert:
+            # Use Blender's actual destination storage/API for conversion and
+            # quantization. The scratch mesh has only color samples, no source
+            # geometry, and is removed even if conversion raises an exception.
+            temporary_mesh = bpy.data.meshes.new('mimi_export_color_conversion')
+            try:
+                temporary_mesh.vertices.add(len(values))
+                temporary_layer = temporary_mesh.color_attributes.new(
+                    name='COLOR', type=storage, domain='POINT')
+                temporary_layer.data.foreach_set(color_property, values.ravel())
+                temporary_layer.data.foreach_get(color_property, values.ravel())
+            finally:
+                bpy.data.meshes.remove(temporary_mesh)
+            print(f'Automatically converted {layer.name}: {layer.data_type} -> {hint} for export')
+
+        # Custom models can store color per vertex rather than per face corner.
+        # Expand after conversion so shared vertices keep identical color values.
+        if layer.domain == 'POINT':
+            loop_vertices = numpy.empty(len(mesh.loops), dtype=numpy.int32)
+            mesh.loops.foreach_get('vertex_index', loop_vertices)
+            values = values[loop_vertices]
+        return values
+
+    @staticmethod
     def _parse_color(mesh, mesh_loops_length, d3d11_element_name, d3d11_element):
         if d3d11_element_name in mesh.color_attributes:
             color_data = mesh.color_attributes[d3d11_element_name].data
@@ -407,21 +444,11 @@ class ObjBufferHelper:
             color_data = None
 
         if color_data is not None:
-            # Blender's color-layer read API always returns 0-1 RGBA floats; handle the intermediate result as float32 here.
-            result = numpy.zeros(mesh_loops_length, dtype=(numpy.float32, 4))
-            # result = numpy.zeros((mesh_loops_length,4), dtype=(numpy.float32))
-
-            # Explicit policy owns the API view; the preset is legacy fallback only.
-            # Actual storage helps old projects whose metadata omitted the hint.
-            storage = mesh.color_attributes[d3d11_element_name].data_type
+            # Explicit policy owns conversion; legacy files retain their API view.
+            # Only scratch color samples are converted, even for a direct caller.
             hint = getattr(d3d11_element, 'BlenderColorType', '')
-            expected_storage, color_property = resolve_color_policy(hint, GlobalConfig.logic_name, storage)
-            # Changing a workspace policy does not convert an existing Blender layer.
-            # Reject that mismatch before an old byte project is read as linear float.
-            if hint.strip().upper() in COLOR_POLICIES and storage != expected_storage:
-                raise ValueError(f'{d3d11_element_name}: {hint} requires {expected_storage}, found {storage}. '
-                                 'Reimport the model or explicitly convert its color layer before export.')
-            color_data.foreach_get(color_property, result.ravel())
+            result = ObjBufferHelper._read_color_for_export(
+                mesh, mesh.color_attributes[d3d11_element_name], hint, GlobalConfig.logic_name)
             
             if d3d11_element.Format == 'R16G16B16A16_FLOAT':
                 result = result.astype(numpy.float16)
