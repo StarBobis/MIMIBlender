@@ -202,6 +202,13 @@ class SubMeshModel:
             target_active.select_set(True)
             bpy.context.view_layer.objects.active = target_active
 
+        # Join retains only the active object's properties. Merge every source
+        # table explicitly so segmented imports keep their full identity range.
+        cloth_sources = None
+        if GlobalConfig.logic_name == LogicName.YYSLS:
+            from ..common.yysls_cloth_map import merge_sources
+            cloth_sources = merge_sources(submesh_temp_obj_list)
+
         # Merge the objects
         ObjUtils.join_objects(bpy.context, submesh_temp_obj_list)
         
@@ -211,6 +218,12 @@ class SubMeshModel:
         # Rename it to the expected name for the steps that follow
         merged_obj_name = "TEMP_SUBMESH_MERGED_" + self.submesh_name
         ObjUtils.rename_object(submesh_merged_obj, merged_obj_name)
+
+        # The immutable table validates IDs after evaluated topology changes.
+        if cloth_sources is not None:
+            from ..common.yysls_cloth_map import TABLE
+            import json
+            submesh_merged_obj[TABLE] = json.dumps(cloth_sources)
 
         # Check and verify that no attributes are missing
         ObjBufferHelper.check_and_verify_attributes(obj=submesh_merged_obj, d3d11_game_type=self.d3d11_game_type)

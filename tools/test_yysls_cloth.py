@@ -1,33 +1,8 @@
-"""Regression tests for YYSLS draw-local cloth bypass, without Blender.
+"""Exercise native-cloth INI generation with the real exporter and serializer.
 
-Load the actual exporter, section builder, and shared draw-line helper.
-Only Blender-facing dependencies and mesh objects are replaced by fixtures.
-A small command-list model checks control-flow outcomes, not the 3Dmigoto
-parser or GPU state restoration implementation. The separate shader test
-compiles the real asset and can compare it with the working ShaderFixes VS.
-
-Coverage is intentionally separated into generation and shader validation:
-- Identification metadata must not contain a run or handling command.
-- A matching shader installs the custom VS before all submesh resources.
-- One shader scope covers every conditional draw in that submesh.
-- Other shaders keep the same draw arguments and their own shader object.
-- Disabling costume mods prevents skip, resource binding, and custom draws.
-- A hidden submesh produces no custom shader invocation at all.
-- Existing object conditions remain around their draws in the shared list.
-- Per-object texture replacement remains immediately before its draw.
-- Per-object texture restoration remains immediately after its draw.
-- Index offsets and base-vertex values are never reconstructed or guessed.
-- Multiple DrawIBs produce one shared marker and distinct custom sections.
-- Packaging copies a portable asset beside the generated INI.
-- No exported path depends on the developer's game directory.
-
-The command-list model implements only the emitted conditional subset.
-It deliberately does not pretend to validate 3Dmigoto's parser or driver.
-In particular, VS restoration is a documented CustomShader contract here.
-Real-game acceptance should check an unrelated mesh immediately afterwards.
-The actual ShaderOverride only identifies a hash; it never suppresses a draw.
-The actual TextureOverride still requires its original index-buffer match.
-Therefore the simulation starts only after selecting the tested override.
+Blender dependencies are replaced by fixtures. The command model checks scope,
+unknown-pass preservation, object conditions, map cleanup and packaging. Actual
+GPU decoding and Blender vertex provenance have separate regression programs.
 """
 
 import ast
@@ -111,7 +86,7 @@ def setup_modules():
     install_module("games.base.sections", add_resource_texture_sections=lambda **kwargs: None)
     builder = load_module("common.m_ini_builder", "common/m_ini_builder.py")
     load_module("games.base.standard_exporter", "games/base/standard_exporter.py")
-    cloth = load_module("games.yysls_cloth", "games/yysls_cloth.py")
+    cloth = load_module("games.yysls_cloth_preserve", "games/yysls_cloth_preserve.py")
     load_module("games.yysls_shapekeys", "games/yysls_shapekeys.py")
     exporter = load_module("games.yysls", "games/yysls.py")
     return config, builder, cloth, exporter.ExportYYSLS
@@ -173,7 +148,7 @@ def parse_sections(builder):
     return result
 
 
-def simulate(sections, section_name, shader=823114, enabled=1, variant=1, events=None):
+def simulate(sections, section_name, shader=823116, enabled=1, variant=1, events=None):
     """Model the emitted subset; this is explicitly not a game integration test.
 
     Conditions are evaluated as the generated draw list executes.
@@ -202,6 +177,8 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1, events
         events = []
 
     def condition(text):
+        if " || " in text:
+            return any(condition(term) for term in text.split(" || "))
         if " == " in text:
             key, value = text.split(" == ")
             return state[key] == int(value)
@@ -253,215 +230,80 @@ def simulate(sections, section_name, shader=823114, enabled=1, variant=1, events
 
 
 class ClothTests(unittest.TestCase):
-    def test_shadow_marker_pairs_each_visible_draw_and_preserves_textures(self):
-        # The shadow path must use the original shader while receiving markers.
-        # Multiple objects need separate bind/reset pairs, not a submesh flag.
-        first = make_draw("300,17,-2", "$variant == 1")
-        first.texture_lines = ["ps-t0 = ResourceObject"]
-        first.restore_lines = ["ps-t0 = ResourceOriginal"]
-        second = make_draw("6,924,5", "$variant == 1")
-        _, builder = build([make_model(draws=[first, second])])
-        sections = parse_sections(builder)
-        trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0",
-                                   shader=CLOTH.SHADOW_VS_FILTER)
-        self.assertEqual(restored, CLOTH.SHADOW_VS_FILTER)
-        draws = [i for i, event in enumerate(trace) if event[0] == "draw"]
-        self.assertEqual(len(draws), 2)
-        for index in draws:
-            self.assertEqual(trace[index - 1],
-                             ("vs-t119", "ref " + CLOTH.SHADOW_MARKER_RESOURCE))
-            self.assertEqual(trace[index + 1], ("vs-t119", "null"))
-        index = draws[0]
-        self.assertEqual(trace[index - 2], ("ps-t0", "ResourceObject"))
-        self.assertEqual(trace[index + 2], ("ps-t0", "ResourceOriginal"))
-
-    def test_shadow_marker_never_leaks_from_disabled_or_unselected_objects(self):
-        # F6 and existing object selection still gate the whole injected draw.
-        # Neither a marker binding nor its reset should execute on these paths.
-        draw = make_draw(condition="$variant == 1")
-        _, builder = build([make_model(draws=[draw])])
-        sections = parse_sections(builder)
-        for enabled, variant in ((0, 1), (1, 0)):
-            trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0",
-                                shader=CLOTH.SHADOW_VS_FILTER,
-                                enabled=enabled, variant=variant)
-            self.assertFalse(any(event[0] in ("draw", "vs-t119") for event in trace))
-        for shader in (0, 123456, CLOTH.CLOTH_VS_FILTER):
-            trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader)
-            self.assertFalse(any(event[0] == "vs-t119" for event in trace))
-
-    def test_exact_hash_marker_has_no_render_commands(self):
-        # Merely encountering the shader on another mesh must do nothing.
+    # These checks exercise the real exporter and serializer. The small command
+    # model verifies scope and side effects, not D3D driver execution.
+    def test_native_cloth_resources_cover_both_passes(self):
         _, builder = build([make_model()])
         sections = parse_sections(builder)
-        marker = sections["ShaderOverride_YYSLS_ClothVS"]
-        self.assertEqual(marker, ["hash = c01b8886cbc05321", "allow_duplicate_hash = true", "filter_index = 823114"])
-        self.assertEqual(simulate(sections, "ShaderOverride_YYSLS_ClothVS")[0], [])
+        for _, shader_filter, filename, _ in CLOTH.CLOTH_SHADER_VARIANTS:
+            events = []
+            trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0",
+                                       shader=shader_filter, events=events)
+            self.assertEqual(restored, shader_filter)
+            self.assertIn(("draw", filename, "924,0,0"), trace)
+            self.assertIn(("vs-t118", "ref Resource31e22cc3YYSLSClothMap"), trace)
+            self.assertEqual(trace[-1], ("vs-t118", "null"))
+            self.assertFalse(any(e[0] == "vs-t119" for e in trace))
+            binds = [e for e in events if e[0] == "bind"]
+            self.assertTrue(all(e[1] == filename for e in binds))
+            self.assertTrue(binds[0][2].startswith("vs-t118 = ref"))
 
-    def test_matching_shader_is_scoped_to_one_draw(self):
-        # After the custom draw, a subsequent mesh still sees the original VS.
+    def test_unknown_pass_keeps_original_draw_untouched(self):
         _, builder = build([make_model()])
-        trace, restored = simulate(parse_sections(builder), "TextureOverride_LOD0.31e22cc3_0")
-        self.assertEqual([x for x in trace if x[0] == "draw"], [("draw", CLOTH.CLOTH_SHADER_FILENAME, "924,0,0")])
-        self.assertEqual(restored, CLOTH.CLOTH_VS_FILTER)
-
-    def test_other_shader_and_unbound_shader_never_use_custom_vs(self):
-        # Other passes retain their original Mod draw, not the original mesh.
-        _, builder = build([make_model()])
-        for shader in (0, 1, 123456):
-            trace, restored = simulate(parse_sections(builder), "TextureOverride_LOD0.31e22cc3_0", shader=shader)
-            self.assertIn(("draw", shader, "924,0,0"), trace)
+        for shader in (0, 1, 123456, 823114):
+            trace, restored = simulate(parse_sections(builder),
+                                      "TextureOverride_LOD0.31e22cc3_0", shader=shader)
+            self.assertEqual(trace, [])
             self.assertEqual(restored, shader)
 
-    def test_disabled_mod_has_no_skip_bind_or_draw(self):
-        """Require a genuinely empty command trace when the mod is disabled.
+    def test_disabled_mod_has_no_side_effects(self):
+        for hidden in (True, False):
+            _, builder = build([make_model(hidden=hidden)])
+            for _, shader, _, _ in CLOTH.CLOTH_SHADER_VARIANTS:
+                self.assertEqual(simulate(parse_sections(builder),
+                    "TextureOverride_LOD0.31e22cc3_0", shader=shader, enabled=0)[0], [])
 
-        Testing only draw counts would miss a stray handling=skip command.
-        Resource assignments could also alter later game draws without drawing.
-        Both populated and intentionally hidden parts must pass this check.
-        """
-        # This includes disabling an intentionally hidden submesh via F6.
-        for hidden in (False, True):
-            _, builder = build([make_model(hidden=hidden)], keys=True)
-            trace, _ = simulate(parse_sections(builder), "TextureOverride_LOD0.31e22cc3_0", enabled=0)
-            self.assertEqual(trace, [])
-
-    def test_hidden_mesh_never_invokes_custom_shader(self):
-        # Hiding a part skips it but does not need to replace a shader object.
-        _, builder = build([make_model(hidden=True)])
-        sections = parse_sections(builder)
-        self.assertFalse(any(name.startswith("CustomShader") for name in sections))
-        trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0")
-        self.assertEqual(trace, [("handling", "skip"), ("ib", "null")])
-
-    def test_object_conditions_offsets_and_texture_restore_survive(self):
-        """Exercise the shared helper's most order-sensitive command sequence.
-
-        The wrapper must not lift an object's draw outside its condition.
-        Both shader-selection branches share the same texture setup/cleanup.
-        A negative base vertex is deliberately retained as a literal argument.
-        """
-        # Both draw arguments and surrounding texture commands are significant.
+    def test_object_conditions_offsets_and_texture_cleanup_survive(self):
         draw = make_draw("300,17,-2", "$variant == 1")
         draw.texture_lines = ["ps-t0 = ResourceObject"]
         draw.restore_lines = ["ps-t0 = ResourceOriginal"]
         _, builder = build([make_model(draws=[draw])])
         sections = parse_sections(builder)
-        name = "TextureOverride_LOD0.31e22cc3_0"
-        trace, _ = simulate(sections, name, variant=1)
-        index = trace.index(("draw", CLOTH.CLOTH_SHADER_FILENAME, "300,17,-2"))
-        self.assertEqual(trace[index - 1], ("ps-t0", "ResourceObject"))
-        self.assertEqual(trace[index + 1], ("ps-t0", "ResourceOriginal"))
-        trace, _ = simulate(sections, name, variant=0)
-        self.assertFalse(any(x[0] in ("draw", "ps-t0") for x in trace))
+        for _, shader, filename, _ in CLOTH.CLOTH_SHADER_VARIANTS:
+            trace, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader)
+            i = trace.index(("draw", filename, "300,17,-2"))
+            self.assertEqual(trace[i-1], ("ps-t0", "ResourceObject"))
+            self.assertEqual(trace[i+1], ("ps-t0", "ResourceOriginal"))
+            off, _ = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader, variant=0)
+            self.assertFalse(any(e[0] == "draw" for e in off))
+            self.assertEqual(off[-1], ("vs-t118", "null"))
 
-    def test_multiple_draws_and_drawibs_share_only_the_hash_marker(self):
-        """Check both intra-submesh and inter-DrawIB command naming.
-
-        A single mod can contain several original index-buffer hashes.
-        Identification is emitted by finalization, not by each DrawIB hook.
-        Consecutive draws share one shader scope until the submesh finishes.
-        """
-        # No duplicate section names, no global parameter slot, no stale flag.
-        first = make_model(draws=[make_draw(), make_draw("6,924,5")])
-        _, builder = build([first, make_model("12345678")])
+    def test_markers_only_identify_and_models_have_independent_maps(self):
+        _, builder = build([make_model(), make_model("e92032c5")])
         sections = parse_sections(builder)
-        self.assertEqual(sum(n.startswith("ShaderOverride") for n in sections), len(CLOTH.CLOTH_SHADER_VARIANTS))
-        self.assertEqual(
-            sum(n.startswith("CustomShader") for n in sections),
-            len(CLOTH.CLOTH_SHADER_VARIANTS) * 2,
-        )
-        self.assertEqual(sum(n.startswith("CommandList_YYSLS_Draw_") for n in sections), 2)
-        events = []
-        trace, restored = simulate(sections, "TextureOverride_LOD0.31e22cc3_0", events=events)
-        self.assertEqual(sum(x[0] == "draw" for x in trace), 2)
-        self.assertEqual(sum(x[0] == "vs_enter" for x in events), 1)
-        self.assertEqual(sum(x[0] == "vs_restore" for x in events), 1)
-        self.assertEqual(events[-1][0], "vs_restore")
-        self.assertEqual(restored, CLOTH.CLOTH_VS_FILTER)
+        for name, lines in sections.items():
+            if name.startswith("ShaderOverride"):
+                self.assertTrue(all(x.startswith(("hash =", "allow_duplicate_hash =", "filter_index =")) for x in lines))
+        trace, _ = simulate(sections, "TextureOverride_LOD0.e92032c5_0")
+        self.assertIn(("vs-t118", "ref Resourcee92032c5YYSLSClothMap"), trace)
 
-    def test_shader_installed_before_all_resource_bindings(self):
-        """Catch the reported late-switch failure with binding-time observations.
-
-        Checking only the active shader at drawindexed allowed the old order.
-        Include automatic submesh textures and conditional per-object textures,
-        as well as all three vertex buffers and the index buffer.
-        """
-        draw = make_draw(condition="$variant == 1")
-        draw.texture_lines = ["ps-t0 = ResourceObject"]
-        draw.restore_lines = ["ps-t0 = ResourceOriginal"]
-        model = make_model(draws=[draw])
-        model.get_submesh_texture_markup_info_list = lambda sub: [
-            NS(mark_type="Slot", mark_slot="ps-t8", get_resource_name=lambda: "ResourceSubmesh")]
-        _, builder = build([model])
-        sections = parse_sections(builder)
-        for shader in (CLOTH.CLOTH_VS_FILTER, 123456):
-            # The replacement route binds identical resources to its own VS
-            # asset; the unknown path keeps the caller's shader instead.
-            events = []
-            simulate(sections, "TextureOverride_LOD0.31e22cc3_0", shader=shader, events=events)
-            bound = [event for event in events if event[0] == "bind"]
-            if shader == CLOTH.CLOTH_VS_FILTER:
-                expected_shader = CLOTH.CLOTH_SHADER_FILENAME
-            else:
-                expected_shader = shader
-            self.assertEqual(len(bound), 7)
-            self.assertTrue(all(event[1] == expected_shader for event in bound))
-            if shader == CLOTH.CLOTH_VS_FILTER:
-                self.assertEqual(events[0][0], "vs_enter")
-                self.assertEqual(events[-1][0], "vs_restore")
-            else:
-                self.assertFalse(any(event[0].startswith("vs_") for event in events))
-
-    def test_parent_only_routes_and_both_paths_share_one_body(self):
-        """Assert the structural invariant independently of command simulation.
-
-        No mod resource assignment may precede the shader check in the parent.
-        The CustomShader delegates setup and drawing instead of drawing alone.
-        The fallback calls the exact same body without replacing any shader.
-        """
-        _, builder = build([make_model()])
-        sections = parse_sections(builder)
-        suffix = "LOD0.31e22cc3_0"
-        parent = sections["TextureOverride_" + suffix]
-        custom = "CustomShader_YYSLS_NoCloth_" + suffix
-        shared = "CommandList_YYSLS_Draw_" + suffix
-        self.assertFalse(any(line.startswith(("vb", "ib =", "ps-t", "vs-t", "drawindexed")) for line in parent))
-        self.assertEqual(sections[custom], ["vs = " + CLOTH.CLOTH_SHADER_FILENAME, "run = " + shared])
-        self.assertIn("run = " + custom, parent)
-        self.assertIn("run = " + shared, parent)
-        self.assertTrue(sections[shared][0].startswith("vb2 = "))
-        self.assertIn("drawindexed = 924,0,0", sections[shared])
-
-    def test_full_export_packages_shader_and_serializes_marker(self):
-        """Check the production serializer as well as in-memory sections.
-
-        Section types omitted by serialization would silently break filtering.
-        Exported shader bytes must match the version shipped with the addon.
-        Temporary files stay outside the real game and are removed afterwards.
-        """
-        # Exercise the actual StandardExporter.export flow in a temporary mod.
-        # No buffer fixture writes are required for checking INI serialization.
-        with tempfile.TemporaryDirectory() as directory:
+    def test_full_export_packages_all_assets_and_map(self):
+        # All output lives in the repository tmp directory, outside live Mods.
+        output_root = ROOT / "tmp"
+        output_root.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=output_root) as directory:
             CONFIG.output = directory
             exporter, _ = build([make_model()])
             exporter.export()
             output = Path(directory)
-            self.assertEqual((output / CLOTH.CLOTH_SHADER_FILENAME).read_bytes(),
-                             (ROOT / "resources" / CLOTH.CLOTH_SHADER_FILENAME).read_bytes())
+            for _, _, filename, _ in CLOTH.CLOTH_SHADER_VARIANTS:
+                self.assertEqual((output / filename).read_bytes(),
+                                 (ROOT / "resources" / filename).read_bytes())
             text = (output / "fixture.ini").read_text()
-            self.assertEqual(text.count("[ShaderOverride_YYSLS_ClothVS]"), 1)
-            self.assertIn("if $costume_mods", text)
-            self.assertIn("if vs == 823114", text)
-            # The shadow family is identified by the package's structural rule,
-            # not by another hardcoded hash marker emitted into the Mod.
-            self.assertIn("if vs == 823115", text)
-            self.assertNotIn("filter_index = 823115", text)
-            self.assertIn("vs-t119 = ref ResourceYYSLSShadowMarkerV2", text)
-            self.assertIn("vs-t119 = null", text)
-            self.assertIn("remove BOTH marker guards", text)
-            self.assertIn("Keep the drawindexed line", text)
-            self.assertNotIn("ShaderFixes\\", text)
+            self.assertIn("[Resource31e22cc3YYSLSClothMap]", text)
+            self.assertIn("format = R32_UINT", text)
+            self.assertNotIn("vs-t119", text)
+            self.assertNotIn("no_cloth.hlsl", text)
 
 
 if __name__ == "__main__":

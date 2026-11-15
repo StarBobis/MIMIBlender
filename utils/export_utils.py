@@ -142,6 +142,13 @@ class ExportUtils:
             dtype=element_context.total_structured_dtype,
             outline_options=outline_options,
         )
+        # Export cloth identity in the exact same unique-loop order as the VB.
+        # Ordinary games never create or consume this additional category.
+        if GlobalConfig.logic_name == LogicName.YYSLS:
+            from ..common.yysls_cloth_map import export_map
+            category_buffer_dict["YYSLSClothMap"] = export_map(
+                obj, element_context.mesh, index_loop_id_dict)
+
         # Resolve ownership while the exact evaluated buffer mesh is still available.
         # Keep legacy standalone callers unchanged when no draw list is supplied.
         # Reordering IB triangles does not change the vertex/loop maps used by keys.

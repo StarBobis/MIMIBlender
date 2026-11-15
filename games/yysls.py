@@ -1,7 +1,7 @@
 """
 YYSLS (Where Winds Meet) mod exporter.
 
-IB overrides, resource naming and draw-scoped cloth bypass are YYSLS-specific.
+IB overrides, resource naming and draw-scoped native cloth mapping are YYSLS-specific.
 The custom VS variants are used only for mod draws matching their verified
 original hashes. Other shader passes keep their original VS; the shared export
 pipeline remains responsible for buffers, texture automation, and branch keys.
@@ -15,12 +15,12 @@ from ..common.m_ini_helper import M_IniHelper
 from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
 from .base.standard_exporter import StandardExporter
 from .base import sections
-from . import yysls_cloth
+from . import yysls_cloth_preserve as yysls_cloth
 from . import yysls_shapekeys
 
 
 class ExportYYSLS(StandardExporter):
-    """YYSLS exporter with a hash-checked, draw-local no-cloth VS."""
+    """YYSLS exporter with hash-checked, draw-local native cloth shaders."""
 
     def generate_buffer_files(self):
         # Package the shader with each mod instead of installing a global fix.
@@ -81,12 +81,12 @@ class ExportYYSLS(StandardExporter):
             # Object branch conditions below still control their actual draws.
             texture_override_ib_section.append("; Disabled mods leave the game draw untouched.")
             texture_override_ib_section.append("if $costume_mods")
-            texture_override_ib_section.append("handling = skip")
 
             # Skip Draw: hide this Submesh inside the same costume_mods gate,
             # so a disabled mod still leaves the game draw untouched. The
             # gate must be closed here because no later command may run.
             if is_submesh_skipped(submesh_model):
+                texture_override_ib_section.append("handling = skip")
                 append_skip_draw_comment(texture_override_ib_section, submesh_model)
                 texture_override_ib_section.append("endif")
                 texture_override_ib_section.new_line()
@@ -95,11 +95,18 @@ class ExportYYSLS(StandardExporter):
             # An empty index buffer means the submesh is hidden: null the IB out.
             ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)
             if ib_buf is None or len(ib_buf) == 0:
+                texture_override_ib_section.append("handling = skip")
                 texture_override_ib_section.append("ib = null")
                 # Hidden meshes issue no draw and therefore need no custom VS.
                 texture_override_ib_section.append("endif")
                 texture_override_ib_section.new_line()
                 continue
+
+            # Unknown passes retain the original game draw and source topology.
+            # Never feed an edited VB to an unadapted simulation consumer.
+            recognized = " || ".join("vs == " + str(v[1]) for v in yysls_cloth.CLOTH_SHADER_VARIANTS)
+            texture_override_ib_section.append("if " + recognized)
+            texture_override_ib_section.append("handling = skip")
 
             # Collect resource bindings instead of executing them in the parent.
             # The matching CustomShader must install VS before these commands.
@@ -143,8 +150,10 @@ class ExportYYSLS(StandardExporter):
             # The helper checks the original VS before either command-list path.
             yysls_cloth.append_scoped_submesh(
                 texture_override_ib_section, custom_section, mod_lines,
-                texture_override_name_suffix,
+                texture_override_name_suffix, drawib_model.draw_ib,
             )
+
+            texture_override_ib_section.append("endif")
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
@@ -176,4 +185,12 @@ class ExportYYSLS(StandardExporter):
             resource_vb_section.append("format = DXGI_FORMAT_R32_UINT")
             resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(submesh_model.submesh_name + "-Index.buf"))
             resource_vb_section.new_line()
+        # Source XYZ and source ID occupy four R32_UINT words per output point.
+        # Floats are bit-reinterpreted by HLSL, never numerically converted.
+        resource_vb_section.append("[Resource" + drawib_model.draw_ib + "YYSLSClothMap]")
+        resource_vb_section.append("type = Buffer")
+        resource_vb_section.append("format = R32_UINT")
+        resource_vb_section.append("filename = " + GlobalConfig.ini_buffer_filename(
+            drawib_model.get_category_buffer_filename("YYSLSClothMap")))
+        resource_vb_section.new_line()
         ini_builder.append_section(resource_vb_section)

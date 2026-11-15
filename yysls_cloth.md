@@ -1,3 +1,91 @@
+# YYSLS native cloth source mapping
+
+The production exporter now uses `games/yysls_cloth_preserve.py`. The older
+`games/yysls_cloth.py` and `resources/yysls_no_cloth.hlsl` remain legacy assets;
+they are no longer the default YYSLS export path.
+
+## Data contract
+
+MMT retains native VB index addressing, including prefix records. New extraction
+JSON declares `YYSLSClothSource` version 1, `preserved-index`, `VertexIdBase: 0`.
+Segmented imports add the segment vertex window start, independently of WWMI's
+shape-key offset. The importer records each decoded game-space reference position
+and source ID in POINT attributes plus an independent reference table.
+
+The exporter builds a separate `YYSLSClothMap` category using the evaluated mesh
+and the real unique-output-to-loop map. Each output point has four R32_UINT words:
+reference XYZ float bit patterns, followed by its original simulation vertex ID.
+UV/hard-normal splits share source identity while keeping distinct output points.
+Source tables are merged explicitly before Blender joins objects. Missing IDs,
+conflicting references and interpolated unmapped points reject export.
+
+## Runtime
+
+Known main VS `21bcfc11171589cb` uses filter 823116. Known shadow VS
+`18939b13d3a1abcf` uses the package-compatible filter 823115. A local CustomShader
+binds the map at reserved VS t118 before the shared VB/IB/draw commands, then
+explicitly clears t118. No t119 no-cloth marker is emitted. Unknown VS draws retain
+the original game mesh, without skip or edited buffer assignment.
+
+The shaders retain native t11 simulation and skeleton animation. They address
+simulation with the mapped source ID, and transport the decoded edited-reference
+minus original-reference position offset through the existing skinning path.
+The main pass applies the offset to both current and historical cloth positions.
+This preserves the existing simulation topology; it does not rebuild collisions,
+constraints or cloth topology for newly created geometry. Simulated normals and
+tangent frames remain authoritative for native cloth.
+
+Packed simulation normals and tangent-plane texels require `asuint` before bit
+extraction. They are not numeric float values. A captured word `0x009e3fe9` is
+approximately `1.45e-38` as float, so numeric integer conversion produces zero.
+Normals use three packed bytes; tangent/binormal use signed 16-bit components.
+Zero-vector safeguards remain in both shipped shaders.
+
+## Legacy scene recovery
+
+`common/yysls_cloth_map.py::recover_source_ids` intersects source-position and UV
+candidates with oriented original triangles until stable. It does not assume
+preserved vertex order and refuses any referenced point with ambiguous identity.
+It supports suitable unchanged-position/deletion-only legacy meshes, not arbitrary
+retopology or edited reference positions. Loose points remain -1 and cannot be
+used in exported faces until a source is assigned. Do not infer identity from
+nearest positions alone or silently choose one of several coincident points.
+
+On 2026-11-15, the open `LOD0.e92032c5-0` scene was recovered from the supplied
+`FrameAnalysis-2026-11-15-202422`: 7158 scene points, 6693 referenced points with
+unique IDs, 465 unused points left unmapped, 8339 verified original triangles.
+The staged export had 6825 output points and 25017 indices. Its four preexisting
+VB/IB files were byte-identical to the user's Mod; only the map, shaders and INI
+were added/changed. Scene copies were saved before/after migration without
+replacing the user's original file. The user confirmed first that explosion was
+removed, then that lighting was normal after the packed-frame decode correction.
+This is acceptance for that installation and mesh, not every shader/game build.
+No adversarial sub-agent review was requested or performed.
+
+## Reproduction
+
+From this repository:
+
+```text
+python tools/test_yysls_cloth.py
+python tools/test_yysls_native_cloth_gpu.py
+blender --background --factory-startup --python-exit-code 1 --python tools/test_yysls_cloth_map_blender.py -- --capture <FrameAnalysis root>
+blender --background --factory-startup --python-exit-code 1 --python tools/test_yysls_blend.py
+```
+
+INI tests exercise real generation and serialization, not the loader parser.
+WARP tests compile both VS assets and execute their actual packed decode helpers
+against an independent signed-word CPU oracle. Blender tests exercise reference
+editing, output reordering, UV-style splits, legacy ambiguity rejection, subdivision
+rejection and the real 8773-point captured import/export. The initial shader ABI
+checks matched the supplied main shader and the retained shadow reference; the
+current game acceptance above additionally covers the tested shadow appearance.
+
+## Historical bypass implementation (superseded)
+
+The material below records the older implementation and its historical gates;
+its supported-hash table and no-cloth behavior do not describe the current exporter.
+
 # YYSLS draw-local cloth bypass
 
 ## Behavior

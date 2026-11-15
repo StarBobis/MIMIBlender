@@ -96,6 +96,7 @@ class MeshCreateHelper:
         import_collection:bpy.types.Collection | None = None,
         wwmi_shapekey_buffers:dict | None = None,
         shapekey_position_data:dict | None = None,
+        cloth_vertex_offset:int = 0,
         wwmi_vertex_offset:int = 0,
         wwmi_vertex_count:int = -1,
         wwmi_vg_map:dict | None = None,
@@ -182,6 +183,11 @@ class MeshCreateHelper:
 
                 positions = [(x[0], x[1], x[2]) for x in data]
                 mesh.vertices.foreach_set('co', unpack_list(positions))
+                # Cloth addressing is source identity, never the edited point order.
+                # Store this before any user edits or evaluated modifiers run.
+                if logic_name == LogicName.YYSLS:
+                    from .yysls_cloth_map import store_source
+                    store_source(obj, positions, cloth_vertex_offset)
             elif element.SemanticName.startswith("COLOR"):
                 # Build the (num_loops, 4) RGBA array with vectorized numpy, then write it in bulk via foreach_set.
                 # Avoids a per-element Python loop -- the vertex_colors compatibility layer is very slow in Blender 5.1.

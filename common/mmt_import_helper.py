@@ -24,6 +24,13 @@ class MMTImportHelper:
 		logic_name = submesh_json.GamePreset
 		gametypename = submesh_json.WorkGameType
 
+		# New MMT captures declare native index identity explicitly. Legacy normal
+		# extraction kept the same prefix records; its base remains zero.
+		cloth_source = submesh_json.JsonDict.get("YYSLSClothSource", {})
+		cloth_base = int(cloth_source.get("VertexIdBase", 0))
+		if cloth_source and (cloth_source.get("Version") != 1 or cloth_source.get("Addressing") != "preserved-index" or cloth_base != 0):
+			raise Fatal("Unsupported YYSLS cloth source addressing")
+
 		# When the caller passes a submesh_name_prefix (usually the DrawIB folder name),
 		# switch to the classic Submesh naming scheme instead of the raw Json file name:
 		# - the Submesh itself is named {DrawIB}-{MatchIndexCount}-{MatchFirstIndex},
@@ -171,6 +178,7 @@ class MMTImportHelper:
 					# Global IDs subtract both the component origin and segment-local origin.
 					wwmi_shapekey_buffers=shapekey_buffers if shapekey_buffers else None,
 					wwmi_vertex_offset=submesh_json.VertexOffset + vertex_min,
+					cloth_vertex_offset=cloth_base + vertex_min,
 					wwmi_vertex_count=vertex_max - vertex_min + 1,
 					wwmi_vg_map=wwmi_vg_map,
 					wwmi_vg_offset=submesh_json.VGOffset,
@@ -217,6 +225,7 @@ class MMTImportHelper:
 			wwmi_shapekey_buffers=shapekey_buffers if shapekey_buffers else None,
 			shapekey_position_data=shapekey_position_data if shapekey_position_data else None,
 			wwmi_vertex_offset=submesh_json.VertexOffset,
+			cloth_vertex_offset=cloth_base,
 			wwmi_vertex_count=submesh_json.VertexCount,
 			wwmi_vg_map=wwmi_vg_map,
 			wwmi_vg_offset=submesh_json.VGOffset,
