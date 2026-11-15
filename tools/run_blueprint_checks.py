@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Every listed script is a self-contained repository regression fixture.
 TESTS = (
     'test_blueprint_blender.py',
+    # Draw menus too: node-only tests cannot detect truncated popup callbacks.
+    'test_blueprint_menus_blender.py',
     'test_dynamic_mod_titles.py',
     'test_dynamic_animation_blender.py',
     'test_naraka_cross_ib_blender.py',

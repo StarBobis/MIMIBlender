@@ -4,7 +4,8 @@ import time
 
 import bpy
 
-from ..common.global_config import GlobalConfig
+# Menu drawing also needs the preset identifiers used by conditional entries.
+from ..common.global_config import GlobalConfig, LogicName
 from ..common.cross_ib_support import supports_cross_ib
 from ..common import texture_format_service
 from ..i18n.i18n import I18nOperator, tr, translatable

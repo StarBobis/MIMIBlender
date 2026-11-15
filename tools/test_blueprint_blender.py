@@ -127,7 +127,12 @@ class BlueprintTests(unittest.TestCase):
         from MIMIBlender.common.m_ini_builder import M_IniBuilder
         from MIMIBlender.workspace.texture_metadata_helper import TextureMarkUpInfo
 
-        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+        # Byte-only file-copy fixtures intentionally do not exercise DDS
+        # conversion; the exact-format suites own real texture headers.
+        scratch = ROOT / 'tmp'
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch) as directory, ExitStack() as stack:
+            stack.enter_context(patch('MIMIBlender.common.m_ini_helper._exact_format_enabled', return_value=False))
             root = Path(directory)
             source = root / 'Components-0 t=679ad2f5.dds'
             source.write_bytes(b'external replacement bytes')
@@ -190,7 +195,14 @@ class BlueprintTests(unittest.TestCase):
             # WWMI owns a separate model and does not run DrawIBModel.__init__.
             # Mock expensive geometry while still calling WWMI.__post_init__.
             game_type = SimpleNamespace(GameTypeName='test', CategoryStrideDict={'Position': 12})
-            merged = bpy.data.objects.new('wwmi_texture_test', None)
+            # Keep an empty real mesh so newer geometry validation can run
+            # without hiding the texture-resolution constructor under test.
+            # Ownership exists even when this fixture has zero polygons.
+            from MIMIBlender.utils.draw_range_utils import DrawRangeUtils
+            mesh = bpy.data.meshes.new('wwmi_texture_test')
+            self.addCleanup(bpy.data.meshes.remove, mesh)
+            mesh.attributes.new(DrawRangeUtils.OWNER_ATTRIBUTE, 'INT', 'FACE')
+            merged = bpy.data.objects.new('wwmi_texture_test', mesh)
             merged_name = merged.name
             self.addCleanup(lambda: bpy.data.objects.remove(bpy.data.objects[merged_name]) if merged_name in bpy.data.objects else None)
             stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'get_drawib_aliasname_dict', return_value={}))
@@ -198,19 +210,19 @@ class BlueprintTests(unittest.TestCase):
             stack.enter_context(patch.object(wwmi.MMTWorkSpace, 'get_ordered_submesh_name_list_by_drawib', return_value=[submesh_name]))
             stack.enter_context(patch.object(wwmi, 'SubmeshJson', return_value=SimpleNamespace(JsonDict={})))
             stack.enter_context(patch.object(wwmi.D3D11GameType, 'from_submesh_json_dict', return_value=game_type))
-            # This texture-only fixture has no mesh or bone metadata.
+            # This texture-only fixture has no vertices or bone metadata.
             # Offline bone conversion is covered by its dedicated mesh suite.
             stack.enter_context(patch.object(wwmi.MIMIGlobalProperties, 'import_merged_vgmap', return_value='MERGED'))
-            stack.enter_context(patch.object(wwmi.WWMIInfoHelper, 'build_from_json_list', return_value=SimpleNamespace()))
+            stack.enter_context(patch.object(wwmi.WWMIInfoHelper, 'build_from_json_list', return_value=SimpleNamespace(shapekeys=SimpleNamespace(batches=[]))))
             stack.enter_context(patch.object(wwmi.DrawIBModelWWMI, 'build_merged_object', return_value=SimpleNamespace(object=merged, components=[])))
             stack.enter_context(patch.object(wwmi.TextureMetadataResolver, 'load_submesh_texture_markup_info_from_all_submeshes', return_value={submesh_name: marks}))
             # No vertex buffers are needed to test a texture export. Keep the
             # constructor running past resolution with a zero-sized Position
             # buffer, rather than bypassing the constructor under test.
             stack.enter_context(patch.object(wwmi.ObjBufferHelper, 'check_and_verify_attributes'))
-            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_obj_element_context', return_value=SimpleNamespace(mesh=None, original_elementname_data_dict={}, final_elementname_data_dict={})))
+            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_obj_element_context', return_value=SimpleNamespace(obj=merged, mesh=mesh, original_elementname_data_dict={}, final_elementname_data_dict={})))
             stack.enter_context(patch.object(wwmi.ObjBufferHelper, 'convert_to_element_vertex_ndarray', return_value={}))
-            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_wwmi_obj_buffer_result', return_value=SimpleNamespace(category_buffer_dict={'Position': b''})))
+            stack.enter_context(patch.object(wwmi.ExportUtils, 'build_wwmi_obj_buffer_result', return_value=SimpleNamespace(category_buffer_dict={'Position': b''}, ib=[])))
             stack.enter_context(patch.object(M_IniHelper, '_get_slot_texture_source_path', return_value=str(mark_source)))
             # Explicit bindings must still work with automatic textures off.
             # Redirect all copy destinations into the disposable test folder;
@@ -229,11 +241,18 @@ class BlueprintTests(unittest.TestCase):
             # other object using the same texture.
             for draw_model in model.submesh_model_list[0].drawcall_model_list:
                 self.assertEqual(len(draw_model.resolved_hash_texture_binding_list), 0)
-                self.assertEqual(len(draw_model.resolved_texture_slot_lines), 2)
-            self.assertTrue(
-                all(line.startswith('ps-t0 = ') or line.startswith('ps-t1 = ')
-                    for line in model.submesh_model_list[0].drawcall_model_list[0].resolved_texture_slot_lines)
-            )
+                # Connected replacements now preserve and restore each slot.
+                # Verify both resources and the restoration pairing, rather
+                # than rejecting the backup lines added by this contract.
+                lines = draw_model.resolved_texture_slot_lines
+                self.assertEqual(len(lines), 4)
+                expected_restores = []
+                for slot in ('ps-t0', 'ps-t1'):
+                    binding = next(line for line in lines if line.startswith(slot + ' = ResourceTex_'))
+                    backup = next(line for line in lines if line.endswith(' = ref ' + slot))
+                    self.assertLess(lines.index(backup), lines.index(binding))
+                    expected_restores.append(slot + ' = ' + backup.split(' = ')[0])
+                self.assertCountEqual(draw_model.resolved_texture_slot_restore_lines, expected_restores)
 
             builder = M_IniBuilder()
             M_IniHelper.add_object_texture_binding_resource_sections(builder, model)

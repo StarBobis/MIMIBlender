@@ -36,6 +36,16 @@ This records verified fixes and coverage, not a guarantee that every possible pr
 
 ### Menus and animation
 
+- **Truncated Add menu (2026-11-15):** the WWMI Mod Info visibility check referenced `LogicName` without importing it. In Blender 5.2, the callback raised `NameError` after Generate Mod for all 20 declared presets and the empty preset. Importing the identifier restores the remaining Face Mod, Switch Key, texture, timeline, preset-specific Cross-IB and Frame entries. Blender's empty-selection right-click menu reaches this callback through `NODE_MT_add`.
+- **Menu regression method:** run actual menu callbacks with a real `SpaceNodeEditor` and a recording layout; let exceptions propagate instead of accepting a partially drawn popup. `tools/test_blueprint_menus_blender.py` checks every preset, creates every offered node, resolves operator/menu RNA, verifies right-click commands, and rejects leakage into other editors. It is included in `tools/run_blueprint_checks.py`.
+- **Development verification for this fix:** 4 menu tests, 43 blueprint tests, and 8 WWMI defaults/metadata tests pass with factory startup. The blueprint suite's texture-only WWMI fixture now supplies an empty real mesh, ownership data, shape-batch and index-buffer fields; it verifies slot backup/restore and explicitly excludes DDS conversion of its placeholder bytes. A separate disposable GUI session rendered the full Add popup (`tmp/blueprint_menu_after.png`) without draw errors. These checks do not exercise live game rendering.
+
+Reproduce the focused menu check:
+
+```text
+blender --background --factory-startup --python-exit-code 1 --python tools/test_blueprint_menus_blender.py
+```
+
 - **Batch connection direction:** allow a pass-through Group to feed an input-only Generate Mod node.
 - **Batch socket growth:** only known dynamic node contracts may gain ports; texture/custom-group interfaces cannot acquire arbitrary extra inputs.
 - **Independent rebaking:** associate a baked Object List with its timeline instance, not just the mesh name. Rebaking the same object into a second timeline no longer clears the first timeline's wires. Shared lists are not destructively reused.
@@ -63,4 +73,4 @@ It renders the reported socket layout and all registered blueprint nodes in Engl
 
 ## Release
 
-The release uses the repository's existing `release.ps1` flow after the fixes and version bump are committed. The manual-install archive and updater tag must refer to the same pushed commit. Release verification checks the public release, remote tag/branch commit, archive version, asset size and SHA-256 digest.
+The release follows `.agents/skills/blender-addon-release/SKILL.md`: commit development changes, then run `release.ps1 -Bump -Push -CustomNotes` with explicit user-visible notes. The script checks the local archive and release response, then finishes on successful upload; do not add post-release polling or download checks.
