@@ -24,6 +24,9 @@ from .games.gimi import outline as gimi_body_outline
 # UI panels
 from .ui import ui_panel_basic
 from .ui import ui_panel_model
+# The weight audit panel sits right below the model processing panel, because
+# weight repair happens after the mesh is edited and bound to a skeleton.
+from .ui import ui_panel_weight
 # Merged Sculpt panel sits directly below the Model Processing panel.
 from .ui import ui_panel_merged_sculpt
 from .sword import ui_panel_sword
@@ -115,6 +118,9 @@ def _register_steps():
     yield blueprint_node_group.register
     yield ui_panel_basic.register
     yield ui_panel_model.register
+    # Weight audit registers right after the model panel so it appears next to
+    # it in the sidebar and its scene properties exist before the panel draws.
+    yield ui_panel_weight.register
     # Panel order inside the MIMITools category follows registration order,
     # so the Merged Sculpt panel appears directly below Model Processing.
     yield ui_panel_merged_sculpt.register
@@ -224,6 +230,8 @@ def unregister():
         ui_panel_sword.unregister,
         # Reverse position of its register step (right after ui_panel_model).
         ui_panel_merged_sculpt.unregister,
+        # Remove the weight panel before the model panel it follows.
+        ui_panel_weight.unregister,
         ui_panel_model.unregister,
         ui_panel_basic.unregister,
         blueprint_node_base.unregister,
