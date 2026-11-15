@@ -202,7 +202,13 @@ class MeshCreateHelper:
                 # (WWMI/EFMI -> FLOAT_COLOR, other games -> BYTE_COLOR).
                 color_type = element.get_blender_color_type(logic_name)
                 color_attr = mesh.color_attributes.new(name=element.ElementName, type=color_type, domain='CORNER')
-                color_attr.data.foreach_set('color', colors_flat.ravel())
+                # Match ZZMI export's stored-byte contract on new imports too.
+                # The linear view applies an RGB transfer function to BYTE_COLOR.
+                # Alpha is unchanged; floating-point color layers stay linear.
+                color_property = 'color'
+                if logic_name == LogicName.ZZMI and color_type == 'BYTE_COLOR':
+                    color_property = 'color_srgb'
+                color_attr.data.foreach_set(color_property, colors_flat.ravel())
             elif element.SemanticName == "BLENDINDICES":
                 if data.ndim == 1:
                     blend_indices[element.SemanticIndex] = numpy.array([(x,) for x in data])

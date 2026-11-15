@@ -410,7 +410,14 @@ class ObjBufferHelper:
             result = numpy.zeros(mesh_loops_length, dtype=(numpy.float32, 4))
             # result = numpy.zeros((mesh_loops_length,4), dtype=(numpy.float32))
 
-            color_data.foreach_get("color", result.ravel())
+            # ZZMI byte colors carry shader control values in the stored bytes.
+            # Reading their linear RGB view turns a stored 128 into 55 on export.
+            # FLOAT_COLOR and other presets retain their existing linear contract.
+            color_property = "color"
+            if (GlobalConfig.logic_name == LogicName.ZZMI
+                    and mesh.color_attributes[d3d11_element_name].data_type == 'BYTE_COLOR'):
+                color_property = "color_srgb"
+            color_data.foreach_get(color_property, result.ravel())
             
             if d3d11_element.Format == 'R16G16B16A16_FLOAT':
                 result = result.astype(numpy.float16)
