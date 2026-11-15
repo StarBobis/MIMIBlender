@@ -1,5 +1,27 @@
 # ZZMI byte color import/export contract
 
+## Explicit-policy follow-up (2026-11-15)
+
+New MMT layouts now declare BYTECOLOR_LINEAR, BYTECOLOR_SRGB,
+FLOATCOLOR_LINEAR or FLOATCOLOR_SRGB in BlenderColorType. Import and export
+resolve the same pair of Blender storage type and API property. Modern XXMI
+standard imports use FLOATCOLOR_LINEAR, which is now the new ZZMI preset
+default. Existing storage-only and missing hints retain the legacy fallback
+described below; explicit policies always win over the game preset.
+
+BYTECOLOR_LINEAR inherently quantizes values through byte sRGB storage.
+It is not a lossless choice for arbitrary linear byte payloads. Existing
+user workspaces and saved color layers are not automatically rewritten.
+The four-policy Blender regression additionally checks all combinations,
+cross-preset independence and rejection of unknown values. This does not
+establish game rendering correctness for untested games.
+
+See the separate MIMITools manual page
+`docs/newbie/MIMIBlender/color-types/color-types.md` for the editable per-game
+record, fixed upstream versions and blank entries awaiting investigation.
+
+## Original byte-color investigation
+
 Validated on 2026-11-15 with Blender 5.2.0, starting from MIMIBlender
 `346285b`. This is a scoped color fix, not a complete ZZMI compatibility audit.
 

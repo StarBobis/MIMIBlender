@@ -5,6 +5,7 @@
 # No user projects, installed add-ons or game Mod directories are changed.
 import sys
 import importlib
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
 import unittest
@@ -19,6 +20,8 @@ from MIMIBlender.common.mesh_create_helper import MeshCreateHelper
 from MIMIBlender.common.obj_buffer_helper import ObjBufferHelper
 from MIMIBlender.common.d3d11_element import D3D11Element
 from MIMIBlender.common.global_config import GlobalConfig
+from MIMIBlender.common.d3d11_element import COLOR_POLICIES, resolve_color_policy
+from MIMIBlender.common.d3d11_gametype import D3D11GameType
 
 
 def element(name, fmt, width):
@@ -33,6 +36,57 @@ class ByteControlColors(unittest.TestCase):
         GlobalConfig.logic_name = 'ZZMI'
         self.addCleanup(setattr, GlobalConfig, 'logic_name', self.previous)
 
+    def test_four_explicit_policies_across_presets(self):
+        # Explicit metadata must override every historical preset default.
+        # Inspect the stored representation independently of the export accessor.
+        rgba = np.array([[128,64,192,73]]*3, dtype=np.uint8)
+        position = element('POSITION', 'R32G32B32_FLOAT', 12)
+        points = np.array([[0,0,0], [1,0,0], [0,1,0]], np.float32)
+        for policy, (storage, api) in COLOR_POLICIES.items():
+            with self.subTest(policy=policy):
+                color = element('COLOR', 'R8G8B8A8_UNORM', 4)
+                color.BlenderColorType = policy
+                # Pass the exact wire field through the production SubmeshJson adapter.
+                layout = D3D11GameType.from_submesh_json_dict({'CategoryBufferList': [
+                    {'D3D11ElementList': [asdict(color)]}]})
+                color = layout.ElementNameD3D11ElementDict['COLOR']
+                with patch.object(MeshCreateHelper, 'create_bsdf_with_diffuse_linked'):
+                    obj = MeshCreateHelper.create_mesh_object(
+                        'explicit_color_fixture', '', 'ZZMI', 'fixture', [position, color],
+                        {'POSITION': points, 'COLOR': rgba}, np.arange(3), 3, 3, 1)
+                layer = obj.data.color_attributes['COLOR']
+                self.assertEqual(layer.data_type, storage)
+                # Linear 0.502 maps to stored sRGB around 0.737 in a byte layer.
+                if policy == 'BYTECOLOR_LINEAR':
+                    self.assertAlmostEqual(layer.data[0].color_srgb[0], 188/255, places=5)
+                if policy == 'FLOATCOLOR_SRGB':
+                    self.assertAlmostEqual(layer.data[0].color[0], .21586, places=4)
+                for preset in ('ZZMI', 'GIMI', 'WWMI', 'PGR'):
+                    GlobalConfig.logic_name = preset
+                    result = ObjBufferHelper._parse_color(obj.data, 3, 'COLOR', color)
+                    # BYTE + LINEAR quantizes in sRGB storage; this is inherently lossy.
+                    # Floating storage and byte-sRGB preserve these byte payloads exactly.
+                    if policy == 'BYTECOLOR_LINEAR':
+                        np.testing.assert_allclose(result, rgba, atol=1)
+                    else:
+                        np.testing.assert_array_equal(result, rgba)
+
+    def test_unknown_policy_is_rejected(self):
+        # A spelling mistake must not silently fall back to BYTE_COLOR.
+        with self.assertRaisesRegex(ValueError, 'Unknown BlenderColorType'):
+            resolve_color_policy('BYTECOLOR_TYPO', 'ZZMI')
+
+    def test_policy_change_does_not_silently_reinterpret_old_layer(self):
+        # Explicit float metadata cannot silently read a legacy byte layer.
+        # Users must convert/reimport instead of merely renaming the policy.
+        mesh = bpy.data.meshes.new('mismatched_color_fixture')
+        mesh.from_pydata([(0,0,0), (1,0,0), (0,1,0)], [], [(0,1,2)])
+        mesh.color_attributes.new(name='COLOR', type='BYTE_COLOR', domain='CORNER')
+        color = element('COLOR', 'R8G8B8A8_UNORM', 4)
+        color.BlenderColorType = 'FLOATCOLOR_LINEAR'
+        with self.assertRaisesRegex(ValueError, 'requires FLOAT_COLOR'):
+            ObjBufferHelper._parse_color(mesh, 3, 'COLOR', color)
+
     def test_all_bytes_import_export(self):
         # Every source vertex participates in one nondegenerate triangle.
         # Independent alpha checks that RGB transfer never touches alpha.
@@ -42,6 +96,8 @@ class ByteControlColors(unittest.TestCase):
         points = np.tile(np.array([[0,0,0], [1,0,0], [0,1,0]], np.float32), (256,1))
         position = element('POSITION', 'R32G32B32_FLOAT', 12)
         color = element('COLOR', 'R8G8B8A8_UNORM', 4)
+        # Pin the new explicit stored-byte contract for the complete byte ramp.
+        color.BlenderColorType = 'BYTECOLOR_SRGB'
         # Material discovery is unrelated to the vertex payload contract.
         with patch.object(MeshCreateHelper, 'create_bsdf_with_diffuse_linked'):
             obj = MeshCreateHelper.create_mesh_object(

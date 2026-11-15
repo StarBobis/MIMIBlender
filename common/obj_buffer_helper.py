@@ -27,6 +27,7 @@ from ..utils.log_utils import LOG
 
 import bpy
 import numpy
+from .d3d11_element import COLOR_POLICIES, resolve_color_policy
 
 class ObjBufferHelper:
     '''
@@ -410,13 +411,16 @@ class ObjBufferHelper:
             result = numpy.zeros(mesh_loops_length, dtype=(numpy.float32, 4))
             # result = numpy.zeros((mesh_loops_length,4), dtype=(numpy.float32))
 
-            # ZZMI byte colors carry shader control values in the stored bytes.
-            # Reading their linear RGB view turns a stored 128 into 55 on export.
-            # FLOAT_COLOR and other presets retain their existing linear contract.
-            color_property = "color"
-            if (GlobalConfig.logic_name == LogicName.ZZMI
-                    and mesh.color_attributes[d3d11_element_name].data_type == 'BYTE_COLOR'):
-                color_property = "color_srgb"
+            # Explicit policy owns the API view; the preset is legacy fallback only.
+            # Actual storage helps old projects whose metadata omitted the hint.
+            storage = mesh.color_attributes[d3d11_element_name].data_type
+            hint = getattr(d3d11_element, 'BlenderColorType', '')
+            expected_storage, color_property = resolve_color_policy(hint, GlobalConfig.logic_name, storage)
+            # Changing a workspace policy does not convert an existing Blender layer.
+            # Reject that mismatch before an old byte project is read as linear float.
+            if hint.strip().upper() in COLOR_POLICIES and storage != expected_storage:
+                raise ValueError(f'{d3d11_element_name}: {hint} requires {expected_storage}, found {storage}. '
+                                 'Reimport the model or explicitly convert its color layer before export.')
             color_data.foreach_get(color_property, result.ravel())
             
             if d3d11_element.Format == 'R16G16B16A16_FLOAT':

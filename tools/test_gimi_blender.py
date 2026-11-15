@@ -28,7 +28,8 @@ class Layout:
         self.properties = []
         self.labels = []
 
-    def row(self):
+    # Mirror Blender's optional layout flags used by the current node UI.
+    def row(self, **kwargs):
         return self
 
     def column(self, **kwargs):
@@ -43,7 +44,7 @@ class Layout:
     def operator(self, *args, **kwargs):
         return SimpleNamespace()
 
-    def prop(self, item, name):
+    def prop(self, item, name, **kwargs):
         self.properties.append(name)
 
     def label(self, **kwargs):

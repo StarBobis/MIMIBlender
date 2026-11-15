@@ -196,18 +196,13 @@ class MeshCreateHelper:
                 else:
                     colors_flat[:, 0] = data[loop_vertex_indices].astype(numpy.float32)
 
-                # The SubmeshJson annotates which Blender color attribute type
-                # each game preset needs (BlenderColorType); old extractions
-                # without the annotation fall back to the historical rule
-                # (WWMI/EFMI -> FLOAT_COLOR, other games -> BYTE_COLOR).
+                # Metadata selects both storage precision and the API view.
+                # Missing hints retain the historical preset fallback only.
                 color_type = element.get_blender_color_type(logic_name)
                 color_attr = mesh.color_attributes.new(name=element.ElementName, type=color_type, domain='CORNER')
-                # Match ZZMI export's stored-byte contract on new imports too.
-                # The linear view applies an RGB transfer function to BYTE_COLOR.
-                # Alpha is unchanged; floating-point color layers stay linear.
-                color_property = 'color'
-                if logic_name == LogicName.ZZMI and color_type == 'BYTE_COLOR':
-                    color_property = 'color_srgb'
+                # Storage and API view are independent, explicit layout choices.
+                # The same property is used on export to prevent double conversion.
+                color_property = element.get_blender_color_property(logic_name)
                 color_attr.data.foreach_set(color_property, colors_flat.ravel())
             elif element.SemanticName == "BLENDINDICES":
                 if data.ndim == 1:

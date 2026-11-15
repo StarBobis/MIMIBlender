@@ -1,6 +1,35 @@
 from dataclasses import dataclass, field
 
 
+# Storage and transfer space are independent parts of the serialized contract.
+# GPU semantic names and Blender layer names remain COLOR, COLOR1, and so on.
+COLOR_POLICIES = {
+    'BYTECOLOR_LINEAR': ('BYTE_COLOR', 'color'),
+    'BYTECOLOR_SRGB': ('BYTE_COLOR', 'color_srgb'),
+    'FLOATCOLOR_LINEAR': ('FLOAT_COLOR', 'color'),
+    'FLOATCOLOR_SRGB': ('FLOAT_COLOR', 'color_srgb'),
+}
+
+
+def resolve_color_policy(hint='', logic_name='', storage_type=None):
+    """Resolve explicit policies first; legacy aliases retain old project behavior."""
+    normalized = hint.strip().upper()
+    if normalized in COLOR_POLICIES:
+        return COLOR_POLICIES[normalized]
+    # Only old files may omit the transfer space. Never guess unknown values.
+    legacy = normalized.replace('_', '')
+    if legacy not in ('', 'BYTECOLOR', 'FLOATCOLOR'):
+        raise ValueError('Unknown BlenderColorType: ' + hint)
+    if legacy == 'FLOATCOLOR' or (not legacy and storage_type == 'FLOAT_COLOR'):
+        return COLOR_POLICIES['FLOATCOLOR_LINEAR']
+    if not legacy and logic_name in ('WWMI', 'EFMI'):
+        return COLOR_POLICIES['FLOATCOLOR_LINEAR']
+    # The prior ZZMI correction used the stored-byte sRGB API for byte layers.
+    if logic_name == 'ZZMI':
+        return COLOR_POLICIES['BYTECOLOR_SRGB']
+    return COLOR_POLICIES['BYTECOLOR_LINEAR']
+
+
 @dataclass
 class D3D11Element:
     SemanticName:str
@@ -24,13 +53,15 @@ class D3D11Element:
     AlignedByteOffset:int
     ElementName:str = field(init=False,default="")
 
-    # Blender color attribute type hint carried by the SubmeshJson
-    # ("BYTECOLOR" / "FLOATCOLOR"); empty on old extractions, in which case
-    # get_blender_color_type() falls back to the historical per-game rule.
+    # Explicit BYTECOLOR/FLOATCOLOR + _LINEAR/_SRGB policy from SubmeshJson.
+    # Missing and storage-only values are accepted only for legacy workspaces.
     BlenderColorType:str = field(default="")
 
     def __post_init__(self):
         self.ElementName = self.get_indexed_semantic_name()
+        # Validate before import can create a temporary object or color layer.
+        if self.SemanticName.startswith('COLOR'):
+            resolve_color_policy(self.BlenderColorType)
 
     def get_indexed_semantic_name(self)->str:
         if self.SemanticIndex == 0:
@@ -39,25 +70,9 @@ class D3D11Element:
             return self.SemanticName + str(self.SemanticIndex)
 
     def get_blender_color_type(self, logic_name:str="")->str:
-        '''
-        Resolve which Blender color attribute data type to create for a COLOR
-        element: 'BYTE_COLOR' or 'FLOAT_COLOR'.
+        # Kept as the storage-only accessor for existing callers.
+        return resolve_color_policy(self.BlenderColorType, logic_name)[0]
 
-        New MMT/SSMT5 extractions annotate COLOR elements explicitly via the
-        BlenderColorType field. Old extractions without the annotation keep
-        the historical behavior so existing workspaces import exactly as
-        before: WWMI/EFMI use FLOAT_COLOR (their shaders read high-precision
-        COLOR payloads such as smooth normals), other games use BYTE_COLOR.
-        '''
-        if self.BlenderColorType:
-            # Normalize so both "FLOATCOLOR" and "FLOAT_COLOR" spellings work.
-            normalized = self.BlenderColorType.strip().upper().replace("_", "")
-            if normalized == "FLOATCOLOR":
-                return 'FLOAT_COLOR'
-            return 'BYTE_COLOR'
-
-        # Lazy import keeps this pure data module free of bpy-side imports.
-        from .global_config import LogicName
-        if logic_name in (LogicName.WWMI, LogicName.EFMI):
-            return 'FLOAT_COLOR'
-        return 'BYTE_COLOR'
+    def get_blender_color_property(self, logic_name:str="")->str:
+        # Import and export must use the same API view for a given policy.
+        return resolve_color_policy(self.BlenderColorType, logic_name)[1]
