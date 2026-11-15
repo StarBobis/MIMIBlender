@@ -118,6 +118,40 @@ class ImportLayoutTests(unittest.TestCase):
         # The final pass must also preserve the importer's deselected state.
         self.assertFalse(any(node.select for node in self.tree.nodes))
 
+    def test_import_texture_managers_match_marks_and_refresh_lists(self):
+        # Exercise real RNA collections and the production refresh dispatcher.
+        # Only workspace discovery is replaced; no user workspace is touched.
+        hash_module = importlib.import_module(ROOT.name + '.blueprint.blueprint_node_hash_texture')
+        slot_module = importlib.import_module(ROOT.name + '.blueprint.blueprint_node_global_slot')
+        hash_entry = dict(hash='1234abcd', name='DiffuseMap', submesh_name='mesh',
+                          source_path='', slot='ps-t0')
+        slot_entry = ('mesh', dict(slot='ps-t1', name='NormalMap'), '')
+        for has_hash, has_slot in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(hash=has_hash, slot=has_slot):
+                # Each one-click import builds a new blueprint from scratch.
+                self.tree.nodes.clear()
+                output = self.tree.nodes.new('MIMINode_Result_Output')
+                output.location = (900.0, -200.0)
+                with patch.object(hash_module, '_load_global_hash_mark_entries',
+                                  return_value=[hash_entry] if has_hash else []), \
+                        patch.object(slot_module, 'scan_slot_marks',
+                                     return_value={'slot_identity': slot_entry} if has_slot else {}):
+                    importer._create_import_texture_managers(self.tree, output)
+                managers = [node for node in self.tree.nodes if node != output]
+                self.assertEqual(len(managers), int(has_hash) + int(has_slot))
+                # Both lists must already be visible without pressing Refresh.
+                for node in managers:
+                    rows = node.texture_hash_items if node.bl_idname == 'MIMINode_Hash_Texture_Global' else node.items
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(node.location.x, output.location.x)
+                    self.assertLessEqual(node.location.y, output.location.y - 800.0)
+                    self.assertEqual(len(node.inputs) + len(node.outputs), 0)
+                self.assertEqual(len(self.tree.links), 0)
+                if len(managers) == 2:
+                    # Before a GUI draw, dimensions are zero; reserved heights
+                    # still separate the two populated detail panels vertically.
+                    self.assertGreaterEqual(managers[0].location.y - managers[1].location.y, 1500.0)
+
     def test_cycle_leaves_positions_unchanged(self):
         # Imported graphs are acyclic; malformed data must not hang the editor.
         # Planning before moving avoids half-rearranged graphs on failure.

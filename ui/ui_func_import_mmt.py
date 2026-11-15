@@ -405,6 +405,29 @@ def _layout_imported_blueprint(tree):
     return True
 
 
+def _create_import_texture_managers(tree, output_node):
+    """Populate independent workspace managers below the generated Mod node."""
+    from ..blueprint.texture_node_refresh import refresh_texture_node
+
+    # Fresh nodes have no drawn dimensions yet. Reserve the full four-row
+    # gallery, preview pair and detail controls rather than just socket rows.
+    # These managers are independent of the object graph and need no links.
+    x, y = output_node.location
+    y -= max(float(output_node.dimensions.y), 700.0) + 100.0
+    for node_id in ('MIMINode_Hash_Texture_Global', 'MIMINode_Texture_Global'):
+        node = tree.nodes.new(node_id)
+        # Use the same scan as the Refresh button to populate the list now.
+        # An empty manager is discarded, so unmarked workspaces stay uncluttered.
+        # Slot discovery includes SharedSlot through the existing refresh path.
+        if not refresh_texture_node(node):
+            tree.nodes.remove(node)
+            continue
+        node.location = (x, y)
+        # A fixed gallery displays four rows regardless of the mark count.
+        # Leave ample room before the next manager on the first editor draw.
+        y -= max(float(node.dimensions.y), 1400.0) + 100.0
+
+
 def _clear_blueprint_node_selection(tree):
     """Leave generated blueprints ready for inspection, without a selected graph."""
     for node in tree.nodes:
@@ -681,6 +704,7 @@ def ImprotFromWorkSpaceFull(self, context):
         # Final links, including the Face branch, define the visual order.
         # Share this dependency layout between full import and refresh import.
         _layout_imported_blueprint(tree)
+        _create_import_texture_managers(tree, output_node)
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
         mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
@@ -983,6 +1007,7 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
         # Final links, including the Face branch, define the visual order.
         # Share this dependency layout between full import and refresh import.
         _layout_imported_blueprint(tree)
+        _create_import_texture_managers(tree, output_node)
         BlueprintExportHelper.set_runtime_blueprint_tree(tree)
 
         mimi_global_properties = getattr(getattr(context, "scene", None), "mimi_global_properties", None)
