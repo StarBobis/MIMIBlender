@@ -57,6 +57,11 @@ from .blueprint import blueprint_node_time_pos_switch
 from .blueprint import blueprint_node_time_shapekey
 from .blueprint import blueprint_time_bake
 from .games.naraka import nodes as blueprint_node_naraka
+# The interaction deformation node and its region tool are preset agnostic.
+from .blueprint import blueprint_node_interaction
+from .blueprint import blueprint_interaction_region_tools
+# The collector samples the control vertex groups while the export mesh exists.
+from .common.interaction import collector as interaction_collector
 
 from .blueprint import blueprint_node_face_mod
 from .blueprint import blueprint_node_group
@@ -91,6 +96,18 @@ def register():
             import traceback
             print(f"[MIMIBlender] register step failed: {getattr(step, '__module__', step)}")
             traceback.print_exc()
+
+
+def _register_interaction_backends():
+    """Register the interaction backend of every preset that has one.
+
+    The backends are declared by the presets themselves, so the shared
+    code never has to know which preset can run the feature.
+    """
+    from .games.naraka.interaction import register_backend as register_naraka_backend
+    from .games.pgr.interaction import register_backend as register_pgr_backend
+    register_naraka_backend()
+    register_pgr_backend()
 
 
 def _register_steps():
@@ -153,6 +170,15 @@ def _register_steps():
     yield blueprint_time_bake.register
     # Naraka-only nodes register right after the base object nodes.
     yield blueprint_node_naraka.register
+    # The interaction deformation node and its region tool are shared by
+    # every preset that provides an interaction backend.
+    yield blueprint_node_interaction.register
+    yield blueprint_interaction_region_tools.register
+    # The collector samples the control vertex groups while the temporary
+    # export mesh still exists, so it has to be active during the export.
+    yield interaction_collector.register
+    # The backends have to exist before the node menu asks for them.
+    yield _register_interaction_backends
     yield ui_func_export.register
     yield blueprint_node_menu.register
 

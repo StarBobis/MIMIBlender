@@ -10,6 +10,7 @@ from ..utils.json_utils import JsonUtils
 from ..common.global_config import LogicName
 from ..common.global_config import GlobalConfig
 from ..common.d3d11_gametype import D3D11GameType
+from ..common.m_export_vertex_attributes import run_collectors
 from ..common.obj_buffer_helper import ObjBufferHelper
 from ..workspace.mmt_workspace import MMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
@@ -58,6 +59,10 @@ class SubMeshModel:
     category_buffer_dict:dict = field(init=False,repr=False,default_factory=dict)
     index_vertex_id_dict:dict = field(init=False,repr=False,default_factory=dict)
     shape_key_buffer_dict:dict = field(init=False,repr=False,default_factory=dict)
+    # Per-vertex attributes captured while the temporary export mesh still
+    # existed. The keys are the collector names, so two features never
+    # overwrite each other's data.
+    export_vertex_attribute_dict:dict = field(init=False,repr=False,default_factory=dict)
     ntemi_bone_palette:list = field(init=False,repr=False,default_factory=list)
 
     def __post_init__(self):
@@ -245,7 +250,12 @@ class SubMeshModel:
         if GlobalConfig.logic_name == LogicName.NTEMI:
             self.ntemi_bone_palette = [int(vg.name) for vg in submesh_merged_obj.vertex_groups]
 
-        # 4. Once the computation is done, delete the temporary obj
+        # 4b. Let the features that need per-vertex data read it now: the
+        # temporary merged mesh is deleted in the next step, and the
+        # exported vertex order only exists together with this mesh.
+        run_collectors(submesh_merged_obj, self)
+
+        # 5. Once the computation is done, delete the temporary obj
         bpy.data.objects.remove(submesh_merged_obj, do_unlink=True)
 
         # Also delete the temporary collections created earlier

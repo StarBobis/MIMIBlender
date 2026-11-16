@@ -19,6 +19,14 @@ from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
 from ...common.skip_draw import append_match_index_count, append_skip_draw_comment, is_submesh_skipped
+from ...common.interaction import backend as interaction_backend
+from ...common.interaction.exporter import (
+    append_interaction_sections,
+    collect_region_list,
+    get_interaction_command_list_name,
+    prepare_interaction,
+    write_interaction_files_to_folder,
+)
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
 from .shapekeys import (
@@ -82,6 +90,39 @@ class Exporter(StandardExporter):
         if self.native_exports:
             check_package_runtime(GlobalConfig.current_game_migoto_folder)
 
+        # The generic interaction deformation replaces the position buffer
+        # before the skinning reads it, so it may not share that buffer
+        # with the shape key path or with the native post-skin path.
+        self.interaction_data = self.prepare_interaction_data()
+
+    def prepare_interaction_data(self):
+        """Prepare the interaction deformation of this export.
+
+        The deformation is refused for a DrawIB that already uses the
+        position buffer for something else, because both features write
+        the same buffer and only one of them could survive.
+        """
+        backend = interaction_backend.get_current_backend()
+        if backend is None:
+            return {}
+
+        region_list = collect_region_list(self.blueprint_model.interaction_node_list)
+        if not region_list:
+            return {}
+
+        prepared_dict = prepare_interaction(self.drawib_model_list, region_list, backend)
+
+        shapekey_drawib_set = set()
+        for model in self.usable_shapekey_drawib_model_list:
+            shapekey_drawib_set.add(model.draw_ib)
+        for drawib in prepared_dict:
+            if drawib in shapekey_drawib_set:
+                raise ValueError("Interaction deformation cannot be combined with shape keys on DrawIB " + drawib)
+            if drawib in self.native_exports:
+                raise ValueError("Interaction deformation cannot be combined with the native post-skin path on DrawIB " + drawib)
+
+        return prepared_dict
+
     def generate_buffer_files(self):
         # Native data was validated in __init__. Keep its files in the same
         # Buffers folder as ordinary IB/VB output, with DrawIB-scoped names.
@@ -91,6 +132,15 @@ class Exporter(StandardExporter):
             _, files, _ = emit_native_ini(plan)
             for filename, content in files.items():
                 (folder / filename).write_bytes(content)
+        # The interaction buffers and its shader sit next to the generated
+        # INI, because the INI refers to them by a relative path.
+        if self.interaction_data:
+            addon_root = Path(__file__).resolve().parents[2]
+            write_interaction_files_to_folder(
+                GlobalConfig.path_generate_mod_folder(),
+                self.interaction_data,
+                str(addon_root),
+            )
 
     @staticmethod
     def get_cross_ib_backup_resource_name(drawib_model, submesh_model, vb_slot: int) -> str:
@@ -167,6 +217,12 @@ class Exporter(StandardExporter):
             ini_builder.append_section(native_section)
             shapekey_run_command_list = capture
 
+        # The interaction deformation also runs from the top of the Position
+        # VB override.  It cannot be combined with the two paths above, so
+        # the export already refused that combination.
+        if drawib_model.draw_ib in self.interaction_data:
+            shapekey_run_command_list = get_interaction_command_list_name(drawib_model.draw_ib)
+
         sections.add_unity_cs_texture_override_vb_sections(
             ini_builder=ini_builder,
             drawib_model=drawib_model,
@@ -197,6 +253,13 @@ class Exporter(StandardExporter):
             # The precomputed list keeps the command list numbering in sync
             # with the "run = ..." lines of the Position VB overrides.
             usable_drawib_model_list=self.usable_shapekey_drawib_model_list,
+        )
+        # The interaction deformation owns the position buffer of its
+        # DrawIBs, so its command lists and resources are emitted last.
+        append_interaction_sections(
+            ini_builder=ini_builder,
+            prepared_dict=self.interaction_data,
+            drawib_model_dict=drawib_drawibmodel_dict,
         )
 
     def add_naraka_cs_texture_override_ib_sections(self, ini_builder: M_IniBuilder, drawib_model):

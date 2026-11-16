@@ -7,6 +7,7 @@ import bpy
 # Menu drawing also needs the preset identifiers used by conditional entries.
 from ..common.global_config import GlobalConfig, LogicName
 from ..common.cross_ib_support import supports_cross_ib
+from ..common.interaction import backend as interaction_backend
 from ..common import texture_format_service
 from ..i18n.i18n import I18nOperator, tr, translatable
 
@@ -1087,6 +1088,10 @@ def draw_node_add_menu(self, context):
     # presets' menus clean.
     if supports_cross_ib(GlobalConfig.logic_name):
         layout.operator("node.add_node", text=tr("Cross-IB Render"), icon='LINKED').type = "MIMINode_NarakaCrossIBRender"
+    # The interaction deformation node needs a preset backend, so it is
+    # only offered by the presets that can actually run it.
+    if interaction_backend.has_backend(GlobalConfig.logic_name):
+        layout.operator("node.add_node", text=tr("Interaction Deformation"), icon='MOD_SIMPLIFY').type = "MIMINode_InteractionDeformation"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper
