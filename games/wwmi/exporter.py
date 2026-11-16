@@ -22,6 +22,7 @@ from ...common.global_config import GlobalConfig
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
 from ...common.d3d11_semantics import D3D11Category
+from ...common.skip_draw import append_match_index_count_value
 from .model import DrawIBModelWWMI
 from .names import (
     WWMI_REQUIRED_RUNTIME_VERSION,
@@ -622,7 +623,10 @@ class Exporter:
             texture_override_component.append(scoped_section("TextureOverrideComponent" + component_count_str, draw_ib))
             texture_override_component.append("hash = " + draw_ib_model.wwmi_info.vb0_hash)
             texture_override_component.append("match_first_index = " + str(component_object.index_offset))
-            texture_override_component.append("match_index_count = " + str(component_object.index_count))
+            # The component range is only matched by a known index count: a
+            # zero value would leave the count filter unset and could hit a
+            # neighboring draw of the same hash, so it is dropped instead.
+            append_match_index_count_value(texture_override_component, component_object.index_count)
             # The shared flag guards textures; the scoped flag selects the
             # registration GUID of a model actually detected this frame.
             texture_override_component.append("$object_detected = 1")

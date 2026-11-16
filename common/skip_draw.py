@@ -12,6 +12,11 @@ lives here instead of being re-implemented per preset:
   INI layouts below,
 - validate_skip_draw() rejects the combinations the INI cannot express.
 
+The module also owns the per-Submesh match identity line every override
+needs: append_match_index_count() is the single guarded writer of
+"match_index_count = N", so no preset can emit an unknown (-1 or 0) index
+count and no preset can forget the line either.
+
 The module deliberately imports nothing at module scope: several test
 harnesses load the addon by file path without the addon package, so an
 import-time dependency would make every one of them stub this file.
@@ -83,6 +88,59 @@ def append_skip_draw_comment(section, submesh_model):
     )
 
 
+def normalize_match_index_count(match_index_count) -> int:
+    """Return the recorded index count as a positive int, or 0 when unknown.
+
+    The import side stores -1 (and occasionally 0) for "this Submesh has no
+    resolved IndexCount": SubMeshModel.match_index_count starts at -1 and is
+    only corrected when the workspace can resolve the value.  A 3Dmigoto
+    override can never match such a value, so both are normalized to 0 here
+    and every caller must read 0 as "do not write the line".
+    """
+    # Strings arrive from blueprint object names and from imported JSON, so
+    # one normalizer keeps every preset on the same definition of "unknown".
+    try:
+        match_index_count = int(match_index_count)
+    except (TypeError, ValueError):
+        return 0
+    if match_index_count <= 0:
+        return 0
+    return match_index_count
+
+
+def append_match_index_count_value(section, match_index_count):
+    """Append "match_index_count = N" when the Submesh's count is known.
+
+    3Dmigoto matches a draw by both first index and index count, so writing
+    the count makes the override hit exactly the draw range it replaces
+    instead of every draw that happens to start at the same first index.
+    Unknown counts (see normalize_match_index_count) write nothing, which
+    keeps the historical first-index-only matching for those Submeshes.
+
+    Callers that hold a plain number (the IdentityV Submesh dictionary)
+    use this variant; everything else calls append_match_index_count().
+    """
+    match_index_count = normalize_match_index_count(match_index_count)
+    # A zero count is the 3Dmigoto default meaning "filter not set", and a
+    # real draw never has IndexCount 0, so writing it would disable the match.
+    if match_index_count > 0:
+        section.append("match_index_count = " + str(match_index_count))
+
+
+def append_match_index_count(section, submesh_model):
+    """Write the match_index_count line of one Submesh override.
+
+    Every game exporter calls this right after its match_first_index line,
+    so no preset can forget the line and no preset can disagree about the
+    guard.  The value comes from SubMeshModel.match_index_count, which the
+    import side fills from SubMeshJson.IndexCount.
+
+    getattr keeps the Blender-free test stand-ins working: a stand-in that
+    only carries the identity fields it uses is treated as "count unknown".
+    """
+    append_match_index_count_value(section, getattr(submesh_model, "match_index_count", 0))
+
+
 def append_hidden_submesh_section(section, draw_ib, section_name_suffix, first_index, submesh_model):
     """Write one complete hidden Submesh section and close it.
 
@@ -94,6 +152,9 @@ def append_hidden_submesh_section(section, draw_ib, section_name_suffix, first_i
     section.append("[TextureOverride_" + str(section_name_suffix) + "]")
     section.append("hash = " + str(draw_ib))
     section.append("match_first_index = " + str(first_index))
+    # Hiding a Submesh needs the same exact match as replacing it, otherwise
+    # a neighboring draw with the same first index could be hidden by mistake.
+    append_match_index_count(section, submesh_model)
     section.append("handling = skip")
     append_skip_draw_comment(section, submesh_model)
     section.new_line()

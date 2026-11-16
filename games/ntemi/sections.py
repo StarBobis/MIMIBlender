@@ -339,8 +339,12 @@ def append_draw_overrides(lines: list[str], drawib_model_list,
         ])
         if first_index > 0:
             lines.append(f"match_first_index = {first_index}")
+        # The region is only matched by a known index count.  A zero total
+        # would leave the count filter unset and let the section match a
+        # neighboring range of the same hash, so the line is dropped instead.
+        if total_index_count > 0:
+            lines.append(f"match_index_count = {total_index_count}")
         lines.extend([
-            f"match_index_count = {total_index_count}",
             "handling = skip",
             f"collector = CollectorSkinPart_{source_suffix_str}, vb0",
         ])

@@ -18,7 +18,7 @@ from ...common.cross_ib_support import CROSS_IB_ERROR_PREFIX
 from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
-from ...common.skip_draw import append_skip_draw_comment, is_submesh_skipped
+from ...common.skip_draw import append_match_index_count, append_skip_draw_comment, is_submesh_skipped
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
 from .shapekeys import (
@@ -29,6 +29,13 @@ from .shapekeys import (
 from .native_postskin_export import prepare_native_export, emit_native_ini, check_package_runtime
 from .native_postskin_data import NativePostSkinError, requires_native_postskin
 from pathlib import Path
+
+
+# Command list declared by the Naraka NBP-Package (not by this add-on).  It
+# re-checks the texture slots of the draw that just matched, so a texture the
+# Package replaced still reaches the Package's own texture overrides.  Only
+# Naraka writes this line: no other preset ships a package that defines it.
+SKIN_CHECK_TEXTURE_SLOT_COMMAND_LIST = "CommandListSkinCheckTextureSlot"
 
 
 class Exporter(StandardExporter):
@@ -209,6 +216,9 @@ class Exporter(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_ib_namesuffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
+            # Match the exact draw range: GPU pre-skinning presets can issue
+            # many draws from one first index, so the count is what selects it.
+            append_match_index_count(texture_override_ib_section, submesh_model)
 
             # No checktextureoverride gate is written here on purpose.  The
             # removed "vb1" line and the per-mark "ps-tN" lines only re-ran
@@ -237,6 +247,9 @@ class Exporter(StandardExporter):
                         category_original_slot = d3d11_game_type.CategoryExtractSlotDict[original_category_name]
                         texture_override_ib_section.append(category_original_slot + " = Resource" + draw_ib + original_category_name)
 
+            # Trigger the Package's texture-slot check right before the modded
+            # index buffer is bound; the checked slots then belong to this draw.
+            texture_override_ib_section.append("run = " + SKIN_CHECK_TEXTURE_SLOT_COMMAND_LIST)
             texture_override_ib_section.append("ib = " + ib_resource_name)
 
             # Automatic Slot / SharedSlot texture bindings from the Submesh marks.
@@ -271,6 +284,9 @@ class Exporter(StandardExporter):
                 guest_drawib_model = cross_entry["guest_drawib_model"]
                 guest_submesh_model = cross_entry["guest_submesh_model"]
                 texture_override_ib_section.append("; Cross-IB: " + guest_submesh_model.display_str + " rendered at " + submesh_model.display_str)
+                # A repeated run before the guest IB bind is harmless and gives
+                # the guest draw the same texture-slot check chance.
+                texture_override_ib_section.append("run = " + SKIN_CHECK_TEXTURE_SLOT_COMMAND_LIST)
                 texture_override_ib_section.append("ib = " + guest_drawib_model.get_submesh_ib_resource_name(guest_submesh_model))
                 texture_override_ib_section.append("vb0 = " + self.get_cross_ib_backup_resource_name(guest_drawib_model, guest_submesh_model, 0))
                 texture_override_ib_section.append("vb1 = " + self.get_cross_ib_backup_resource_name(guest_drawib_model, guest_submesh_model, 1))

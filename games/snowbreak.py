@@ -9,7 +9,7 @@ resource sections and the whole export pipeline come from the shared base.
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
-from ..common.skip_draw import append_hidden_submesh_section, is_submesh_skipped
+from ..common.skip_draw import append_hidden_submesh_section, append_match_index_count, is_submesh_skipped
 from .base.standard_exporter import StandardExporter
 from .base import sections
 
@@ -51,6 +51,9 @@ class ExportSnowBreak(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
+            # Match the exact draw range, not only the first index. The
+            # backup below is bound only when this section really matched.
+            append_match_index_count(texture_override_ib_section, submesh_model)
             texture_override_ib_section.append("handling = skip")
             texture_override_ib_section.append(backup_resource_name + " = ref ib")
             texture_override_ib_section.append("checktextureoverride = vb0")

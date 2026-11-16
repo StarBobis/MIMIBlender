@@ -14,7 +14,12 @@ from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
-from ..common.skip_draw import append_hidden_submesh_section, is_submesh_skipped
+from ..common.skip_draw import (
+    append_hidden_submesh_section,
+    append_match_index_count,
+    append_match_index_count_value,
+    is_submesh_skipped,
+)
 from .base.standard_exporter import StandardExporter
 from .base import sections
 
@@ -35,6 +40,9 @@ class ExportIdentityV(StandardExporter):
         for submesh_model in drawib_model.submesh_model_list:
             existing_submesh_dict[int(submesh_model.match_first_index)] = {
                 "match_first_index": int(submesh_model.match_first_index),
+                # Carried through the dict so both the normal and the bare
+                # skip section write the same match identity.
+                "match_index_count": submesh_model.match_index_count,
                 "submesh_name": submesh_model.submesh_name,
                 "submesh_model": submesh_model,
                 "is_missing": False,
@@ -65,6 +73,9 @@ class ExportIdentityV(StandardExporter):
 
             existing_submesh_dict[match_first_index] = {
                 "match_first_index": match_first_index,
+                # A Submesh that exists only as a workspace folder has no
+                # parsed blueprint data, so its index count stays unknown (0).
+                "match_index_count": 0,
                 "submesh_name": entry_name,
                 "submesh_model": None,
                 "is_missing": True,
@@ -82,6 +93,9 @@ class ExportIdentityV(StandardExporter):
         texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
         texture_override_ib_section.append("hash = " + draw_ib)
         texture_override_ib_section.append("match_first_index = " + str(submesh_entry["match_first_index"]))
+        # Same guarded writer as the normal path: this path only holds the
+        # plain dictionary value, so the value variant is used here.
+        append_match_index_count_value(texture_override_ib_section, submesh_entry["match_index_count"])
         texture_override_ib_section.append("handling = skip")
         texture_override_ib_section.new_line()
 
@@ -159,6 +173,9 @@ class ExportIdentityV(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
+            # Match the exact draw range: the IB backup below is bound only
+            # when this section matched the intended draw.
+            append_match_index_count(texture_override_ib_section, submesh_model)
             texture_override_ib_section.append("handling = skip")
             texture_override_ib_section.append(backup_resource_name + " = ref ib")
             texture_override_ib_section.append("checktextureoverride = vb0")

@@ -9,7 +9,7 @@ from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.buffer_export_helper import BufferExportHelper
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
-from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
+from ..common.skip_draw import append_match_index_count, append_skip_draw_comment, is_submesh_skipped
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 from ..workspace.mmt_workspace import MMTWorkSpace
 
@@ -95,7 +95,10 @@ class ExportEFMI:
             texture_override_ib_section.append("[TextureOverride_" + drawib_model.get_submesh_texture_override_suffix(submesh_model) + "]")
             texture_override_ib_section.append("hash = " + submesh_model.match_draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
-            texture_override_ib_section.append("match_index_count = " + str(submesh_model.match_index_count))
+            # Guarded on purpose: the shared helper drops the line when the
+            # Submesh's index count is still unknown (-1), because writing -1
+            # would make the override match nothing at all.
+            append_match_index_count(texture_override_ib_section, submesh_model)
             texture_override_ib_section.append("handling = skip")
 
             # Skip Draw: this Submesh is hidden. The original draw stays

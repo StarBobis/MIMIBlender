@@ -6,7 +6,7 @@ from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.buffer_export_helper import BufferExportHelper
 from ..common.m_ini_helper import M_IniHelper
 from ..common.m_ini_builder import M_IniBuilder,M_IniSection, M_SectionType
-from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
+from ..common.skip_draw import append_match_index_count, append_skip_draw_comment, is_submesh_skipped
 from ..model.drawib_model import DrawIBModel
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
@@ -206,6 +206,9 @@ class ExportSRMI:
                 texture_override_ib_section.append("[TextureOverride_" + texture_override_ib_namesuffix + "]")
                 texture_override_ib_section.append("hash = " + draw_ib)
                 texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
+                # Match the exact draw range, not only the first index. The
+                # WRITE_DISABLE_OVERLAY draws below rely on this match.
+                append_match_index_count(texture_override_ib_section, submesh_model)
                 texture_override_ib_section.append("handling = skip")
 
                 # Skip Draw: hide this Submesh by never binding its IB and

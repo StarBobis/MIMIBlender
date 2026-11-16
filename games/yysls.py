@@ -12,7 +12,7 @@ from ..common.global_config import GlobalConfig
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
-from ..common.skip_draw import append_skip_draw_comment, is_submesh_skipped
+from ..common.skip_draw import append_match_index_count, append_skip_draw_comment, is_submesh_skipped
 from .base.standard_exporter import StandardExporter
 from .base import sections
 from . import yysls_cloth_preserve as yysls_cloth
@@ -75,7 +75,9 @@ class ExportYYSLS(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + match_first_index)
-            texture_override_ib_section.append("match_index_count = " + str(submesh_model.match_index_count))
+            # Guarded on purpose: an unknown (-1/0) index count is dropped
+            # instead of written, otherwise the override would match nothing.
+            append_match_index_count(texture_override_ib_section, submesh_model)
             # The game package declares this switch in d3dx.ini (F6 in Core).
             # A disabled mod must not skip the game draw or bind mod resources.
             # Object branch conditions below still control their actual draws.

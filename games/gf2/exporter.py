@@ -28,7 +28,7 @@ from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.cross_ib_support import CROSS_IB_ERROR_PREFIX
 from ...common.m_ini_builder import M_IniBuilder, M_IniSection, M_SectionType
 from ...common.m_ini_helper import M_IniHelper
-from ...common.skip_draw import append_hidden_submesh_section, is_submesh_skipped
+from ...common.skip_draw import append_hidden_submesh_section, append_match_index_count, is_submesh_skipped
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
 from ...common.gimi_texture_slots import collect_gimi_texture_bindings, gimi_texture_lines
@@ -275,6 +275,9 @@ class GF2Exporter(StandardExporter):
             texture_override_ib_section.append("[TextureOverride_" + texture_override_name_suffix + "]")
             texture_override_ib_section.append("hash = " + draw_ib)
             texture_override_ib_section.append("match_first_index = " + str(submesh_model.match_first_index))
+            # Match the exact draw range: several Submeshes can share one
+            # first index, and only the index count tells them apart.
+            append_match_index_count(texture_override_ib_section, submesh_model)
 
             ib_buf = drawib_model.submesh_ib_dict.get(submesh_model.submesh_name, None)
             if ib_buf is None or len(ib_buf) == 0:
