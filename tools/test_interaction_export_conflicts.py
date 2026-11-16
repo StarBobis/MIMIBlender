@@ -9,6 +9,8 @@ The cases below cover the combinations that used to abort the whole
 export, plus the cases that must still report a problem.
 """
 
+import contextlib
+import io
 import os
 import sys
 
@@ -20,10 +22,19 @@ from common.interaction import runtime  # noqa: E402
 from common.interaction.backend import GpuPreSkinningBackend  # noqa: E402
 from common.interaction.exporter import (  # noqa: E402
     collect_region_list,
+    find_empty_control_groups,
     find_missing_control_groups,
     prepare_interaction,
 )
 from common.interaction.runtime import InteractionRegion  # noqa: E402
+
+
+def capture_output(function, *args):
+    """Run a function and return everything it printed."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        function(*args)
+    return buffer.getvalue()
 
 
 POSITION_STRIDE = 40
@@ -183,7 +194,50 @@ def check_group_without_weight_is_not_called_missing():
     missing = find_missing_control_groups([body], [region("MimiInteraction_Empty")])
     if missing:
         raise AssertionError("a group that exists was reported as missing: " + str(missing))
-    print("a group without a weight: OK (not reported as missing)")
+
+    # The empty group has to be reported with its own wording, and the
+    # report has to be reachable.
+    empty = find_empty_control_groups([body], [region("MimiInteraction_Empty")])
+    if empty != ["MimiInteraction_Empty"]:
+        raise AssertionError("the empty group was not found: " + str(empty))
+
+    output = capture_output(prepare_interaction, [body], [region("MimiInteraction_Empty")],
+                             GpuPreSkinningBackend())
+    if "exists but carries no weight" not in output:
+        raise AssertionError("the empty group was not reported: " + output)
+    if "was not found on any exported object" in output:
+        raise AssertionError("an existing group was reported as missing: " + output)
+    print("a group without a weight: OK (reported with its own wording)")
+
+
+def check_conflict_drawib_does_not_claim_a_pull():
+    """A DrawIB another feature owns must not claim a pull."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    regions = [region("MimiInteraction_Chest", offset=(0.5, 0.0, 0.0))]
+
+    conflict_reason_dict = {"body1111": "it already carries shape keys"}
+    output = capture_output(prepare_interaction, [body], regions,
+                             GpuPreSkinningBackend(), conflict_reason_dict)
+    if "pulls" in output:
+        raise AssertionError("a skipped DrawIB claimed a pull: " + output)
+    if "already carries shape keys" not in output:
+        raise AssertionError("the conflict was not reported: " + output)
+    print("a DrawIB owned by another feature: OK (no pull is claimed)")
+
+
+def check_object_name_reason_is_true():
+    """The reason must name the object only when it is really missing."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    # The object of the region is the object of this DrawIB, so the real
+    # reason is the missing weight, not a missing object.
+    regions = [region("MimiInteraction_Chest", object_name="Body")]
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "which is not part of this DrawIB" in output:
+        raise AssertionError("the reason named a missing object that is present: " + output)
+    if "does not exist" in output:
+        raise AssertionError("the reason named a missing group that exists: " + output)
+    print("the reason names the real cause: OK")
 
 
 def check_object_name_mismatch_is_reported():
@@ -275,6 +329,8 @@ def main():
     check_constant_weight_is_reported()
     check_wrong_group_name_is_reported()
     check_group_without_weight_is_not_called_missing()
+    check_conflict_drawib_does_not_claim_a_pull()
+    check_object_name_reason_is_true()
     check_object_name_mismatch_is_reported()
     check_vertex_count_mismatch_is_skipped()
     check_region_offsets_match_the_region_list()
