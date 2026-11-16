@@ -76,6 +76,20 @@ def main():
         raise AssertionError("the group name does not carry the object name")
     print("the group names: OK")
 
+    # Two labels that only differ in characters that are not allowed in a
+    # name must still get their own group.
+    spaced_name = region_tools.build_group_name("Region 1", "Body")
+    tight_name = region_tools.build_group_name("Region1", "Body")
+    print("the folded names: %s and %s" % (spaced_name, tight_name))
+    if spaced_name == tight_name:
+        raise AssertionError("two different labels share the group name")
+
+    # The name has to be the same every time, or the group of a region
+    # would be lost on the next run.
+    if region_tools.build_group_name("Chest", "Body") != first_name:
+        raise AssertionError("the group name is not stable")
+    print("the folded names: OK")
+
     # The operator has to run on a real mesh in the real edit mode.
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()

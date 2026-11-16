@@ -207,6 +207,7 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
         box.label(text=tr("The pull strength is a fraction of the safe distance"))
         box.label(text=tr("A narrow control group can only be pulled a little"))
         box.label(text=tr("Control groups must not use a numbered bone group name"))
+        box.label(text=tr("Let the create region button make the control group"))
         box.label(text=tr("A control group name has to start with {prefix}").format(
             prefix=CONTROL_GROUP_PREFIX))
 

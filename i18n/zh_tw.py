@@ -1479,4 +1479,5 @@ TRANSLATIONS_ZH_TW = {
     "The pull strength is a fraction of the safe distance": "拉伸強度是安全拉伸距離的比例",
     "A narrow control group can only be pulled a little": "控制組越窄，能拉伸的距離越短",
     "A control group name has to start with {prefix}": "控制組名稱必須以 {prefix} 開頭",
+    "Let the create region button make the control group": "讓「建立區域」按鈕建立控制組",
 }

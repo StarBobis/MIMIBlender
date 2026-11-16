@@ -424,6 +424,37 @@ def check_region_reason_has_its_own_title():
     print("the region reasons have their own title: OK")
 
 
+def check_zero_pull_region_is_reported():
+    """A region without a pull is exported, so it is reported too."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    regions = [region("MimiInteraction_Chest", offset=(0.0, 0.0, 0.0))]
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "has no pull" not in output:
+        raise AssertionError("the region without a pull was not reported: " + output)
+    print("a region without a pull: OK (reported)")
+
+
+def check_disabled_regions_are_not_reported():
+    """A region the user switched off is not reported as a problem."""
+    class FakeEntry:
+        def __init__(self, enabled, vertex_group):
+            self.enabled = enabled
+            self.label = "Region"
+            self.object_name = "Body"
+            self.vertex_group = vertex_group
+            self.offset = (0.1, 0.0, 0.0)
+
+    class FakeNode:
+        def __init__(self, entries):
+            self.regions = entries
+
+    output = capture_output(collect_region_list, [FakeNode([FakeEntry(False, "")])])
+    if output.strip():
+        raise AssertionError("a switched off region was reported: " + output)
+    print("a switched off region: OK (not reported)")
+
+
 def main():
     check_second_drawib_is_skipped()
     check_constant_weight_is_reported()
@@ -438,6 +469,8 @@ def main():
     check_vertex_count_mismatch_is_skipped()
     check_region_offsets_match_the_region_list()
     check_zero_pull_is_allowed()
+    check_zero_pull_region_is_reported()
+    check_disabled_regions_are_not_reported()
     check_empty_control_group_is_reported()
     check_region_reason_has_its_own_title()
     check_region_collection_drops_incomplete_rows()

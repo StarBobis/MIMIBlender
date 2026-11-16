@@ -91,10 +91,12 @@ def collect_region_list(node_list):
     silently ignored.
     """
     region_list = []
+    enabled_region_count = 0
     for node in node_list:
         for entry in getattr(node, "regions", []):
             if not getattr(entry, "enabled", True):
                 continue
+            enabled_region_count += 1
             vertex_group = str(getattr(entry, "vertex_group", "") or "")
             if not vertex_group:
                 # The region has no control group, so it moves nothing.
@@ -120,8 +122,13 @@ def collect_region_list(node_list):
         region_list = region_list[:MAX_RUNTIME_REGIONS]
 
     if node_list and not region_list:
-        print("Interaction deformation: none of the regions can be deformed,"
-              + " so the feature does nothing in this export.")
+        if enabled_region_count == 0:
+            # Every region was switched off, which is what the user asked
+            # for, so there is nothing to report.
+            pass
+        else:
+            print("Interaction deformation: none of the regions has a control"
+                  + " group, so the feature does nothing in this export.")
 
     return region_list
 
@@ -375,7 +382,11 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
             strength = float(sum(value * value for value in direction) ** 0.5)
             if strength <= 1e-12:
                 # The region asks for no pull, so it simply does not move.
+                # It is still exported, so the report names it as well.
                 region_offsets.append((0.0, 0.0, 0.0))
+                drawib_report_list.append(
+                    "the region '" + (region.label or region.vertex_group)
+                    + "' of DrawIB " + drawib + " has no pull, so it does not move")
                 continue
 
             gradient_bound = data["region_gradient_bound_list"][region_index]

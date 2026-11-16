@@ -124,7 +124,14 @@ def collect_region_weights(drawib_model, region):
     The weights of a DrawIB are the concatenation of the weights of its
     submeshes, in the same order the position buffer is assembled in.  A
     submesh that does not contain the object of the region contributes
-    zeroes, so a region never leaks into another body part.
+    zeroes.
+
+    The filter works on the submesh, not on the vertex.  A submesh that
+    holds more than one object is filtered as a whole, so a control group
+    that was painted across several objects of that submesh reaches all
+    of them.  The tool that creates the control groups puts the name of
+    the object into the name of the group, so two objects never share one
+    group and the weights stay apart.
     """
     weights_list = []
     for submesh_model in drawib_model.submesh_model_list:

@@ -17,6 +17,8 @@ in one group.  The exporter deletes the group from the temporary export
 copy, so it never reaches the game as a skin weight.
 """
 
+import hashlib
+
 import bpy
 
 from ..i18n.i18n import I18nOperator, tr
@@ -48,6 +50,10 @@ def build_group_name(label, object_name):
     The name carries the name of the object, because two objects with the
     same label would otherwise be joined into one group, and then both
     regions would pull both objects.
+
+    The name also carries a short digest of the label and the object, so
+    two labels that only differ in characters that are not allowed in a
+    name, such as "Region 1" and "Region1", still get their own group.
     """
     clean_label = "".join(
         character for character in (label or "Region")
@@ -59,7 +65,12 @@ def build_group_name(label, object_name):
         if character.isalnum() or character in ("_", "-"))
     if not clean_object:
         clean_object = "Object"
-    return GROUP_PREFIX + clean_label + "_" + clean_object
+
+    # The digest keeps two different regions apart, even when their names
+    # look the same after the characters were cleaned up.
+    digest_source = (label or "") + "\0" + (object_name or "")
+    digest = hashlib.md5(digest_source.encode("utf-8")).hexdigest()[:6]
+    return GROUP_PREFIX + clean_label + "_" + clean_object + "_" + digest
 
 
 def _smooth_step(value):
