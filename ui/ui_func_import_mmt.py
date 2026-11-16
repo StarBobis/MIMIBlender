@@ -713,6 +713,9 @@ def ImprotFromWorkSpaceFull(self, context):
 
         BlueprintExportHelper.reveal_tree_in_node_editors(context, tree)
         _clear_blueprint_node_selection(tree)
+        # Persist the first-view request even when no blueprint editor is open.
+        # The editor timer waits for measured bounds before framing this output.
+        tree["mimi_pending_output_focus"] = output_node.name
 
         print(f"Blueprint {tree_name} updated with imported objects.")
         
@@ -1016,6 +1019,9 @@ def _generate_blueprint_for_imported_objects(context, foldername_imported_obj_di
 
         BlueprintExportHelper.reveal_tree_in_node_editors(context, tree)
         _clear_blueprint_node_selection(tree)
+        # Persist the first-view request even when no blueprint editor is open.
+        # The editor timer waits for measured bounds before framing this output.
+        tree["mimi_pending_output_focus"] = output_node.name
 
         print(f"Blueprint {tree_name} updated with imported objects.")
     except Exception as e:

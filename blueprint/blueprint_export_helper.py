@@ -159,6 +159,40 @@ class BlueprintExportHelper:
         return tree
 
     @staticmethod
+    def _focus_imported_output(window, area):
+        """Frame an imported output once, after the editor has measured it."""
+        space = area.spaces.active
+        tree = getattr(space, "edit_tree", None)
+        if tree is None:
+            return
+        node_name = tree.get("mimi_pending_output_focus", "")
+        if not node_name:
+            return
+        node = tree.nodes.get(node_name)
+        if node is None:
+            del tree["mimi_pending_output_focus"]
+            return
+        # Newly opened editors report zero dimensions until their first draw.
+        # Keep the persistent request until a visible editor can frame the node.
+        region = next((item for item in area.regions if item.type == 'WINDOW'), None)
+        if region is None or node.dimensions.x <= 0 or node.dimensions.y <= 0:
+            area.tag_redraw()
+            return
+        # Select only the output so distant import nodes cannot widen the view.
+        # The active node also makes the export entry point easy to identify.
+        for item in tree.nodes:
+            item.select = item == node
+        tree.nodes.active = node
+        try:
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                result = bpy.ops.node.view_selected()
+        except RuntimeError:
+            # A changing window context can become unavailable during a redraw.
+            return
+        if 'FINISHED' in result:
+            del tree["mimi_pending_output_focus"]
+
+    @staticmethod
     def _sync_workspace_tree_timer():
         """Bind the workspace blueprint only once, when an area switches to the MMT Blueprint type."""
         current_tree_type_by_space = {}
@@ -179,6 +213,9 @@ class BlueprintExportHelper:
                         and getattr(space, "node_tree", None) is None
                     ):
                         BlueprintExportHelper._bind_workspace_tree_to_space(space)
+                # This also handles explicit opens and already-visible import editors.
+                # Consuming the request once preserves later manual pan and zoom.
+                BlueprintExportHelper._focus_imported_output(window, area)
         BlueprintExportHelper._node_editor_tree_type_by_space = current_tree_type_by_space
         return 0.5
 
