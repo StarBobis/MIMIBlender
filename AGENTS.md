@@ -6,5 +6,4 @@
 - Do not use PowerShell scripts lightly; unless necessary, write Python scripts instead, to avoid garbled-character issues.
 - When generating code, use simple syntax wherever possible, so that ordinary people without programming training / non-professional programmers can easily read and maintain the generated code.
 - Don't forget commit and push after modify code.
-- SubAgent is not allowed to use!!! Don't use Any SubAgent, do it yourself!!!
 
