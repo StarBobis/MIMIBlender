@@ -82,6 +82,9 @@ class FakeDrawIBModel:
         self.draw_ib = drawib
         self.d3d11_game_type = FakeGameType()
         self.submesh_model_list = submesh_model_list
+        self.vertex_count = 0
+        for submesh_model in submesh_model_list:
+            self.vertex_count += len(submesh_model.index_vertex_id_dict)
 
     def _get_exported_vertex_count(self, submesh_model):
         if submesh_model.index_vertex_id_dict:
@@ -90,6 +93,10 @@ class FakeDrawIBModel:
         if position_buffer is None:
             return 0
         return int(len(position_buffer) / POSITION_STRIDE)
+
+    def get_category_buffer_filename(self, category):
+        """Mirror the naming of the real export model."""
+        return "LOD0." + self.draw_ib + "-" + category + ".buf"
 
 
 def build_flat_grid(size=3):
@@ -211,6 +218,14 @@ def check_prepared_data_and_ini():
     # The INI must bind the shader the way the game expects.  The builder
     # only renders its sections when it writes the file, so the check
     # reads the written file back.
+    #
+    # The Rest file name is built from the real name builder of the export
+    # model, not from a hand written constant: a typo in the constant would
+    # hide a wrong path in the generated mod.  The folder prefix is added
+    # by hand here, because the shared config module needs Blender.  The
+    # Blender suite checks the full path against the file the exporter
+    # really writes.
+    rest_file_name = "Buffers\\" + drawib_model.get_category_buffer_filename("Position")
     from common.m_ini_builder import M_IniBuilder
     builder = M_IniBuilder()
     runtime.append_interaction_ini_sections(
@@ -220,7 +235,7 @@ def check_prepared_data_and_ini():
         POSITION_STRIDE,
         runtime.get_controls_buffer_filename("test1234"),
         runtime.get_state_buffer_filename("test1234"),
-        "Buffers/LOD0.test1234-Position.buf",
+        rest_file_name,
     )
     with tempfile.TemporaryDirectory() as temporary_folder:
         ini_path = os.path.join(temporary_folder, "test.ini")
@@ -232,8 +247,7 @@ def check_prepared_data_and_ini():
         "cs = " + runtime.APPLY_SHADER_FILENAME,
         "cs-t40 = " + runtime.get_rest_resource_name("test1234"),
         "cs-t41 = " + runtime.get_controls_resource_name("test1234"),
-        "cs-t42 = " + runtime.get_state_resource_name("test1234"),
-        "cs-u5 = ref " + runtime.get_deformed_resource_name("test1234"),
+        "cs-t42 = " + runtime.get_state_resource_name("test1234"),        "cs-u5 = ref " + runtime.get_deformed_resource_name("test1234"),
         "dispatch = " + str((vertex_count + 63) // 64) + ",1,1",
         "Resource" + "test1234" + "Position = ref " + runtime.get_deformed_resource_name("test1234"),
         "stride = 32",

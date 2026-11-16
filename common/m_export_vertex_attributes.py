@@ -22,6 +22,12 @@ key, so two features never overwrite each other.
 # data it wants to attach to a submesh, keyed by its own name.
 _COLLECTOR_LIST = []
 
+# The registered preprocessors.  A preprocessor runs on the temporary
+# merged mesh before the vertex and index buffers are built, so a feature
+# can prepare the mesh for the export.  Removing a helper vertex group
+# belongs here: the group would otherwise be read as a skin weight.
+_PREPROCESSOR_LIST = []
+
 
 def register_collector(collector):
     """Register a collector callable and return it.
@@ -34,15 +40,43 @@ def register_collector(collector):
     return collector
 
 
+def register_preprocessor(preprocessor):
+    """Register a preprocessor callable and return it."""
+    if preprocessor not in _PREPROCESSOR_LIST:
+        _PREPROCESSOR_LIST.append(preprocessor)
+    return preprocessor
+
+
 def unregister_collector(collector):
     """Remove a collector callable; unknown collectors are ignored."""
     if collector in _COLLECTOR_LIST:
         _COLLECTOR_LIST.remove(collector)
 
 
+def unregister_preprocessor(preprocessor):
+    """Remove a preprocessor callable; unknown ones are ignored."""
+    if preprocessor in _PREPROCESSOR_LIST:
+        _PREPROCESSOR_LIST.remove(preprocessor)
+
+
 def get_collector_name(collector):
     """Return the storage key of a collector callable."""
     return getattr(collector, "collector_name", collector.__name__)
+
+
+def run_preprocessors(merged_obj):
+    """Run every registered preprocessor on the temporary export mesh.
+
+    A preprocessor that fails must not break the export: the problem is
+    reported on the console and the export continues without it.
+    """
+    for preprocessor in list(_PREPROCESSOR_LIST):
+        try:
+            preprocessor(merged_obj)
+        except Exception as error:
+            print("Export vertex attribute preprocessor "
+                  + getattr(preprocessor, "collector_name", preprocessor.__name__)
+                  + " failed: " + str(error))
 
 
 def run_collectors(merged_obj, submesh_model):

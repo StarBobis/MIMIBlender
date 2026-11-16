@@ -105,13 +105,17 @@ def get_backup_resource_name(drawib, slot):
 
 
 def get_controls_buffer_filename(drawib):
-    """Return the mod relative file name of the control data buffer."""
-    return BUFFER_SUBFOLDER + "/" + drawib + "-Controls.buf"
+    """Return the mod relative file name of the control data buffer.
+
+    The folder separator is a backslash, the same way the shared buffer
+    resources are named, so every resource of the mod uses one spelling.
+    """
+    return BUFFER_SUBFOLDER + "\\" + drawib + "-Controls.buf"
 
 
 def get_state_buffer_filename(drawib):
     """Return the mod relative file name of the runtime state buffer."""
-    return BUFFER_SUBFOLDER + "/" + drawib + "-State.buf"
+    return BUFFER_SUBFOLDER + "\\" + drawib + "-State.buf"
 
 
 def collect_region_weights(drawib_model, region):
@@ -249,9 +253,12 @@ def build_state_record(region_offsets):
 def assemble_interaction_data(drawib_model, regions, positions, triangles):
     """Assemble the per-vertex control data of one DrawIB.
 
-    Returns a dictionary with the control record, the gradient bound and
-    the pull distance that keeps the surface from folding.  The pull of
-    every region is limited so that the Jacobian stays invertible.
+    Returns a dictionary with the control record and, for every region, the
+    gradient bound of its own weight field and the pull distance that keeps
+    the surface from folding for that region.  The per region values matter
+    because one region may have a usable weight field while another one is
+    flat, and the second one has to be reported instead of silently doing
+    nothing.
     """
     vertex_count = len(positions)
 
@@ -266,17 +273,21 @@ def assemble_interaction_data(drawib_model, regions, positions, triangles):
 
     control_record = build_control_data(weights_by_region, gradients_by_region)
 
-    gradient_bound = 0.0
-    for gradients in gradients_by_region:
-        gradient_bound = max(gradient_bound, compute_gradient_bound(gradients))
-
     model_extent = compute_model_extent(positions)
-    safe_distance = compute_safe_displacement(gradient_bound, model_extent)
+
+    region_gradient_bound_list = []
+    region_safe_distance_list = []
+    for gradients in gradients_by_region:
+        gradient_bound = compute_gradient_bound(gradients)
+        region_gradient_bound_list.append(gradient_bound)
+        region_safe_distance_list.append(compute_safe_displacement(gradient_bound, model_extent))
 
     return {
         "control_record": control_record,
-        "gradient_bound": gradient_bound,
-        "safe_distance": safe_distance,
+        "gradient_bound": max(region_gradient_bound_list) if region_gradient_bound_list else 0.0,
+        "region_gradient_bound_list": region_gradient_bound_list,
+        "region_safe_distance_list": region_safe_distance_list,
+        "safe_distance": max(region_safe_distance_list) if region_safe_distance_list else 0.0,
         "model_extent": model_extent,
         "vertex_count": vertex_count,
     }
@@ -363,10 +374,13 @@ def append_interaction_ini_sections(ini_builder, drawib, vertex_count, position_
     resource_section.new_line()
 
     # The deformed buffer is written by the shader and read by the game.
+    # The vertex buffer binding is declared as well, because the game
+    # facing position resource has to be usable by the input assembler in
+    # the presets that draw the mesh from a vertex buffer.
     resource_section.append("[" + get_deformed_resource_name(drawib) + "]")
     resource_section.append("type = ByteAddressBuffer")
     resource_section.append("misc_flags = buffer_allow_raw_views")
-    resource_section.append("bind_flags = shader_resource unordered_access")
+    resource_section.append("bind_flags = vertex_buffer shader_resource unordered_access")
     resource_section.append("stride = " + str(position_stride))
     resource_section.append("byte_width = " + str(vertex_count * position_stride))
     resource_section.new_line()

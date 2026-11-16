@@ -84,9 +84,15 @@ class PGRExporter(StandardExporter):
         shapekey_drawib_set = set()
         for model in self.usable_shapekey_drawib_model_list:
             shapekey_drawib_set.add(model.draw_ib)
+        time_pos_drawib_set = set()
+        for model in self.drawib_model_list:
+            if getattr(model, "time_pos_frame_groups", None):
+                time_pos_drawib_set.add(model.draw_ib)
         for drawib in prepared_dict:
             if drawib in shapekey_drawib_set:
                 raise ValueError("Interaction deformation cannot be combined with shape keys on DrawIB " + drawib)
+            if drawib in time_pos_drawib_set:
+                raise ValueError("Interaction deformation cannot be combined with the Position.buf based dynamic mod on DrawIB " + drawib)
 
         return prepared_dict
 

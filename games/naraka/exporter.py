@@ -95,6 +95,19 @@ class Exporter(StandardExporter):
         # with the shape key path or with the native post-skin path.
         self.interaction_data = self.prepare_interaction_data()
 
+    @property
+    def time_pos_drawib_set(self):
+        """Return the DrawIBs that the Position based dynamic mod writes.
+
+        The dynamic mod copies its per frame positions into the position
+        resource of its DrawIB, so it is a third writer of that buffer.
+        """
+        drawib_set = set()
+        for model in self.drawib_model_list:
+            if getattr(model, "time_pos_frame_groups", None):
+                drawib_set.add(model.draw_ib)
+        return drawib_set
+
     def prepare_interaction_data(self):
         """Prepare the interaction deformation of this export.
 
@@ -120,6 +133,8 @@ class Exporter(StandardExporter):
                 raise ValueError("Interaction deformation cannot be combined with shape keys on DrawIB " + drawib)
             if drawib in self.native_exports:
                 raise ValueError("Interaction deformation cannot be combined with the native post-skin path on DrawIB " + drawib)
+            if drawib in self.time_pos_drawib_set:
+                raise ValueError("Interaction deformation cannot be combined with the Position.buf based dynamic mod on DrawIB " + drawib)
 
         return prepared_dict
 

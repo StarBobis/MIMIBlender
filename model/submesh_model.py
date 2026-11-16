@@ -10,7 +10,7 @@ from ..utils.json_utils import JsonUtils
 from ..common.global_config import LogicName
 from ..common.global_config import GlobalConfig
 from ..common.d3d11_gametype import D3D11GameType
-from ..common.m_export_vertex_attributes import run_collectors
+from ..common.m_export_vertex_attributes import run_collectors, run_preprocessors
 from ..common.obj_buffer_helper import ObjBufferHelper
 from ..workspace.mmt_workspace import MMTWorkSpace
 from ..workspace.submesh_json import SubmeshJson
@@ -233,6 +233,11 @@ class SubMeshModel:
         # Check and verify that no attributes are missing
         ObjBufferHelper.check_and_verify_attributes(obj=submesh_merged_obj, d3d11_game_type=self.d3d11_game_type)
 
+        # 3b. Let the features prepare the mesh before the buffers are
+        # built.  A helper vertex group has to be removed here, because
+        # the exporter reads every remaining group as a skin weight.
+        run_preprocessors(submesh_merged_obj)
+
         obj_buffer_result = ExportUtils.build_unity_obj_buffer_result(
             obj=submesh_merged_obj,
             d3d11_game_type=self.d3d11_game_type,
@@ -248,7 +253,12 @@ class SubMeshModel:
         self.shape_key_buffer_dict = obj_buffer_result.shape_key_buffer_dict
 
         if GlobalConfig.logic_name == LogicName.NTEMI:
-            self.ntemi_bone_palette = [int(vg.name) for vg in submesh_merged_obj.vertex_groups]
+            # The palette holds the numbered bone groups.  A helper group
+            # that is not a bone must not break the export.
+            self.ntemi_bone_palette = [
+                int(vertex_group.name) for vertex_group in submesh_merged_obj.vertex_groups
+                if vertex_group.name.isdigit()
+            ]
 
         # 4b. Let the features that need per-vertex data read it now: the
         # temporary merged mesh is deleted in the next step, and the
