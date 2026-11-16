@@ -24,9 +24,13 @@ from .runtime import (
     copy_apply_shader,
     get_controls_buffer_filename,
     get_state_buffer_filename,
-    limit_offset,
     write_interaction_files,
 )
+
+
+# The runtime state carries two regions, so two is also the limit of the
+# regions an export can use.
+MAX_RUNTIME_REGIONS = 2
 
 
 # The node id of the interaction deformation node.
@@ -78,6 +82,10 @@ def collect_region_list(node_list):
     Every region keeps the object it belongs to and the control group that
     carries its weight.  A region without a control group cannot be
     deformed and is reported by the caller.
+
+    The runtime carries two regions, so a third one would be dropped
+    without a trace.  The extra regions are reported instead of being
+    silently ignored.
     """
     region_list = []
     for node in node_list:
@@ -93,6 +101,14 @@ def collect_region_list(node_list):
                 vertex_group=vertex_group,
                 offset=tuple(float(value) for value in getattr(entry, "offset", (0.0, 0.0, 0.0))),
             ))
+
+    if len(region_list) > MAX_RUNTIME_REGIONS:
+        print("Interaction deformation: the runtime carries only "
+              + str(MAX_RUNTIME_REGIONS) + " regions, so "
+              + str(len(region_list) - MAX_RUNTIME_REGIONS)
+              + " of them are not exported. Keep one node with two regions.")
+        region_list = region_list[:MAX_RUNTIME_REGIONS]
+
     return region_list
 
 
@@ -133,7 +149,7 @@ def prepare_interaction(drawib_model_list, region_list, backend):
     """
     prepared_dict = {}
     skipped_reason_list = []
-    limited_report_list = []
+    applied_report_list = []
     if not region_list:
         return prepared_dict
 
@@ -185,8 +201,12 @@ def prepare_interaction(drawib_model_list, region_list, backend):
                 drawib + ": it carries none of the interaction regions")
             continue
 
-        # The pull of a region is a fraction of the model size, so the
-        # same value behaves the same way on a large and on a small body.
+        # The pull of a region is a fraction of the distance that its own
+        # weight field can carry.  The distance shrinks with the gradient
+        # of the weight field, so a narrow control group can only be
+        # pulled a little.  Measuring the pull against that distance
+        # keeps the whole slider range usable: a value of one always
+        # means "as far as this region can be pulled safely".
         model_extent = data["model_extent"]
         region_offsets = []
         region_problem = ""
@@ -196,9 +216,9 @@ def prepare_interaction(drawib_model_list, region_list, backend):
                 region_offsets.append((0.0, 0.0, 0.0))
                 continue
 
-            offset = tuple(float(value) * model_extent for value in region.offset)
-            magnitude = float(sum(value * value for value in offset) ** 0.5)
-            if magnitude <= 1e-12:
+            direction = tuple(float(value) for value in region.offset)
+            strength = float(sum(value * value for value in direction) ** 0.5)
+            if strength <= 1e-12:
                 # The region asks for no pull, so it simply does not move.
                 region_offsets.append((0.0, 0.0, 0.0))
                 continue
@@ -213,28 +233,27 @@ def prepare_interaction(drawib_model_list, region_list, backend):
                 break
 
             safe_distance = data["region_safe_distance_list"][region_index]
-            limited = limit_offset(offset, safe_distance)
-            limited_magnitude = float(sum(value * value for value in limited) ** 0.5)
-            if limited_magnitude <= 1e-12:
+            if safe_distance <= 1e-12:
                 region_problem = ("the pull of the region '" + (region.label or region.vertex_group)
                                   + "' is too small for its weight field and would be cancelled; "
                                   + "increase the pull or soften the control group")
                 break
 
-            # The pull is limited so the surface cannot fold.  The limit
-            # shrinks with the gradient of the weight field, so a narrow
-            # control group allows a much smaller pull than a wide one.
-            # The user has to see the value that is really applied.
-            if limited_magnitude < magnitude - 1e-9:
-                limited_report_list.append(
-                    "the region '" + (region.label or region.vertex_group)
-                    + "' of DrawIB " + drawib + " asked for "
-                    + format(magnitude, ".4f") + " but is limited to "
-                    + format(limited_magnitude, ".4f")
-                    + " because its weight gradient is "
-                    + format(gradient_bound, ".2f")
-                    + "; a narrower control group allows a smaller pull")
-            region_offsets.append(tuple(float(value) for value in limited))
+            # The direction of the pull stays the one the user chose, and
+            # the length is the strength scaled to the safe distance.
+            applied_magnitude = strength * safe_distance
+            unit_direction = tuple(value / strength for value in direction)
+            applied = tuple(value * applied_magnitude for value in unit_direction)
+
+            # The user has to see the distance that is really applied,
+            # because it depends on the way the region was drawn.
+            applied_report_list.append(
+                "the region '" + (region.label or region.vertex_group)
+                + "' of DrawIB " + drawib + " pulls "
+                + format(applied_magnitude, ".4f")
+                + " with a strength of " + format(strength, ".2f")
+                + "; its weight gradient is " + format(gradient_bound, ".2f"))
+            region_offsets.append(applied)
 
         # A region that cannot be pulled is reported and the DrawIB is
         # skipped.  It never stops the export, because the other parts of
@@ -255,11 +274,11 @@ def prepare_interaction(drawib_model_list, region_list, backend):
         for reason in skipped_reason_list:
             print("  " + reason)
 
-    # A pull that was shortened has to be visible too, because the value
-    # in the node is not the value the game applies.
-    if limited_report_list:
-        print("Interaction deformation: some pulls were shortened:")
-        for report in limited_report_list:
+    # The applied distance has to be visible, because it depends on the
+    # way the region was drawn and the node only carries the strength.
+    if applied_report_list:
+        print("Interaction deformation: the applied pull of every region:")
+        for report in applied_report_list:
             print("  " + report)
 
     return prepared_dict

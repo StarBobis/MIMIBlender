@@ -202,13 +202,20 @@ def check_prepared_data_and_ini():
     if data["control_record"].shape != (vertex_count, 8):
         raise AssertionError("the control record must hold eight floats per vertex")
 
-    # The pull of the region is a fraction of the model size.
-    expected_magnitude = 0.1 * data["model_extent"]
+    # The pull is measured against the distance the weight field can
+    # carry, so the whole strength range stays usable.  The strength is
+    # the length of the pull vector the user typed.
+    expected_magnitude = 0.1 * data["region_safe_distance_list"][0]
     actual_magnitude = float(np.linalg.norm(data["region_offsets"][0]))
     if abs(actual_magnitude - expected_magnitude) > 1e-6:
-        raise AssertionError("the pull is not scaled by the model size")
+        raise AssertionError("the pull is not scaled by the safe distance")
     if actual_magnitude > data["safe_distance"] + 1e-9:
         raise AssertionError("the pull exceeds the safe distance")
+
+    # The direction of the pull has to stay the one the user chose.
+    offset = data["region_offsets"][0]
+    if offset[0] <= 0.0 or abs(offset[1]) > 1e-9 or abs(offset[2]) > 1e-9:
+        raise AssertionError("the pull did not keep its direction")
 
     # The state buffer carries the pull of the region.
     state = data["state_record"]

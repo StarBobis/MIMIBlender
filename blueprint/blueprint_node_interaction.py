@@ -46,7 +46,8 @@ class MIMIInteractionRegion(bpy.types.PropertyGroup):
     offset: bpy.props.FloatVectorProperty(
         name=tr("Pull"), size=3, default=(0.0, 0.0, 0.0),
         min=-1.0, max=1.0,
-        description=tr("Pull direction and strength; the length is a fraction of the model size"),
+        description=tr("Pull direction and strength; the length is a fraction of the "
+                       "distance this region can be pulled safely"),
     ) # type: ignore
 
 
@@ -203,7 +204,8 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
         else:
             box.label(text=tr("Add at least one enabled region before exporting"), icon='INFO')
 
-        box.label(text=tr("The pull length is a fraction of the model size"))
+        box.label(text=tr("The pull strength is a fraction of the safe distance"))
+        box.label(text=tr("A narrow control group can only be pulled a little"))
         box.label(text=tr("Control groups must not use a numbered bone group name"))
 
 
