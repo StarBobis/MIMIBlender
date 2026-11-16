@@ -172,15 +172,17 @@ class WeightDetectOperator(WeightOperatorBase):
         settings = scene_settings(context.scene)
         results = [WeightAuditUtils.analyse(obj, settings) for obj in objects]
         lines = format_report(results)
-        # Marking the vertices is only useful when the user knows where to look
-        # for them; the marks are invisible in Object Mode.
-        if self.mark_issues and any(result["issue_vertices"] for result in results):
-            lines.append(
-                tr("Detected vertices are selected; enter Edit Mode to see them")
-            )
+        # Every run redraws the marks, including clearing them when the mesh is
+        # now clean; otherwise a stale selection from the previous run could be
+        # mistaken for the current result. The hint line only appears when
+        # there is something to look at.
+        if self.mark_issues:
             for obj, result in zip(objects, results):
-                if result["issue_vertices"]:
-                    WeightAuditUtils.mark_vertices(obj, result["issue_vertices"])
+                WeightAuditUtils.mark_vertices(obj, result["issue_vertices"])
+            if any(result["issue_vertices"] for result in results):
+                lines.append(
+                    tr("Detected vertices are selected; enter Edit Mode to see them")
+                )
         # The full report goes into the scene so the panel can draw it after
         # the operator returns; the popup report only shows the summary.
         context.scene.mimi_weight_report = "\n".join(lines)

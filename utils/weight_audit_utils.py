@@ -205,6 +205,38 @@ class WeightAuditUtils:
         for group in entry:
             entry[group] = entry[group] / total
 
+    @classmethod
+    def prune_invisible_and_normalize(cls, entry):
+        """Drop weights the reader ignores and renormalize the rest.
+
+        The reader ignores weights at or below ``WEIGHT_EPSILON``, and float32
+        storage can move a written value by about one relative epsilon. Keeping
+        only weights above twice that line means the next read still sees every
+        written weight, so the visible sum cannot drift below one.
+
+        Normalization lowers every weight, so a weight just above the line can
+        fall under it on the same pass; prune and rescale until every kept
+        weight stays above it. The loop is bounded because one surviving weight
+        always rescales to exactly one.
+        """
+        if not entry:
+            return {}
+        floor = 2.0 * WEIGHT_EPSILON
+        for _ in range(4):
+            visible = {
+                group: weight for group, weight in entry.items() if weight > floor
+            }
+            if not visible:
+                # Keep the strongest weight rather than dropping the vertex
+                # binding entirely.
+                strongest = max(entry, key=entry.get)
+                visible = {strongest: entry[strongest]}
+            cls.normalize_entry(visible)
+            entry = visible
+            if all(weight > floor for weight in entry.values()):
+                break
+        return entry
+
     @staticmethod
     def entries_equal(first, second):
         """Whether two weight dictionaries describe the same weights.
@@ -474,9 +506,11 @@ class WeightAuditUtils:
                     )
                     if value > WEIGHT_EPSILON:
                         blended[group] = value
-                # Every smoothed vertex must still sum to one, otherwise the
-                # exporter would silently renormalize a different result.
-                cls.normalize_entry(blended)
+                # Every smoothed vertex must still sum to one, and no written
+                # weight may be below the reader's epsilon. Normalization can
+                # push a tiny weight under that line, so prune and rescale
+                # until every kept weight stays visible.
+                blended = cls.prune_invisible_and_normalize(blended)
                 updated[vertex] = blended
             for vertex, blended in updated.items():
                 weights[vertex] = blended
@@ -491,6 +525,18 @@ class WeightAuditUtils:
         below the threshold: removing all of them would leave the vertex
         without any bone and freeze it in the bind pose.
 
+        Two epsilon boundaries matter here and are handled by one limit:
+
+        - the reader (``collect_vertex_weights``) ignores weights at or below
+          ``WEIGHT_EPSILON``, so a smaller weight written into the mesh would
+          be invisible on the next read and make the visible sum drift;
+        - Blender stores weights as float32, so a weight exactly at the
+          threshold can come back a hair below it and be pruned by the next
+          pass, which makes the button non-idempotent.
+
+        The effective limit is the user threshold raised to twice the read
+        epsilon, and comparisons allow one epsilon of slack.
+
         Returns how many vertices actually changed, so an operator can report
         a precise number instead of a mesh size.
         """
@@ -498,6 +544,16 @@ class WeightAuditUtils:
         weights = cls.collect_vertex_weights(mesh)
         influence_limit = max(1, int(max_influences))
         weight_limit = max(0.0, float(min_weight))
+        # Weights at or below WEIGHT_EPSILON are invisible to the reader, and
+        # float32 storage plus a later renormalization can move a boundary
+        # weight by about one relative epsilon. The lower bound keeps a margin
+        # from both: twice the read epsilon when no user threshold is set, and
+        # a relative margin above the user threshold otherwise. A negative
+        # margin would keep weights below the user's own threshold and would
+        # still let a float32 value land under the read epsilon.
+        lower_bound = max(
+            weight_limit * (1.0 + WEIGHT_EPSILON), 2.0 * WEIGHT_EPSILON
+        )
         changed = []
         for vertex, entry in enumerate(weights):
             if not entry:
@@ -505,15 +561,34 @@ class WeightAuditUtils:
             kept = {
                 group: weight
                 for group, weight in entry.items()
-                if weight >= weight_limit
+                if weight >= lower_bound
             }
             if not kept:
+                # Keep the single strongest weight instead of leaving the
+                # vertex unbound, which would freeze it in the bind pose.
                 strongest = max(entry, key=entry.get)
                 kept = {strongest: entry[strongest]}
             if len(kept) > influence_limit:
                 ordered = sorted(kept.items(), key=lambda item: item[1], reverse=True)
                 kept = dict(ordered[:influence_limit])
-            cls.normalize_entry(kept)
+            # Normalization lowers every weight, so a weight that just passed
+            # the threshold can fall below it on the same pass. Prune and
+            # rescale until every kept weight still passes; otherwise a second
+            # Clean click would silently change the same vertex again, which
+            # makes the button non-idempotent. The loop is bounded because a
+            # single surviving weight always rescales to exactly one.
+            for _ in range(8):
+                kept = {
+                    group: weight
+                    for group, weight in kept.items()
+                    if weight >= lower_bound
+                }
+                if not kept:
+                    strongest = max(entry, key=entry.get)
+                    kept = {strongest: entry[strongest]}
+                cls.normalize_entry(kept)
+                if all(weight >= lower_bound for weight in kept.values()):
+                    break
             # A vertex that already satisfies every rule is skipped, which
             # keeps the undo step and the mesh data limited to real changes.
             if cls.entries_equal(kept, entry):
@@ -542,7 +617,11 @@ class WeightAuditUtils:
             }
             for group in set(existing) | set(entry):
                 new_weight = entry.get(group, 0.0)
-                if new_weight <= WEIGHT_EPSILON:
+                # Only a real zero is removed. The callers prune and normalize
+                # their dictionaries before writing, so dropping a tiny positive
+                # weight here would silently break the sum of one that the
+                # caller just guaranteed.
+                if new_weight <= 0.0:
                     # Removing only when the group was present avoids a
                     # pointless edit and keeps the undo data small.
                     if group in existing:

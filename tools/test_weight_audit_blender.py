@@ -517,6 +517,161 @@ class WeightAuditTests(unittest.TestCase):
         updated = WeightAuditUtils.smooth_vertices(obj, {1, 99, -3}, 2, 0.5)
         self.assertEqual(updated, 1)
 
+    def test_shared_bone_overrides_seam_threshold(self):
+        """A shared transition bone must suppress a seam even above the threshold."""
+        obj = two_quad_mesh('shared_bone')
+        obj.vertex_groups.new(name='bone_a')
+        obj.vertex_groups.new(name='bone_b')
+        add_weight(obj, 0, [0, 1, 3], 1.0)
+        # Vertex 2 keeps bone_a at 0.4, so the L1 distance from vertex 1 is 1.2,
+        # above the 1.0 threshold, but bone_a is a real transition between the
+        # two vertices. This case is what separates the shared-bone branch from
+        # the plain "small difference" branch.
+        add_weight(obj, 0, [2], 0.4)
+        add_weight(obj, 1, [2], 0.6)
+        add_weight(obj, 1, [4, 5], 1.0)
+        report = WeightAuditUtils.analyse(obj, settings())
+        self.assertEqual(report['seam_edges'], [])
+
+    def test_clean_is_idempotent_at_threshold(self):
+        """A weight just above the threshold must not need a second clean pass."""
+        obj = new_mesh_object('boundary', [(0.0, 0.0, 0.0)], edges=[])
+        obj.vertex_groups.new(name='a')
+        obj.vertex_groups.new(name='b')
+        add_weight(obj, 0, [0], 1.0)
+        # 0.01001 passes the 0.01 threshold, but normalization would push it
+        # below 0.01, so a naive clean would need a second click to settle.
+        add_weight(obj, 1, [0], 0.01001)
+        first = WeightAuditUtils.clean_weights(obj, 0.01, 4)
+        second = WeightAuditUtils.clean_weights(obj, 0.01, 4)
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+        weights = [element.weight for element in obj.data.vertices[0].groups]
+        self.assertEqual(len(weights), 1)
+        self.assertAlmostEqual(weights[0], 1.0, places=5)
+
+    def test_detect_clears_stale_marks(self):
+        """A clean re-detect must clear the vertex marks of the previous run."""
+        obj = new_mesh_object('stale', [(0, 0, 0), (1, 0, 0)], edges=[(0, 1)])
+        obj.vertex_groups.new(name='a')
+        # Vertex 0 starts without any weight, so the first detect marks it.
+        add_weight(obj, 0, [1], 1.0)
+        activate(obj)
+        self.assertEqual(bpy.ops.mimi.weight_detect(), {'FINISHED'})
+        self.assertTrue(obj.data.vertices[0].select)
+        # Give it a weight; the second detect must clear the old mark because
+        # the mesh no longer has anything to report.
+        add_weight(obj, 0, [0], 1.0)
+        self.assertEqual(bpy.ops.mimi.weight_detect(), {'FINISHED'})
+        self.assertFalse(obj.data.vertices[0].select)
+        self.assertNotIn('Edit Mode', bpy.context.scene.mimi_weight_report)
+
+    def test_smoothing_normalizes_unnormalized_neighbours(self):
+        """Neighbours with a broken weight sum must not break the result sum."""
+        obj = new_mesh_object(
+            'unnormalized', [(0, 0, 0), (1, 0, 0), (2, 0, 0)], edges=[(0, 1), (1, 2)]
+        )
+        for name in ['a', 'b', 'c', 'd', 'e', 'f', 'g']:
+            obj.vertex_groups.new(name=name)
+        # Neighbour 0 carries a weight sum above one plus five tiny weights.
+        # After averaging they are still above the read epsilon, but
+        # normalization pushes them below it, so a writer that prunes small
+        # weights loses about 3.5e-6 of the sum. That is the exact regression
+        # this fixture is designed to catch, so the tolerance is 1e-6.
+        add_weight(obj, 0, [0], 1.0)
+        add_weight(obj, 1, [0], 1.0)
+        for group in range(2, 7):
+            add_weight(obj, group, [0], 0.0000021)
+        add_weight(obj, 0, [2], 1.0)
+        add_weight(obj, 0, [1], 1.0)
+        WeightAuditUtils.smooth_vertices(obj, {1}, 1, 1.0)
+        total = sum(element.weight for element in obj.data.vertices[1].groups)
+        self.assertAlmostEqual(total, 1.0, places=6)
+        # The reader ignores weights below its epsilon, so the visible sum must
+        # also be one; a leftover invisible weight would make it drift.
+        visible = WeightAuditUtils.collect_vertex_weights(obj.data)[1]
+        self.assertAlmostEqual(sum(visible.values()), 1.0, places=6)
+
+    def test_clean_is_idempotent_at_float32_threshold(self):
+        """A float32 weight that lands exactly on the threshold must settle."""
+        obj = new_mesh_object('f32_boundary', [(0.0, 0.0, 0.0)], edges=[])
+        obj.vertex_groups.new(name='a')
+        obj.vertex_groups.new(name='b')
+        # These values normalize to a weight that is exactly the float32
+        # version of 0.01, so a second clean pass must not prune it again.
+        add_weight(obj, 0, [0], 0.9994999766349792)
+        add_weight(obj, 1, [0], 0.010095959529280663)
+        first = WeightAuditUtils.clean_weights(obj, 0.01, 4)
+        second = WeightAuditUtils.clean_weights(obj, 0.01, 4)
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+
+    def test_clean_with_zero_threshold_aligns_read_epsilon(self):
+        """A zero threshold must not write weights the reader cannot see."""
+        obj = new_mesh_object('read_epsilon', [(0.0, 0.0, 0.0)], edges=[])
+        for name in ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']:
+            obj.vertex_groups.new(name=name)
+        add_weight(obj, 0, [0], 1.0)
+        add_weight(obj, 1, [0], 1.0)
+        add_weight(obj, 2, [0], 1.0)
+        for group in range(3, 8):
+            add_weight(obj, group, [0], 0.0000027)
+        first = WeightAuditUtils.clean_weights(obj, 0.0, 8)
+        second = WeightAuditUtils.clean_weights(obj, 0.0, 8)
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+        # Every surviving weight must be visible to the reader, otherwise the
+        # next read sees a sum that is off and rewrites the vertex again.
+        weights = WeightAuditUtils.collect_vertex_weights(obj.data)
+        self.assertTrue(
+            all(weight > weight_utils.WEIGHT_EPSILON for weight in weights[0].values())
+        )
+
+    def test_clean_drops_weights_below_user_threshold(self):
+        """No weight below the user threshold may survive a clean pass."""
+        obj = new_mesh_object('below_threshold', [(0.0, 0.0, 0.0)], edges=[])
+        obj.vertex_groups.new(name='a')
+        obj.vertex_groups.new(name='b')
+        add_weight(obj, 0, [0], 1.0)
+        # 0.0101005 passes the threshold before normalization but lands below
+        # 0.01 after it; it must be dropped rather than left as a residual
+        # that the next Detect would keep reporting as a small weight.
+        add_weight(obj, 1, [0], 0.0101005)
+        WeightAuditUtils.clean_weights(obj, 0.01, 4)
+        weights = WeightAuditUtils.collect_vertex_weights(obj.data)[0]
+        self.assertTrue(all(weight >= 0.01 for weight in weights.values()))
+        self.assertEqual(len(weights), 1)
+
+    def test_clean_threshold_between_epsilons(self):
+        """A threshold below the read epsilon must still drop smaller weights."""
+        obj = new_mesh_object('tiny_threshold', [(0.0, 0.0, 0.0)], edges=[])
+        obj.vertex_groups.new(name='a')
+        obj.vertex_groups.new(name='b')
+        add_weight(obj, 0, [0], 1.0)
+        add_weight(obj, 1, [0], 0.0000012)
+        WeightAuditUtils.clean_weights(obj, 0.0000019, 4)
+        weights = WeightAuditUtils.collect_vertex_weights(obj.data)[0]
+        # 1.2e-6 is below the user threshold 1.9e-6, so it must be removed.
+        self.assertEqual(list(weights.values()), [1.0])
+
+    def test_smooth_does_not_write_invisible_weights(self):
+        """Every weight written by smoothing must stay visible to the reader."""
+        obj = new_mesh_object(
+            'visible', [(0, 0, 0), (1, 0, 0), (2, 0, 0)], edges=[(0, 1), (1, 2)]
+        )
+        obj.vertex_groups.new(name='a')
+        obj.vertex_groups.new(name='b')
+        add_weight(obj, 0, [0], 1.0)
+        add_weight(obj, 1, [0], 0.000003)
+        add_weight(obj, 0, [2], 1.0)
+        add_weight(obj, 0, [1], 1.0)
+        WeightAuditUtils.smooth_vertices(obj, {1}, 1, 1.0)
+        visible = WeightAuditUtils.collect_vertex_weights(obj.data)[1]
+        # The neighbour average carries a 1.5e-6 third weight; after
+        # normalization it falls under the read line, so smoothing must prune
+        # it and the visible sum must still be one.
+        self.assertAlmostEqual(sum(visible.values()), 1.0, places=6)
+
     def test_locked_group_warning_helper(self):
         """The lock warning must fire only when a vertex group is locked."""
         obj = new_mesh_object('lock', [(0, 0, 0)], edges=[])
