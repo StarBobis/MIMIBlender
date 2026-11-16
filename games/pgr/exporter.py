@@ -88,11 +88,21 @@ class PGRExporter(StandardExporter):
         for model in self.drawib_model_list:
             if getattr(model, "time_pos_frame_groups", None):
                 time_pos_drawib_set.add(model.draw_ib)
-        for drawib in prepared_dict:
+        # A DrawIB that another feature already writes cannot carry the
+        # deformation.  Such a DrawIB is skipped and reported, so the rest
+        # of the mod is still exported.
+        conflict_reason_dict = {}
+        for drawib in list(prepared_dict.keys()):
             if drawib in shapekey_drawib_set:
-                raise ValueError("Interaction deformation cannot be combined with shape keys on DrawIB " + drawib)
-            if drawib in time_pos_drawib_set:
-                raise ValueError("Interaction deformation cannot be combined with the Position.buf based dynamic mod on DrawIB " + drawib)
+                conflict_reason_dict[drawib] = "it already carries shape keys"
+            elif drawib in time_pos_drawib_set:
+                conflict_reason_dict[drawib] = "it already uses the Position.buf based dynamic mod"
+            if drawib in conflict_reason_dict:
+                del prepared_dict[drawib]
+
+        for drawib, reason in conflict_reason_dict.items():
+            print("Interaction deformation: DrawIB " + drawib + " does not carry the"
+                  + " deformation because " + reason + ".")
 
         return prepared_dict
 

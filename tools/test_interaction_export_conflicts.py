@@ -55,13 +55,19 @@ class FakeDrawCallModel:
 
 
 class FakeSubmeshModel:
-    def __init__(self, submesh_name, obj_name, weights_by_group, index_vertex_id_dict, ib):
+    def __init__(self, submesh_name, obj_name, weights_by_group, index_vertex_id_dict, ib,
+                 all_group_names=None):
         self.submesh_name = submesh_name
         self.drawcall_model_list = [FakeDrawCallModel(obj_name)]
         self.index_vertex_id_dict = index_vertex_id_dict
         self.ib = ib
+        if all_group_names is None:
+            all_group_names = list(weights_by_group.keys())
         self.export_vertex_attribute_dict = {
-            "interaction_vertex_group_weights": {"weights_by_group": weights_by_group},
+            "interaction_vertex_group_weights": {
+                "weights_by_group": weights_by_group,
+                "all_group_names": all_group_names,
+            },
         }
         self.category_buffer_dict = {"Position": build_position_buffer()}
 
@@ -93,10 +99,10 @@ def build_triangles():
     return [[0, 1, 2], [2, 1, 3], [2, 3, 4], [4, 3, 5]]
 
 
-def make_body_drawib(drawib, group_name, weights):
-    index_vertex_id_dict = {index: index for index in range(VERTEX_COUNT)}
+def make_body_drawib(drawib, group_name, weights, object_name="Body", vertex_count=VERTEX_COUNT):
+    index_vertex_id_dict = {index: index for index in range(vertex_count)}
     submesh = FakeSubmeshModel(
-        "LOD0." + drawib + "-0", "Body", {group_name: weights},
+        "LOD0." + drawib + "-0", object_name, {group_name: weights},
         index_vertex_id_dict, build_triangles())
     return FakeDrawIBModel(drawib, [submesh])
 
@@ -158,12 +164,74 @@ def check_wrong_group_name_is_reported():
     if missing != ["Bone12"]:
         raise AssertionError("the missing group was not found: " + str(missing))
 
-    # The region that names the missing group is dropped, so the body
-    # still carries the deformation of the region that does exist.
-    prepared = prepare_interaction([body], [regions[0]], GpuPreSkinningBackend())
+    # The region that names the missing group is really passed in, so the
+    # export has to survive it.  The region that does exist still works.
+    prepared = prepare_interaction([body], regions, GpuPreSkinningBackend())
     if "body1111" not in prepared:
         raise AssertionError("the body must still carry its own region")
     print("a group nobody has: OK (reported, not fatal)")
+
+
+def check_group_without_weight_is_not_called_missing():
+    """A group that exists without a weight is not reported as missing."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    # The group exists on the mesh but carries no weight at all.
+    body.submesh_model_list[0].export_vertex_attribute_dict[
+        "interaction_vertex_group_weights"]["all_group_names"] = [
+            "MimiInteraction_Chest", "MimiInteraction_Empty"]
+
+    missing = find_missing_control_groups([body], [region("MimiInteraction_Empty")])
+    if missing:
+        raise AssertionError("a group that exists was reported as missing: " + str(missing))
+    print("a group without a weight: OK (not reported as missing)")
+
+
+def check_object_name_mismatch_is_reported():
+    """A region that names another object does not deform this DrawIB."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    regions = [region("MimiInteraction_Chest", object_name="SomeOtherObject")]
+
+    prepared = prepare_interaction([body], regions, GpuPreSkinningBackend())
+    if "body1111" in prepared:
+        raise AssertionError("a region of another object must not deform this DrawIB")
+    print("a region of another object: OK (skipped, not fatal)")
+
+
+def check_vertex_count_mismatch_is_skipped():
+    """A DrawIB whose vertex count does not match its positions is skipped."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    # The DrawIB claims more vertices than its position buffer holds.
+    body.vertex_count = VERTEX_COUNT + 7
+    regions = [region("MimiInteraction_Chest")]
+
+    prepared = prepare_interaction([body], regions, GpuPreSkinningBackend())
+    if "body1111" in prepared:
+        raise AssertionError("a DrawIB with a broken vertex count must be skipped")
+    print("a broken vertex count: OK (skipped, not fatal)")
+
+
+def check_region_offsets_match_the_region_list():
+    """The offsets and the state keep the position of every region."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    regions = [
+        region("MimiInteraction_Chest", offset=(0.0, 0.0, 0.0)),
+        region("MimiInteraction_Chest", offset=(0.5, 0.0, 0.0)),
+    ]
+
+    prepared = prepare_interaction([body], regions, GpuPreSkinningBackend())
+    if "body1111" not in prepared:
+        raise AssertionError("the body must carry the deformation")
+    data = prepared["body1111"]
+    if len(data["region_offsets"]) != len(regions):
+        raise AssertionError("the offsets do not match the region list")
+    state = data["state_record"]
+    if state.shape[0] != 9 or state.shape[1] != 4:
+        raise AssertionError("the state record has the wrong shape")
+    if abs(float(state[0, 0])) > 1e-9:
+        raise AssertionError("the first region must not pull")
+    if abs(float(state[2, 0])) <= 1e-9:
+        raise AssertionError("the second region must pull")
+    print("the offsets and the state match the regions: OK")
 
 
 def check_zero_pull_is_allowed():
@@ -206,6 +274,10 @@ def main():
     check_second_drawib_is_skipped()
     check_constant_weight_is_reported()
     check_wrong_group_name_is_reported()
+    check_group_without_weight_is_not_called_missing()
+    check_object_name_mismatch_is_reported()
+    check_vertex_count_mismatch_is_skipped()
+    check_region_offsets_match_the_region_list()
     check_zero_pull_is_allowed()
     check_region_collection_drops_incomplete_rows()
     print("all interaction export conflict checks passed")

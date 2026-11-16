@@ -264,7 +264,8 @@ class SubMeshModel:
                 else:
                     print("SubMeshModel: the vertex group '" + vertex_group.name
                           + "' is not a numbered bone group and is left out of the"
-                          + " NTEMI bone palette.")
+                          + " NTEMI bone palette. If it stays on the mesh it is read as a"
+                          + " skin weight, and the bone indices of the whole mesh shift.")
             self.ntemi_bone_palette = bone_palette
 
         # 4b. Let the features that need per-vertex data read it now: the

@@ -120,16 +120,18 @@ def stage_control_groups(merged_obj):
         # The clear call belongs to the evaluated object, not to the mesh.
         evaluated_object.to_mesh_clear()
 
-    if not group_weight_dict:
-        return
-
+    # The names of the groups are recorded even when none of them carries
+    # a weight, so the export can tell a group that does not exist from a
+    # group that simply has no weight yet.
     merged_obj[STAGED_PROPERTY] = json.dumps({
         "weights_by_group": group_weight_dict,
+        "all_group_names": list(group_name_by_index.values()),
         "loop_vertex_index": loop_vertex_index,
     })
 
-    # The groups are removed in reverse order, so the indices of the
-    # remaining groups do not shift while they are being removed.
+    # The groups are removed even when they carry no weight.  A group that
+    # stays on the mesh would be read as a skin weight, which would shift
+    # the bone indices of the whole mesh.
     control_group_list = [
         vertex_group for vertex_group in merged_obj.vertex_groups
         if vertex_group.name.startswith(CONTROL_GROUP_PREFIX)
@@ -244,11 +246,13 @@ def collect_vertex_group_weights(merged_obj, submesh_model):
         index_loop_id_dict,
         staged_dict["weights_by_group"],
     )
-    if not mapped_dict:
-        return None
 
+    # The result is returned even when no group carries a weight, because
+    # the names of the groups are still needed to tell a group that does
+    # not exist from a group without a weight.
     return {
         "weights_by_group": mapped_dict,
+        "all_group_names": staged_dict.get("all_group_names", []),
         "vertex_count": len(index_loop_id_dict),
     }
 

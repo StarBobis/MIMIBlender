@@ -153,6 +153,22 @@ def main():
         if not any(group.name.isdigit() for group in obj.vertex_groups):
             raise AssertionError("the bone group was removed as well")
 
+        # A control group that carries no weight at all still has to be
+        # removed, because a group that stays on the mesh is read as a
+        # skin weight and shifts the bone indices.
+        empty_obj = bpy.data.objects.new("EmptyControlProbe", obj.data.copy())
+        bpy.context.scene.collection.objects.link(empty_obj)
+        empty_group = empty_obj.vertex_groups.new(name=CONTROL_GROUP_PREFIX + "Empty")
+        bone_group_copy = empty_obj.vertex_groups.new(name="0")
+        interaction_collector.stage_control_groups(empty_obj)
+        empty_remaining = [group.name for group in empty_obj.vertex_groups]
+        print("remaining groups of the empty control probe: %s" % empty_remaining)
+        for group_name in empty_remaining:
+            if group_name.startswith(CONTROL_GROUP_PREFIX):
+                raise AssertionError("a control group without a weight was not removed")
+        if not any(group.name.isdigit() for group in empty_obj.vertex_groups):
+            raise AssertionError("the bone group of the empty probe was removed as well")
+
     finally:
         interaction_collector.set_enabled(False)
 
