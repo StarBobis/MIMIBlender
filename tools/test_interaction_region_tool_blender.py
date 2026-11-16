@@ -19,11 +19,13 @@ Run with:
     blender --background --factory-startup --python tools/test_interaction_region_tool_blender.py
 """
 
+import json
 import os
 import sys
 import types
 
 import bpy
+import numpy as np
 
 
 # The repository is loaded as a package so the production modules can use
@@ -137,6 +139,99 @@ def main():
         raise AssertionError("the region row does not name the object")
     print("the region row: OK (%s / %s)"
           % (node.regions[0].object_name, node.regions[0].vertex_group))
+
+    # A second run has to clear the old weights, so the group carries only
+    # the vertices of the new selection.
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+    # One single vertex is selected, so the second run has to drop the
+    # weights of the other eight.  The operator is called in the edit
+    # mode, because that is where it reads the selection from.
+    #
+    # The selection lives in the edit cage, which is not the mesh of the
+    # object, so it is changed through the bmesh of the edit cage.  That
+    # bmesh belongs to Blender and must not be freed.
+    import bmesh
+    edit_bmesh = bmesh.from_edit_mesh(obj.data)
+    edit_bmesh.verts.ensure_lookup_table()
+    for vertex in edit_bmesh.verts:
+        vertex.select = False
+    edit_bmesh.verts[0].select = True
+    selected_count = sum(1 for vertex in edit_bmesh.verts if vertex.select)
+    print("the selected vertices before the second run: %d" % selected_count)
+
+    bpy.utils.register_class(region_tools.MIMI_OT_InteractionCreateRegion)
+    try:
+        import interaction_region_test.blueprint.blueprint_node_interaction as node_module
+        original_finder = node_module.find_interaction_node
+        node_module.find_interaction_node = lambda context, tree_name, node_name: node
+        try:
+            second_result = bpy.ops.mimi.interaction_create_region(
+                tree_name="Tree", node_name="Node", region_index=0, feather_rings=2)
+        finally:
+            node_module.find_interaction_node = original_finder
+    finally:
+        bpy.utils.unregister_class(region_tools.MIMI_OT_InteractionCreateRegion)
+    print("the second operator result: %s" % second_result)
+
+    group = obj.vertex_groups.get(node.regions[0].vertex_group)
+    second_weighted = 0
+    for vertex in obj.data.vertices:
+        for membership in vertex.groups:
+            if membership.group == group.index and membership.weight > 0.0:
+                second_weighted += 1
+    print("the group index: %d, the groups of the object: %s"
+          % (group.index, [(item.index, item.name) for item in obj.vertex_groups]))
+    print("the vertices with a weight after the second run: %d" % second_weighted)
+    if second_weighted >= weighted_count:
+        raise AssertionError("the second run kept the old weights: %d of %d"
+                             % (second_weighted, weighted_count))
+
+    # The weight of the region has to fall off towards its border, because
+    # a constant weight has no gradient and the region could not be
+    # pulled at all.  The production sampler and the production gradient
+    # decide this.
+    from interaction_region_test.common.interaction import collector as interaction_collector
+    from interaction_region_test.common.interaction.weight_field import (
+        compute_gradient_bound,
+        compute_surface_gradients,
+    )
+
+    interaction_collector.set_enabled(True)
+    try:
+        interaction_collector.stage_control_groups(obj)
+    finally:
+        interaction_collector.set_enabled(False)
+
+    staged = obj.get(interaction_collector.STAGED_PROPERTY, None)
+    if not staged:
+        raise AssertionError("the sampler stored no weights")
+    staged_dict = json.loads(staged)
+    group_name = node.regions[0].vertex_group
+    if group_name not in staged_dict["weights_by_group"]:
+        raise AssertionError("the sampler did not find the group")
+    pairs = staged_dict["weights_by_group"][group_name]
+    weight_dict = {int(index): float(weight) for index, weight in pairs}
+
+    distinct_value_list = sorted(set(round(value, 4) for value in weight_dict.values()))
+    print("the distinct weights of the region: %s" % distinct_value_list)
+    if len(distinct_value_list) < 2:
+        raise AssertionError("the weight does not fall off: " + str(distinct_value_list))
+
+    mesh = obj.data
+    positions = np.array([vertex.co[:] for vertex in mesh.vertices], dtype=np.float64)
+    weight_array = np.array(
+        [weight_dict.get(vertex.index, 0.0) for vertex in mesh.vertices], dtype=np.float64)
+    triangle_list = [
+        [polygon.vertices[0], polygon.vertices[1], polygon.vertices[2]]
+        for polygon in mesh.polygons]
+    gradients = compute_surface_gradients(
+        positions, weight_array, np.array(triangle_list, dtype=np.int64))
+    gradient_bound = compute_gradient_bound(gradients)
+    print("the gradient bound of the region: %f" % gradient_bound)
+    if gradient_bound <= 1e-12:
+        raise AssertionError("the region has no gradient, so it cannot be pulled")
 
     print("OK: the interaction region tool works in Blender 5.2")
 

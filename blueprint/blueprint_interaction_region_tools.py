@@ -7,11 +7,14 @@ stretching it.
 
 The tool therefore feathers the selection: the selected vertices keep the
 full weight, and the rings around them receive a smaller weight that grows
-smoothly towards the selected ones.
+smoothly towards the selected ones.  The rings lie outside the selection,
+so the weight falls to zero at the border of the region.
 
 The created group is named with the interaction prefix, so it is never
-mistaken for a numbered bone group.  The exporter deletes the group from
-the temporary export copy, so it never reaches the game as a skin weight.
+mistaken for a numbered bone group.  The name carries the name of the
+object as well, so two objects with the same region label do not end up
+in one group.  The exporter deletes the group from the temporary export
+copy, so it never reaches the game as a skin weight.
 """
 
 import bpy
@@ -67,48 +70,31 @@ def _smooth_step(value):
 def _build_feathered_weights(bmesh, selected_vertex_index_set, feather_rings):
     """Return the weight of every vertex that belongs to the region.
 
-    The vertices in the middle of the selection keep the full weight.  The
-    vertices on the border of the selection get no weight at all, and the
-    rings between the border and the middle receive a weight that grows
-    towards the middle, so the border of the region ends at zero and the
-    surface stays continuous.
+    The vertices in the selection keep the full weight.  The rings around
+    the selection receive a smaller weight that grows smoothly towards the
+    selection, so the region fades out towards its border and the surface
+    stays continuous.
+
+    The rings are outside the selection on purpose.  If the fade went inwards
+    instead, a selection that covers a whole part of the body would give
+    every vertex the same weight, and a constant weight has no gradient, so
+    the part could not be pulled at all.
     """
-    weights = {}
+    weights = {vertex_index: 1.0 for vertex_index in selected_vertex_index_set}
 
-    # A vertex is on the border when it touches a vertex that is not part
-    # of the selection.  A hidden vertex counts as not selected here, so
-    # it also ends the region.
-    border_vertex_index_set = set()
-    for vertex in bmesh.verts:
-        if vertex.index not in selected_vertex_index_set:
-            continue
-        for edge in vertex.link_edges:
-            other = edge.other_vert(vertex)
-            if other.index not in selected_vertex_index_set:
-                border_vertex_index_set.add(vertex.index)
-                break
-
-    if not border_vertex_index_set:
-        # The whole connected component is selected, so there is no border
-        # to fade out and every vertex keeps the full weight.
-        for vertex_index in selected_vertex_index_set:
-            weights[vertex_index] = 1.0
-        return weights
-
-    # Spread the feather from the border towards the inside.
-    visited = set(border_vertex_index_set)
-    current_ring = set(border_vertex_index_set)
+    # Spread the feather from the selection towards the outside.
+    visited = set(selected_vertex_index_set)
+    current_ring = set(selected_vertex_index_set)
     for ring_index in range(1, feather_rings + 1):
-        # The weight of this ring, counted from the border inwards.
-        ratio = (ring_index + 1) / (feather_rings + 1)
-        weight = _smooth_step(ratio)
+        # The weight of this ring, counted from the selection outwards.
+        # It falls towards zero, so the border of the region ends at zero.
+        ratio = ring_index / (feather_rings + 1)
+        weight = 1.0 - _smooth_step(ratio)
         next_ring = set()
         for vertex_index in current_ring:
             vertex = bmesh.verts[vertex_index]
             for edge in vertex.link_edges:
                 other = edge.other_vert(vertex)
-                if other.index not in selected_vertex_index_set:
-                    continue
                 if other.index in visited:
                     continue
                 next_ring.add(other.index)
@@ -118,15 +104,6 @@ def _build_feathered_weights(bmesh, selected_vertex_index_set, feather_rings):
         current_ring = next_ring
         if not current_ring:
             break
-
-    # Everything that is still unweighted and is not on the border sits in
-    # the middle of the region and keeps the full weight.
-    for vertex_index in selected_vertex_index_set:
-        if vertex_index in weights:
-            continue
-        if vertex_index in border_vertex_index_set:
-            continue
-        weights[vertex_index] = 1.0
 
     return weights
 
@@ -142,7 +119,7 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
     node_name: bpy.props.StringProperty(default="") # type: ignore
     region_index: bpy.props.IntProperty(default=0, min=0) # type: ignore
     feather_rings: bpy.props.IntProperty(
-        name=tr("Feather Rings"), default=2, min=0, max=MAX_FEATHER_RINGS,
+        name=tr("Feather Rings"), default=2, min=1, max=MAX_FEATHER_RINGS,
     ) # type: ignore
 
     def _find_edit_target(self, context):
@@ -176,8 +153,18 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
         import bmesh
 
         mesh = obj.data
-        bmesh_data = bmesh.new()
-        bmesh_data.from_mesh(mesh)
+
+        # The selection lives in the edit cage, which is not the mesh of
+        # the object.  A bmesh that is built from the mesh reads the older
+        # flags of the mesh and would feather the selection of an earlier
+        # run, so the edit cage is used while the object is being edited.
+        owns_bmesh = False
+        if is_edit_mode(context):
+            bmesh_data = bmesh.from_edit_mesh(mesh)
+        else:
+            bmesh_data = bmesh.new()
+            bmesh_data.from_mesh(mesh)
+            owns_bmesh = True
         try:
             # The vertex lookup table makes the vertices addressable by
             # their index, which the feather needs.
@@ -193,7 +180,10 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
             weights = _build_feathered_weights(
                 bmesh_data, selected_vertex_index_set, self.feather_rings)
         finally:
-            bmesh_data.free()
+            # The bmesh of the edit cage belongs to Blender and must not be
+            # freed, only a bmesh that was made here may be.
+            if owns_bmesh:
+                bmesh_data.free()
 
         if not weights:
             self.report({'WARNING'}, tr("The selection did not produce any weight"))
@@ -212,19 +202,14 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
         # merged group, and both regions would pull both objects.
         group_name = build_group_name(entry.label, obj.name)
         vertex_group = obj.vertex_groups.get(group_name)
-        if vertex_group is None:
-            vertex_group = obj.vertex_groups.new(name=group_name)
-        else:
+        if vertex_group is not None:
             # The group is written from scratch, so an older run cannot
             # leave stale weights behind.  The vertex group of a mesh has
-            # no element list any more, so the vertices are removed one by
-            # one.
-            for vertex_index in range(len(mesh.vertices)):
-                try:
-                    vertex_group.remove([vertex_index])
-                except RuntimeError:
-                    # The vertex does not carry this group.
-                    pass
+            # no element list any more, so the group is removed and made
+            # again.  That is much faster than removing the vertices one
+            # by one.
+            obj.vertex_groups.remove(vertex_group)
+        vertex_group = obj.vertex_groups.new(name=group_name)
 
         for vertex_index, weight in weights.items():
             if weight <= 0.0:
