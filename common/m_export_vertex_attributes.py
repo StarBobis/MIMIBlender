@@ -68,7 +68,9 @@ def run_preprocessors(merged_obj):
     """Run every registered preprocessor on the temporary export mesh.
 
     A preprocessor that fails must not break the export: the problem is
-    reported on the console and the export continues without it.
+    reported on the console and the export continues without it.  The
+    report names the consequence, because a preprocessor that cleans the
+    mesh up and fails leaves its helper data in the export.
     """
     for preprocessor in list(_PREPROCESSOR_LIST):
         try:
@@ -76,7 +78,9 @@ def run_preprocessors(merged_obj):
         except Exception as error:
             print("Export vertex attribute preprocessor "
                   + getattr(preprocessor, "collector_name", preprocessor.__name__)
-                  + " failed: " + str(error))
+                  + " failed: " + str(error)
+                  + ". The export continues, but whatever the preprocessor was supposed"
+                  + " to clean up may still be part of the exported mesh.")
 
 
 def run_collectors(merged_obj, submesh_model):

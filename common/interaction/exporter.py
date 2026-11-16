@@ -96,18 +96,53 @@ def collect_region_list(node_list):
     return region_list
 
 
+def find_missing_control_groups(drawib_model_list, region_list):
+    """Return the control groups that no DrawIB carries.
+
+    A region that names a group nobody has is a configuration mistake, so
+    it is reported.  A group that exists but only on some of the DrawIBs is
+    normal: a body and its weapon are two DrawIBs, and only the body
+    carries the control group.
+    """
+    existing_group_set = set()
+    for drawib_model in drawib_model_list:
+        for submesh_model in drawib_model.submesh_model_list:
+            attribute_dict = getattr(submesh_model, "export_vertex_attribute_dict", {})
+            sampled_dict = attribute_dict.get("interaction_vertex_group_weights", {})
+            group_weights = sampled_dict.get("weights_by_group", {})
+            existing_group_set.update(group_weights.keys())
+
+    missing_group_list = []
+    for region in region_list:
+        if region.vertex_group in existing_group_set:
+            continue
+        if region.vertex_group in missing_group_list:
+            continue
+        missing_group_list.append(region.vertex_group)
+    return missing_group_list
+
+
 def prepare_interaction(drawib_model_list, region_list, backend):
     """Prepare the interaction data of every DrawIB that can carry it.
 
     Returns a dictionary that maps the DrawIB to its prepared data.  A
-    DrawIB whose position layout the backend rejects is skipped, and the
-    reason is collected so the export can report it instead of producing a
-    mod that silently does nothing.
+    DrawIB that cannot carry the deformation is skipped, and the reason is
+    collected so the export can report it instead of producing a mod that
+    silently does nothing.  A skipped DrawIB never stops the export: the
+    other parts of the mod are still worth exporting.
     """
     prepared_dict = {}
     skipped_reason_list = []
+    limited_report_list = []
     if not region_list:
         return prepared_dict
+
+    # A region that names a group nobody has is a configuration mistake.
+    # It is reported once, because no DrawIB could ever carry it.
+    missing_group_list = find_missing_control_groups(drawib_model_list, region_list)
+    for group_name in missing_group_list:
+        print("Interaction deformation: the control group '" + group_name
+              + "' was not found on any exported object, so the region that uses it does nothing.")
 
     for drawib_model in drawib_model_list:
         drawib = drawib_model.draw_ib
@@ -128,18 +163,39 @@ def prepare_interaction(drawib_model_list, region_list, backend):
         # unwritten while the game still reads it.
         exported_vertex_count = getattr(drawib_model, "vertex_count", 0)
         if exported_vertex_count and exported_vertex_count != len(positions):
-            raise ValueError("Interaction deformation: DrawIB " + drawib + " exports "
-                             + str(exported_vertex_count) + " vertices but its position buffer holds "
-                             + str(len(positions)) + "; the deformation cannot cover the whole mesh")
+            skipped_reason_list.append(
+                drawib + ": it exports " + str(exported_vertex_count)
+                + " vertices but its position buffer holds " + str(len(positions))
+                + ", so the deformation cannot cover the whole mesh")
+            continue
 
         triangles = collect_triangles(drawib_model, len(positions))
         data = assemble_interaction_data(drawib_model, region_list, positions, triangles)
+
+        # Only the regions this DrawIB really carries are checked.  A body
+        # and its weapon are two DrawIBs, and the weapon carries no
+        # control group at all.
+        active_region_index_list = [
+            region_index for region_index in range(len(region_list))
+            if bool((data["region_weight_sum_list"][region_index] > 1e-9))
+        ]
+        active_region_index_set = set(active_region_index_list)
+        if not active_region_index_list:
+            skipped_reason_list.append(
+                drawib + ": it carries none of the interaction regions")
+            continue
 
         # The pull of a region is a fraction of the model size, so the
         # same value behaves the same way on a large and on a small body.
         model_extent = data["model_extent"]
         region_offsets = []
+        region_problem = ""
         for region_index, region in enumerate(region_list):
+            if region_index not in active_region_index_set:
+                # This DrawIB does not carry the region, so it does not move.
+                region_offsets.append((0.0, 0.0, 0.0))
+                continue
+
             offset = tuple(float(value) * model_extent for value in region.offset)
             magnitude = float(sum(value * value for value in offset) ** 0.5)
             if magnitude <= 1e-12:
@@ -149,19 +205,43 @@ def prepare_interaction(drawib_model_list, region_list, backend):
 
             gradient_bound = data["region_gradient_bound_list"][region_index]
             if gradient_bound <= 1e-12:
-                raise ValueError("Interaction deformation: the control group '"
-                                 + region.vertex_group + "' of DrawIB " + drawib
-                                 + " has no weight gradient, so it cannot be pulled safely. "
-                                 + "Give the region a weight that fades out towards its border.")
+                # The group carries a constant weight, so there is no
+                # gradient and the surface cannot be stretched safely.
+                region_problem = ("the control group '" + region.vertex_group
+                                  + "' has a constant weight, so it cannot be pulled safely; "
+                                  + "give the region a weight that fades out towards its border")
+                break
 
             safe_distance = data["region_safe_distance_list"][region_index]
             limited = limit_offset(offset, safe_distance)
-            if float(sum(value * value for value in limited) ** 0.5) <= 1e-12:
-                raise ValueError("Interaction deformation: the pull of the region '"
-                                 + region.label + "' of DrawIB " + drawib
-                                 + " is too small for its weight field and would be cancelled. "
-                                 + "Increase the pull or soften the control group.")
+            limited_magnitude = float(sum(value * value for value in limited) ** 0.5)
+            if limited_magnitude <= 1e-12:
+                region_problem = ("the pull of the region '" + (region.label or region.vertex_group)
+                                  + "' is too small for its weight field and would be cancelled; "
+                                  + "increase the pull or soften the control group")
+                break
+
+            # The pull is limited so the surface cannot fold.  The limit
+            # shrinks with the gradient of the weight field, so a narrow
+            # control group allows a much smaller pull than a wide one.
+            # The user has to see the value that is really applied.
+            if limited_magnitude < magnitude - 1e-9:
+                limited_report_list.append(
+                    "the region '" + (region.label or region.vertex_group)
+                    + "' of DrawIB " + drawib + " asked for "
+                    + format(magnitude, ".4f") + " but is limited to "
+                    + format(limited_magnitude, ".4f")
+                    + " because its weight gradient is "
+                    + format(gradient_bound, ".2f")
+                    + "; a narrower control group allows a smaller pull")
             region_offsets.append(tuple(float(value) for value in limited))
+
+        # A region that cannot be pulled is reported and the DrawIB is
+        # skipped.  It never stops the export, because the other parts of
+        # the mod are still worth exporting.
+        if region_problem:
+            skipped_reason_list.append(drawib + ": " + region_problem)
+            continue
 
         data["region_offsets"] = region_offsets
         data["state_record"] = build_state_record(region_offsets)
@@ -174,6 +254,13 @@ def prepare_interaction(drawib_model_list, region_list, backend):
         print("Interaction deformation: the following DrawIBs do not carry the deformation:")
         for reason in skipped_reason_list:
             print("  " + reason)
+
+    # A pull that was shortened has to be visible too, because the value
+    # in the node is not the value the game applies.
+    if limited_report_list:
+        print("Interaction deformation: some pulls were shortened:")
+        for report in limited_report_list:
+            print("  " + report)
 
     return prepared_dict
 

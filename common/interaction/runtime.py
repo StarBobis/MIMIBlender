@@ -277,16 +277,21 @@ def assemble_interaction_data(drawib_model, regions, positions, triangles):
 
     region_gradient_bound_list = []
     region_safe_distance_list = []
-    for gradients in gradients_by_region:
+    region_weight_sum_list = []
+    for weights, gradients in zip(weights_by_region, gradients_by_region):
         gradient_bound = compute_gradient_bound(gradients)
         region_gradient_bound_list.append(gradient_bound)
         region_safe_distance_list.append(compute_safe_displacement(gradient_bound, model_extent))
+        # The total weight tells whether this DrawIB carries the region
+        # at all: a weapon DrawIB carries no control group.
+        region_weight_sum_list.append(float(weights.sum()))
 
     return {
         "control_record": control_record,
         "gradient_bound": max(region_gradient_bound_list) if region_gradient_bound_list else 0.0,
         "region_gradient_bound_list": region_gradient_bound_list,
         "region_safe_distance_list": region_safe_distance_list,
+        "region_weight_sum_list": region_weight_sum_list,
         "safe_distance": max(region_safe_distance_list) if region_safe_distance_list else 0.0,
         "model_extent": model_extent,
         "vertex_count": vertex_count,

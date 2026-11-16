@@ -253,12 +253,19 @@ class SubMeshModel:
         self.shape_key_buffer_dict = obj_buffer_result.shape_key_buffer_dict
 
         if GlobalConfig.logic_name == LogicName.NTEMI:
-            # The palette holds the numbered bone groups.  A helper group
-            # that is not a bone must not break the export.
-            self.ntemi_bone_palette = [
-                int(vertex_group.name) for vertex_group in submesh_merged_obj.vertex_groups
-                if vertex_group.name.isdigit()
-            ]
+            # The palette holds the numbered bone groups.  A group that is
+            # not a bone must not break the export, but it also must not
+            # shift the palette, because the blend indices refer to the
+            # position inside the palette.
+            bone_palette = []
+            for vertex_group in submesh_merged_obj.vertex_groups:
+                if vertex_group.name.isdigit():
+                    bone_palette.append(int(vertex_group.name))
+                else:
+                    print("SubMeshModel: the vertex group '" + vertex_group.name
+                          + "' is not a numbered bone group and is left out of the"
+                          + " NTEMI bone palette.")
+            self.ntemi_bone_palette = bone_palette
 
         # 4b. Let the features that need per-vertex data read it now: the
         # temporary merged mesh is deleted in the next step, and the

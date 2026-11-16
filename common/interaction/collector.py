@@ -21,11 +21,10 @@ after, before the vertex and index buffers are built.  The weights are
 kept on the temporary object, so the collector can still map them onto
 the exported vertices afterwards.
 
-Every vertex group of the mesh is sampled, not only the ones a feature
-needs: the collector cannot know which groups will be used, because the
-feature configuration is read after the meshes were built.  The sampling
-cost is one pass over the mesh, and the result is reused by whichever
-feature asks for it.
+Every vertex group with the control prefix of this feature is sampled,
+not every group of the mesh: the other groups are bone groups and the
+exporter reads them as skin weights.  The sampling cost is one pass over
+the mesh, and the result is reused by whichever feature asks for it.
 """
 
 import json
