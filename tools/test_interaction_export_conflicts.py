@@ -240,6 +240,63 @@ def check_object_name_reason_is_true():
     print("the reason names the real cause: OK")
 
 
+def check_group_with_only_zero_weights_counts_as_empty():
+    """A group whose exported weights are all zero moves nothing."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest",
+                            [0.0] * VERTEX_COUNT)
+    regions = [region("MimiInteraction_Chest")]
+
+    empty = find_empty_control_groups([body], regions)
+    if empty != ["MimiInteraction_Chest"]:
+        raise AssertionError("a group with only zero weights was not empty: " + str(empty))
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "exists but carries no weight" not in output:
+        raise AssertionError("the empty group was not reported: " + output)
+    print("a group with only zero weights: OK (reported as empty)")
+
+
+def check_region_without_weight_is_reported_when_others_work():
+    """A region that does not work is reported even when others do."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    # The second region names an object that carries no weight.
+    body.submesh_model_list[0].export_vertex_attribute_dict[
+        "interaction_vertex_group_weights"]["all_group_names"] = [
+            "MimiInteraction_Chest", "MimiInteraction_Empty"]
+    regions = [
+        region("MimiInteraction_Chest", offset=(0.5, 0.0, 0.0)),
+        region("MimiInteraction_Empty", offset=(0.5, 0.0, 0.0)),
+    ]
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "MimiInteraction_Empty" not in output:
+        raise AssertionError("the region without a weight was not reported: " + output)
+    print("a region without a weight next to a working one: OK (reported)")
+
+
+def check_object_without_weight_has_its_own_reason():
+    """A group with a weight on another part has its own reason.
+
+    The weights live on the submesh that holds the sword, while the
+    region names the object of the other submesh.  The group has a weight
+    on this DrawIB, but not on the object the region names.
+    """
+    index_vertex_id_dict = {index: index for index in range(VERTEX_COUNT)}
+    sword_submesh = FakeSubmeshModel(
+        "LOD0.body1111-0", "Sword", {"MimiInteraction_Chest": fading_weights()},
+        index_vertex_id_dict, build_triangles())
+    body_submesh = FakeSubmeshModel(
+        "LOD0.body1111-1", "Body", {}, index_vertex_id_dict, build_triangles())
+    body = FakeDrawIBModel("body1111", [sword_submesh, body_submesh])
+
+    regions = [region("MimiInteraction_Chest", object_name="Body")]
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "carries no weight for the control group" not in output:
+        raise AssertionError("the object reason was not used: " + output)
+    print("a weight on another part: OK (its own reason)")
+
+
 def check_object_name_mismatch_is_reported():
     """A region that names another object does not deform this DrawIB."""
     body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
@@ -329,6 +386,9 @@ def main():
     check_constant_weight_is_reported()
     check_wrong_group_name_is_reported()
     check_group_without_weight_is_not_called_missing()
+    check_group_with_only_zero_weights_counts_as_empty()
+    check_region_without_weight_is_reported_when_others_work()
+    check_object_without_weight_has_its_own_reason()
     check_conflict_drawib_does_not_claim_a_pull()
     check_object_name_reason_is_true()
     check_object_name_mismatch_is_reported()

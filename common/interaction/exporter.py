@@ -128,7 +128,7 @@ def collect_existing_control_groups(drawib_model_list):
     return existing_group_set
 
 
-def find_missing_control_groups(drawib_model_list, region_list):
+def find_missing_control_groups(drawib_model_list, region_list, existing_group_set=None):
     """Return the control groups that no exported object carries.
 
     A region that names a group nobody has is a configuration mistake, so
@@ -136,7 +136,8 @@ def find_missing_control_groups(drawib_model_list, region_list):
     normal: a body and its weapon are two DrawIBs, and only the body
     carries the control group.
     """
-    existing_group_set = collect_existing_control_groups(drawib_model_list)
+    if existing_group_set is None:
+        existing_group_set = collect_existing_control_groups(drawib_model_list)
 
     missing_group_list = []
     for region in region_list:
@@ -149,25 +150,37 @@ def find_missing_control_groups(drawib_model_list, region_list):
 
 
 def collect_weighted_control_groups(drawib_model_list):
-    """Return the control groups that carry a weight on some DrawIB."""
+    """Return the control groups that carry a weight on some DrawIB.
+
+    A group that was sampled but whose weight is zero on every exported
+    vertex does not count, because such a group moves nothing.
+    """
     weighted_group_set = set()
     for drawib_model in drawib_model_list:
         for submesh_model in drawib_model.submesh_model_list:
             attribute_dict = getattr(submesh_model, "export_vertex_attribute_dict", {})
             sampled_dict = attribute_dict.get("interaction_vertex_group_weights", {})
-            weighted_group_set.update(sampled_dict.get("weights_by_group", {}).keys())
+            group_weights = sampled_dict.get("weights_by_group", {})
+            for group_name, weights in group_weights.items():
+                if len(weights) == 0:
+                    continue
+                if float(sum(weights)) > 1e-12:
+                    weighted_group_set.add(group_name)
     return weighted_group_set
 
 
-def find_empty_control_groups(drawib_model_list, region_list):
+def find_empty_control_groups(drawib_model_list, region_list, existing_group_set=None,
+                              weighted_group_set=None):
     """Return the control groups that exist but carry no weight at all.
 
     A group that exists on the mesh but was never painted is a different
     mistake than a group that does not exist, so it is reported with its
     own wording.
     """
-    existing_group_set = collect_existing_control_groups(drawib_model_list)
-    weighted_group_set = collect_weighted_control_groups(drawib_model_list)
+    if existing_group_set is None:
+        existing_group_set = collect_existing_control_groups(drawib_model_list)
+    if weighted_group_set is None:
+        weighted_group_set = collect_weighted_control_groups(drawib_model_list)
 
     empty_group_list = []
     for region in region_list:
@@ -212,6 +225,14 @@ def describe_missing_region(drawib_model, region, existing_group_set, weighted_g
     if group_name not in weighted_group_set:
         return "the control group '" + group_name + "' has no weight on this DrawIB"
 
+    # The group has a weight on this DrawIB, but not on the object the
+    # region names.  That is a different mistake than a group without any
+    # weight at all.
+    if region.object_name:
+        return ("the object '" + region.object_name + "' of the region '"
+                + (region.label or group_name) + "' carries no weight for the"
+                + " control group '" + group_name + "'")
+
     return "the control group '" + group_name + "' has no weight on this DrawIB"
 
 
@@ -240,11 +261,14 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
     # A region that names a group nobody has is a configuration mistake.
     # It is reported once, because no DrawIB could ever carry it.
     existing_group_set = collect_existing_control_groups(drawib_model_list)
-    missing_group_list = find_missing_control_groups(drawib_model_list, region_list)
+    weighted_group_set = collect_weighted_control_groups(drawib_model_list)
+    missing_group_list = find_missing_control_groups(
+        drawib_model_list, region_list, existing_group_set)
     for group_name in missing_group_list:
         print("Interaction deformation: the control group '" + group_name
               + "' was not found on any exported object, so the region that uses it does nothing.")
-    for group_name in find_empty_control_groups(drawib_model_list, region_list):
+    for group_name in find_empty_control_groups(
+            drawib_model_list, region_list, existing_group_set, weighted_group_set):
         print("Interaction deformation: the control group '" + group_name
               + "' exists but carries no weight, so the region that uses it does nothing.")
 
@@ -291,18 +315,23 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
             if bool((data["region_weight_sum_list"][region_index] > 1e-9))
         ]
         active_region_index_set = set(active_region_index_list)
-        if not active_region_index_list:
-            # The reason is named, because "carries none of the regions"
-            # does not tell the user whether the group is missing, has no
-            # weight or belongs to another object.
-            weighted_group_set = collect_weighted_control_groups([drawib_model])
-            reason_list = []
-            for region in region_list:
-                reason_list.append(describe_missing_region(
+
+        # The reason is named for every region this DrawIB does not
+        # carry, so a region that stays silent is impossible.
+        weighted_group_set = collect_weighted_control_groups([drawib_model])
+        inactive_reason_list = []
+        for region_index, region in enumerate(region_list):
+            if region_index in active_region_index_set:
+                continue
+            inactive_reason_list.append(
+                (region.label or region.vertex_group) + ": "
+                + describe_missing_region(
                     drawib_model, region, existing_group_set, weighted_group_set))
+
+        if not active_region_index_list:
             skipped_reason_list.append(
                 drawib + ": it carries none of the interaction regions ("
-                + "; ".join(reason_list) + ")")
+                + "; ".join(inactive_reason_list) + ")")
             continue
 
         # The reports of this DrawIB are only published when the DrawIB
@@ -378,6 +407,14 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
         # The reports of a DrawIB are only published when the DrawIB is
         # used, so a skipped DrawIB never claims a pull it does not have.
         applied_report_list.extend(drawib_report_list)
+
+        # A region that this DrawIB does not carry is reported even when
+        # other regions of the same DrawIB work, so no region stays
+        # silent.
+        if inactive_reason_list:
+            skipped_reason_list.append(
+                drawib + ": these regions do not deform it ("
+                + "; ".join(inactive_reason_list) + ")")
 
     # A DrawIB that was skipped has to be visible, otherwise the export
     # succeeds with a mod that does nothing at all.
