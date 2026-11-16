@@ -130,7 +130,12 @@ class BluePrintModel:
         # declares which regions of the model may be pulled, so it is
         # collected apart from the object traversal.
         from ..common.interaction.exporter import collect_interaction_nodes
+        from ..common.interaction import collector as interaction_collector
         self.interaction_node_list = collect_interaction_nodes(tree)
+        # The control weights are only sampled when an export actually
+        # declares a region, so the meshes are not walked for nothing.
+        # The switch is set before the traversal builds the meshes.
+        interaction_collector.set_enabled(bool(self.interaction_node_list))
 
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])

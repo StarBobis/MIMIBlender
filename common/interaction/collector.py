@@ -24,6 +24,24 @@ from ..m_export_vertex_attributes import register_collector
 # The key the sampled weights are stored under.
 COLLECTOR_NAME = "interaction_vertex_group_weights"
 
+# The sampling is only worth its cost when the export actually declares
+# an interaction region.  The blueprint model flips this switch before the
+# meshes are built, so an export without the feature pays nothing.
+_ENABLED = False
+
+
+def set_enabled(enabled):
+    """Turn the sampling on or off and return the previous state."""
+    global _ENABLED
+    previous = _ENABLED
+    _ENABLED = bool(enabled)
+    return previous
+
+
+def is_enabled():
+    """Return True when the sampling runs during the export."""
+    return _ENABLED
+
 
 def read_vertex_group_weights(merged_obj):
     """Return every vertex group of the object mapped to its weights.
@@ -108,6 +126,11 @@ def map_weights_to_exported_vertices(mesh, index_loop_id_dict, group_weight_dict
 
 def collect_vertex_group_weights(merged_obj, submesh_model):
     """Collector entry point used by the export registry."""
+    if not _ENABLED:
+        # Nothing declared an interaction region, so the weights are not
+        # needed and the mesh is not touched at all.
+        return None
+
     index_loop_id_dict = getattr(submesh_model, "index_vertex_id_dict", None)
     if not index_loop_id_dict:
         return None
