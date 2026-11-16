@@ -1478,4 +1478,5 @@ TRANSLATIONS_ZH_TW = {
     "Pull direction and strength; the length is a fraction of the distance this region can be pulled safely": "拉伸方向與強度；長度是該區域可安全拉伸距離的比例",
     "The pull strength is a fraction of the safe distance": "拉伸強度是安全拉伸距離的比例",
     "A narrow control group can only be pulled a little": "控制組越窄，能拉伸的距離越短",
+    "A control group name has to start with {prefix}": "控制組名稱必須以 {prefix} 開頭",
 }

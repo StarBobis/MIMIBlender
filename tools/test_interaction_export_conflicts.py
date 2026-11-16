@@ -381,6 +381,49 @@ def check_region_collection_drops_incomplete_rows():
     print("region collection: OK")
 
 
+def check_empty_control_group_is_reported():
+    """A region without a control group must not disappear silently."""
+    class FakeEntry:
+        def __init__(self, enabled, vertex_group):
+            self.enabled = enabled
+            self.label = "Region"
+            self.object_name = "Body"
+            self.vertex_group = vertex_group
+            self.offset = (0.1, 0.0, 0.0)
+
+    class FakeNode:
+        def __init__(self, entries):
+            self.regions = entries
+
+    output = capture_output(collect_region_list, [FakeNode([FakeEntry(True, "")])])
+    if "has no control group" not in output:
+        raise AssertionError("the empty region was not reported: " + output)
+
+    output = capture_output(collect_region_list, [FakeNode([FakeEntry(True, "")])])
+    if "does nothing in this export" not in output:
+        raise AssertionError("the empty feature was not reported: " + output)
+    print("a region without a control group: OK (reported)")
+
+
+def check_region_reason_has_its_own_title():
+    """A region that does not deform its DrawIB has its own title."""
+    body = make_body_drawib("body1111", "MimiInteraction_Chest", fading_weights())
+    body.submesh_model_list[0].export_vertex_attribute_dict[
+        "interaction_vertex_group_weights"]["all_group_names"] = [
+            "MimiInteraction_Chest", "MimiInteraction_Empty"]
+    regions = [
+        region("MimiInteraction_Chest", offset=(0.5, 0.0, 0.0)),
+        region("MimiInteraction_Empty", offset=(0.5, 0.0, 0.0)),
+    ]
+
+    output = capture_output(prepare_interaction, [body], regions, GpuPreSkinningBackend())
+    if "the following DrawIBs do not carry the deformation" in output:
+        raise AssertionError("a working DrawIB was listed as skipped: " + output)
+    if "the following regions do not deform their DrawIB" not in output:
+        raise AssertionError("the region reason has no title of its own: " + output)
+    print("the region reasons have their own title: OK")
+
+
 def main():
     check_second_drawib_is_skipped()
     check_constant_weight_is_reported()
@@ -395,6 +438,8 @@ def main():
     check_vertex_count_mismatch_is_skipped()
     check_region_offsets_match_the_region_list()
     check_zero_pull_is_allowed()
+    check_empty_control_group_is_reported()
+    check_region_reason_has_its_own_title()
     check_region_collection_drops_incomplete_rows()
     print("all interaction export conflict checks passed")
 

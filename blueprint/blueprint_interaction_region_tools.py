@@ -25,6 +25,39 @@ GROUP_PREFIX = "MimiInteraction_"
 # The number of rings that are feathered around the selection.
 MAX_FEATHER_RINGS = 3
 
+# The mode names Blender uses for the mesh edit mode.  Blender 5.2 reports
+# "EDIT_MESH" instead of the older "EDIT".
+EDIT_MODE_NAME_LIST = ("EDIT", "EDIT_MESH")
+
+
+def is_edit_mode(context):
+    """Return whether the context is in the mesh edit mode.
+
+    Blender 5.2 renamed the mode to "EDIT_MESH".  The older name is still
+    accepted, so the check works on both.
+    """
+    return getattr(context, "mode", "") in EDIT_MODE_NAME_LIST
+
+
+def build_group_name(label, object_name):
+    """Return the name of the control group of a region.
+
+    The name carries the name of the object, because two objects with the
+    same label would otherwise be joined into one group, and then both
+    regions would pull both objects.
+    """
+    clean_label = "".join(
+        character for character in (label or "Region")
+        if character.isalnum() or character in ("_", "-"))
+    if not clean_label:
+        clean_label = "Region"
+    clean_object = "".join(
+        character for character in (object_name or "Object")
+        if character.isalnum() or character in ("_", "-"))
+    if not clean_object:
+        clean_object = "Object"
+    return GROUP_PREFIX + clean_label + "_" + clean_object
+
 
 def _smooth_step(value):
     """Return the smooth step of a value between zero and one."""
@@ -117,7 +150,7 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
         obj = getattr(context, "object", None)
         if obj is None or obj.type != 'MESH':
             return None
-        if context.mode != 'EDIT':
+        if not is_edit_mode(context):
             return None
         if obj.library is not None:
             # A linked object cannot carry a new vertex group.
@@ -169,24 +202,35 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
         # Leave Edit Mode before the group is created: the edit mode undo
         # does not capture the new group, so the user could only undo one
         # half of the operation.
-        if context.mode == 'EDIT':
+        if is_edit_mode(context):
             bpy.ops.object.mode_set(mode='OBJECT')
 
-        group_name = GROUP_PREFIX + (node.regions[self.region_index].label or "Region")
+        entry = node.regions[self.region_index]
+
+        # The name of the group carries the name of the object, because
+        # two objects with the same label would otherwise end up in one
+        # merged group, and both regions would pull both objects.
+        group_name = build_group_name(entry.label, obj.name)
         vertex_group = obj.vertex_groups.get(group_name)
         if vertex_group is None:
             vertex_group = obj.vertex_groups.new(name=group_name)
-
-        # The group is written from scratch, so an older run cannot leave
-        # stale weights behind.
-        vertex_group.remove([element.index for element in vertex_group.elements])
+        else:
+            # The group is written from scratch, so an older run cannot
+            # leave stale weights behind.  The vertex group of a mesh has
+            # no element list any more, so the vertices are removed one by
+            # one.
+            for vertex_index in range(len(mesh.vertices)):
+                try:
+                    vertex_group.remove([vertex_index])
+                except RuntimeError:
+                    # The vertex does not carry this group.
+                    pass
 
         for vertex_index, weight in weights.items():
             if weight <= 0.0:
                 continue
             vertex_group.add([vertex_index], weight, 'REPLACE')
 
-        entry = node.regions[self.region_index]
         entry.object_name = obj.name
         entry.vertex_group = vertex_group.name
         entry.enabled = True

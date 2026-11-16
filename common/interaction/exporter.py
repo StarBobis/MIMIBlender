@@ -14,6 +14,8 @@ deformation for those.
 
 import os
 
+import numpy
+
 from .runtime import (
     InteractionRegion,
     append_interaction_ini_sections,
@@ -81,7 +83,8 @@ def collect_region_list(node_list):
 
     Every region keeps the object it belongs to and the control group that
     carries its weight.  A region without a control group cannot be
-    deformed and is reported by the caller.
+    deformed, and it is reported here, because the caller would otherwise
+    never hear of it.
 
     The runtime carries two regions, so a third one would be dropped
     without a trace.  The extra regions are reported instead of being
@@ -94,6 +97,13 @@ def collect_region_list(node_list):
                 continue
             vertex_group = str(getattr(entry, "vertex_group", "") or "")
             if not vertex_group:
+                # The region has no control group, so it moves nothing.
+                # The user has to know, because a new region row starts
+                # out empty.
+                print("Interaction deformation: the region '"
+                      + str(getattr(entry, "label", "") or "")
+                      + "' has no control group, so it does nothing. Use the"
+                      + " create region button to make one.")
                 continue
             region_list.append(InteractionRegion(
                 label=str(getattr(entry, "label", "") or ""),
@@ -108,6 +118,10 @@ def collect_region_list(node_list):
               + str(len(region_list) - MAX_RUNTIME_REGIONS)
               + " of them are not exported. Keep one node with two regions.")
         region_list = region_list[:MAX_RUNTIME_REGIONS]
+
+    if node_list and not region_list:
+        print("Interaction deformation: none of the regions can be deformed,"
+              + " so the feature does nothing in this export.")
 
     return region_list
 
@@ -162,9 +176,12 @@ def collect_weighted_control_groups(drawib_model_list):
             sampled_dict = attribute_dict.get("interaction_vertex_group_weights", {})
             group_weights = sampled_dict.get("weights_by_group", {})
             for group_name, weights in group_weights.items():
-                if len(weights) == 0:
+                if weights is None:
                     continue
-                if float(sum(weights)) > 1e-12:
+                # The sum of the array is much faster than the built in
+                # sum, which walks the array one item at a time.
+                total = float(numpy.asarray(weights, dtype=numpy.float64).sum())
+                if total > 1e-12:
                     weighted_group_set.add(group_name)
     return weighted_group_set
 
@@ -252,6 +269,7 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
     """
     prepared_dict = {}
     skipped_reason_list = []
+    region_reason_list = []
     applied_report_list = []
     if not region_list:
         return prepared_dict
@@ -410,17 +428,23 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
 
         # A region that this DrawIB does not carry is reported even when
         # other regions of the same DrawIB work, so no region stays
-        # silent.
+        # silent.  It has its own list, because the DrawIB itself works.
         if inactive_reason_list:
-            skipped_reason_list.append(
-                drawib + ": these regions do not deform it ("
-                + "; ".join(inactive_reason_list) + ")")
+            region_reason_list.append(
+                drawib + ": " + "; ".join(inactive_reason_list))
 
     # A DrawIB that was skipped has to be visible, otherwise the export
     # succeeds with a mod that does nothing at all.
     if skipped_reason_list:
         print("Interaction deformation: the following DrawIBs do not carry the deformation:")
         for reason in skipped_reason_list:
+            print("  " + reason)
+
+    # A region that does not deform its DrawIB is a separate matter: the
+    # DrawIB itself may work perfectly well.
+    if region_reason_list:
+        print("Interaction deformation: the following regions do not deform their DrawIB:")
+        for reason in region_reason_list:
             print("  " + reason)
 
     # The applied distance has to be visible, because it depends on the
