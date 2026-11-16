@@ -62,8 +62,11 @@ from ....i18n.i18n import I18nOperator, tr
 from ...core import layout
 from ...globs import CombineListTypes
 from .combiner_ops import get_data, get_mats_uv, get_size, get_structure, _get_image_size
-from ...utils.materials import get_image_from_material, get_diffuse, get_effective_diffuse, get_gfx_textures, get_alpha_texture
+from ...utils.materials import (get_image_from_material, get_diffuse, get_effective_diffuse,
+                                get_gfx_texture_images,
+                                get_alpha_texture, get_alpha_texture_image)
 from ...utils.images import get_packed_file
+from ...utils import source_identity as source_utils
 
 # Only layout-affecting options participate; output paths and codecs do not.
 SETTINGS = (
@@ -251,6 +254,11 @@ def prepare_shared_sampling(scene, structure):
     Preview and merge both call this adapter; neither wraps polygon corners
     with modulo, which would break triangles crossing a tile boundary.
     """
+    # Source identity must be cached before any family or output grouping.
+    # Several Image datablocks can point at one file; the identity turns them
+    # into one family so their sampling windows and rectangles can agree.
+    source_utils.assign_source_identities(
+        structure, scene.mimi_smc_include_extra_textures)
     groups = texture_groups(structure)
     # Solid outputs can share a row even without a common Image datablock.
     # Give those peers one mapping too; their flat color has no tile detail.
@@ -297,17 +305,39 @@ def prepare_shared_sampling(scene, structure):
 
 
 def texture_groups(structure):
-    """Link allocations using the same source Image without pixel comparisons.
+    """Link allocations using the same source texture without pixel comparisons.
 
     Empty/solid materials remain independent; None is not a shared texture.
     Group detection runs only in explicit planning and merge operations.
+    The key is the cached source identity, so several Image datablocks loaded
+    from one file stay one family. A generated image without a file path
+    keeps its datablock pointer and therefore stays independent.
     """
     groups = {}
     for mat in structure:
         image = get_image_from_material(mat)
-        key = ("image", image.as_pointer()) if image else ("material", mat.as_pointer())
+        if image is None:
+            # Solids never share a sampling window with an image family.
+            key = ("material", mat.as_pointer())
+        else:
+            key = structure[mat]["gfx"].get("source_key")
+            if key is None:
+                # Direct callers may pass a structure that skipped planning.
+                key = source_utils.material_source_key(mat)
         groups.setdefault(key, []).append(mat)
     return list(groups.values())
+
+
+def _extra_identity(item, field, image):
+    """Read a cached alpha/extra-map identity, or compute one on demand.
+
+    A missing cache entry means assign_source_identities was skipped. A
+    cached None is a real answer: the material currently has no alpha image.
+    """
+    gfx = item["gfx"]
+    if field in gfx:
+        return gfx[field]
+    return source_utils.image_source_key(image)
 
 
 def output_groups(scene, structure):
@@ -317,6 +347,8 @@ def output_groups(scene, structure):
     UV coverage is not source identity: prepare_shared_sampling gives peers
     one common grid before packing and merging. Keeping shading differences
     in this key still prevents visibly different outputs sharing a rectangle.
+    The first component is the source identity, so several datablocks that
+    load one file share one rectangle while a different file stays apart.
     """
     groups = {}
     for mat, item in structure.items():
@@ -330,13 +362,37 @@ def output_groups(scene, structure):
         alpha = None
         if alpha_mode in {"SEPARATE", "MULTIPLY"}:
             alpha_image = mat.mimi_smc_alpha_image
-            alpha = (alpha_image.as_pointer() if alpha_image else 0, mat.mimi_smc_alpha_channel)
+            # Alpha sources follow the same identity rule as the base image.
+            alpha = (_extra_identity(item, "alpha_source", alpha_image),
+                     mat.mimi_smc_alpha_channel)
         elif alpha_mode == "AUTO":
             linked = get_alpha_texture(mat)
-            alpha = (linked[0].as_pointer(), linked[1]) if linked else None
-        maps = get_gfx_textures(mat) if scene.mimi_smc_include_extra_textures else {}
-        key = (packed.as_pointer() if packed else 0, color, alpha_mode, alpha,
-               tuple(sorted((kind, source.as_pointer() if source else 0) for kind, source in maps.items())))
+            if linked:
+                alpha_image = get_alpha_texture_image(mat)
+                alpha = (_extra_identity(item, "alpha_source", alpha_image), linked[1])
+        # Extra maps also use the source identity: two datablocks that load
+        # one PBR file must not split an otherwise equivalent output.
+        map_sources = ()
+        if scene.mimi_smc_include_extra_textures:
+            cached = item["gfx"].get("map_sources")
+            scanned = item["gfx"].get("map_scan")
+            if cached is None or scanned != scene.mimi_smc_include_extra_textures:
+                # Do not write the result back. Only assign_source_identities
+                # may cache extra identities: a direct caller that skipped it
+                # must re-read the bytes on every call, or a changed PBR
+                # payload would be hidden by an old cache entry.
+                map_sources = tuple(sorted(
+                    (kind, source_utils.image_source_key(image))
+                    for kind, image in get_gfx_texture_images(mat).items()))
+            else:
+                map_sources = tuple(sorted(cached.items()))
+        identity = None
+        if packed:
+            # Solid or unreadable images keep the old color-only identity.
+            identity = item["gfx"].get("source_key")
+            if identity is None:
+                identity = source_utils.material_source_key(mat)
+        key = (identity, color, alpha_mode, alpha, map_sources)
         groups.setdefault(key, []).append(mat)
     return list(groups.values())
 
@@ -475,11 +531,43 @@ def plan_sizes(scene, structure, fixed):
     return fits, canvas, sizes
 
 
+def validate_distribution_groups(scene, structure):
+    """Reject a plan whose approved rows no longer match the current sources.
+
+    Called before any live UV normalization so a stale plan cannot leave the
+    mesh half-aligned, and again by apply_distribution before it assigns the
+    approved rectangles. A source file replaced after planning can split one
+    row into two; using the old row would paste two pictures into one
+    rectangle and silently lose one of them.
+    """
+    entries = distribution_entries(scene)
+    if set(entries) != set(structure):
+        raise ValueError(tr("Materials changed; generate the size distribution again"))
+    # A direct caller may hold a structure built before the packed data
+    # changed. Refresh identities from the current bytes before comparing the
+    # approved rows; trusting the cached keys would accept a stale row and
+    # paste two different pictures into one rectangle.
+    source_utils.assign_source_identities(
+        structure, scene.mimi_smc_include_extra_textures)
+    approved = {}
+    for mat, entry in entries.items():
+        approved.setdefault(entry.as_pointer(), set()).add(mat)
+    outputs = output_groups(scene, structure)
+    current = {frozenset(group) for group in outputs}
+    if current != {frozenset(group) for group in approved.values()}:
+        raise ValueError(tr("Materials changed; generate the size distribution again"))
+    return outputs
+
+
 def apply_distribution(scene, structure):
     """Use the validated positions verbatim; never repack during the merge."""
     entries = distribution_entries(scene)
     if set(entries) != set(structure):
         raise ValueError(tr("Materials changed; generate the size distribution again"))
+    # The approved rows and the current equivalent-output groups must still
+    # describe the same split. This repeats the validation the operator runs
+    # before touching live UVs, because direct callers can skip that guard.
+    outputs = validate_distribution_groups(scene, structure)
     for mat, item in structure.items():
         entry = entries[mat]
         gaps = scene.mimi_smc_gaps
@@ -495,7 +583,7 @@ def apply_distribution(scene, structure):
         item["gfx"]["distribution"] = True
     # Combine UV lists only for truly equivalent output rectangles.
     # Composition now decodes and pastes each duplicate group exactly once.
-    for group in output_groups(scene, structure):
+    for group in outputs:
         root = group[0]
         for mat in group[1:]:
             peer = structure[mat]

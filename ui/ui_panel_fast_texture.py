@@ -20,6 +20,7 @@ from ..i18n.i18n import I18nOperator, tr, translatable
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils,CollectionColor
 from ..utils.material_texture_utils import apply_image_texture_to_material
+from ..utils.image_loading import load_shared_image
 
 # Stores the preview image collection
 fast_preview_collections = {}
@@ -181,8 +182,9 @@ class MMT_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
         selected_image = scene.mimi_image_list[selected_index]
         image_path = selected_image.filepath
         
-        # Get or create the image data block
-        image_data = bpy.data.images.load(image_path, check_existing=True)
+        # One datablock per file: applying one picture to several objects must
+        # not create a separate source for the texture combiner.
+        image_data = load_shared_image(image_path, "sRGB")
         
         selected_objects = context.selected_objects
         if not selected_objects:

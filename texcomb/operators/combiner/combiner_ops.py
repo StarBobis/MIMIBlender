@@ -47,6 +47,7 @@ from ...utils.materials import (
     get_alpha_texture,
     get_alpha_texture_issue,
     get_diffuse,
+    get_effective_diffuse,
     get_gfx_textures,
     get_image_from_material,
     sort_materials,
@@ -570,7 +571,11 @@ def get_atlas(
             ).format(name=mat.name, error=exc)
             fallback_item = dict(item)
             fallback_item["gfx"] = dict(item["gfx"])
-            fallback_item["gfx"]["img_or_color"] = get_diffuse(mat)
+            # Use the same effective color that output_groups used for the
+            # shared-rectangle key. Falling back to the raw socket color here
+            # could bake a different color than the group agreed on and let
+            # one member overwrite another.
+            fallback_item["gfx"]["img_or_color"] = get_effective_diffuse(mat)
             fallback_item["gfx"]["alpha"] = None
             plane = plane_builder.build_base_plane(
                 mat, fallback_item, content_size, images

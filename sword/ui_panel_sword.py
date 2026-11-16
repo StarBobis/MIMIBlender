@@ -9,6 +9,7 @@ from ..common.global_config import GlobalConfig
 from ..common.mmt_import_helper import MMTImportHelper
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..i18n.i18n import I18nOperator, tr, translatable, get_language
+from ..utils.image_loading import load_shared_image
 from ..workspace.submesh_json import SubmeshJson
 
 # Folder check shared with the Mod Reverse panel: it tells the user whether the
@@ -418,7 +419,7 @@ class Sword_ImportTexture_WM_OT_ApplyImageToMaterial(I18nOperator):
         image_path = selected_image.filepath
         
         # Get or create the image data block
-        image_data = bpy.data.images.load(image_path, check_existing=True)
+        image_data = load_shared_image(image_path, "sRGB")
         
         selected_objects = context.selected_objects
         if not selected_objects:

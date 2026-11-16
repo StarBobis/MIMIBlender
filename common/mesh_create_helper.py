@@ -7,6 +7,7 @@ import os
 from bpy_extras.io_utils import unpack_list, axis_conversion
 
 from ..utils.format_utils import Fatal, FormatUtils
+from ..utils.image_loading import load_shared_image
 from ..utils.mesh_utils import MeshUtils
 from ..utils.mesh_mirror_utils import MeshMirrorUtils
 from ..utils.obj_utils import ObjUtils
@@ -824,7 +825,11 @@ class MeshCreateHelper:
     @staticmethod
     def apply_diffuse_texture(node_tree, bsdf, texture_path:str):
         tex_image = node_tree.nodes.new('ShaderNodeTexImage')
-        tex_image.image = bpy.data.images.load(texture_path)
+        # One datablock per file: every SubMesh of one model may reuse the
+        # same diffuse map, and the texture combiner must see one source.
+        # Loading a fresh datablock per material would paste the picture once
+        # per SubMesh and waste the atlas.
+        tex_image.image = load_shared_image(texture_path, "sRGB")
         # Game diffuse maps pack data (emission / material masks) into the
         # alpha channel: CHANNEL_PACKED keeps that data readable instead of
         # letting Blender treat it as transparency. The Alpha output is left

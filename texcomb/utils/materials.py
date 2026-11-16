@@ -383,6 +383,25 @@ def get_gfx_textures(
         Dictionary mapping texture type names to packed file data.
         Empty dictionary if no compatible shader or textures found.
     """
+    # The image scan is shared with the atlas identity code, which needs the
+    # Image datablocks rather than their packed bytes.
+    textures = {}
+    for gfx_type, image in get_gfx_texture_images(mat).items():
+        packed_file = get_packed_file(image)
+        if packed_file:
+            textures[gfx_type] = packed_file
+    return textures
+
+
+def get_gfx_texture_images(
+    mat: bpy.types.Material,
+) -> Dict[str, bpy.types.Image]:
+    """Extract connected extra-map images by texture type.
+
+    The shader scan is identical to get_gfx_textures(); only the returned
+    value differs. Extra-map images are read on demand by the atlas identity
+    so one source file cannot split an equivalent output group.
+    """
     gfx_textures = {}
     if not mat.node_tree or not mat.node_tree.nodes:
         return gfx_textures
@@ -431,9 +450,11 @@ def get_gfx_textures(
         socket = shader_node.inputs[input_name]
         image_node = _check_socket_for_image(socket)
         if image_node and image_node.image:
-            packed_file = get_packed_file(image_node.image)
-            if packed_file:
-                gfx_textures[gfx_type] = packed_file
+            # Keep the same key set as get_gfx_textures(): an image that
+            # cannot be packed is not baked into the atlas and therefore must
+            # not change output grouping either.
+            if get_packed_file(image_node.image):
+                gfx_textures[gfx_type] = image_node.image
 
     return gfx_textures
 

@@ -9,6 +9,7 @@ from ..workspace.submesh_json import SubmeshJson, SubmeshCategoryBuffer
 from .mimi_global_properties import MIMIGlobalProperties
 from ..utils.format_utils import Fatal, FormatUtils
 from ..utils.material_texture_utils import apply_image_texture_to_material, find_node
+from ..utils.image_loading import load_shared_image
 
 
 class MMTImportHelper:
@@ -814,8 +815,9 @@ class MMTImportHelper:
 		if not texture_path or not os.path.isfile(texture_path):
 			return
 
-		# check_existing=True: re-imports share one image data-block per file path.
-		image_data = bpy.data.images.load(texture_path, check_existing=True)
+		# One datablock per file: re-imports and preview materials share the
+		# same source, so the texture combiner can merge them into one region.
+		image_data = load_shared_image(texture_path, "sRGB")
 
 		# Reuse the first material slot when it exists; otherwise create a fresh
 		# preview material named after the texture file.

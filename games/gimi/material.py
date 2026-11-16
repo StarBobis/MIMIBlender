@@ -10,6 +10,7 @@ import os
 import bpy
 
 from ...common.global_config import GlobalConfig, LogicName
+from ...utils.image_loading import load_shared_image
 
 
 class GIMIHighFidelityMaterial:
@@ -811,7 +812,11 @@ class GIMIHighFidelityMaterial:
         node.location = location
         if image_path:
             try:
-                node.image = bpy.data.images.load(image_path, check_existing=True)
+                # One datablock per file keeps every atlas source unique.
+                # The color space is part of the key so a raw-data view never
+                # silently repaints a color texture.
+                node.image = load_shared_image(
+                    image_path, "Non-Color" if non_color else "sRGB")
             except Exception as error:
                 print(f"[GIMI Material] Cannot load {name}: {image_path}: {error}")
         if node.image:

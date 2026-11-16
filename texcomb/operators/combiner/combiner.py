@@ -29,7 +29,7 @@ from .combiner_ops import (
     validate_ob_data,
 )
 
-from .size_distribution import apply_distribution, distribution_ready, prepare_sources
+from .size_distribution import apply_distribution, distribution_ready, prepare_sources, validate_distribution_groups
 
 MAX_ATLAS_SIZE = 20000
 
@@ -116,6 +116,10 @@ class Combiner(I18nOperator):
         # Fresh live vectors avoid stale references after the file picker.
         # Approval is already checked before any UV alignment occurs.
         set_ob_mode(context.view_layer, scn.mimi_smc_ob_data)
+        # Validate the approved rows against the current sources before the
+        # live pass. A stale plan must not leave the mesh half-normalized.
+        _, _, approved_structure = prepare_sources(scn)
+        validate_distribution_groups(scn, approved_structure)
         self.data, self.mats_uv, self.structure = prepare_sources(scn, read_only=False)
         atlas_size = apply_distribution(scn, self.structure)
         size = atlas_size
