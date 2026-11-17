@@ -93,6 +93,10 @@ def collect_region_list(node_list):
     region_list = []
     enabled_region_count = 0
     for node in node_list:
+        if getattr(node, 'mouse_drag', False):
+            from ..global_config import GlobalConfig
+            if GlobalConfig.logic_name != 'Naraka':
+                raise ValueError('Mouse drag export currently supports Naraka only')
         for entry in getattr(node, "regions", []):
             if not getattr(entry, "enabled", True):
                 continue
@@ -260,7 +264,7 @@ def describe_missing_region(drawib_model, region, existing_group_set, weighted_g
     return "the control group '" + group_name + "' has no weight on this DrawIB"
 
 
-def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason_dict=None):
+def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason_dict=None, mouse_drag=False):
     """Prepare the interaction data of every DrawIB that can carry it.
 
     Returns a dictionary that maps the DrawIB to its prepared data.  A
@@ -378,7 +382,9 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
                 region_offsets.append((0.0, 0.0, 0.0))
                 continue
 
-            direction = tuple(float(value) for value in region.offset)
+            # A dynamic region starts at rest but still needs a usable
+            # gradient. Validate its entire displacement range before export.
+            direction = (1.0, 0.0, 0.0) if mouse_drag else tuple(float(value) for value in region.offset)
             strength = float(sum(value * value for value in direction) ** 0.5)
             if strength <= 1e-12:
                 # The region asks for no pull, so it simply does not move.
@@ -415,11 +421,11 @@ def prepare_interaction(drawib_model_list, region_list, backend, conflict_reason
             # because it depends on the way the region was drawn.
             drawib_report_list.append(
                 "the region '" + (region.label or region.vertex_group)
-                + "' of DrawIB " + drawib + " pulls "
+                + "' of DrawIB " + drawib + (" has runtime displacement capacity " if mouse_drag else " pulls ")
                 + format(applied_magnitude, ".4f")
                 + " with a strength of " + format(strength, ".2f")
                 + "; its weight gradient is " + format(gradient_bound, ".2f"))
-            region_offsets.append(applied)
+            region_offsets.append((0.0, 0.0, 0.0) if mouse_drag else applied)
 
         # A region that cannot be pulled is reported and the DrawIB is
         # skipped.  It never stops the export, because the other parts of
@@ -478,6 +484,10 @@ def append_interaction_sections(ini_builder, prepared_dict, drawib_model_dict):
         drawib_model = drawib_model_dict.get(drawib, None)
         if drawib_model is None:
             continue
+        if "drag" in data:
+            from .drag import sections
+            sections(ini_builder, data, drawib_model)
+            continue
 
         # The bind pose is the exported position buffer of the DrawIB.
         from ..global_config import GlobalConfig
@@ -503,6 +513,10 @@ def write_interaction_files_to_folder(output_folder, prepared_dict, addon_root):
     copy_apply_shader(output_folder, addon_root)
     for drawib in sorted(prepared_dict.keys()):
         data = prepared_dict[drawib]
+        if "drag" in data:
+            from .drag import write
+            write(output_folder, data, drawib)
+            continue
         write_interaction_files(
             output_folder,
             drawib,

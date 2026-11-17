@@ -43,6 +43,7 @@ class MIMIInteractionRegion(bpy.types.PropertyGroup):
         name=tr("Control Vertex Group"), default="",
         description=tr("The vertex group weights decide how far each vertex is pulled"),
     ) # type: ignore
+    source_group: bpy.props.StringProperty(default="") # type: ignore
     offset: bpy.props.FloatVectorProperty(
         name=tr("Pull"), size=3, default=(0.0, 0.0, 0.0),
         min=-1.0, max=1.0,
@@ -135,11 +136,26 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
     """Node that declares the pullable regions of the exported model."""
 
     bl_idname = INTERACTION_NODE_ID
-    bl_label = "Interaction Deformation"
+    bl_label = "Chest Interaction Jiggle System"
     bl_icon = 'MOD_SIMPLIFY'
     bl_width_min = 320
 
     enabled: bpy.props.BoolProperty(name=tr("Enable Interaction Deformation"), default=True) # type: ignore
+    # Existing files retain the fixed-pull path until the user opts in.
+    mouse_drag: bpy.props.BoolProperty(name=tr("Mouse drag and spring return"), default=False) # type: ignore
+    drag_strength: bpy.props.FloatProperty(default=0.7, min=0.01, max=1.0,
+        description=tr('Fraction of the safe pull distance; start at 0.7')) # type: ignore
+    drag_sensitivity: bpy.props.FloatProperty(default=2.0, min=0.1, max=10.0) # type: ignore
+    spring_frequency: bpy.props.FloatProperty(default=3.5, min=0.1, max=20.0,
+        description=tr('Oscillations per second; higher values bounce faster')) # type: ignore
+    damping_ratio: bpy.props.FloatProperty(default=0.24, min=0.01, max=2.0,
+        description=tr('Low damping keeps bouncing longer; 1 returns without oscillation')) # type: ignore
+    flip_y: bpy.props.BoolProperty(default=True) # type: ignore
+    reversed_z: bpy.props.BoolProperty(default=True) # type: ignore
+    pick_vs: bpy.props.StringProperty(default="") # type: ignore
+    pick_ps: bpy.props.StringProperty(default="") # type: ignore
+    show_advanced: bpy.props.BoolProperty(default=False) # type: ignore
+    capture_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH') # type: ignore
     regions: bpy.props.CollectionProperty(type=MIMIInteractionRegion) # type: ignore
     region_index: bpy.props.IntProperty(default=0, min=0) # type: ignore
 
@@ -150,6 +166,7 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
         self.color = (0.30, 0.40, 0.45)
         entry = self.regions.add()
         entry.label = tr("Region {number}").format(number=1)
+        self.mouse_drag = True
 
     def width_texts(self):
         return [self.label]
@@ -159,6 +176,17 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
             layout.label(text=tr("This preset does not provide the interaction deformation"), icon='ERROR')
         layout.prop(self, "enabled", text=tr("Enable Interaction Deformation"))
         layout.label(text=tr("Independent settings; keep the existing output links"), icon='INFO')
+        layout.prop(self, "mouse_drag", text=tr("Mouse drag and spring return"))
+        if self.mouse_drag:
+            help_box = layout.box()
+            help_box.label(text=tr("1. Choose the body mesh and a region"))
+            help_box.label(text=tr("2. Copy an existing group or select vertices"))
+            help_box.label(text=tr("3. Export; Alt + left drag, release to bounce"))
+            if GlobalConfig.logic_name != 'Naraka':
+                help_box.label(text=tr("Mouse drag export currently supports Naraka only"), icon='ERROR')
+            layout.prop(self, 'drag_strength', text=tr('Maximum pull'))
+            layout.prop(self, 'spring_frequency', text=tr('Bounce speed'))
+            layout.prop(self, 'damping_ratio', text=tr('Damping (higher stops sooner)'))
 
         settings = layout.column()
         settings.enabled = self.enabled
@@ -192,8 +220,22 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
                 detail.prop(entry, "vertex_group", text=tr("Control Vertex Group"))
                 if entry.object_name:
                     detail.label(text=tr("Choose an existing mesh object"), icon='ERROR')
-            detail.prop(entry, "offset", text=tr("Pull"))
-            create_region = detail.operator(
+            if obj is not None and obj.type == 'MESH':
+                detail.prop_search(entry, 'source_group', obj, 'vertex_groups', text=tr('Existing vertex group'))
+                copy_group = detail.operator('mimi.interaction_copy_group', text=tr('Copy weights to this region'), icon='DUPLICATE')
+                copy_group.tree_name = self.id_data.name
+                copy_group.node_name = self.name
+                copy_group.region_index = self.region_index
+            if not self.mouse_drag:
+                detail.prop(entry, "offset", text=tr("Pull"))
+            group = obj.vertex_groups.get(entry.vertex_group) if obj and obj.type == 'MESH' else None
+            if group and group.name.startswith(CONTROL_GROUP_PREFIX):
+                detail.label(text=tr('Control group ready; check its weight falloff'), icon='CHECKMARK')
+            else:
+                detail.label(text=tr('Create or copy a control group below'), icon='INFO')
+            create_row = detail.row()
+            create_row.enabled = getattr(context, 'mode', '') in ('EDIT', 'EDIT_MESH')
+            create_region = create_row.operator(
                 "mimi.interaction_create_region",
                 text=tr("Create Region from Selected Vertices"), icon='GROUP_VERTEX',
             )
@@ -204,12 +246,30 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
         else:
             box.label(text=tr("Add at least one enabled region before exporting"), icon='INFO')
 
-        box.label(text=tr("The pull strength is a fraction of the safe distance"))
-        box.label(text=tr("A narrow control group can only be pulled a little"))
-        box.label(text=tr("Control groups must not use a numbered bone group name"))
-        box.label(text=tr("Let the create region button make the control group"))
-        box.label(text=tr("A control group name has to start with {prefix}").format(
-            prefix=CONTROL_GROUP_PREFIX))
+        if not self.mouse_drag:
+            box.label(text=tr("The pull strength is a fraction of the safe distance"))
+            box.label(text=tr("A narrow control group can only be pulled a little"))
+            box.label(text=tr("Control groups must not use a numbered bone group name"))
+            box.label(text=tr("Let the create region button make the control group"))
+            box.label(text=tr("A control group name has to start with {prefix}").format(
+                prefix=CONTROL_GROUP_PREFIX))
+        if self.mouse_drag:
+            layout.prop(self, 'capture_directory', text=tr('FrameAnalysis folder (latest if empty)'))
+            detect = layout.operator('mimi.interaction_detect_picker', text=tr('Configure picking from capture'), icon='VIEWZOOM')
+            detect.tree_name = self.id_data.name
+            detect.node_name = self.name
+            layout.prop(self, 'show_advanced', text=tr('Picking setup and advanced settings'), icon='TRIA_DOWN' if self.show_advanced else 'TRIA_RIGHT')
+            if self.show_advanced:
+                layout.label(text=tr('Main-pass shader hashes from FrameAnalysis'))
+                layout.prop(self, 'pick_vs', text='VS')
+                layout.prop(self, 'pick_ps', text='PS')
+                layout.prop(self, 'drag_sensitivity', text=tr('Drag sensitivity'))
+                layout.prop(self, 'flip_y', text=tr('Flip cursor Y'))
+                layout.prop(self, 'reversed_z', text=tr('Reversed depth'))
+            if not self.pick_vs or not self.pick_ps:
+                layout.label(text=tr('Picking setup required before export'), icon='ERROR')
+            else:
+                layout.label(text=tr('Picking shaders configured from capture'), icon='CHECKMARK')
 
 
 def register():

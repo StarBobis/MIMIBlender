@@ -140,8 +140,19 @@ class Exporter(StandardExporter):
             elif drawib in self.time_pos_drawib_set:
                 conflict_reason_dict[drawib] = "it already uses the Position.buf based dynamic mod"
 
+        nodes = [n for n in self.blueprint_model.interaction_node_list if n.enabled]
         prepared_dict = prepare_interaction(
-            self.drawib_model_list, region_list, backend, conflict_reason_dict)
+            self.drawib_model_list, region_list, backend, conflict_reason_dict,
+            mouse_drag=bool(nodes and getattr(nodes[0], 'mouse_drag', False)))
+        if nodes and getattr(nodes[0], 'mouse_drag', False):
+            if len(nodes) != 1:
+                raise ValueError('Mouse drag requires a single interaction node per export')
+            if not prepared_dict:
+                raise ValueError('Mouse drag: no usable control regions; check export diagnostics and weight falloff')
+            from ...common.interaction.drag import prepare
+            for model in self.drawib_model_list:
+                if model.draw_ib in prepared_dict:
+                    prepare(prepared_dict[model.draw_ib], model, nodes[0])
 
         return prepared_dict
 
@@ -244,6 +255,8 @@ class Exporter(StandardExporter):
         # the export already refused that combination.
         if drawib_model.draw_ib in self.interaction_data:
             shapekey_run_command_list = get_interaction_command_list_name(drawib_model.draw_ib)
+            if 'drag' in self.interaction_data[drawib_model.draw_ib]:
+                shapekey_run_command_list = 'CommandListMimiNarakaDragApply_' + drawib_model.draw_ib
 
         sections.add_unity_cs_texture_override_vb_sections(
             ini_builder=ini_builder,
@@ -355,6 +368,11 @@ class Exporter(StandardExporter):
                 obj_name_draw_offset_dict=drawib_model.obj_name_draw_offset,
             ):
                 texture_override_ib_section.append(drawindexed_str)
+                if draw_ib in self.interaction_data:
+                    from ...common.interaction.drag import hook
+                    pick = hook(self.interaction_data[draw_ib], drawib_model, submesh_model, drawindexed_str)
+                    if pick:
+                        texture_override_ib_section.append(pick)
 
             # Guest backup: capture this DrawIB's VB bindings while they are
             # live (vb0 already holds the CS-written modded data and vb1 is

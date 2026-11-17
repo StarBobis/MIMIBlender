@@ -235,8 +235,90 @@ class MIMI_OT_InteractionCreateRegion(I18nOperator):
         return {'FINISHED'}
 
 
+class MIMI_OT_InteractionDetectPicker(I18nOperator):
+    """Read capture evidence; never require novices to copy shader hashes."""
+    bl_idname = 'mimi.interaction_detect_picker'
+    bl_label = 'Configure picking from capture'
+    bl_options = {'REGISTER', 'UNDO'}
+    tree_name: bpy.props.StringProperty(default='') # type: ignore
+    node_name: bpy.props.StringProperty(default='') # type: ignore
+
+    def execute(self, context):
+        import re
+        from pathlib import Path
+        from .blueprint_node_interaction import find_interaction_node
+        from ..common.global_config import GlobalConfig
+        from ..common.interaction.capture import find_picker_shaders
+        node = find_interaction_node(context,self.tree_name,self.node_name)
+        if node is None or not node.regions:
+            return {'CANCELLED'}
+        entry = node.regions[min(node.region_index,len(node.regions)-1)]
+        match = re.search(r'(?:^|\.)([0-9a-fA-F]{8})-',entry.object_name)
+        if not match:
+            self.report({'ERROR'},tr('Choose an imported mesh object first'))
+            return {'CANCELLED'}
+        folder = node.capture_directory
+        if not folder:
+            captures = sorted(Path(GlobalConfig.current_game_migoto_folder).glob('FrameAnalysis-*'))
+            folder = str(captures[-1]) if captures else ''
+        try:
+            vs,ps = find_picker_shaders(bpy.path.abspath(folder),match[1])
+        except (OSError,ValueError) as error:
+            self.report({'ERROR'},tr('Picking configuration failed') + ': ' + tr(str(error)))
+            return {'CANCELLED'}
+        node.pick_vs,node.pick_ps = vs,ps
+        node.capture_directory = folder
+        self.report({'INFO'},tr('Picking shaders configured from capture'))
+        return {'FINISHED'}
+
+
+class MIMI_OT_InteractionCopyGroup(I18nOperator):
+    """Copy authored weights without changing the original bone group.
+
+    A new control group is always created. Blender undo owns the entire
+    operation and the original rig weights remain available to skinning.
+    """
+    bl_idname = 'mimi.interaction_copy_group'
+    bl_label = 'Copy weights to this region'
+    bl_options = {'REGISTER', 'UNDO'}
+    tree_name: bpy.props.StringProperty(default='') # type: ignore
+    node_name: bpy.props.StringProperty(default='') # type: ignore
+    region_index: bpy.props.IntProperty(default=0) # type: ignore
+
+    def execute(self, context):
+        from .blueprint_node_interaction import find_interaction_node
+        node = find_interaction_node(context, self.tree_name, self.node_name)
+        if node is None or not 0 <= self.region_index < len(node.regions):
+            return {'CANCELLED'}
+        entry = node.regions[self.region_index]
+        obj = bpy.data.objects.get(entry.object_name)
+        if obj is None or obj.type != 'MESH' or obj.mode != 'OBJECT' or obj.library:
+            self.report({'WARNING'}, tr('Choose a local mesh in Object Mode first'))
+            return {'CANCELLED'}
+        source = obj.vertex_groups.get(entry.source_group)
+        if source is None:
+            self.report({'WARNING'}, tr('Choose an existing vertex group first'))
+            return {'CANCELLED'}
+        weights = [(v.index, g.weight) for v in obj.data.vertices
+                   for g in v.groups if g.group == source.index and g.weight > 0]
+        if not weights:
+            self.report({'WARNING'}, tr('The source vertex group has no weights'))
+            return {'CANCELLED'}
+        # Never overwrite an existing group, even if its generated name
+        # matches. Blender adds a suffix and the entry follows the real name.
+        group = obj.vertex_groups.new(name=build_group_name(entry.label, obj.name))
+        for index, weight in weights:
+            group.add([index], weight, 'REPLACE')
+        entry.vertex_group = group.name
+        entry.enabled = True
+        self.report({'INFO'}, tr('Control group ready; check its weight falloff'))
+        return {'FINISHED'}
+
+
 classes = (
     MIMI_OT_InteractionCreateRegion,
+    MIMI_OT_InteractionCopyGroup,
+    MIMI_OT_InteractionDetectPicker,
 )
 
 

@@ -1091,7 +1091,7 @@ def draw_node_add_menu(self, context):
     # The interaction deformation node needs a preset backend, so it is
     # only offered by the presets that can actually run it.
     if interaction_backend.has_backend(GlobalConfig.logic_name):
-        layout.operator("node.add_node", text=tr("Interaction Deformation"), icon='MOD_SIMPLIFY').type = "MIMINode_InteractionDeformation"
+        layout.operator("node.add_node", text=tr("Chest Interaction Jiggle System"), icon='MOD_SIMPLIFY').type = "MIMINode_InteractionDeformation"
     layout.separator()
 
     # The Frame node has no functionality of its own; it is a built-in Blender helper
