@@ -78,6 +78,18 @@ def main():
         struct.pack_into('<I',header,84,113)
         output.write_bytes(header)
         assert find_picker_shaders(folder,'12345678') == ('1234567890abcdef','fedcba0987654321')
+        # A live Mod replaces the dumped IB and leaves zero-byte texture
+        # placeholders. Original bindings and dedup destinations are in log.
+        (folder/('000001-ib=12345678'+pair+'.txt')).rename(folder/('000001-ib'+pair+'.txt'))
+        (folder/'deduped').mkdir()
+        (folder/'deduped/hdr.dds').write_bytes(header)
+        output.write_bytes(b'')
+        (folder/'log.txt').write_text(
+            '000001 IASetIndexBuffer(pIndexBuffer:0x1) hash=12345678\n'
+            '000001 OMSetRenderTargets(NumViews:1, pDepthStencilView:0x123)\n'
+            '000001 DrawIndexed(IndexCount:3, StartIndexLocation:0, BaseVertexLocation:0)\n'
+            '000001 3DMigoto Dumping Texture2D '+str(output)+' -> '+str(folder/'deduped/hdr.dds')+'\n')
+        assert find_picker_shaders(folder,'12345678',first_index=0,index_count=3)==('1234567890abcdef','fedcba0987654321')
         (folder / ('000001-ps-t0=11223344'+pair+'.buf')).write_bytes(b'fixture')
         mark = SimpleNamespace(mark_name='DiffuseMap',mark_type='Slot',mark_slot='ps-t0')
         try:
@@ -100,6 +112,30 @@ def main():
         else:
             raise AssertionError('A multiple-render-target pass must not be selected')
     print('PASS: legacy/DX10 HDR capture selection and G-buffer rejection')
+    from common.interaction.automatic import latest_host_capture,region_submesh
+    with tempfile.TemporaryDirectory(dir=root) as temporary:
+        base=Path(temporary)
+        config=base/'host'
+        (config/'Games/Naraka').mkdir(parents=True)
+        install=base/'game'
+        import json
+        (config/'settings.json').write_text(json.dumps({'CurrentGameName':'Naraka'}))
+        (config/'Games/Naraka/Config.json').write_text(json.dumps({'installDir':str(install)}))
+        for name in ('FrameAnalysis-2026-11-16','FrameAnalysis-2026-11-17'):
+            path=install/name
+            path.mkdir(parents=True)
+            (path/'log.txt').write_text('fixture')
+        assert Path(latest_host_capture(config,base/'workspace')).name=='FrameAnalysis-2026-11-17'
+        (config/'settings.json').write_text(json.dumps({'CurrentGameName':'WWMI'}))
+        try:
+            latest_host_capture(config,base/'workspace')
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('Do not borrow another game configuration')
+    tree=SimpleNamespace(nodes=[SimpleNamespace(object_items=[SimpleNamespace(object_name='Body',submesh_name='LOD0.12345678-0')])])
+    assert region_submesh(tree,SimpleNamespace(object_name='Body'))=='LOD0.12345678-0'
+    print('PASS: latest host capture, game isolation and renamed object Submesh mapping')
 
 
 if __name__ == '__main__':

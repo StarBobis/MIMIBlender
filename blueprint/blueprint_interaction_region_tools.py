@@ -242,32 +242,19 @@ class MIMI_OT_InteractionDetectPicker(I18nOperator):
     bl_options = {'REGISTER', 'UNDO'}
     tree_name: bpy.props.StringProperty(default='') # type: ignore
     node_name: bpy.props.StringProperty(default='') # type: ignore
+    use_mmt: bpy.props.BoolProperty(default=False) # type: ignore
 
     def execute(self, context):
-        import re
-        from pathlib import Path
         from .blueprint_node_interaction import find_interaction_node
-        from ..common.global_config import GlobalConfig
-        from ..common.interaction.capture import find_picker_shaders
+        from ..common.interaction.automatic import configure_node
         node = find_interaction_node(context,self.tree_name,self.node_name)
         if node is None or not node.regions:
             return {'CANCELLED'}
-        entry = node.regions[min(node.region_index,len(node.regions)-1)]
-        match = re.search(r'(?:^|\.)([0-9a-fA-F]{8})-',entry.object_name)
-        if not match:
-            self.report({'ERROR'},tr('Choose an imported mesh object first'))
-            return {'CANCELLED'}
-        folder = node.capture_directory
-        if not folder:
-            captures = sorted(Path(GlobalConfig.current_game_migoto_folder).glob('FrameAnalysis-*'))
-            folder = str(captures[-1]) if captures else ''
         try:
-            vs,ps = find_picker_shaders(bpy.path.abspath(folder),match[1])
+            configure_node(node,force_host=self.use_mmt)
         except (OSError,ValueError) as error:
             self.report({'ERROR'},tr('Picking configuration failed') + ': ' + tr(str(error)))
             return {'CANCELLED'}
-        node.pick_vs,node.pick_ps = vs,ps
-        node.capture_directory = folder
         self.report({'INFO'},tr('Picking shaders configured from capture'))
         return {'FINISHED'}
 

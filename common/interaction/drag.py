@@ -26,12 +26,14 @@ def prepare(data, model, node):
     character's hashes on another model would silently produce no interaction.
     Multiple ranges retain their original visibility conditions in the IB hook.
     """
-    vs, ps = node.pick_vs.strip().lower(), node.pick_ps.strip().lower()
+    from .automatic import configure_node
+    folder,vs,ps=configure_node(node,drawib=model.draw_ib)
+    vs,ps=vs.strip().lower(),ps.strip().lower()
     if not re.fullmatch('[0-9a-f]{16}', vs) or not re.fullmatch('[0-9a-f]{16}', ps):
         raise ValueError('Mouse drag: choose the main-pass VS and PS hashes from a FrameAnalysis capture in the interaction node')
     if getattr(node, 'capture_directory', ''):
         from .capture import validate_texture_slots
-        validate_texture_slots(node.capture_directory, model.draw_ib, vs, ps,
+        validate_texture_slots(folder, model.draw_ib, vs, ps,
                                [mark for submesh in model.submesh_model_list
                                 for mark in model.get_submesh_texture_markup_info_list(submesh)])
     if data['position_stride'] != 40:

@@ -156,6 +156,10 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
     pick_vs: bpy.props.StringProperty(default="") # type: ignore
     pick_ps: bpy.props.StringProperty(default="") # type: ignore
     show_advanced: bpy.props.BoolProperty(default=False) # type: ignore
+    auto_capture: bpy.props.BoolProperty(default=True,
+        description=tr('Read MMT game settings and refresh the latest capture on every export')) # type: ignore
+    manual_picker: bpy.props.BoolProperty(default=False,
+        description=tr('Keep your VS/PS values until you turn manual mode off')) # type: ignore
     show_debug: bpy.props.BoolProperty(default=False,
         description=tr('Show the in-game status labels and cursor; export and reload the Mod to apply')) # type: ignore
     capture_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH') # type: ignore
@@ -235,22 +239,34 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
             box.label(text=tr("Add at least one enabled region before exporting"), icon='INFO')
 
         if self.mouse_drag:
-            layout.prop(self, 'capture_directory', text=tr('FrameAnalysis folder (latest if empty)'))
-            detect = layout.operator('mimi.interaction_detect_picker', text=tr('Configure picking from capture'), icon='VIEWZOOM')
-            detect.tree_name = self.id_data.name
-            detect.node_name = self.name
+            layout.prop(self,'auto_capture',text=tr('Automatically use MMT latest capture'))
+            directory_row=layout.row()
+            directory_row.enabled=not self.auto_capture
+            directory_row.prop(self,'capture_directory',text=tr('FrameAnalysis folder'))
+            host=layout.operator('mimi.interaction_detect_picker',text=tr('Read latest capture from MMT'),icon='FILE_REFRESH')
+            host.tree_name=self.id_data.name
+            host.node_name=self.name
+            host.use_mmt=True
+            if not self.auto_capture:
+                detect = layout.operator('mimi.interaction_detect_picker', text=tr('Configure picking from capture'), icon='VIEWZOOM')
+                detect.tree_name = self.id_data.name
+                detect.node_name = self.name
             layout.prop(self, 'show_advanced', text=tr('Picking setup and advanced settings'), icon='TRIA_DOWN' if self.show_advanced else 'TRIA_RIGHT')
             if self.show_advanced:
-                layout.label(text=tr('Main-pass shader hashes from FrameAnalysis'))
-                layout.prop(self, 'pick_vs', text='VS')
-                layout.prop(self, 'pick_ps', text='PS')
+                layout.prop(self,'manual_picker',text=tr('Manually specify VS/PS'))
+                hashes=layout.column()
+                hashes.enabled=self.manual_picker
+                hashes.prop(self, 'pick_vs', text='VS')
+                hashes.prop(self, 'pick_ps', text='PS')
                 layout.prop(self, 'drag_sensitivity', text=tr('Drag sensitivity'))
                 layout.prop(self, 'flip_y', text=tr('Flip cursor Y'))
                 layout.prop(self, 'reversed_z', text=tr('Reversed depth'))
-            if not self.pick_vs or not self.pick_ps:
+            if not self.manual_picker:
+                layout.label(text=tr('Picking shaders are matched automatically when exporting'),icon='INFO')
+            elif not self.pick_vs or not self.pick_ps:
                 layout.label(text=tr('Picking setup required before export'), icon='ERROR')
             else:
-                layout.label(text=tr('Picking shaders configured from capture'), icon='CHECKMARK')
+                layout.label(text=tr('Using your manually specified VS/PS'), icon='CHECKMARK')
 
 
 def register():
