@@ -28,6 +28,7 @@ the mesh, and the result is reused by whichever feature asks for it.
 """
 
 import json
+import hashlib
 
 import numpy as np
 
@@ -51,6 +52,55 @@ STAGED_PROPERTY = "mimi_interaction_staged_weights"
 # an interaction region.  The blueprint model flips this switch before the
 # meshes are built, so an export without the feature pays nothing.
 _ENABLED = False
+_SOURCE_GROUPS = {}
+
+
+def region_group_name(entry):
+    """Resolve a selected rig group to a private export-only weight field.
+
+    Saved legacy rows without a source group keep their old field. The
+    private identity includes the object so joined meshes stay independent.
+    """
+    source = str(getattr(entry, 'source_group', '') or '')
+    if not source:
+        return str(getattr(entry, 'vertex_group', '') or '')
+    identity = str(getattr(entry, 'object_name', '') or '') + '\0' + source
+    return CONTROL_GROUP_PREFIX + 'export_' + hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]
+
+
+def configure_source_groups(nodes):
+    """Replace the current export's source selection before mesh traversal."""
+    _SOURCE_GROUPS.clear()
+    for node in nodes:
+        if not getattr(node, 'enabled', True):
+            continue
+        for entry in node.regions:
+            if entry.enabled and getattr(entry, 'source_group', '') and entry.object_name:
+                _SOURCE_GROUPS.setdefault(entry.object_name, {})[entry.source_group] = region_group_name(entry)
+
+
+def stage_source_groups(source_obj, temp_obj):
+    """Snapshot chosen chest weights on a temporary copy only.
+
+    No permanent group is created or renamed on the user's object. Doing
+    this before modifiers also lets topology changes carry the field through
+    Blender's normal deform-weight interpolation before it is sampled.
+    """
+    if not _ENABLED:
+        return
+    for source_name, private_name in _SOURCE_GROUPS.get(source_obj.name, {}).items():
+        source = temp_obj.vertex_groups.get(source_name)
+        if source is None:
+            raise ValueError('Chest vertex group not found: ' + source_obj.name + ' / ' + source_name)
+        weights = [(v.index, g.weight) for v in temp_obj.data.vertices
+                   for g in v.groups if g.group == source.index and g.weight > 0]
+        # This reserved name belongs exclusively to the transient field.
+        existing = temp_obj.vertex_groups.get(private_name)
+        if existing is not None:
+            temp_obj.vertex_groups.remove(existing)
+        group = temp_obj.vertex_groups.new(name=private_name)
+        for index, weight in weights:
+            group.add([index],weight,'REPLACE')
 
 
 def set_enabled(enabled):

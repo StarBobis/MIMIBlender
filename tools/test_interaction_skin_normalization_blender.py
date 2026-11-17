@@ -51,3 +51,39 @@ def check(enabled):
 
 check(True)
 check(False)
+
+
+def check_direct_group():
+    """Select an existing bone group; snapshot only the disposable copy."""
+    bpy.ops.mesh.primitive_plane_add()
+    source = bpy.context.object
+    source.vertex_groups.new(name='12').add([0,1,2,3],1.0,'REPLACE')
+    entry = types.SimpleNamespace(enabled=True, object_name=source.name,
+                                  source_group='12', vertex_group='')
+    node = types.SimpleNamespace(enabled=True,regions=[entry])
+    collector.configure_source_groups([node])
+    collector.set_enabled(True)
+    private_name = collector.region_group_name(entry)
+    temp = source.copy()
+    temp.data = source.data.copy()
+    bpy.context.collection.objects.link(temp)
+    collector.stage_source_groups(source,temp)
+    assert list(source.vertex_groups.keys())==['12']
+    assert temp.vertex_groups[private_name].weight(0)==1.0
+    collector.stage_control_groups(temp)
+    assert list(temp.vertex_groups.keys())==['12']
+    assert temp.vertex_groups['12'].weight(0)==1.0
+    # Selecting a different source field must not silently reuse an old
+    # copied group. Each export reads the latest source mesh memberships.
+    source.vertex_groups['12'].add([0],.25,'REPLACE')
+    fresh = source.copy()
+    fresh.data = source.data.copy()
+    bpy.context.collection.objects.link(fresh)
+    collector.stage_source_groups(source,fresh)
+    assert fresh.vertex_groups[private_name].weight(0)==.25
+    assert list(source.vertex_groups.keys())==['12']
+    collector.configure_source_groups([])
+    print('PASS: direct chest group selection preserves source and snapshots latest weights')
+
+
+check_direct_group()

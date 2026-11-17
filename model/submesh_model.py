@@ -161,6 +161,9 @@ class SubMeshModel:
             )
             ShapeKeyUtils.reset_all_shapekey_values(temp_obj)
 
+            from ..common.interaction.collector import stage_source_groups
+            stage_source_groups(source_obj, temp_obj)
+
             self._normalize_temp_obj_for_export(temp_obj)
 
             # Restore the optional import mirror before the existing game-space

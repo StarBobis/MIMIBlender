@@ -101,7 +101,8 @@ def collect_region_list(node_list):
             if not getattr(entry, "enabled", True):
                 continue
             enabled_region_count += 1
-            vertex_group = str(getattr(entry, "vertex_group", "") or "")
+            from .collector import region_group_name
+            vertex_group = region_group_name(entry)
             if not vertex_group:
                 # The region has no control group, so it moves nothing.
                 # The user has to know, because a new region row starts

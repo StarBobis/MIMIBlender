@@ -136,6 +136,7 @@ class BluePrintModel:
         # declares a region, so the meshes are not walked for nothing.
         # The switch is set before the traversal builds the meshes.
         interaction_collector.set_enabled(bool(self.interaction_node_list))
+        interaction_collector.configure_source_groups(self.interaction_node_list)
 
         print("BluePrintModel: number of nodes connected to the output node: " + str(len(BlueprintExportHelper.get_connected_nodes(output_node))))
         self.parse_current_node(output_node, [])

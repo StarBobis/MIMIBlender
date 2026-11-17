@@ -43,7 +43,8 @@ class MIMIInteractionRegion(bpy.types.PropertyGroup):
         name=tr("Control Vertex Group"), default="",
         description=tr("The vertex group weights decide how far each vertex is pulled"),
     ) # type: ignore
-    source_group: bpy.props.StringProperty(default="") # type: ignore
+    source_group: bpy.props.StringProperty(default="",
+        description=tr('Select an existing chest group; each export reads its latest weights without changing the rig')) # type: ignore
     offset: bpy.props.FloatVectorProperty(
         name=tr("Pull"), size=3, default=(0.0, 0.0, 0.0),
         min=-1.0, max=1.0,
@@ -136,7 +137,7 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
     """Node that declares the pullable regions of the exported model."""
 
     bl_idname = INTERACTION_NODE_ID
-    bl_label = "Chest Interaction Jiggle System"
+    bl_label = "Chest Interaction Jiggle System - Naraka Only"
     bl_icon = 'MOD_SIMPLIFY'
     bl_width_min = 320
 
@@ -183,7 +184,7 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
             layout.prop(self, 'show_debug', text=tr('Show interaction debug information'))
             help_box = layout.box()
             help_box.label(text=tr("1. Choose the body mesh and a region"))
-            help_box.label(text=tr("2. Copy an existing group or select vertices"))
+            help_box.label(text=tr("2. Select the existing chest vertex group directly"))
             help_box.label(text=tr("3. Export; Alt + left drag, release to bounce"))
             if GlobalConfig.logic_name != 'Naraka':
                 help_box.label(text=tr("Mouse drag export currently supports Naraka only"), icon='ERROR')
@@ -218,44 +219,21 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
             detail.prop_search(entry, "object_name", bpy.data, "objects", text=tr("Region Object"), icon='OBJECT_DATA')
             obj = bpy.data.objects.get(entry.object_name)
             if obj is not None and obj.type == 'MESH':
-                detail.prop_search(entry, "vertex_group", obj, "vertex_groups", text=tr("Control Vertex Group"), icon='GROUP_VERTEX')
+                detail.prop_search(entry, 'source_group', obj, 'vertex_groups', text=tr('Chest vertex group'), icon='GROUP_VERTEX')
+                if entry.source_group and obj.vertex_groups.get(entry.source_group):
+                    detail.label(text=tr('Ready; uses the selected group weights directly'), icon='CHECKMARK')
+                elif not entry.source_group and entry.vertex_group:
+                    detail.label(text=tr('Legacy region retained; select a chest group to update it'), icon='INFO')
+                else:
+                    detail.label(text=tr('Select a chest vertex group first'), icon='INFO')
             else:
-                detail.prop(entry, "vertex_group", text=tr("Control Vertex Group"))
                 if entry.object_name:
                     detail.label(text=tr("Choose an existing mesh object"), icon='ERROR')
-            if obj is not None and obj.type == 'MESH':
-                detail.prop_search(entry, 'source_group', obj, 'vertex_groups', text=tr('Existing vertex group'))
-                copy_group = detail.operator('mimi.interaction_copy_group', text=tr('Copy weights to this region'), icon='DUPLICATE')
-                copy_group.tree_name = self.id_data.name
-                copy_group.node_name = self.name
-                copy_group.region_index = self.region_index
             if not self.mouse_drag:
                 detail.prop(entry, "offset", text=tr("Pull"))
-            group = obj.vertex_groups.get(entry.vertex_group) if obj and obj.type == 'MESH' else None
-            if group and group.name.startswith(CONTROL_GROUP_PREFIX):
-                detail.label(text=tr('Control group ready; check its weight falloff'), icon='CHECKMARK')
-            else:
-                detail.label(text=tr('Create or copy a control group below'), icon='INFO')
-            create_row = detail.row()
-            create_row.enabled = getattr(context, 'mode', '') in ('EDIT', 'EDIT_MESH')
-            create_region = create_row.operator(
-                "mimi.interaction_create_region",
-                text=tr("Create Region from Selected Vertices"), icon='GROUP_VERTEX',
-            )
-            create_region.tree_name = self.id_data.name if self.id_data else ""
-            create_region.node_name = self.name
-            create_region.region_index = self.region_index
-            detail.label(text=tr("Select mesh vertices in Edit Mode first"))
         else:
             box.label(text=tr("Add at least one enabled region before exporting"), icon='INFO')
 
-        if not self.mouse_drag:
-            box.label(text=tr("The pull strength is a fraction of the safe distance"))
-            box.label(text=tr("A narrow control group can only be pulled a little"))
-            box.label(text=tr("Control groups must not use a numbered bone group name"))
-            box.label(text=tr("Let the create region button make the control group"))
-            box.label(text=tr("A control group name has to start with {prefix}").format(
-                prefix=CONTROL_GROUP_PREFIX))
         if self.mouse_drag:
             layout.prop(self, 'capture_directory', text=tr('FrameAnalysis folder (latest if empty)'))
             detect = layout.operator('mimi.interaction_detect_picker', text=tr('Configure picking from capture'), icon='VIEWZOOM')

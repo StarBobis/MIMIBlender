@@ -1514,4 +1514,11 @@ TRANSLATIONS_ZH_TW = {
     "Low damping keeps bouncing longer; 1 returns without oscillation": "阻尼越小晃動越久；設為 1 時不振盪地回到原位",
     "Show interaction debug information": "顯示互動偵錯資訊",
     "Show the in-game status labels and cursor; export and reload the Mod to apply": "顯示遊戲內狀態標籤和準星；修改後需重新匯出並重新載入 Mod",
+    "Chest Interaction Jiggle System - Naraka Only": "胸部互動乳搖系統-永劫無間專用",
+    "2. Select the existing chest vertex group directly": "2. 直接選擇身體現有的胸部頂點群組",
+    "Chest vertex group": "胸部頂點群組",
+    "Ready; uses the selected group weights directly": "已就緒，直接使用所選群組的權重",
+    "Select a chest vertex group first": "請選擇胸部頂點群組",
+    "Legacy region retained; select a chest group to update it": "舊區域已保留，可選擇胸部頂點群組更新",
+    "Select an existing chest group; each export reads its latest weights without changing the rig": "直接選擇現有胸部頂點群組；每次匯出讀取最新權重，不修改骨骼綁定",
 }
