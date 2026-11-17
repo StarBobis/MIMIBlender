@@ -79,8 +79,6 @@ def stage_control_groups(merged_obj):
     collector can still map them onto the exported vertices afterwards.
     Removing the groups here keeps them out of the skin weights.
     """
-    if not _ENABLED:
-        return
     if merged_obj is None or merged_obj.type != 'MESH':
         return
 
@@ -90,6 +88,14 @@ def stage_control_groups(merged_obj):
         if vertex_group.name.startswith(CONTROL_GROUP_PREFIX)
     }
     if not group_name_by_index:
+        return
+    if not _ENABLED:
+        # Disabling interaction stops sampling, but the saved control
+        # groups still exist. They must not become skin influences in a
+        # normal export of the same model.
+        for group in list(merged_obj.vertex_groups):
+            if group.name.startswith(CONTROL_GROUP_PREFIX):
+                merged_obj.vertex_groups.remove(group)
         return
 
     # The exporter evaluates the object, resets the shape keys and then

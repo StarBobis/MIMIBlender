@@ -236,7 +236,15 @@ class SubMeshModel:
         # 3b. Let the features prepare the mesh before the buffers are
         # built.  A helper vertex group has to be removed here, because
         # the exporter reads every remaining group as a skin weight.
+        from ..common.interaction.collector import CONTROL_GROUP_PREFIX
+        had_control_groups = any(group.name.startswith(CONTROL_GROUP_PREFIX)
+                                 for group in submesh_merged_obj.vertex_groups)
         run_preprocessors(submesh_merged_obj)
+        if had_control_groups:
+            # Normalize skin weights only after helper weights were sampled
+            # and removed. A locked active helper of weight one would make
+            # Blender's Normalize All clear the real bone weights to zero.
+            self._normalize_temp_obj_for_export(submesh_merged_obj)
 
         obj_buffer_result = ExportUtils.build_unity_obj_buffer_result(
             obj=submesh_merged_obj,
@@ -286,6 +294,12 @@ class SubMeshModel:
         print("SubMeshModel: " + self.submesh_name + " computation finished, temp objects deleted")
 
     def _normalize_temp_obj_for_export(self, temp_obj: bpy.types.Object):
+        from ..common.interaction.collector import CONTROL_GROUP_PREFIX
+        if any(group.name.startswith(CONTROL_GROUP_PREFIX) for group in temp_obj.vertex_groups):
+            # Helper weights are independent of the rig and must never
+            # enter Blender's skin-weight normalization. Defer until the
+            # merged-mesh preprocessor has extracted their weight fields.
+            return
         if self.d3d11_game_type is None:
             return
 
