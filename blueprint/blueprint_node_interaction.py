@@ -155,6 +155,8 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
     pick_vs: bpy.props.StringProperty(default="") # type: ignore
     pick_ps: bpy.props.StringProperty(default="") # type: ignore
     show_advanced: bpy.props.BoolProperty(default=False) # type: ignore
+    show_debug: bpy.props.BoolProperty(default=False,
+        description=tr('Show the in-game status labels and cursor; export and reload the Mod to apply')) # type: ignore
     capture_directory: bpy.props.StringProperty(default='', subtype='DIR_PATH') # type: ignore
     regions: bpy.props.CollectionProperty(type=MIMIInteractionRegion) # type: ignore
     region_index: bpy.props.IntProperty(default=0, min=0) # type: ignore
@@ -178,6 +180,7 @@ class MIMINode_InteractionDeformation(MIMINodeBase):
         layout.label(text=tr("Independent settings; keep the existing output links"), icon='INFO')
         layout.prop(self, "mouse_drag", text=tr("Mouse drag and spring return"))
         if self.mouse_drag:
+            layout.prop(self, 'show_debug', text=tr('Show interaction debug information'))
             help_box = layout.box()
             help_box.label(text=tr("1. Choose the body mesh and a region"))
             help_box.label(text=tr("2. Copy an existing group or select vertices"))

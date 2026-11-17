@@ -49,6 +49,7 @@ def prepare(data, model, node):
                         frequency=node.spring_frequency, damping=node.damping_ratio,
                         sensitivity=node.drag_sensitivity, flip_y=node.flip_y,
                         reversed_z=node.reversed_z, ranges={})
+    data['drag']['show_debug'] = bool(getattr(node, 'show_debug', False))
     # A grab starts at the rest pose; the old fixed offset has no meaning.
     data['state_record'][:] = 0
     data['drag_positions'] = np.concatenate([
@@ -93,7 +94,8 @@ def sections(builder, data, model):
               'VERTICES': data['vertex_count'], 'BYTES': data['vertex_count'] * 40,
               'GROUPS': (data['vertex_count'] + 63) // 64,
               'DISTANCE': settings['distance'], 'FREQUENCY': settings['frequency'],
-              'DAMPING': settings['damping'], 'SENSITIVITY': settings['sensitivity']}
+              'DAMPING': settings['damping'], 'SENSITIVITY': settings['sensitivity'],
+              'DEBUG': int(settings.get('show_debug', False))}
     for name, body in chunks:
         if name == 'ResourceMimiNarakaDragIndices_@DRAW@':
             continue

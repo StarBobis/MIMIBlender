@@ -33,6 +33,14 @@ def main():
     builder = M_IniBuilder()
     drag.sections(builder, data, model)
     text = '\n'.join('\n'.join(s.SectionLineList) for s in builder.ini_section_list)
+    # Hiding diagnostics must change only the HUD condition. Picking,
+    # spring integration and deformation must retain their original paths.
+    assert '_input_valid == 1 && 0 == 1' in text
+    data['drag']['show_debug'] = True
+    debug_builder = M_IniBuilder()
+    drag.sections(debug_builder,data,model)
+    debug_text = '\n'.join('\n'.join(s.SectionLineList) for s in debug_builder.ini_section_list)
+    assert debug_text == text.replace('_input_valid == 1 && 0 == 1','_input_valid == 1 && 1 == 1')
     headers = re.findall(r'^\[([^\]]+)\]', text, re.M)
     assert len(headers) == len(set(headers)), 'Duplicate section names'
     assert '@' not in text and 'd3b27608' not in text
@@ -56,6 +64,7 @@ def main():
         for shader in re.findall(r'= (Interaction/drag/[^\s]+\.hlsl)', text):
             assert (Path(folder) / shader).is_file(), shader
     print('PASS: two picker ranges, 64 GS draws, complete resource graph and shader files')
+    print('PASS: debug overlay defaults off and changes no interaction commands')
     with tempfile.TemporaryDirectory(dir=root) as folder:
         folder = Path(folder)
         pair = '-vs=1234567890abcdef-ps=fedcba0987654321'

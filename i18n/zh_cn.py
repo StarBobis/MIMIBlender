@@ -1508,4 +1508,6 @@ TRANSLATIONS_ZH_CN = {
     "Fraction of the safe pull distance; start at 0.7": "占安全拉伸距离的比例；建议先用 0.7",
     "Oscillations per second; higher values bounce faster": "每秒振动次数；数值越大，回弹越快",
     "Low damping keeps bouncing longer; 1 returns without oscillation": "阻尼越小晃动越久；设为 1 时不振荡地回到原位",
+    "Show interaction debug information": "显示交互调试信息",
+    "Show the in-game status labels and cursor; export and reload the Mod to apply": "显示游戏内状态标签和准星；修改后需重新导出并重载 Mod",
 }
