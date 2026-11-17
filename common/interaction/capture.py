@@ -49,3 +49,28 @@ def find_picker_shaders(directory, drawib):
     if len(candidates) != 1:
         raise ValueError('The capture has no unique single-target HDR main pass; choose another capture or configure VS/PS manually')
     return next(iter(candidates))
+
+
+def validate_texture_slots(directory, drawib, vs, ps, marks):
+    """Reject texture marks that would overwrite a witnessed buffer binding.
+
+    Capture slot numbers belong to a shader pass. A diffuse texture found
+    in another slot must never replace that pass's structured-buffer input.
+    Check only the selected IB and shader pair, and only explicit evidence.
+    """
+    names = [p.name for p in Path(directory).iterdir() if p.is_file()]
+    suffix = '-vs=' + vs + '-ps=' + ps
+    draws = {name.split('-',1)[0] for name in names
+             if '-ib=' + drawib + suffix + '.txt' in name}
+    buffers = set()
+    for name in names:
+        if name.split('-',1)[0] not in draws or suffix + '.buf' not in name:
+            continue
+        match = re.match(r'\d+-(ps-t\d+)=',name)
+        if match:
+            buffers.add(match[1])
+    for mark in marks:
+        if mark.mark_type in ('Slot','SharedSlot') and mark.mark_slot in buffers:
+            raise ValueError('Texture mark ' + mark.mark_name + ' targets ' + mark.mark_slot
+                             + ', but the selected render pass binds a buffer there; '
+                             + 'correct the texture mark or use Hash replacement before exporting')

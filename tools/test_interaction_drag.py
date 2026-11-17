@@ -15,7 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from common.interaction import drag
 from common.m_ini_builder import M_IniBuilder
-from common.interaction.capture import find_picker_shaders
+from common.interaction.capture import find_picker_shaders, validate_texture_slots
 import struct
 
 
@@ -69,6 +69,16 @@ def main():
         struct.pack_into('<I',header,84,113)
         output.write_bytes(header)
         assert find_picker_shaders(folder,'12345678') == ('1234567890abcdef','fedcba0987654321')
+        (folder / ('000001-ps-t0=11223344'+pair+'.buf')).write_bytes(b'fixture')
+        mark = SimpleNamespace(mark_name='DiffuseMap',mark_type='Slot',mark_slot='ps-t0')
+        try:
+            validate_texture_slots(folder,'12345678','1234567890abcdef','fedcba0987654321',[mark])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('A texture must not overwrite a captured buffer slot')
+        mark.mark_type = 'Hash'
+        validate_texture_slots(folder,'12345678','1234567890abcdef','fedcba0987654321',[mark])
         header[84:88] = b'DX10'
         struct.pack_into('<I',header,128,10)
         output.write_bytes(header)

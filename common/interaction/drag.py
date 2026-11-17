@@ -29,6 +29,11 @@ def prepare(data, model, node):
     vs, ps = node.pick_vs.strip().lower(), node.pick_ps.strip().lower()
     if not re.fullmatch('[0-9a-f]{16}', vs) or not re.fullmatch('[0-9a-f]{16}', ps):
         raise ValueError('Mouse drag: choose the main-pass VS and PS hashes from a FrameAnalysis capture in the interaction node')
+    if getattr(node, 'capture_directory', ''):
+        from .capture import validate_texture_slots
+        validate_texture_slots(node.capture_directory, model.draw_ib, vs, ps,
+                               [mark for submesh in model.submesh_model_list
+                                for mark in model.get_submesh_texture_markup_info_list(submesh)])
     if data['position_stride'] != 40:
         raise ValueError('Mouse drag currently requires the reference 40-byte Position layout')
     if any(c.cross_render_at_submesh for s in model.submesh_model_list for c in s.drawcall_model_list):
