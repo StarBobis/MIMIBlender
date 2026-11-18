@@ -34,7 +34,6 @@ from ..utils.json_utils import JsonUtils
 from ..utils.material_texture_utils import apply_image_texture_to_material
 from ..utils.skeleton_helper import SkeletonHelper
 from ..utils.skeleton_ui import (
-    RIG_PROPERTY,
     EXPAND_PROPERTY_REVERSE,
     draw_skeleton_binding,
     ensure_bind_settings,
@@ -572,11 +571,8 @@ class SwordImportAllReversed(I18nOperator):
         if not settings.bind or not drawib_objects:
             return
         skeletons = skeletons or {}
-        rig_type = getattr(context.scene, RIG_PROPERTY, "NATIVE")
         sidecar_path = os.path.join(reverse_output_folder_path, "skeleton.json")
         if not any(skeletons.values()) and not os.path.isfile(sidecar_path):
-            if rig_type == "MMD":
-                self.report({'WARNING'}, tr("No MMD skeleton data. Re-export with MMT after binding a supported skeleton."))
             return
         # The helper returns binding problems as plain strings so this operator
         # can show them as real warnings instead of one INFO line.
@@ -595,7 +591,6 @@ class SwordImportAllReversed(I18nOperator):
                 skeletons=skeletons,
                 collection=collection,
                 warnings=binding_warnings,
-                rig_type=rig_type,
             )
         except Exception as error:  # noqa: BLE001 - binding must never break the import
             self.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))

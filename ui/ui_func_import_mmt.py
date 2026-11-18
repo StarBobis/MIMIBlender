@@ -13,7 +13,7 @@ from bpy_extras.io_utils import ImportHelper
 from ..utils.json_utils import JsonUtils
 from ..utils.collection_utils import CollectionUtils, CollectionColor
 from ..utils.skeleton_helper import COMPONENT_INDEX_PROPERTY, SkeletonHelper
-from ..utils.skeleton_ui import RIG_PROPERTY, ensure_bind_settings, remember_bind_report
+from ..utils.skeleton_ui import ensure_bind_settings, remember_bind_report
 from ..utils.timer_utils import TimerUtils
 
 from ..common.global_config import GlobalConfig
@@ -514,11 +514,8 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None, coll
     if not settings.bind:
         return
     skeletons = skeletons or {}
-    rig_type = getattr(bpy.context.scene, RIG_PROPERTY, "NATIVE")
     sidecar_path = os.path.join(GlobalConfig.path_workspace_folder(), "skeleton.json")
     if not any(skeletons.values()) and not os.path.isfile(sidecar_path):
-        if rig_type == "MMD":
-            operator.report({'WARNING'}, tr("No MMD skeleton data. Re-export with MMT after binding a supported skeleton."))
         return
     # The helper reports binding problems as plain strings, so this operator can
     # raise them at WARNING level instead of hiding them inside one INFO line.
@@ -536,10 +533,9 @@ def _auto_bind_workspace_skeleton(operator, drawib_objects, skeletons=None, coll
             skeletons=skeletons,
             collection=collection,
             warnings=binding_warnings,
-            rig_type=rig_type,
         )
     except Exception as error:  # noqa: BLE001 - binding must never break the import
-        operator.report({'WARNING'}, tr("Skeleton binding failed: {error}").format(error=error))
+        print("Skeleton binding failed:", error)
         return
     for message in binding_warnings:
         operator.report({'WARNING'}, message)
@@ -571,7 +567,6 @@ def ImprotFromWorkSpaceFull(self, context):
     # its SubmeshJson, so the one-click import binds each DrawIB to its own rig.
     drawib_imported_objects = {}
     drawib_skeletons = {}
-    import_mmd = getattr(context.scene, RIG_PROPERTY, "NATIVE") == "MMD"
 
     for lod_name in sorted(ws_model.lod_components.keys()):
         # Create a blue sub-collection per LOD, linked under the workspace collection
@@ -627,12 +622,11 @@ def ImprotFromWorkSpaceFull(self, context):
                             foldername_imported_obj_dict[new_submesh_name] = (imported_obj, display_name)
                             all_submesh_display_names.append(display_name)
                             successful_import_count += 1
-                            key = f"{lod_name}/{old_folder_name}" if import_mmd else draw_ib
-                            drawib_imported_objects.setdefault(key, []).append(imported_obj)
-                            if key not in drawib_skeletons:
+                            drawib_imported_objects.setdefault(draw_ib, []).append(imported_obj)
+                            if draw_ib not in drawib_skeletons:
                                 skeleton_block = _read_embedded_skeleton(json_file_path)
                                 if skeleton_block:
-                                    drawib_skeletons[key] = skeleton_block
+                                    drawib_skeletons[draw_ib] = skeleton_block
 
                         foldername_gametypename_dict[new_submesh_name] = gametype_name
                         oldfoldername_jsonpath_dict[old_folder_name] = json_file_path
@@ -857,9 +851,6 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
     oldfoldername_jsonpath_dict = {}
     all_submesh_display_names = []
     successful_import_count = 0
-    import_mmd = getattr(context.scene, RIG_PROPERTY, "NATIVE") == "MMD"
-    drawib_objects = {}
-    drawib_skeletons = {}
 
     # When force_gametype_name == "__AUTO__", lock the type after the first success
     locked_gametype = None
@@ -928,12 +919,6 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
                         foldername_imported_obj_dict[new_submesh_name] = (imported_obj, display_name)
                         all_submesh_display_names.append(display_name)
                         successful_import_count += 1
-                        if import_mmd:
-                            # Keep the actual JSON used for each mesh, including
-                            # the LOD-specific palette carried by that file.
-                            key = f"{lod_name}/{submesh_folder_name}"
-                            drawib_objects.setdefault(key, []).append(imported_obj)
-                            drawib_skeletons[key] = _read_embedded_skeleton(json_file_path)
 
                     foldername_gametypename_dict[new_submesh_name] = gametype_name
                     oldfoldername_jsonpath_dict[submesh_folder_name] = json_file_path
@@ -951,9 +936,6 @@ def ImprotFromWorkSpaceSelected(self, context, submesh_lod_info_list, force_game
     if successful_import_count == 0:
         self.report({'ERROR'}, tr("None of the selected submeshes were imported successfully."))
         return
-
-    if import_mmd:
-        _auto_bind_workspace_skeleton(self, drawib_objects, drawib_skeletons, workspace_collection)
 
     # Update Import.json (keep existing records, overwrite the ones imported now)
     save_import_json_path = GlobalConfig.path_import_selection_json()
