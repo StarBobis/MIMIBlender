@@ -29,6 +29,7 @@ from ...common.interaction.exporter import (
 )
 from ..base.standard_exporter import StandardExporter
 from ..base import sections
+from .opacity import solid_alpha_dds
 from .shapekeys import (
     add_naraka_shapekey_ini_sections,
     collect_usable_drawib_model_list,
@@ -268,6 +269,13 @@ class Exporter(StandardExporter):
         sections.add_unity_cs_resource_vertexlimit(ini_builder=ini_builder, drawib_model=drawib_model)
         self.add_naraka_cs_resource_vb_sections(ini_builder=ini_builder, drawib_model=drawib_model)
         sections.add_resource_texture_sections(ini_builder=ini_builder, drawib_model=drawib_model)
+        if drawib_model.naraka_opacity_textures:
+            # The common slot resolver declares these resources alongside
+            # file-backed texture nodes. Write only the Naraka DDS payloads.
+            folder = Path(GlobalConfig.path_generatemod_texture_folder(drawib_model.draw_ib))
+            folder.mkdir(parents=True, exist_ok=True)
+            for filename, rgba in drawib_model.naraka_opacity_textures.items():
+                (folder / filename).write_bytes(solid_alpha_dds(rgba))
 
     def add_final_sections(self, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict):
         # Branch keys stay on the shared helper; shape keys need the Naraka

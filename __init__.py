@@ -43,6 +43,7 @@ from .blueprint import texture_format_widgets
 # The socketless managers share one row gallery, registered with them.
 from .blueprint import texture_row_ui
 from .blueprint import blueprint_node_texture
+from .blueprint import blueprint_node_naraka_opacity
 from .blueprint import blueprint_node_hash_texture
 # Socketless Slot defaults register independently of connected texture nodes.
 from .blueprint import blueprint_node_global_slot
@@ -159,6 +160,7 @@ def _register_steps():
     yield texture_bind_channels.register
     # Texture Bind node and its PropertyGroup register right after the base object nodes.
     yield blueprint_node_texture.register
+    yield blueprint_node_naraka_opacity.register
     yield blueprint_node_hash_texture.register
     yield blueprint_node_global_slot.register
     yield blueprint_node_wwmi_mod_info.register
@@ -241,6 +243,7 @@ def unregister():
         blueprint_node_time_switch.unregister,
         blueprint_node_obj.unregister,
         blueprint_node_object_list.unregister,
+        blueprint_node_naraka_opacity.unregister,
         blueprint_node_texture.unregister,
         texture_bind_channels.unregister,
         blueprint_node_global_slot.unregister,

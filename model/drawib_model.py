@@ -124,6 +124,7 @@ class DrawIBModel:
     #                  "force_original_size": bool, "resize_filter": str}}
     # Filled by both binding resolvers and by the global slot pass; consumed
     # by the export copy stage, which converts before writing the Mod folder.
+    naraka_opacity_textures: dict = field(init=False, repr=False, default_factory=dict)
     exact_texture_jobs:dict = field(init=False,repr=False,default_factory=dict)
 
 
@@ -469,6 +470,7 @@ class DrawIBModel:
         '''
         self.object_texture_binding_resource_list = []
         self.object_texture_binding_file_list = []
+        self.naraka_opacity_textures = {}
 
         # Only GIMI interprets known MARK names as logical API resources.
         is_gimi = getattr(GlobalConfig, "logic_name", "") == "GIMI"
@@ -519,6 +521,13 @@ class DrawIBModel:
                 node_label = str(binding.get("node_label", "") or "Texture Bind")
                 owner_name = str(getattr(draw_model, "obj_name", "") or draw_model)
                 slot = str(binding.get("slot", "") or "").strip().lower()
+                if binding.get("source_type") == "NARAKA_OPACITY":
+                    from ..games.naraka.opacity import resolve_slot
+                    try:
+                        slot = resolve_slot(binding, markup_list, draw_model)
+                    except ValueError as error:
+                        raise ValueError(f"{node_label} / {submesh_model.submesh_name} / {owner_name} — {error}") from error
+
                 # MARK rows follow each object's own captured register when
                 # the row still uses its autofilled default. Explicit FILE
                 # registers and manually changed MARK registers stay literal.
@@ -614,6 +623,14 @@ class DrawIBModel:
                         used_resource_names, file_resource_by_source,
                         replacement_plan=replacement_plan,
                     )
+                elif source_type == "NARAKA_OPACITY":
+                    # Content-address the generated texture within this DrawIB.
+                    # The usual slot path captures and restores the previous SRV.
+                    rgba = binding["rgba"]
+                    stem = "mimi_naraka_opacity_" + self.draw_ib + "_" + bytes(rgba).hex()
+                    resource_name = "Resource_" + stem
+                    self.naraka_opacity_textures[stem + ".dds"] = rgba
+                    self.object_texture_binding_resource_list.append((resource_name, stem + ".dds"))
                 elif source_type == "RESOURCE":
                     resource_name = str(binding.get("resource_name", "") or "").strip()
                     # An existing resource points at a file this node does not

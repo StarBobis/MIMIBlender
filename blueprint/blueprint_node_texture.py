@@ -274,6 +274,7 @@ _SWITCH_STATE_PASS_THROUGH = (
     'MIMINode_Object_Group',
     'MIMINode_Texture_Bind',
     'MIMINode_Hash_Texture_Bind',
+    'MIMINode_Naraka_Opacity',
 )
 
 

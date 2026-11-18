@@ -11,7 +11,8 @@ from ..common.m_key import M_Key
 from .draw_call_model import DrawCallModel
 from .submesh_model import SubMeshModel
 from .drawib_model import DrawIBModel
-from ..common.global_config import GlobalConfig
+from ..common.global_config import GlobalConfig, LogicName
+from ..i18n.i18n import tr
 from ..common.gimi_texture_slots import texture_binding_key
 from ..blueprint.blueprint_export_helper import BlueprintExportHelper
 
@@ -26,6 +27,7 @@ from ..blueprint.blueprint_node_hash_texture import (
     MIMINode_Hash_Texture_Global,
 )
 from ..blueprint.texture_bind_channels import channel_inputs
+from ..blueprint.blueprint_node_naraka_opacity import MIMINode_Naraka_Opacity
 from ..blueprint.blueprint_node_time_switch import MIMINode_TimeSwitch, time_switch_owner_key
 from ..blueprint.blueprint_node_time_pos_switch import MIMINode_TimePosSwitch
 
@@ -468,6 +470,27 @@ class BluePrintModel:
             # the branch draw calls become per-frame Position side buffers
             # instead of conditional drawindexed calls.
             self._parse_time_switch_node(unknown_node, chain_key_list, is_position_switch=True)
+
+        elif unknown_node.bl_idname == MIMINode_Naraka_Opacity.bl_idname:
+            if GlobalConfig.logic_name != LogicName.Naraka:
+                raise ValueError(tr("Clothing Transparency is available only in Naraka"))
+
+            # Apply only to the new draws from this traversal. The binding
+            # follows the rendered object through switch and cross-IB paths.
+            start = len(self.ordered_draw_obj_data_model_list)
+            self.parse_current_node(unknown_node, chain_key_list)
+            binding = {
+                "source_type": "NARAKA_OPACITY",
+                "slot_mode": unknown_node.slot_mode,
+                "slot": unknown_node.slot,
+                "mark_name": unknown_node.mark_name,
+                "rgba": tuple(round(channel * 255) for channel in (*unknown_node.tint, unknown_node.opacity)),
+                "node_label": unknown_node.label or unknown_node.name,
+            }
+            for draw in self.ordered_draw_obj_data_model_list[start:]:
+                # The closest opacity node wins when nodes are chained.
+                if not any(row.get("source_type") == "NARAKA_OPACITY" for row in draw.texture_slot_binding_list):
+                    draw.texture_slot_binding_list.append(binding)
 
         elif unknown_node.bl_idname == MIMINode_Texture_Bind.bl_idname:
             # Texture Bind is a transparent pass-through: parse the upstream
@@ -998,6 +1021,10 @@ class BluePrintModel:
         for draw_call_model in self.ordered_draw_obj_data_model_list:
             is_time_pos_frame = bool(draw_call_model.time_position_key_name)
             if is_time_pos_frame:
+                # Frame providers supply positions only. A texture effect on
+                # one of them would silently disappear at draw time.
+                if any(row.get("source_type") == "NARAKA_OPACITY" for row in draw_call_model.texture_slot_binding_list):
+                    raise ValueError(tr("Place Clothing Transparency on the drawn object branch of a Time Position Switch."))
                 self.time_pos_frame_models.append(draw_call_model)
             else:
                 kept_draw_call_list.append(draw_call_model)

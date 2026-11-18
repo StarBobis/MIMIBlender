@@ -1039,6 +1039,8 @@ class MIMIMT_TextureAssignMenu(bpy.types.Menu):
         # Hash rows turn each passing object into conditional this= blocks
         # inside the global hash-style TextureOverride sections.
         layout.operator("node.add_node", text=tr("Targeted Hash Texture Replacement"), icon='TEXTURE_DATA').type = "MIMINode_Hash_Texture_Bind"
+        if GlobalConfig.logic_name == LogicName.Naraka:
+            layout.operator("node.add_node", text=tr("Clothing Transparency"), icon='TEXTURE').type = "MIMINode_Naraka_Opacity"
         # Socketless manager: changes the default of selected Submesh marks only.
         layout.operator("node.add_node", text=tr("Global Slot Texture Replacement"), icon='TEXTURE').type = "MIMINode_Texture_Global"
         # Global hash rows have no sockets because their replacements apply
