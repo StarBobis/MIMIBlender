@@ -705,7 +705,7 @@ class SkeletonHelper:
         return meshes, groups
 
     @staticmethod
-    def scan_weights(objects, bone_names=None):
+    def scan_weights(objects, bone_names=None, weight_floor=0.0):
         """Read every mesh once and describe how well its weights are bound.
 
         Returns a dict with these entries:
@@ -746,7 +746,7 @@ class SkeletonHelper:
                 for assignment in vertex.groups:
                     # Zero weights are padding slots written by the importer.
                     # Counting them would keep bones that deform nothing.
-                    if assignment.weight <= 0.0:
+                    if not assignment.weight > weight_floor:
                         continue
                     weight_sum += assignment.weight
                     name = group_names.get(assignment.group)
@@ -1349,7 +1349,9 @@ class SkeletonHelper:
             # One weight pass per armature serves the cleanup and the report.
             # It runs before the cleanup so the report describes the geometry
             # the user actually has, not the bones that survived it.
-            scan = cls.scan_weights(meshes, bone_names)
+            # The MMT palette matcher omits weights at or below 1e-6.
+            # Use the same threshold in the MMD binding report.
+            scan = cls.scan_weights(meshes, bone_names, weight_floor=1e-6 if payload else 0.0)
             # Cleanup runs after every DrawIB that uses this armature is bound,
             # so a bone used by a later mesh is never deleted too early.
             removed_count, hidden_count = cls.cleanup_bones(
