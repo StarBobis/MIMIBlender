@@ -26,6 +26,8 @@ import re
 import bpy
 from mathutils import Matrix, Vector
 
+from ..i18n.i18n import tr
+
 
 NAMING_BONE_TO_GROUP = "BONE_TO_GROUP"
 NAMING_GROUP_TO_BONE = "GROUP_TO_BONE"
@@ -411,7 +413,7 @@ class SkeletonHelper:
 
     @staticmethod
     def build_armature(character, space_scale=1.0, space_rotation_z=0.0,
-                       mirror_x=False, collection=None, alignment=None, suffix=""):
+                       mirror_x=False, collection=None, alignment=None, suffix="", exact_lengths=()):
         """Create the armature of one character in the mesh's own space.
 
         ``collection`` receives the armature object. Passing it explicitly keeps
@@ -436,6 +438,10 @@ class SkeletonHelper:
         view_layer = bpy.context.view_layer
         previous_active = view_layer.objects.active
         lengths = SkeletonHelper._bone_lengths(bones)
+        # An IK owner's tail is its endpoint. Display-length heuristics must
+        # not shorten that segment when a helper is closer than the endpoint.
+        for index in exact_lengths:
+            lengths[index] = max(float(bones[index]["Length"]), 1e-5)
         space_matrix = SkeletonHelper._space_matrix(space_scale, space_rotation_z, alignment)
         used_names = set()
         created = []
@@ -576,11 +582,12 @@ class SkeletonHelper:
         return renamed
 
     @staticmethod
-    def rename_groups_with_map(objects, mapping, by_original=None):
+    def rename_groups_with_map(objects, mapping, by_original=None, merge=False):
         """Rename numeric vertex groups through an explicit index -> bone map."""
         by_original = by_original or {}
         renamed = 0
         for obj in objects:
+            duplicates = {}
             for group in obj.vertex_groups:
                 if not group.name.isdigit():
                     continue
@@ -589,7 +596,21 @@ class SkeletonHelper:
                     continue
                 target = by_original.get(original, original)
                 if target:
+                    if merge and (existing := obj.vertex_groups.get(target)) and existing != group:
+                        duplicates[group.index] = existing
+                        continue
                     group.name = target
+                    renamed += 1
+            if duplicates:
+                # Several original slots can intentionally resolve to one
+                # bone. Sum their weights before removing the numeric groups
+                # so Blender never creates an unbound ".001" group.
+                for vertex in obj.data.vertices:
+                    weights = [(duplicates[g.group], g.weight) for g in vertex.groups if g.group in duplicates]
+                    for destination, weight in weights:
+                        destination.add([vertex.index], weight, 'ADD')
+                for index in sorted(duplicates, reverse=True):
+                    obj.vertex_groups.remove(obj.vertex_groups[index])
                     renamed += 1
         return renamed
 
@@ -995,6 +1016,7 @@ class SkeletonHelper:
         skeletons=None,
         collection=None,
         warnings=None,
+        rig_type="NATIVE",
     ):
         """Bind several DrawIB groups at once, one armature per numbering.
 
@@ -1029,6 +1051,14 @@ class SkeletonHelper:
         # constants, so every caller value is normalized before it is compared.
         requested_mode = cls.normalize_naming_mode(naming_mode) or NAMING_SIDECAR
         warning_list = warnings if warnings is not None else []
+        mmd_import = rig_type == "MMD"
+        mmd_tools = None
+        if mmd_import:
+            from . import mmd_importer
+
+            mmd_tools = mmd_importer.get_tools()
+            if mmd_tools is None:
+                warning_list.append(tr("Enable MMD Tools to import an MMD skeleton. The native skeleton was imported."))
 
         embedded = {
             str(name): block
@@ -1061,7 +1091,13 @@ class SkeletonHelper:
                 continue
             plan = None
             block = embedded.get(str(draw_ib_name))
+            mmd_payload = None
             if block:
+                payload = block.get("Mmd") if mmd_tools else None
+                if isinstance(payload, dict) and payload.get("Version") == 1 and payload.get("Bones"):
+                    mmd_payload = payload
+                    if payload.get("BoneMap"):
+                        block = dict(block, BoneMap=payload["BoneMap"])
                 plan = cls._plan_from_block(block, meshes)
             # The sidecar entry of the same DrawIB carries the confidence that
             # the embedded block does not contain. Without a block it is the
@@ -1075,6 +1111,15 @@ class SkeletonHelper:
                 plan = cls._plan_from_sidecar(sidecar, draw_ib_name, meshes)
             if plan is None:
                 continue
+            if mmd_payload:
+                plan["mmd"] = mmd_payload
+                plan["character"]["Bones"] = mmd_payload["Bones"]
+                plan["key"] += "|mmd-v1"
+                if mmd_payload.get("BoneMap"):
+                    # A calibrated palette is independent of the native
+                    # estimator's candidate score and group counts.
+                    plan["confidence"] = None
+                    plan["used_bones"] = plan["mapped_bones"] = len(mmd_payload["BoneMap"])
             # The DrawIB name is kept on the plan: numeric naming builds one
             # armature per palette, and each of those rigs has to say which
             # DrawIBs it serves.
@@ -1085,6 +1130,9 @@ class SkeletonHelper:
 
         if not plans:
             return ""
+        if mmd_tools and any(not plan.get("mmd") for plan in plans):
+            warning_list.append(tr("Some meshes have no supported MMD skeleton data. Their native skeleton was imported."))
+        mmd_by_key = {plan["key"]: plan["mmd"] for plan in plans if plan.get("mmd")}
 
         # "Follow MMT" is decided once per character: the embedded blocks each
         # carry the app's choice, the legacy sidecar carries it globally. An
@@ -1129,6 +1177,11 @@ class SkeletonHelper:
                 effective_naming[key] = NAMING_GROUP_TO_BONE
             else:
                 effective_naming[key] = naming_by_key.get(key, default_naming)
+        # Japanese animation channels and generated control bones need stable
+        # bone identities. Resolve palette numbers independently on each mesh.
+        for key in mmd_by_key:
+            effective_naming[key] = NAMING_GROUP_TO_BONE
+            override_reason.pop(key, None)
 
         palettes_per_character = {}
         armature_labels = {}
@@ -1201,6 +1254,7 @@ class SkeletonHelper:
                     collection=collection,
                     alignment=space.get("Alignment"),
                     suffix=suffix,
+                    exact_lengths=[entry["Owner"] for entry in plan.get("mmd", {}).get("Ik", [])],
                 )
                 if armature_obj is None:
                     continue
@@ -1238,7 +1292,7 @@ class SkeletonHelper:
                         continue
                     mapping = (entry or {}).get("BoneMap") or plan["fallback"]
                     if mapping:
-                        cls.rename_groups_with_map([mesh], mapping, by_original)
+                        cls.rename_groups_with_map([mesh], mapping, by_original, merge=bool(plan.get("mmd")))
                     bindable.append(mesh)
             cls.bind(bindable, armature_obj)
             bound_counts[armature_key] = bound_counts.get(armature_key, 0) + len(bindable)
@@ -1290,6 +1344,7 @@ class SkeletonHelper:
             )
         for armature_key, (armature_obj, final_names, _, character) in armatures.items():
             meshes = armature_meshes.get(armature_key, [])
+            payload = mmd_by_key.get(armature_character.get(armature_key))
             bone_names = {bone.name for bone in armature_obj.data.bones}
             # One weight pass per armature serves the cleanup and the report.
             # It runs before the cleanup so the report describes the geometry
@@ -1298,8 +1353,10 @@ class SkeletonHelper:
             # Cleanup runs after every DrawIB that uses this armature is bound,
             # so a bone used by a later mesh is never deleted too early.
             removed_count, hidden_count = cls.cleanup_bones(
-                armature_obj, meshes, cleanup_mode, scan=scan
+                armature_obj, meshes, BONE_CLEANUP_NONE if payload else cleanup_mode, scan=scan
             )
+            if payload:
+                mmd_importer.apply(mmd_tools, armature_obj, final_names, payload, character)
             # Several characters can be imported at once (body, weapon, ...), so
             # every note names the skeleton it belongs to. One line per armature
             # keeps the panel hint readable instead of repeating the name five

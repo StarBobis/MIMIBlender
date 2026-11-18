@@ -43,6 +43,7 @@ from .skeleton_helper import (
 # one of them would silently reset the setting for every existing user.
 BIND_PROPERTY = "mimi_sword_bind_skeleton"
 NAMING_PROPERTY = "mimi_sword_skeleton_naming"
+RIG_PROPERTY = "mimi_skeleton_rig"
 CLEANUP_PROPERTY = "mimi_sword_skeleton_cleanup"
 REPORT_PROPERTY = "mimi_sword_skeleton_last_report"
 LEGACY_MODE_PROPERTY = "mimi_sword_skeleton_mode"
@@ -80,6 +81,18 @@ class BindSettings:
     def __iter__(self):
         # Makes the value behave like the tuple tests and callers may unpack.
         return iter((self.bind, self.naming, self.cleanup))
+
+
+# Blender retains pointers to dynamic enum strings. Keep translated items alive.
+_rig_labels = {}
+
+
+def _rig_items():
+    labels = (tr("Native Skeleton"), tr("MMD Skeleton"))
+    return _rig_labels.setdefault(labels, [
+        ("NATIVE", labels[0], ""),
+        ("MMD", labels[1], ""),
+    ])
 
 
 def get_naming_items(self=None, context=None):
@@ -421,9 +434,12 @@ def draw_skeleton_binding(layout, scene, folder, expand_property=EXPAND_PROPERTY
     body = layout.column(align=True)
     bound = bool(getattr(scene, BIND_PROPERTY, True))
     if bound:
-        body.prop(scene, NAMING_PROPERTY, text=tr("Skeleton Naming"))
-        body.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
-        info = sidecar_info(folder)
+        body.prop(scene, RIG_PROPERTY, text=tr("Skeleton Type"))
+        native_options = body.column(align=True)
+        native_options.enabled = getattr(scene, RIG_PROPERTY, "NATIVE") == "NATIVE"
+        native_options.prop(scene, NAMING_PROPERTY, text=tr("Skeleton Naming"))
+        native_options.prop(scene, CLEANUP_PROPERTY, text=tr("Bone Cleanup"))
+        info = sidecar_info(folder) if native_options.enabled else None
         if info is not None:
             # The hint belongs right under the dropdown it explains: the user
             # then knows how many rigs to expect before pressing the button.
@@ -486,6 +502,10 @@ def migrate_loaded_scene(scene=None):
 
 def register():
     """Define the shared properties and install the load time migration."""
+    bpy.types.Scene.mimi_skeleton_rig = EnumProperty(
+        name=tr("Skeleton Type"),
+        items=lambda self, context: _rig_items(),
+    )
     bpy.types.Scene.mimi_sword_bind_skeleton = BoolProperty(
         name=tr("Bind Skeleton"),
         description=tr("Build the character armature from skeleton.json during import"),
@@ -542,6 +562,7 @@ def register():
 def unregister():
     """Remove the properties and the handler again."""
     for property_name in (
+        RIG_PROPERTY,
         "mimi_sword_skeleton_last_report",
         "mimi_sword_skeleton_cleanup",
         "mimi_sword_skeleton_naming",
