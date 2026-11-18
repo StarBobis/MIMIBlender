@@ -159,4 +159,16 @@ assert abs(bone.length - 0.5) < 1e-5, bone.length
 print("PASS: identity rest matrix keeps Blender's +Y bone axis")
 bpy.data.objects.remove(armature, do_unlink=True)
 
+# A nearby helper must not shorten an explicitly aimed MMD segment.
+owner = identity["Bones"][0]
+auxiliary = dict(owner, Name="auxiliary", Parent=0, Rest=owner["Rest"].copy())
+auxiliary["Rest"][7] = 0.02
+aimed = {"Id": "mmdlength", "Bones": [owner, auxiliary]}
+armature, created, _ = helper.build_armature(
+    aimed, space_scale=0.01, space_rotation_z=180.0, mirror_x=True,
+    collection=bpy.context.scene.collection, exact_lengths={0},
+)
+assert abs(armature.data.bones[created[0]].length - 0.005) < 1e-6
+bpy.data.objects.remove(armature, do_unlink=True)
+
 print("PASS: skeleton rest orientation, roll and display length")

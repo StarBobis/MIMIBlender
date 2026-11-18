@@ -1246,6 +1246,11 @@ class SkeletonHelper:
                 suffix = ""
                 if key in split_characters:
                     suffix = (armature_labels.get(armature_key) or [""])[0]
+                mmd = plan.get("mmd", {})
+                # New payloads specify anatomical lengths for all aimed bones.
+                # Older MMT outputs only require exact IK owner lengths.
+                exact_lengths = {int(index) for index in mmd.get("DisplayConnections", {})}
+                exact_lengths.update(entry["Owner"] for entry in mmd.get("Ik", []))
                 armature_obj, final_names, original_names = cls.build_armature(
                     character,
                     space_scale=space_scale,
@@ -1254,7 +1259,7 @@ class SkeletonHelper:
                     collection=collection,
                     alignment=space.get("Alignment"),
                     suffix=suffix,
-                    exact_lengths=[entry["Owner"] for entry in plan.get("mmd", {}).get("Ik", [])],
+                    exact_lengths=exact_lengths,
                 )
                 if armature_obj is None:
                     continue

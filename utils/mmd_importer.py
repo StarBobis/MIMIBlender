@@ -59,6 +59,14 @@ def apply(tools, armature, names, payload, character):
             if channel:
                 bone.lock_location = (index not in movable,) * 3
 
+        # MMT supplies the display links independently from parenting, which
+        # may pass through game helper bones. Link to Blender's actual names.
+        for index, target in payload.get("DisplayConnections", {}).items():
+            if target is not None:
+                prop = bones[int(index)].mmd_bone
+                prop.display_connection_type = 'BONE'
+                prop.display_connection_bone = bones[target].name
+
         # Blender solves to the constraint owner's tail, which MMT placed at
         # the corresponding ankle or toe pivot in the serialized rest rig.
         for entry in payload["Ik"]:
