@@ -1,7 +1,7 @@
 """Exercise native-cloth INI generation with the real exporter and serializer.
 
 Blender dependencies are replaced by fixtures. The command model checks scope,
-unknown-pass preservation, object conditions, map cleanup and packaging. Actual
+original-VS fallback, object conditions, map cleanup and packaging. Actual
 GPU decoding and Blender vertex provenance have separate regression programs.
 """
 
@@ -248,18 +248,26 @@ class ClothTests(unittest.TestCase):
             self.assertTrue(all(e[1] == filename for e in binds))
             self.assertTrue(binds[0][2].startswith("vs-t118 = ref"))
 
-    def test_unknown_pass_keeps_original_draw_untouched(self):
+    def test_unmatched_shader_draws_mod_with_original_vs(self):
         _, builder = build([make_model()])
         for shader in (0, 1, 123456, 823114):
             trace, restored = simulate(parse_sections(builder),
                                       "TextureOverride_LOD0.31e22cc3_0", shader=shader)
-            self.assertEqual(trace, [])
+            self.assertEqual(trace, [
+                ("handling", "skip"),
+                ("vb2", "Resource31e22cc3Blend"),
+                ("vb0", "Resource31e22cc3Position"),
+                ("vb1", "Resource31e22cc3Texcoord"),
+                ("ib", "Resource_LOD0.31e22cc3_0_Index"),
+                ("draw", shader, "924,0,0"),
+            ])
             self.assertEqual(restored, shader)
 
     def test_disabled_mod_has_no_side_effects(self):
+        shader_filters = [0, *(variant[1] for variant in CLOTH.CLOTH_SHADER_VARIANTS)]
         for hidden in (True, False):
             _, builder = build([make_model(hidden=hidden)])
-            for _, shader, _, _ in CLOTH.CLOTH_SHADER_VARIANTS:
+            for shader in shader_filters:
                 self.assertEqual(simulate(parse_sections(builder),
                     "TextureOverride_LOD0.31e22cc3_0", shader=shader, enabled=0)[0], [])
 

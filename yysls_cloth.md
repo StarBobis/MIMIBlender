@@ -24,8 +24,9 @@ conflicting references and interpolated unmapped points reject export.
 Known main VS `21bcfc11171589cb` uses filter 823116. Known shadow VS
 `18939b13d3a1abcf` uses the package-compatible filter 823115. A local CustomShader
 binds the map at reserved VS t118 before the shared VB/IB/draw commands, then
-explicitly clears t118. No t119 no-cloth marker is emitted. Unknown VS draws retain
-the original game mesh, without skip or edited buffer assignment.
+explicitly clears t118. No t119 no-cloth marker is emitted. When an enabled mod
+matches the IB and draw range, passes without a cloth shader match run the shared
+draw list with the original VS and the mod's buffers.
 
 The shaders retain native t11 simulation and skeleton animation. They address
 simulation with the mapped source ID, and transport the decoded edited-reference

@@ -63,7 +63,7 @@ class ExportYYSLS(StandardExporter):
         # Each submesh has a shared binding/draw list and a scoped CustomShader.
         # Select the shader before entering that list, never after binding slots.
         # The same index buffer can appear in multiple passes with different VSs.
-        # An unknown VS must keep the old draw path instead of guessing its ABI.
+        # Passes without a cloth shader match draw the mod with the original VS.
         custom_section = M_IniSection(M_SectionType.CommandList)
         draw_ib = drawib_model.draw_ib
         d3d11_game_type = drawib_model.d3d11_game_type
@@ -104,10 +104,8 @@ class ExportYYSLS(StandardExporter):
                 texture_override_ib_section.new_line()
                 continue
 
-            # Unknown passes retain the original game draw and source topology.
-            # Never feed an edited VB to an unadapted simulation consumer.
-            recognized = " || ".join("vs == " + str(v[1]) for v in yysls_cloth.CLOTH_SHADER_VARIANTS)
-            texture_override_ib_section.append("if " + recognized)
+            # Skip the original draw for both cloth and original-VS routes.
+            # The shader filter selects a replacement VS, not whether to draw.
             texture_override_ib_section.append("handling = skip")
 
             # Collect resource bindings instead of executing them in the parent.
@@ -154,8 +152,6 @@ class ExportYYSLS(StandardExporter):
                 texture_override_ib_section, custom_section, mod_lines,
                 texture_override_name_suffix, drawib_model.draw_ib,
             )
-
-            texture_override_ib_section.append("endif")
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")
