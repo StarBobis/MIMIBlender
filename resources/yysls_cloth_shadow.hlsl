@@ -172,6 +172,8 @@ void main(
 {
 // Needs manual fix for instruction:
 // unknown dcl_: dcl_input_sgv v8.x, vertex_id
+  // Only XY carries shadow UVs; define the unused output lanes as well.
+  o1.zw = float2(0, 0);
   float4 r0,r1,r2,r3,r4,r5,r6;
   // Read the map with the exported ID before replacing simulation addressing.
   uint mapBase = v8 * 4;
