@@ -28,6 +28,13 @@ explicitly clears t118. No t119 no-cloth marker is emitted. When an enabled mod
 matches the IB and draw range, passes without a cloth shader match run the shared
 draw list with the original VS and the mod's buffers.
 
+VS c01b8886cbc05321 uses filter 823114 and shares the native cloth template
+with 21bcfc11171589cb. Compiling the shared remap with the original c01
+constant declarations produced identical executable instructions and shader
+signatures. The c01 material-only declaration differences are unused by its VS.
+The observed 89f65adb8660822d pass has active cloth and uses filter 823118.
+It keeps the original geometry until its replacement ABI can be validated.
+
 The shaders retain native t11 simulation and skeleton animation. They address
 simulation with the mapped source ID, and transport the decoded edited-reference
 minus original-reference position offset through the existing skinning path.

@@ -104,8 +104,11 @@ class ExportYYSLS(StandardExporter):
                 texture_override_ib_section.new_line()
                 continue
 
-            # Skip the original draw for both cloth and original-VS routes.
-            # The shader filter selects a replacement VS, not whether to draw.
+            # An observed cloth pass without a verified replacement needs
+            # the original vertex numbering, so leave that draw in place.
+            texture_override_ib_section.append(
+                "if vs != " + str(yysls_cloth.UNSUPPORTED_CLOTH_VS_FILTER)
+            )
             texture_override_ib_section.append("handling = skip")
 
             # Collect resource bindings instead of executing them in the parent.
@@ -152,6 +155,7 @@ class ExportYYSLS(StandardExporter):
                 texture_override_ib_section, custom_section, mod_lines,
                 texture_override_name_suffix, drawib_model.draw_ib,
             )
+            texture_override_ib_section.append("endif")
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(GlobalConfig.generated_mod_number) + " = 1")

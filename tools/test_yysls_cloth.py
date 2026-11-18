@@ -182,6 +182,9 @@ def simulate(sections, section_name, shader=823116, enabled=1, variant=1, events
         if " == " in text:
             key, value = text.split(" == ")
             return state[key] == int(value)
+        if " != " in text:
+            key, value = text.split(" != ")
+            return state[key] != int(value)
         return bool(state[text])
 
     def execute(name):
@@ -250,7 +253,7 @@ class ClothTests(unittest.TestCase):
 
     def test_unmatched_shader_draws_mod_with_original_vs(self):
         _, builder = build([make_model()])
-        for shader in (0, 1, 123456, 823114):
+        for shader in (0, 1, 123456):
             trace, restored = simulate(parse_sections(builder),
                                       "TextureOverride_LOD0.31e22cc3_0", shader=shader)
             self.assertEqual(trace, [
@@ -262,6 +265,15 @@ class ClothTests(unittest.TestCase):
                 ("draw", shader, "924,0,0"),
             ])
             self.assertEqual(restored, shader)
+
+    def test_unmapped_cloth_pass_keeps_game_draw(self):
+        _, builder = build([make_model()])
+        shader = CLOTH.UNSUPPORTED_CLOTH_VS_FILTER
+        trace, restored = simulate(
+            parse_sections(builder), "TextureOverride_LOD0.31e22cc3_0", shader=shader,
+        )
+        self.assertEqual(trace, [])
+        self.assertEqual(restored, shader)
 
     def test_disabled_mod_has_no_side_effects(self):
         shader_filters = [0, *(variant[1] for variant in CLOTH.CLOTH_SHADER_VARIANTS)]

@@ -32,7 +32,15 @@ SHADOW_VS_FILTER = 823115
 CLOTH_SHADER_VARIANTS = (
     (CLOTH_VS_HASH, CLOTH_VS_FILTER, CLOTH_SHADER_FILENAME, "default"),
     ("18939b13d3a1abcf", 823115, "yysls_cloth_shadow.hlsl", "shadow"),
+    # c01 uses the same VS code and binding layout. Its differing material
+    # constant declarations are unused by the vertex program.
+    ("c01b8886cbc05321", 823114, CLOTH_SHADER_FILENAME, "c01"),
 )
+
+# Captured with active cloth, but the original bytecode is not available for
+# validating a replacement. Keep the game mesh for this pass.
+UNSUPPORTED_CLOTH_VS_HASH = "89f65adb8660822d"
+UNSUPPORTED_CLOTH_VS_FILTER = 823118
 
 
 def copy_shader_asset():
@@ -45,7 +53,7 @@ def copy_shader_asset():
     addon_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     destination = GlobalConfig.path_generate_mod_folder()
     os.makedirs(destination, exist_ok=True)
-    for _, _, filename, _ in CLOTH_SHADER_VARIANTS:
+    for filename in dict.fromkeys(variant[2] for variant in CLOTH_SHADER_VARIANTS):
         source = os.path.join(addon_root, "resources", filename)
         shutil.copyfile(source, os.path.join(destination, filename))
 
@@ -74,6 +82,11 @@ def add_shader_check(ini_builder):
         section.append("allow_duplicate_hash = true")
         section.append("filter_index = " + str(shader_filter))
         section.new_line()
+    section.append("[ShaderOverride_YYSLS_UnmappedClothVS]")
+    section.append("hash = " + UNSUPPORTED_CLOTH_VS_HASH)
+    section.append("allow_duplicate_hash = true")
+    section.append("filter_index = " + str(UNSUPPORTED_CLOTH_VS_FILTER))
+    section.new_line()
     ini_builder.append_section(section)
 
 
