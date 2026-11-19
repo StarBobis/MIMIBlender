@@ -355,6 +355,8 @@ void main(
   float3 sourcePosition = asfloat(uint3(MIMIClothSource[mapBase],
     MIMIClothSource[mapBase + 1], MIMIClothSource[mapBase + 2]));
   uint sourceVertex = MIMIClothSource[mapBase + 3];
+  // Replacement draws use the ordinary skinned position and tangent frame.
+  bool useNativeCloth = cVertexDeformType == 1 && sourceVertex != 0xffffffffu;
   float3 editOffset;
 
   uint4 bitmask, uiDest;
@@ -405,10 +407,9 @@ void main(
   r4.xyz = v5.xyz * r0.zzz;
   // r1 is the decoded edited reference position.
   editOffset = r1.xyz - sourcePosition;
-  r0.z = cmp(cVertexDeformType == 1);
   r7.xyz = r1.xyz;
   r0.w = 0;
-  if (r0.z != 0) {
+  if (useNativeCloth) {
     uint layerCount = (asuint(cDeformationMisc) >> 24) & 255;
     uint currentLayer = asuint(cDeformationMisc) & 255;
     uint tangentLayer = (asuint(cDeformationMisc) >> 16) & 255;
@@ -495,7 +496,7 @@ void main(
     r4.xyz = r9.yyy ? r4.xyz : r1.xyz;
     r1.xyz = r9.xxx ? r6.xyz : r4.xyz;
   }
-  if (r0.z != 0) {
+  if (useNativeCloth) {
     r4.xy = cDeformationMisc >> int2(24,8);
     r4.xz = (int2)r4.xy & int2(255,255);
     r0.z = cmp((int)r4.z < (int)r4.x);

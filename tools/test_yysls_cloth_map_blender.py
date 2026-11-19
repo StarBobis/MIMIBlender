@@ -18,6 +18,9 @@ spec = importlib.util.spec_from_file_location("blend_fixture", Path(__file__).wi
 f = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(f)
 from yysls_blend_test.common.yysls_cloth_map import store_source, export_map, pack_map, merge_sources, recover_source_ids, TABLE
+from yysls_blend_test.common.yysls_cloth_map import NO_CLOTH, read_draw_source_table
+from yysls_blend_test.model.draw_call_model import DrawCallModel
+from yysls_blend_test.utils.draw_range_utils import DrawRangeUtils
 
 
 def expect_failure(action):
@@ -94,6 +97,37 @@ def capture(root):
     print("PASS: real capture",len(a),"source vertices ->",len(payload),"exported vertices; reference IDs and edit offsets agree")
 
 
+def mixed_draws():
+    obj = f.triangle()
+    obj.name = "38a65b18-0.Native"
+    # Both polygons deliberately share the same points and packed attributes.
+    # The cloth policy must still produce separate vertices in the shared VB.
+    points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    obj.data.clear_geometry()
+    obj.data.from_pydata(points, [], [(0, 1, 2), (0, 1, 2)])
+    obj.vertex_groups.new(name="0").add([0, 1, 2], 1, 'REPLACE')
+    obj.data.uv_layers.new()
+    store_source(obj, points, 7)
+    DrawRangeUtils.tag_object(obj, 1)
+    obj.data.attributes[DrawRangeUtils.OWNER_ATTRIBUTE].data[1].value = 2
+    original = DrawCallModel(obj.name, "38a65b18-0")
+    replacement = DrawCallModel("7705ede7-0.Replacement", "38a65b18-0")
+    assert read_draw_source_table(obj, replacement) is None
+    tables = [read_draw_source_table(obj, original), None]
+    game_type = f.blend_type(sets=1)
+
+    def export():
+        result = f.ExportUtils.build_unity_obj_buffer_result(
+            obj, game_type, [original, replacement], cloth_source_tables=tables)
+        rows = result.category_buffer_dict["YYSLSClothMap"].view('<u4').reshape(-1, 4)
+        return rows[result.ib, 3].reshape(2, 3)
+
+    assert export().tolist() == [[9, 8, 7], [NO_CLOTH] * 3]
+    obj.data.vertices[0].co.x += 0.25
+    assert export().tolist() == [[NO_CLOTH] * 3] * 2
+    print("PASS: native and replacement draws share a VB; edited draw bypasses cloth")
+
+
 if __name__ == "__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--capture",type=Path)
@@ -102,5 +136,6 @@ if __name__ == "__main__":
     bpy.types.Scene.mimi_global_properties=bpy.props.PointerProperty(type=f.MIMIGlobalProperties)
     f.GlobalConfig.logic_name=f.LogicName.YYSLS
     synthetic()
+    mixed_draws()
     if args.capture:
         capture(args.capture)

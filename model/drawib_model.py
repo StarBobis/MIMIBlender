@@ -1458,7 +1458,7 @@ class DrawIBModel:
             obj_name=frame_model.obj_name,
             submesh_name=frame_model.submesh_name,
         )
-        temp_submesh_model = SubMeshModel(drawcall_model_list=[temp_draw_call])
+        temp_submesh_model = SubMeshModel(drawcall_model_list=[temp_draw_call], cloth_check_positions=False)
         position_buffer = temp_submesh_model.category_buffer_dict.get("Position")
         if position_buffer is None or len(position_buffer) == 0:
             raise ValueError(
@@ -1478,7 +1478,16 @@ class DrawIBModel:
         for category, base_bytes in base_submesh.category_buffer_dict.items():
             if category == "Position":
                 continue
-            if not numpy.array_equal(temp_submesh_model.category_buffer_dict.get(category), base_bytes):
+            frame_bytes = temp_submesh_model.category_buffer_dict.get(category)
+            if category == "YYSLSClothMap" and frame_bytes is not None:
+                from ..common.yysls_cloth_map import NO_CLOTH
+                base_map = base_bytes.view('<u4').reshape(-1, 4)
+                frame_map = frame_bytes.view('<u4').reshape(-1, 4)
+                # Only Position changes at runtime. Validate reference identity
+                # for the vertices whose base draw actually samples cloth.
+                native = base_map[:, 3] != NO_CLOTH
+                base_bytes, frame_bytes = base_map[native], frame_map[native]
+            if not numpy.array_equal(frame_bytes, base_bytes):
                 raise ValueError(
                     "Position.buf Based Dynamic Mod: frame '" + frame_model.obj_name + "' changes " + category
                     + "; use the DrawIndex Based Dynamic Mod node for non-Position animation"

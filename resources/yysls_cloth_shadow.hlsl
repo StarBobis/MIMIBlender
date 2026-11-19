@@ -223,8 +223,8 @@ void main(
   r0.xyz = v2.xyz * float3(2,2,2) + float3(-1,-1,-1);
   // Shadow position must follow the same simulated source and edit.
   editOffset = r1.xyz - sourcePosition;
-  r0.w = cmp(cVertexDeformType == 1);
-  if (r0.w != 0) {
+  // Use the same cloth decision as the main pass for replacement draws.
+  if (cVertexDeformType == 1 && sourceVertex != 0xffffffffu) {
     r0.w = cDeformationMisc >> 24;
     r0.w = (int)r0.w & 255;
     r2.z = cDeformationMisc & 255;

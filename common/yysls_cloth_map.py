@@ -2,7 +2,7 @@
 
 An edited vertex number cannot address the game's simulation texture. Keep the
 imported ID and reference position through copies and UV splits, then serialize
-them in the final exported VB order. Unsupported topology must fail explicitly.
+them in the final exported VB order. Replacement draws use ordinary skinning.
 """
 
 import json
@@ -11,6 +11,7 @@ import numpy as np
 ID = "mimi_yysls_source_id"
 REST = "mimi_yysls_source_position"
 TABLE = "mimi_yysls_source_table"
+NO_CLOTH = 0xffffffff
 
 
 def store_source(obj, positions, offset=0, source_ids=None):
@@ -51,16 +52,18 @@ def pack_map(ids, reference, table, point_indices):
     ids = np.asarray(ids, dtype=np.int64)
     reference = np.asarray(reference, dtype=np.float32)
     selected = np.asarray(point_indices, dtype=np.int64)
-    if reference.shape != (len(ids), 3) or not np.isfinite(reference).all():
+    if reference.shape != (len(ids), 3):
         raise ValueError("YYSLS cloth: invalid source positions")
     if len(selected) and (selected.min() < 0 or selected.max() >= len(ids)):
         raise ValueError("YYSLS cloth: invalid exported point index")
+    if not np.isfinite(reference[selected]).all():
+        raise ValueError("YYSLS cloth: invalid source positions")
     # Check only exported points. Removed/unreferenced vertices need no map.
     # Interpolated references from subdivision do not identify an original point.
     for point in np.unique(selected):
         source_id = int(ids[point])
         expected = table.get(str(source_id))
-        if source_id < 0 or source_id > 0xffffffff or expected is None:
+        if source_id < 0 or source_id >= NO_CLOTH or expected is None:
             raise ValueError("YYSLS cloth: missing original vertex ID")
         if not np.array_equal(reference[point], np.asarray(expected, dtype=np.float32)):
             raise ValueError("YYSLS cloth: topology generated an unmapped point; transfer source mapping before export")
@@ -84,6 +87,79 @@ def export_map(obj, mesh, index_loop_map):
     rest.data.foreach_get('vector', reference.ravel())
     points = [mesh.loops[index_loop_map[i]].vertex_index for i in range(len(index_loop_map))]
     return pack_map(ids, reference, json.loads(obj[TABLE]), points)
+
+
+def read_draw_source_table(obj, draw):
+    """Read provenance before joining the disposable draw meshes."""
+    # A recognized original draw name must agree with the blueprint target.
+    # Compare ranges only when both names use the same addressing convention.
+    source = draw._try_parse_name(draw.obj_name)
+    if source is not None:
+        source_ib, source_count, source_first, _, _ = source
+        named_ib = len(source_ib) == 8 and all(c in "0123456789abcdefABCDEF" for c in source_ib)
+        if named_ib and (source_ib.lower() != draw.match_draw_ib.lower()
+                         or (bool(source_count) == bool(draw.match_index_count)
+                             and (source_count, source_first) != (draw.match_index_count, draw.match_first_index))):
+            return None
+    if (TABLE not in obj or obj.data.attributes.get(ID) is None
+            or obj.data.attributes.get(REST) is None):
+        return None
+    try:
+        table = json.loads(obj[TABLE])
+    except (TypeError, ValueError):
+        return None
+    return table if isinstance(table, dict) else None
+
+
+def build_draw_loop_map(mesh, source_tables, check_positions=True):
+    """Build the cloth record for each corner in the evaluated export mesh."""
+    from ..utils.draw_range_utils import DrawRangeUtils
+
+    # A whole draw uses ordinary skinning if any of its rendered points lost
+    # provenance or moved. UV splits and unused source points are harmless.
+    records = np.zeros((len(mesh.loops), 4), dtype='<u4')
+    records[:, 3] = NO_CLOTH
+    if not any(source_tables):
+        return records
+    source = mesh.attributes.get(ID)
+    rest = mesh.attributes.get(REST)
+    if (source is None or source.domain != 'POINT' or source.data_type != 'INT'
+            or rest is None or rest.domain != 'POINT' or rest.data_type != 'FLOAT_VECTOR'):
+        return records
+
+    owners = mesh.attributes.get(DrawRangeUtils.OWNER_ATTRIBUTE)
+    if owners is None:
+        raise ValueError("YYSLS cloth: export mesh lost polygon ownership")
+    loops_by_draw = [[] for _ in source_tables]
+    owner_ids = np.empty(len(mesh.polygons), dtype=np.int32)
+    owners.data.foreach_get('value', owner_ids)
+    for polygon, owner in zip(mesh.polygons, owner_ids):
+        if not 1 <= owner <= len(source_tables):
+            raise ValueError("YYSLS cloth: export mesh contains unowned polygons")
+        loops_by_draw[owner - 1].extend(polygon.loop_indices)
+
+    ids = np.empty(len(mesh.vertices), dtype=np.int32)
+    reference = np.empty((len(mesh.vertices), 3), dtype=np.float32)
+    positions = np.empty_like(reference)
+    loop_points = np.empty(len(mesh.loops), dtype=np.int32)
+    source.data.foreach_get('value', ids)
+    rest.data.foreach_get('vector', reference.ravel())
+    mesh.vertices.foreach_get('co', positions.ravel())
+    mesh.loops.foreach_get('vertex_index', loop_points)
+
+    for table, loops in zip(source_tables, loops_by_draw):
+        if not table or not loops:
+            continue
+        points = loop_points[loops]
+        # Export copies have already been rotated to the original game space.
+        if check_positions and not np.allclose(positions[points], reference[points], rtol=0, atol=2e-6):
+            continue
+        try:
+            records[loops] = pack_map(ids, reference, table, points).view('<u4').reshape(-1, 4)
+        except (TypeError, ValueError):
+            # Invalid/missing IDs must never reach the simulation texture.
+            continue
+    return records
 
 
 def recover_source_ids(positions, faces, corner_uvs, source_positions, source_uvs, source_faces, tolerance=2e-6):

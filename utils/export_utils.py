@@ -120,6 +120,8 @@ class ExportUtils:
         d3d11_game_type: D3D11GameType,
         drawcall_model_list: Optional[list] = None,
         outline_options: Optional[dict] = None,
+        cloth_source_tables: Optional[list] = None,
+        cloth_check_positions: bool = True,
     ) -> UnityBufferBuildResult:
         ObjBufferHelper.check_and_verify_attributes(obj=obj, d3d11_game_type=d3d11_game_type)
 
@@ -134,6 +136,12 @@ class ExportUtils:
             final_elementname_data_dict=element_context.final_elementname_data_dict,
         )
 
+        cloth_records = None
+        if cloth_source_tables is not None:
+            from ..common.yysls_cloth_map import build_draw_loop_map
+            cloth_records = build_draw_loop_map(
+                element_context.mesh, cloth_source_tables, check_positions=cloth_check_positions)
+
         ib, category_buffer_dict, index_loop_id_dict = ExportUtils.build_unity_index_buffers(
             obj=obj,
             mesh=element_context.mesh,
@@ -141,10 +149,14 @@ class ExportUtils:
             d3d11_game_type=d3d11_game_type,
             dtype=element_context.total_structured_dtype,
             outline_options=outline_options,
+            loop_keys=cloth_records,
         )
         # Export cloth identity in the exact same unique-loop order as the VB.
         # Ordinary games never create or consume this additional category.
-        if GlobalConfig.logic_name == LogicName.YYSLS:
+        if cloth_records is not None:
+            loops = [index_loop_id_dict[i] for i in range(len(index_loop_id_dict))]
+            category_buffer_dict["YYSLSClothMap"] = cloth_records[loops].view(numpy.uint8).ravel()
+        elif GlobalConfig.logic_name == LogicName.YYSLS:
             from ..common.yysls_cloth_map import export_map
             category_buffer_dict["YYSLSClothMap"] = export_map(
                 obj, element_context.mesh, index_loop_id_dict)
@@ -183,6 +195,7 @@ class ExportUtils:
         d3d11_game_type: D3D11GameType,
         dtype: numpy.dtype,
         outline_options: Optional[dict] = None,
+        loop_keys: Optional[numpy.ndarray] = None,
     ):
         if (
             GlobalConfig.logic_name == LogicName.CPUSkinning
@@ -202,6 +215,7 @@ class ExportUtils:
             dtype=dtype,
             obj=obj,
             outline_options=outline_options,
+            loop_keys=loop_keys,
         )
 
     @staticmethod

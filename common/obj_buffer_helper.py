@@ -1397,7 +1397,7 @@ class ObjBufferHelper:
         element_vertex_ndarray:numpy.ndarray, 
         obj:bpy.types.Object, 
         d3d11_game_type:D3D11GameType,
-        dtype:numpy.dtype, outline_options=None):
+        dtype:numpy.dtype, outline_options=None, loop_keys=None):
         '''
         [Universal mode] Standard graphics export logic
         --------------------------------------------------
@@ -1439,6 +1439,9 @@ class ObjBufferHelper:
                 # Core: the Key always includes the vertex_index (data, index)
                 # Thus an index is shared only when "the data is fully identical" and "it is the same vertex (split only by hard edges/UVs)"
                 key = (data, loop.vertex_index)
+                # A shared point can have different cloth policy in two draws.
+                if loop_keys is not None:
+                    key += (loop_keys[loop.index].tobytes(),)
                 
                 if key in unique_map:
                     idx = unique_map[key]
@@ -1456,9 +1459,7 @@ class ObjBufferHelper:
         # Also build the index -> blender_loop_index mapping
         # This is critical for generating the ShapeKey Buffer later: we must know which Blender Loop the i-th generated point corresponds to
         # Loop Index can be converted to Vertex Index, but Vertex Index cannot be reversed into a unique Loop Index (Split Normals)
-        vertex_data_list = []
-        for i, (data_bytes, blender_v_idx) in enumerate(unique_map.keys()):
-            vertex_data_list.append(data_bytes)
+        vertex_data_list = [key[0] for key in unique_map]
         
         index_loop_id_dict = unique_loop_map
 

@@ -27,6 +27,8 @@ class SubMeshModel:
     drawcall_model_list:list[DrawCallModel] = field(default_factory=list)
     # Immutable-by-convention snapshot from the selected Generate Mod node.
     outline_options: dict = field(default_factory=dict, repr=False)
+    # Position-only animation frames reuse the cloth policy of the base VB.
+    cloth_check_positions: bool = True
 
     # These attributes are computed in post_init
     match_draw_ib:str = field(init=False, default="")
@@ -210,12 +212,15 @@ class SubMeshModel:
             target_active.select_set(True)
             bpy.context.view_layer.objects.active = target_active
 
-        # Join retains only the active object's properties. Merge every source
-        # table explicitly so segmented imports keep their full identity range.
-        cloth_sources = None
+        # Keep each draw's original reference table across Blender's join.
+        # Independent replacements may use a different vertex ID space.
+        cloth_source_tables = None
         if GlobalConfig.logic_name == LogicName.YYSLS:
-            from ..common.yysls_cloth_map import merge_sources
-            cloth_sources = merge_sources(submesh_temp_obj_list)
+            from ..common.yysls_cloth_map import read_draw_source_table
+            cloth_source_tables = [
+                read_draw_source_table(obj, draw)
+                for obj, draw in zip(submesh_temp_obj_list, self.drawcall_model_list)
+            ]
 
         # Merge the objects
         ObjUtils.join_objects(bpy.context, submesh_temp_obj_list)
@@ -226,12 +231,6 @@ class SubMeshModel:
         # Rename it to the expected name for the steps that follow
         merged_obj_name = "TEMP_SUBMESH_MERGED_" + self.submesh_name
         ObjUtils.rename_object(submesh_merged_obj, merged_obj_name)
-
-        # The immutable table validates IDs after evaluated topology changes.
-        if cloth_sources is not None:
-            from ..common.yysls_cloth_map import TABLE
-            import json
-            submesh_merged_obj[TABLE] = json.dumps(cloth_sources)
 
         # Check and verify that no attributes are missing
         ObjBufferHelper.check_and_verify_attributes(obj=submesh_merged_obj, d3d11_game_type=self.d3d11_game_type)
@@ -254,6 +253,8 @@ class SubMeshModel:
             d3d11_game_type=self.d3d11_game_type,
             drawcall_model_list=self.drawcall_model_list,
             outline_options=self.outline_options,
+            cloth_source_tables=cloth_source_tables,
+            cloth_check_positions=self.cloth_check_positions,
         )
         # Final ranges are derived from the evaluated IB, including generated faces.
         # Do not reuse pre-merge counts when a modifier changes topology or order.

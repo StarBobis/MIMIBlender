@@ -16,8 +16,12 @@ The exporter builds a separate `YYSLSClothMap` category using the evaluated mesh
 and the real unique-output-to-loop map. Each output point has four R32_UINT words:
 reference XYZ float bit patterns, followed by its original simulation vertex ID.
 UV/hard-normal splits share source identity while keeping distinct output points.
-Source tables are merged explicitly before Blender joins objects. Missing IDs,
-conflicting references and interpolated unmapped points reject export.
+The exporter captures each object's source table before joining and associates
+it with evaluated triangles via their draw ownership. A draw without matching
+provenance or with positions edited from the imported reference writes
+`0xffffffff` in the simulation ID field for its entire range. UV and material
+edits that retain the original points can keep cloth. If two draws share a
+Blender vertex, different cloth records produce separate exported vertices.
 
 ## Runtime
 
@@ -35,7 +39,10 @@ signatures. The c01 material-only declaration differences are unused by its VS.
 The observed 89f65adb8660822d pass has active cloth and uses filter 823118.
 It keeps the original geometry until its replacement ABI can be validated.
 
-The shaders retain native t11 simulation and skeleton animation. They address
+The main, c01 and shadow variants treat the sentinel as ordinary skinning.
+The main variant bypasses current deformation, tangent reconstruction and
+historical deformation together. Mapped draws retain native t11 simulation
+and skeleton animation. They address
 simulation with the mapped source ID, and transport the decoded edited-reference
 minus original-reference position offset through the existing skinning path.
 The main pass applies the offset to both current and historical cloth positions.
