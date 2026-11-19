@@ -35,6 +35,8 @@ import os
 import sys
 import tempfile
 import types
+from pathlib import Path
+from unittest.mock import patch
 
 # Addon root (the repository root), one level up from tools/.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -714,24 +716,21 @@ def test_global_hash_override(modules, texture_root):
     with open(target_path, "rb") as file:
         assert file.read() != before
 
-    # Automatic copies still protect newer hand-edited output. An explicit
-    # object binding uses the same copy helper with that protection disabled.
-    # Verify actual bytes and identical-output stability, not only timestamps.
+    # An explicit object binding overwrites even newer manual output.
+    # Verify actual bytes and identical-output stability.
     helper = ini_helper_mod.M_IniHelper
     source_bytes = open(marked_source_file, 'rb').read()
     with open(marked_target_path, 'wb') as file:
         file.write(b'hand edited')
     os.utime(marked_source_file, ns=(1_000_000_000, 1_000_000_000))
     os.utime(marked_target_path, ns=(2_000_000_000, 2_000_000_000))
-    assert helper._refresh_generated_texture(marked_source_file, marked_target_path) == 'kept'
     model = types.SimpleNamespace(draw_ib='global')
     helper._copy_object_texture_binding_files(model, [
         ('ResourceExplicit', marked_source_file, HASH_RED + '_global.dds', marked_source_file)])
     with open(marked_target_path, 'rb') as file:
         assert file.read() == source_bytes
     stamp = os.stat(marked_target_path).st_mtime_ns
-    assert helper._refresh_generated_texture(marked_source_file, marked_target_path,
-                                             preserve_newer=False) == 'unchanged'
+    assert helper._refresh_generated_texture(marked_source_file, marked_target_path) == 'unchanged'
     assert os.stat(marked_target_path).st_mtime_ns == stamp
 
     managed = ini_helper_mod.M_IniHelper._collect_hash_binding_managed_hashes(
@@ -888,6 +887,64 @@ def test_managed_hash_skip(modules):
     print("test_managed_hash_skip OK")
 
 
+def test_automatic_textures_only_fill_missing_files(modules, texture_root):
+    helper = modules[TEST_PKG + ".common.m_ini_helper"].M_IniHelper
+    builder_type = modules[TEST_PKG + ".common.m_ini_builder"].M_IniBuilder
+    sys.modules[TEST_PKG + ".common.global_config"].GlobalConfig._texture_root = texture_root
+    draw_ib = "94517393"
+    submesh = FakeSubmeshModel(draw_ib + "-0", [])
+    marks = [FakeMarkup("Diffuse", "Hash"), FakeMarkup("Mask", "SharedSlot", HASH_BLUE),
+             FakeMarkup("Normal", "Slot")]
+    model = make_drawib(modules, draw_ib, [submesh], {submesh.submesh_name: marks})
+    models = {draw_ib: model}
+    folder = Path(texture_root) / draw_ib
+    folder.mkdir(exist_ok=True)
+    targets = [folder / name for name in (
+        HASH_RED + "_Diffuse.dds", HASH_BLUE + "_Mask.dds", draw_ib + "-0-Normal.dds")]
+    source = Path(texture_root) / "automatic_capture.dds"
+    source.write_bytes(b"capture")
+
+    def generate(ini_path):
+        builder = builder_type()
+        helper.generate_hash_style_texture_ini(builder, models)
+        helper.generate_shared_slot_style_texture_ini(builder, models)
+        helper.move_slot_style_textures(model)
+        builder.save_to_file(str(ini_path))
+        return ini_path.read_text(encoding="utf-8")
+
+    with patch.object(helper, "_get_slot_texture_source_path", return_value=str(source)):
+        generate(folder / "first.ini")
+        assert all(target.read_bytes() == b"capture" for target in targets)
+        for target in targets:
+            target.write_bytes(b"user image")
+            os.utime(target, ns=(1_000_000_000, 1_000_000_000))
+        source.write_bytes(b"new capture")
+        generate(folder / "second.ini")
+        assert all(target.read_bytes() == b"user image" for target in targets)
+        assert all(target.stat().st_mtime_ns == 1_000_000_000 for target in targets)
+
+    # Already-present output keeps its INI reference even if the workspace
+    # capture was removed. In this case generation need not resolve the source.
+    with patch.object(helper, "_get_slot_texture_source_path", side_effect=AssertionError) as resolve_source:
+        ini = generate(folder / "third.ini")
+    resolve_source.assert_not_called()
+    assert all(target.name in ini for target in targets[:2])
+
+    # A file saved during staging also takes precedence over the capture.
+    from shutil import copy2
+    race_target = folder / "concurrent.dds"
+
+    def save_during_copy(source_path, staged_path):
+        copy2(source_path, staged_path)
+        race_target.write_bytes(b"concurrent user image")
+
+    with (patch.object(helper, "_get_slot_texture_source_path", return_value=str(source)),
+          patch("shutil.copy2", side_effect=save_during_copy)):
+        assert helper._copy_missing_marked_texture(model, submesh.submesh_name, marks[0], race_target) == "kept"
+    assert race_target.read_bytes() == b"concurrent user image"
+    print("test_automatic_textures_only_fill_missing_files OK")
+
+
 def main():
     ensure_parent_packages()
     install_stubs()
@@ -907,6 +964,7 @@ def main():
         test_global_hash_override(modules, temp_dir)
         test_section_generation(modules, temp_dir)
         test_managed_hash_skip(modules)
+        test_automatic_textures_only_fill_missing_files(modules, temp_dir)
 
     print("ALL HASH TEXTURE BIND TESTS PASSED")
 

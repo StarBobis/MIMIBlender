@@ -2,6 +2,7 @@ import filecmp
 import os
 import re
 import shutil
+import tempfile
 
 from .m_ini_builder import *
 from .m_control_flow import M_ControlFlow
@@ -578,10 +579,8 @@ class M_IniHelper:
                 if os.path.normcase(os.path.abspath(source_path)) != os.path.normcase(os.path.abspath(target_path)):
                     # An explicit blueprint choice wins over an older export,
                     # even when the selected image has an old filesystem date.
-                    # Automatic capture copies retain their separate protection.
                     cls._refresh_generated_texture(
                         source_path, target_path, str(row.get("stamp_path", "") or ""),
-                        preserve_newer=False,
                     )
 
         # Keep resource declarations before all hash overrides. One section per
@@ -739,11 +738,6 @@ class M_IniHelper:
                     print("M_IniHelper: Skipping Hash texture processing, submesh_name not found, Part: " + str(part_name))
                     continue
 
-                # Read this SubMesh's hash dedupe info dict
-                hash_deduped_texture_info_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
-                    submesh_folder_name=submesh_folder_name,
-                )
-
                 for texture_markup_info in texture_markup_info_list:
                     # Type filter: only process Hash marks
                     if texture_markup_info.mark_type != "Hash":
@@ -755,45 +749,14 @@ class M_IniHelper:
                     mark_hash = str(texture_markup_info.mark_hash or "").strip().lower()
                     if mark_hash in repeat_hash_list:
                         continue
-                    repeat_hash_list.append(mark_hash)
 
                     # Hashes bound by Targeted Hash Texture Replacement nodes keep their
                     # resource management but skip the automatic override;
                     # the explicit node sections take over.
                     if mark_hash in managed_hash_set:
+                        repeat_hash_list.append(mark_hash)
                         print("M_IniHelper: hash " + mark_hash + " is managed by Targeted Hash Texture Replacement nodes; skipping the automatic Hash override.")
                         continue
-
-                    # Find the source texture file path
-                    original_texture_file_path = cls._get_slot_texture_source_path(
-                        draw_ib_model=draw_ib_model,
-                        part_name=part_name,
-                        texture_markup_info=texture_markup_info,
-                    )
-                    if not original_texture_file_path or not os.path.exists(original_texture_file_path):
-                        continue
-
-                    # Build the output filename
-                    #  New format: "{mark_hash}_{mark_name}_{format}.dds"
-                    hash_style_texture_filename = ""
-
-                    # Look up hash dedupe info; prefer the current SubMesh's, fall back to all SubMeshes
-                    deduped_texture_info = hash_deduped_texture_info_dict.get(
-                        texture_markup_info.mark_hash, None,
-                    )
-                    if deduped_texture_info is None:
-                        for sm in getattr(draw_ib_model, "submesh_model_list", []):
-                            sm_folder = getattr(sm, "submesh_name", "")
-                            if not sm_folder:
-                                continue
-                            sm_deduped_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
-                                submesh_folder_name=sm_folder,
-                            )
-                            deduped_texture_info = sm_deduped_dict.get(
-                                texture_markup_info.mark_hash, None,
-                            )
-                            if deduped_texture_info is not None:
-                                break
 
                     hash_style_texture_filename = (
                         texture_markup_info.mark_hash + "_"
@@ -815,10 +778,14 @@ class M_IniHelper:
                         hash_style_override_section_name = hash_style_override_section_name + "_" + resource_prefix
 
                     # Assemble the target path
-                    target_texture_file_path = (
-                        GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib)
-                        + hash_style_texture_filename
-                    )
+                    target_texture_file_path = os.path.join(
+                        GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib),
+                        hash_style_texture_filename)
+                    result = cls._copy_missing_marked_texture(
+                        draw_ib_model, part_name, texture_markup_info, target_texture_file_path)
+                    if result == "missing":
+                        continue
+                    repeat_hash_list.append(mark_hash)
 
                     # Generate the INI config sections (Resource_Texture + TextureOverride)
                     resource_texture_section = M_IniSection(
@@ -854,12 +821,6 @@ class M_IniHelper:
                     resource_texture_section.new_line()
                     ini_builder.append_section(resource_texture_section)
 
-                    # Refresh the copy when the capture changed. The old rule
-                    # ("skip when the target exists") kept a texture from a
-                    # previous export forever, so editing or re-extracting a
-                    # capture produced a Mod that mixed old and new pictures.
-                    cls._refresh_generated_texture(original_texture_file_path, target_texture_file_path)
-
     @classmethod
     def generate_shared_slot_style_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict[str, DrawIBModel]):
         """
@@ -873,7 +834,6 @@ class M_IniHelper:
             print("[TRACE] generate_shared_slot_style_texture_ini: forbid_auto_texture_ini=True, skipped!")
             return
 
-        repeat_hash_list: list[str] = []
         appended_resource_names: set[str] = set()
         # Cache: mark_hash -> hash_style_filename, shared across all DrawIBs so each hash is copied only once
         hash_filename_cache: dict[str, str] = {}
@@ -898,10 +858,6 @@ class M_IniHelper:
                     print("M_IniHelper: Skipping SharedSlot texture processing, submesh_name not found, Part: " + str(part_name))
                     continue
 
-                hash_deduped_texture_info_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
-                    submesh_folder_name=submesh_folder_name,
-                )
-
                 for texture_markup_info in texture_markup_info_list:
                     # Type filter: only process SharedSlot marks
                     if texture_markup_info.mark_type != "SharedSlot":
@@ -910,52 +866,21 @@ class M_IniHelper:
                     # File copy + filename construction (deduped by hash)
                     hash_style_texture_filename: str | None = hash_filename_cache.get(texture_markup_info.mark_hash)
                     if hash_style_texture_filename is None:
-                        # First time this hash is seen: find the source file, build the filename, copy
-                        original_texture_file_path = cls._get_slot_texture_source_path(
-                            draw_ib_model=draw_ib_model,
-                            part_name=part_name,
-                            texture_markup_info=texture_markup_info,
-                        )
-                        if not original_texture_file_path or not os.path.exists(original_texture_file_path):
-                            continue
-
-                        hash_style_texture_filename = ""
-
-                        deduped_texture_info = hash_deduped_texture_info_dict.get(
-                            texture_markup_info.mark_hash, None,
-                        )
-                        if deduped_texture_info is None:
-                            for sm in getattr(draw_ib_model, "submesh_model_list", []):
-                                sm_folder = getattr(sm, "submesh_name", "")
-                                if not sm_folder:
-                                    continue
-                                sm_deduped_dict = MMTWorkSpace.get_hash_deduped_texture_info_dict(
-                                    submesh_folder_name=sm_folder,
-                                )
-                                deduped_texture_info = sm_deduped_dict.get(
-                                    texture_markup_info.mark_hash, None,
-                                )
-                                if deduped_texture_info is not None:
-                                    break
-
                         hash_style_texture_filename = (
                             texture_markup_info.mark_hash + "_"
                             + texture_markup_info.mark_name
                             + ".dds"
                         )
 
-                        # Copy the file (dedupe); identical bytes stay untouched.
-                        target_texture_file_path = (
-                            GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib)
-                            + hash_style_texture_filename
-                        )
-                        cls._refresh_generated_texture(original_texture_file_path, target_texture_file_path)
+                        target_texture_file_path = os.path.join(
+                            GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib),
+                            hash_style_texture_filename)
+                        result = cls._copy_missing_marked_texture(
+                            draw_ib_model, part_name, texture_markup_info, target_texture_file_path)
+                        if result == "missing":
+                            continue
 
                         hash_filename_cache[texture_markup_info.mark_hash] = hash_style_texture_filename
-                        repeat_hash_list.append(texture_markup_info.mark_hash)
-                    else:
-                        # Hash already handled: skip the file copy but still write the Resource section
-                        pass
 
                     # Generate the Slot-style Resource section (deduped by resource name)
                     has_shared_slot = True
@@ -982,8 +907,7 @@ class M_IniHelper:
     def _texture_stamp_ns(path: str) -> int:
         """Return the modification time of one file in nanoseconds, or 0.
 
-        Only used to decide which of two files is newer, so a vanished file
-        simply loses that comparison instead of raising.
+        A vanished timestamp source leaves the copied file's metadata intact.
         """
         try:
             return os.stat(path).st_mtime_ns
@@ -994,10 +918,8 @@ class M_IniHelper:
     def _copy_generated_texture(source_path: str, target_path: str, stamp_ns: int) -> None:
         """Copy one texture and stamp the copy with its source time.
 
-        The stamp is what the next export compares, so the generated file always
-        says how new the picture inside it really is. ``copy2`` already carries
-        the time of the file it copies; a converted replacement keeps the time
-        of the user's own image instead, which is why the stamp is explicit.
+        A converted replacement keeps the timestamp of the image selected in
+        the blueprint, even when the bytes come from a conversion product.
         """
         shutil.copy2(source_path, target_path)
         if stamp_ns:
@@ -1005,32 +927,8 @@ class M_IniHelper:
 
     @classmethod
     def _refresh_generated_texture(cls, source_path: str, target_path: str,
-                                   source_stamp_path: str = "", *,
-                                   preserve_newer: bool = True) -> str:
-        """Copy one texture into the generated Mod, or keep a hand-edited one.
-
-        Two earlier rules were both wrong for somebody:
-
-        - "skip when the target exists" (before 1.0.66) kept a picture from a
-          previous export forever, so re-extracting a workspace or editing a
-          capture produced a Mod that mixed old and new textures;
-        - "copy whenever the bytes differ" (1.0.66) always won against a texture
-          the user had re-saved inside the generated folder by hand.
-
-        The rule is therefore "the newer file wins": a capture re-extracted or
-        edited after the export refreshes the Mod, while a generated texture the
-        user saved later is kept and reported. Identical bytes never touch the
-        file, so a repeated export stays free.
-
-        ``source_stamp_path`` lets a converted replacement carry the timestamp
-        of the user's own image instead of the temporary conversion product.
-
-        Explicit blueprint replacements disable ``preserve_newer``: choosing
-        a file is an instruction to replace the previous generated image.
-        Automatic capture copies keep the default hand-edit protection.
-
-        Returns ``copied``, ``unchanged``, ``kept`` or ``missing``.
-        """
+                                   source_stamp_path: str = "") -> str:
+        """Refresh a texture explicitly selected in the blueprint."""
         # ``exists`` (not ``isfile``) is deliberate: the copy tests patch the
         # exists probe only, and a directory source fails loudly in copy2.
         if not source_path or not os.path.exists(source_path):
@@ -1038,18 +936,34 @@ class M_IniHelper:
         # The stamp belongs to the picture, which is the real source when the
         # bytes handed in are a converted copy of it.
         source_stamp = cls._texture_stamp_ns(source_stamp_path or source_path)
-        if not os.path.isfile(target_path):
-            cls._copy_generated_texture(source_path, target_path, source_stamp)
-            return "copied"
-        if filecmp.cmp(source_path, target_path, shallow=False):
+        if os.path.isfile(target_path) and filecmp.cmp(source_path, target_path, shallow=False):
             return "unchanged"
-        if preserve_newer and cls._texture_stamp_ns(target_path) > source_stamp:
-            print(
-                "M_IniHelper: kept the generated texture you edited by hand "
-                + "(newer than its source): " + target_path
-            )
-            return "kept"
         cls._copy_generated_texture(source_path, target_path, source_stamp)
+        return "copied"
+
+    @classmethod
+    def _copy_missing_marked_texture(cls, draw_ib_model, part_name, texture_markup_info, target_path):
+        """Supply an automatic texture only when the output path is vacant."""
+        if os.path.lexists(target_path):
+            return "kept"
+        source_path = cls._get_slot_texture_source_path(draw_ib_model, part_name, texture_markup_info)
+        if not source_path or not os.path.isfile(source_path):
+            return "missing"
+
+        # Publish a complete file without replacing a texture created during
+        # the copy. Windows rename refuses an existing destination; POSIX
+        # requires an exclusive hard link for the same behavior.
+        output_folder = os.path.dirname(os.path.abspath(target_path))
+        with tempfile.TemporaryDirectory(prefix=".mimi-texture-", dir=output_folder) as staging:
+            staged_path = os.path.join(staging, os.path.basename(target_path))
+            shutil.copy2(source_path, staged_path)
+            try:
+                if os.name == "nt":
+                    os.rename(staged_path, target_path)
+                else:
+                    os.link(staged_path, target_path)
+            except FileExistsError:
+                return "kept"
         return "copied"
 
     @classmethod
@@ -1074,7 +988,6 @@ class M_IniHelper:
 
         slot_copied = 0
         slot_skipped_exists = 0
-        slot_kept_manual = 0
         slot_skipped_no_source = 0
         slot_skipped_non_slot = 0
 
@@ -1105,41 +1018,23 @@ class M_IniHelper:
                 slot_texture_filename = cls._get_slot_style_texture_filename(draw_ib_model, idx, texture_markup_info)
                 print("[TRACE] Slot texture new filename: " + slot_texture_filename)
 
-                target_path = GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib_model.draw_ib) + slot_texture_filename
-                source_path = cls._get_slot_texture_source_path(draw_ib_model, part_name, texture_markup_info)
-                print("[TRACE] Slot texture source_path resolve result: '" + source_path + "'")
-                print("[TRACE] Slot texture target_path: '" + target_path + "'")
-                print("[TRACE] source_path exists: " + str(os.path.exists(source_path) if source_path else "N/A (empty string)"))
-                print("[TRACE] target_path exists: " + str(os.path.exists(target_path)))
-
-                if source_path == "":
-                    print("[TRACE] Slot texture source_path is empty, skip! mark_filename=" + texture_markup_info.mark_filename)
-                    slot_skipped_no_source += 1
-                    continue
-                if not os.path.exists(source_path):
-                    print("[TRACE] Slot texture source_path file does not exist, skip! source_path=" + source_path)
-                    slot_skipped_no_source += 1
-                    continue
-                # The capture is newer than the Mod file it should refresh, so
-                # a re-extracted or edited texture is copied; a generated file
-                # the user saved later is kept instead of being restored.
-                print("[TRACE] >>> Refreshing generated texture: " + source_path + " -> " + target_path)
+                target_path = os.path.join(texture_output_folder, slot_texture_filename)
                 try:
-                    result = cls._refresh_generated_texture(source_path, target_path)
+                    result = cls._copy_missing_marked_texture(
+                        draw_ib_model, part_name, texture_markup_info, target_path)
                     print("[TRACE] <<< Generated texture result: " + result + " for " + target_path)
                     if result == "copied":
                         slot_copied += 1
-                    elif result == "kept":
-                        slot_kept_manual += 1
+                    elif result == "missing":
+                        slot_skipped_no_source += 1
                     else:
                         slot_skipped_exists += 1
                 except Exception as e:
-                    print("[TRACE] <<< Refresh failed! Exception: " + str(e))
+                    print("[TRACE] <<< Texture copy failed: " + str(e))
 
         print("[TRACE] move_slot_style_textures() summary - DrawIB: " + draw_ib_model.draw_ib)
         print("[TRACE]   Slot copied: " + str(slot_copied))
-        print("[TRACE]   Slot kept (edited in the Mod folder): " + str(slot_kept_manual))
-        print("[TRACE]   Slot unchanged: " + str(slot_skipped_exists))
+        print("[TRACE]   Slot kept (output already exists): " + str(slot_skipped_exists))
         print("[TRACE]   Slot skipped (source missing): " + str(slot_skipped_no_source))
         print("[TRACE]   Slot skipped (non-Slot type): " + str(slot_skipped_non_slot))
         print("=" * 60)
@@ -1285,13 +1180,11 @@ class M_IniHelper:
         # The caller owns staged storage; this helper performs only final copies.
         # File resources and names stay local to the existing exporter namespace.
         # Entries are (resource, bytes_to_copy, target_name, timestamp_source):
-        # the timestamp source is the picture the user picked, never the
-        # temporary conversion product, for later automatic-copy comparisons.
+        # The timestamp source is the picture the user picked.
         texture_output_folder = GlobalConfig.path_generatemod_texture_folder(draw_ib=draw_ib_model.draw_ib)
         os.makedirs(texture_output_folder, exist_ok=True)
 
         copied_count = 0
-        kept_count = 0
         skipped_count = 0
         for entry in file_list:
             resource_name, source_path, target_filename = entry[0], entry[1], entry[2]
@@ -1310,12 +1203,7 @@ class M_IniHelper:
                 continue
             # Explicit Slot and targeted Hash choices must replace stale output.
             # Source timestamps can predate the original captured image by years.
-            # Automatic copies still use the default newer-file protection.
-            result = cls._refresh_generated_texture(
-                source_path, target_path, stamp_path, preserve_newer=False)
-            if result == "kept":
-                kept_count += 1
-                continue
+            result = cls._refresh_generated_texture(source_path, target_path, stamp_path)
             if result == "unchanged":
                 skipped_count += 1
                 continue
@@ -1337,7 +1225,6 @@ class M_IniHelper:
         print(
             "M_IniHelper: Texture Bind texture copy done, DrawIB: " + draw_ib_model.draw_ib
             + ", copied: " + str(copied_count)
-            + ", kept (edited in the Mod folder): " + str(kept_count)
             + ", unchanged: " + str(skipped_count)
         )
 

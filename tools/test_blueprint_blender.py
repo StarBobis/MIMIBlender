@@ -1147,48 +1147,25 @@ class BlueprintTests(unittest.TestCase):
                 if path.exists():
                     path.unlink()
 
-    def test_hand_edited_generated_texture_is_kept(self):
-        # A texture the user re-saved inside the generated folder (the PS
-        # workflow) is newer than its capture, so the next export must keep it
-        # instead of restoring the capture over the fix.
+    def test_converted_explicit_texture_uses_selected_image_timestamp(self):
         from MIMIBlender.common.m_ini_helper import M_IniHelper
-        helper = M_IniHelper._refresh_generated_texture
-        folder = Path(tempfile.gettempdir())
-        source = folder / "mimi_keep_source.dds"
-        target = folder / "mimi_keep_target.dds"
-        try:
-            # Explicit timestamps make the comparison independent of the file
-            # system clock granularity.
-            source.write_bytes(b"capture")
-            os.utime(source, ns=(1_000_000_000, 1_000_000_000))
-            self.assertEqual(helper(str(source), str(target)), "copied")
-            # The copy carries the capture timestamp, so it is not "newer".
-            self.assertEqual(target.stat().st_mtime_ns, 1_000_000_000)
-            # The user edits the generated file after the export.
-            target.write_bytes(b"hand edited")
-            os.utime(target, ns=(2_000_000_000, 2_000_000_000))
-            self.assertEqual(helper(str(source), str(target)), "kept")
-            self.assertEqual(target.read_bytes(), b"hand edited")
-            # Editing the capture afterwards wins again: the capture is newer.
-            source.write_bytes(b"new capture")
-            os.utime(source, ns=(3_000_000_000, 3_000_000_000))
-            self.assertEqual(helper(str(source), str(target)), "copied")
-            self.assertEqual(target.read_bytes(), b"new capture")
-            # A converted replacement reports the timestamp of the user's own
-            # image through source_stamp_path, not the conversion product time.
-            os.utime(source, ns=(1_500_000_000, 1_500_000_000))
-            converted = folder / "mimi_keep_converted.dds"
-            converted.write_bytes(b"converted")
-            os.utime(converted, ns=(500_000_000, 500_000_000))
-            target.write_bytes(b"hand edited again")
-            os.utime(target, ns=(2_000_000_000, 2_000_000_000))
+
+        # An explicit replacement can be older than the generated file.
+        # Its timestamp comes from the selected image, not conversion time.
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as folder:
+            source = Path(folder) / "selected.png"
+            converted = Path(folder) / "converted.dds"
+            target = Path(folder) / "generated.dds"
+            for path, stamp in ((source, 1_000_000_000), (converted, 3_000_000_000),
+                                (target, 2_000_000_000)):
+                path.write_bytes(path.stem.encode())
+                os.utime(path, ns=(stamp, stamp))
             self.assertEqual(
-                helper(str(converted), str(target), str(source)), "kept"
+                M_IniHelper._refresh_generated_texture(str(converted), str(target), str(source)),
+                "copied",
             )
-        finally:
-            for path in (source, target, folder / "mimi_keep_converted.dds"):
-                if path.exists():
-                    path.unlink()
+            self.assertEqual(target.read_bytes(), b"converted")
+            self.assertEqual(target.stat().st_mtime_ns, 1_000_000_000)
 
 
     def test_refresh_blueprint_refreshes_every_texture_node(self):

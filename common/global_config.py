@@ -505,7 +505,7 @@ class GlobalConfig:
             GlobalConfig.TEXTURE_OUTPUT_SUBFOLDER + "\\",
         )
         if not os.path.exists(texture_path):
-            os.makedirs(texture_path)
+            os.makedirs(texture_path, exist_ok=True)
             print("GlobalConfig: Texture output folder created: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
         else:
             print("GlobalConfig: Using existing texture output folder: " + texture_path + " (DrawIB: " + str(draw_ib) + ")")
