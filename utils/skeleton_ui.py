@@ -95,7 +95,7 @@ def get_naming_items(self=None, context=None):
             NAMING_BONE_TO_GROUP,
             tr("Rename Bones (mod workflow)"),
             tr("Keep numeric vertex groups and rename the armature bones (keeps the model exportable); "
-               "a character whose DrawIBs use different palettes gets one armature per palette"),
+               "DrawIBs and components share an armature when their palettes match"),
         ),
         (
             NAMING_GROUP_TO_BONE,
@@ -271,16 +271,15 @@ def _naming_hint(info, naming):
     Only numeric bone names need a warning: one bone can carry one number, so a
     character whose DrawIBs disagree gets several armatures. Renaming the vertex
     groups keeps one armature, because every object renames its own groups, so
-    that mode has nothing to warn about. Per-component tables still change the
-    naming itself: they keep bone names because the export addresses the
-    components through one merged table.
+    that mode has nothing to warn about. Component-local palettes follow the
+    same numeric naming rule as DrawIB palettes.
     """
     if info is None:
         return ""
     if info.get("components"):
         if _wants_numeric_bones(naming):
             return tr(
-                "This skeleton numbers bones per component; the import renames the vertex groups instead of the bones"
+                "Components with different bone palettes get separate armatures"
             )
         return ""
     conflicts = info.get("conflicts") or []
@@ -322,8 +321,7 @@ def sidecar_info(folder):
         "path": path,
         "draw_ibs": len(payload.get("DrawIBs") or []),
         "characters": characters,
-        # The two facts that make "Rename Bones" impossible for this skeleton.
-        # Computing them once per file modification keeps the redraw cheap.
+        # Cache the palette information used by the naming hint.
         "conflicts": _conflicting_characters(payload),
         "components": any(entry.get("Components") for entry in payload.get("DrawIBs") or []),
     }
@@ -338,7 +336,7 @@ def clear_sidecar_cache():
 
 # The side panel is narrow, so a bind report has to be split into lines that
 # actually fit. One line that is too long is shortened in the middle, which hid
-# the forced-naming note of every long report.
+# binding details in long reports.
 REPORT_LINE_WIDTH = 38
 REPORT_MAX_LINES = 8
 
@@ -431,9 +429,7 @@ def draw_skeleton_binding(layout, scene, folder, expand_property=EXPAND_PROPERTY
                 info, _concrete_naming(getattr(scene, NAMING_PROPERTY, ""))
             )
             if hint:
-                # A per-component fallback really changes the naming mode, while
-                # one armature per palette is the documented numeric behaviour.
-                body.label(text=hint, icon='ERROR' if info.get("components") else 'INFO')
+                body.label(text=hint, icon='INFO')
             body.label(
                 text=tr("Skeleton file found: the import will bind the character armature"),
                 icon='ARMATURE_DATA',

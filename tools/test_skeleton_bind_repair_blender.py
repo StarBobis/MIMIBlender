@@ -277,6 +277,45 @@ class ComponentIdentityTests(unittest.TestCase):
 class PaletteConflictTests(unittest.TestCase):
     """One rig cannot carry two numberings, so each palette gets its own rig."""
 
+    def test_component_palettes_respect_both_naming_modes(self):
+        bones = [
+            {"Name": "Root", "Parent": -1, "Rest": rest_matrix(), "Length": 0.2},
+            {"Name": "Arm", "Parent": 0, "Rest": rest_matrix(x=0.3), "Length": 0.2},
+        ]
+        components = [
+            {"ComponentIndex": index, "BoneMap": {"0": name}}
+            for index, name in enumerate(("Root", "Arm", "Arm"))
+        ]
+        block = drawib_block(bones, {"0": "Root"}, naming="groupToBone",
+                             components=components, hash_value="components")
+
+        for mode in ("BONE_TO_GROUP", "GROUP_TO_BONE"):
+            first, second, third = (
+                make_mesh(name, [("0", [0, 1, 2])])
+                for name in ("aaaa1111-Component 0.part", "renamed", "aaaa1111-Component 2.part")
+            )
+            second[helper_module.COMPONENT_INDEX_PROPERTY] = 1
+            unknown = make_mesh("whole_buffer", [("0", [0, 1, 2])])
+            warnings = []
+            summary = SkeletonHelper.apply_groups(
+                mode, {"aaaa1111": [first, second, third, unknown]},
+                import_mirror=False, skeletons={"aaaa1111": block}, warnings=warnings)
+            first_rig, second_rig, third_rig = map(bound_armature, (first, second, third))
+            self.assertIs(second_rig, third_rig)
+            self.assertFalse(unknown.modifiers)
+            self.assertTrue(any("without component identity" in warning for warning in warnings))
+            if mode == "BONE_TO_GROUP":
+                self.assertIn("naming Rename Bones", summary)
+                self.assertIsNot(first_rig, second_rig)
+                self.assertEqual([mesh.vertex_groups[0].name for mesh in (first, second, third)], ["0"] * 3)
+                self.assertAlmostEqual(first_rig.data.bones["0"].head_local.x, 0.0)
+                self.assertAlmostEqual(second_rig.data.bones["0"].head_local.x, 0.3)
+            else:
+                self.assertIn("naming Rename Vertex Groups", summary)
+                self.assertIs(first_rig, second_rig)
+                self.assertEqual([mesh.vertex_groups[0].name for mesh in (first, second, third)],
+                                 ["Root", "Arm", "Arm"])
+
     def test_conflicting_palettes_get_one_armature_each(self):
         first = make_mesh("conflictA-Component 0", [("0", [0, 1, 2])])
         second = make_mesh("conflictB-Component 0", [("0", [0, 1, 2])])
