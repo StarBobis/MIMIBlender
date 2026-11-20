@@ -166,22 +166,6 @@ class DrawIBModelWWMI:
             ordered_submesh_json_list, include_shapekeys=False)
         self.merged_object = self.build_merged_object()
 
-        obj_name_temp_object_dict: dict[str, TempObject] = {}
-        for component in self.merged_object.components:
-            for temp_object in component.objects:
-                obj_name_temp_object_dict[temp_object.name] = temp_object
-
-        for idx, drawcall_model_list in enumerate(self.submesh_drawcall_groups):
-            updated_drawcall_model_list: list[DrawCallModel] = []
-            for drawcall_model in drawcall_model_list:
-                temp_object = obj_name_temp_object_dict.get(drawcall_model.obj_name)
-                if temp_object is not None:
-                    drawcall_model.index_count = temp_object.index_count
-                    drawcall_model.index_offset = temp_object.index_offset
-                    drawcall_model.vertex_count = temp_object.vertex_count
-                updated_drawcall_model_list.append(drawcall_model)
-            self.submesh_drawcall_groups[idx] = updated_drawcall_model_list
-
         # Build submesh_model_list and the Texture markup dict for the M_IniHelper Texture export
         # Note: sort by match_first_index (i.e. ComponentIndex / FirstIndex) in ascending order,
         # so that DrawIB-0 (Component 0) comes before DrawIB-1 (Component 1),
@@ -299,6 +283,16 @@ class DrawIBModelWWMI:
         for component in self.merged_object.components:
             component.index_count = sum(temp.index_count for temp in component.objects)
         self.merged_object.index_count = len(self.obj_buffer_model_wwmi.ib)
+        # INI drawindexed commands consume DrawCallModel, while alignment
+        # updates TempObject. Copy the evaluated ranges only after alignment.
+        owners_by_name = {temp.name: temp for temp in range_owners}
+        for draws in self.submesh_drawcall_groups:
+            for draw in draws:
+                owner = owners_by_name.get(draw.obj_name)
+                if owner is not None:
+                    draw.index_count = owner.index_count
+                    draw.index_offset = owner.index_offset
+                    draw.vertex_count = owner.vertex_count
 
         position_stride: int = self.d3d11_game_type.CategoryStrideDict["Position"]
         position_bytelength: int = len(self.obj_buffer_model_wwmi.category_buffer_dict["Position"])
@@ -497,6 +491,11 @@ class DrawIBModelWWMI:
                     for shape_key in muted_shape_keys:
                         temp_obj.shape_key_remove(shape_key)
 
+                # Match upstream by baking Object Mode edits on the export
+                # copy before modifiers, joining and the game-space transform.
+                if GlobalConfig.logic_name == LogicName.WWMI:
+                    with OpenObject(bpy.context, temp_obj):
+                        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
                 self.prepare_export_modifiers(temp_obj)
 
                 # WWMI has its own component merge and game-space transform.

@@ -184,6 +184,56 @@ class SplitDrawRangesTests(unittest.TestCase):
                 self.assertTrue(np.any(points[:, :, 1] > 0))
                 self.assertTrue(np.any(points[:, :, 1] < 0))
 
+    def export_wwmi_object(self, obj):
+        from MIMIBlender.common.mimi_global_properties import MIMIGlobalProperties
+        from MIMIBlender.games.wwmi import model as wwmi
+        from MIMIBlender.workspace.wwmi_info import WWMIInfoShapeKeys
+
+        submesh = 'LOD0.12345678-0'
+        draw = DrawCallModel(obj_name=obj.name, submesh_name=submesh)
+        blueprint = SimpleNamespace(ordered_draw_obj_data_model_list=[draw])
+        info = SimpleNamespace(components=[SimpleNamespace(vg_map={})], shapekeys=WWMIInfoShapeKeys())
+        # Stub workspace and texture I/O only. The real model builds the
+        # evaluated VB, aligns the IB, and supplies the draw command's range.
+        with (
+            patch.object(GlobalConfig, 'logic_name', LogicName.WWMI),
+            patch.object(MIMIGlobalProperties, 'import_merged_vgmap', return_value='PER_COMPONENT'),
+            patch.object(MIMIGlobalProperties, 'apply_all_modifiers', return_value=False),
+            patch.object(wwmi.MMTWorkSpace, 'get_drawib_aliasname_dict', return_value={}),
+            patch.object(wwmi.MMTWorkSpace, 'get_ordered_submesh_name_list_by_drawib', return_value=[submesh]),
+            patch.object(wwmi.MMTWorkSpace, 'check_and_get_submesh_json_path', return_value='synthetic.json'),
+            patch.object(wwmi, 'SubmeshJson', return_value=METADATA),
+            patch.object(wwmi.WWMIInfoHelper, 'build_from_json_list', return_value=info),
+            patch.object(wwmi.TextureMetadataResolver, 'load_submesh_texture_markup_info_from_all_submeshes', return_value={}),
+            patch.object(DrawIBModel, 'resolve_texture_bindings_for_model'),
+        ):
+            model = wwmi.DrawIBModelWWMI('12345678', blueprint, 'LOD0')
+        return model.submesh_drawcall_groups[0][0], model.obj_buffer_model_wwmi
+
+    def test_wwmi_drawindexed_covers_evaluated_array(self):
+        obj = self.objects[0]
+        modifier = obj.modifiers.new('Repeat', 'ARRAY')
+        modifier.count = 2
+        draw, result = self.export_wwmi_object(obj)
+        self.assertEqual(len(result.ib), 12)
+        self.assertEqual(draw.get_drawindexed_str(), 'drawindexed = 12,0,0')
+        self.assertEqual(len(obj.data.polygons), 2)
+        self.assertEqual(len(obj.modifiers), 1)
+
+    def test_wwmi_position_buffer_preserves_object_transforms(self):
+        obj = self.objects[0]
+        obj.location = (3, 4, 5)
+        obj.rotation_euler.z = 0.75
+        obj.scale = (2, 3, 1)
+        bpy.context.view_layer.update()
+        matrix = obj.matrix_world.copy()
+        _, result = self.export_wwmi_object(obj)
+        positions = np.frombuffer(result.category_buffer_dict['Position'], dtype='<f4').reshape(-1, 3)
+        expected = np.array([tuple(matrix @ obj.data.vertices[vertex].co)
+                             for vertex in result.index_vertex_id_dict.values()])
+        np.testing.assert_allclose(positions, expected * [-100, -100, 100], atol=0.001)
+        self.assertEqual(obj.matrix_world, matrix)
+
     # Multi-Submesh coverage is separate from the modifier regression above.
     # It uses unchanged geometry and therefore cannot be blamed on evaluation.
     # Each Submesh independently exports the very same Blender object identities.
