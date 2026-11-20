@@ -26,6 +26,7 @@ from texcomb.core.dds_match import (
     read_dds_metadata,
     matching_mip_count,
     DDSMetadata,
+    run_conversion_plan,
 )
 from texcomb.core.conversion_cache import ConversionCache
 from texcomb.core.texconv import _run_texconv
@@ -66,6 +67,23 @@ def test_partial_and_one_mip():
     with pytest.raises(ValueError, match='too small'):
         matching_mip_count(partial, 4, 4)
     assert matching_mip_count(DDSMetadata(64, 64, 1, 28, True), 128, 128) == 1
+
+
+@pytest.mark.parametrize('resize_filter', ['FANT', 'BOX'])
+def test_npot_srgb_dds_regenerates_mips(tmp_path, resize_filter):
+    # A single-mip BC7 replacement needs a fresh chain even at its own size.
+    source_image = tmp_path / 'source.png'
+    Image.new('RGBA', (24, 16), (128, 64, 32, 200)).save(source_image)
+    _run_texconv(['-f', 'BC7_UNORM_SRGB', '-dx10', '-m', '1', '-o',
+                  str(tmp_path), str(source_image)])
+    source = str(tmp_path / 'source.dds')
+    original = DDSMetadata(16, 16, 5, 99, True)
+    plan = build_conversion_plan(source, original, resize_filter=resize_filter)
+    assert plan.resize_filter == 'LINEAR'
+    output = run_conversion_plan(plan, str(tmp_path / 'output'))
+    actual = read_dds_metadata(output)
+    assert actual.storage_key == original.storage_key
+    assert (actual.width, actual.height, actual.mip_count) == (24, 16, 5)
 
 
 def test_invalid_header(tmp_path):
@@ -109,7 +127,7 @@ def test_payload_and_volume_passthrough(tmp_path):
         read_dds_metadata(path)
 
 
-def _round_trip_pixel(tmp_path, target_format):
+def _round_trip_pixel(tmp_path, target_format, color_mode='AUTO'):
     """Convert one 8x8 image to a target and read the first pixel back.
 
     The original DDS is produced first so the plan follows the same path as
@@ -123,10 +141,8 @@ def _round_trip_pixel(tmp_path, target_format):
                   str(tmp_path), str(original)])
     original_dds = tmp_path / 'pixel_original.dds'
     metadata = read_dds_metadata(str(original_dds))
-    plan = build_conversion_plan(str(source), metadata)
+    plan = build_conversion_plan(str(source), metadata, color_mode=color_mode)
     produced_dir = tmp_path / 'produced'
-    # run_conversion_plan is imported lazily to keep the module list short.
-    from texcomb.core.dds_match import run_conversion_plan
     produced = run_conversion_plan(plan, str(produced_dir))
     back_dir = tmp_path / 'back'
     os.makedirs(back_dir, exist_ok=True)
@@ -143,9 +159,9 @@ def test_srgb_target_keeps_pixel_bytes(tmp_path):
 
 
 def test_linear_target_keeps_raw_bytes(tmp_path):
-    # Data textures rely on the ASCII bytes being copied unchanged; a color
+    # Data textures rely on the pixel bytes being copied unchanged; a color
     # space conversion here would corrupt masks, normals and lookups.
-    pixel = _round_trip_pixel(tmp_path, 'R8G8B8A8_UNORM')
+    pixel = _round_trip_pixel(tmp_path, 'R8G8B8A8_UNORM', color_mode='DATA')
     assert pixel[:3] == (128, 64, 32), pixel
 
 

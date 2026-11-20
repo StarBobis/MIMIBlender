@@ -621,6 +621,15 @@ def build_conversion_plan(source, original, force_original_size=False,
     # An unknown filter falls back to the documented default instead of
     # reaching texconv, which would fail on a typo and abort the export.
     chosen_filter = resize_filter if resize_filter in RESIZE_FILTERS else DEFAULT_RESIZE_FILTER
+    # Texconv shares -if between resizing and mip generation. FANT aliases BOX
+    # in DirectXTex, whose native mip generator requires power-of-two dimensions.
+    # Use DirectXTex's default for this shape and include it in the cache key.
+    if (
+        mips > 1
+        and chosen_filter in ('FANT', 'BOX')
+        and (width & (width - 1) or height & (height - 1))
+    ):
+        chosen_filter = 'LINEAR'
     srgb_in, srgb_out, ignore_srgb = colour_flags(
         source, original.dxgi, color_mode=color_mode, data_hint=data_hint,
     )
@@ -668,8 +677,7 @@ def run_conversion_plan(plan, output_dir, explicit_path=""):
     else:
         args.append('-srgbo')
     args += ['-y', '-o', output_dir]
-    # The resize filter only matters when the output size differs from the
-    # source size, and texconv ignores it otherwise.
+    # Texconv also uses the filter when regenerating mips at the same size.
     if plan.resize_filter:
         args += ['-if', plan.resize_filter]
     args.append(input_path)

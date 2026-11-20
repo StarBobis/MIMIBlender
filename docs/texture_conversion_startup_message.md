@@ -81,3 +81,21 @@ support documentation. If Generate Mod still reports a conversion failure in
 the source/captured DDS metadata. Check tool absence, invalid format, truncated
 payload and filesystem failures separately; do not label every zero-job result
 as success or every DDS failure as a missing tool.
+
+## Non-power-of-two mip generation failure
+
+When texconv 2026.5.8.1 reports `FAILED [mipmaps] (80004005)`, check the
+planned output dimensions, mip count and `-if` filter. Texconv uses that
+filter for both resizing and mip generation. FANT and BOX share a filter
+flag, and the native DirectXTex BOX mip generator rejects non-power-of-two
+dimensions.
+[DirectXTex mipmap implementation](https://github.com/microsoft/DirectXTex/blob/main/DirectXTex/DirectXTexMipmaps.cpp)
+
+To isolate this failure, feed a single-mip BC7 sRGB DDS with non-power-of-two
+dimensions into a full-chain conversion. Keep the dimensions and mip count
+fixed while comparing FANT or BOX with LINEAR. A 6144×4096 source reproduced
+the error and produced a 13-level BC7 sRGB DDS with LINEAR. The planner now
+uses LINEAR for this combination and records the effective filter in the
+conversion cache key. The regression in
+[`test_dds_match.py`](../texcomb/tests/test_dds_match.py) exercises both aliases
+with a small DDS and checks the resulting storage format and mip count.
