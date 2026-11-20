@@ -79,7 +79,9 @@ IMPORT = load_function('common/mesh_create_helper.py', 'import_shapekeys_wwmi', 
     'capture_reverse_shape_metadata': REVERSE_METADATA['capture_reverse_shape_metadata'],
 })
 EXPORT = load_function('games/wwmi/shapekeys.py', 'get_wwmi_shapekey_batches', {
-    'Fatal': ValueError, 'validate_runtime_batch': REVERSE_METADATA['validate_runtime_batch']})
+    'Fatal': ValueError, 'validate_runtime_batch': REVERSE_METADATA['validate_runtime_batch'],
+    'MAX_RUNTIME_SHAPE_BATCHES': REVERSE_METADATA['MAX_RUNTIME_SHAPE_BATCHES'],
+})
 PACK = load_function('utils/shapekey_utils.py', 'extract_shapekey_data', {'math': math, 'numpy': numpy})
 
 

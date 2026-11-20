@@ -17,6 +17,7 @@ import numpy
 
 
 PROPERTY_NAME = "mimi_wwmi_reverse_shape_metadata"
+MAX_RUNTIME_SHAPE_BATCHES = 2
 
 # Fields that describe the game's original dispatch, not the compact Mod buffer.
 RUNTIME_FIELDS = ("vertex_offset", "dispatch_y", "checksum")
@@ -211,7 +212,12 @@ def _merge_source(selected, incoming, fail):
                     target[field] = deepcopy(value)
                 elif _integer(current, fail) != value:
                     fail("conflicts with an existing original runtime batch")
-            for field in ("shapekey_count", "shapekey_offset"):
+            # A terminal batch's populated count describes the edited payload.
+            # Earlier counts still define the ID boundary of a following batch.
+            boundary_fields = ("shapekey_offset",)
+            if index + 1 < max(len(merged), len(rows)):
+                boundary_fields += ("shapekey_count",)
+            for field in boundary_fields:
                 value = row.get(field)
                 if value is None:
                     continue
@@ -261,7 +267,7 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=No
     """Extend batches from explicitly attached, matching reverse sources.
 
     Native component palettes and vertex counts remain authoritative.
-    All overlapping runtime dispatches must agree, including shape boundaries.
+    Overlapping dispatch identities and subsequent batch boundaries must agree.
     Multiple source objects may repeat or extend the same batch sequence.
     Conflicting complete sources fail rather than silently winning by order.
     A source that records less than the target already has cannot block the
@@ -276,6 +282,15 @@ def resolve_reverse_shape_metadata(info, objects, draw_ib, required_key_count=No
     if required_key_count == 0:
         original.batches = []
         return
+
+    # The public runtime provides only two blocks of 127 slots. Reject an
+    # impossible key ID before an unrelated reverse-sidecar error can mask it.
+    max_capacity = MAX_RUNTIME_SHAPE_BATCHES * 127
+    if required_key_count is not None and required_key_count > max_capacity:
+        raise ValueError(
+            f"WWMI DrawIB {draw_ib}: shape key ID {required_key_count - 1} exceeds "
+            f"the WWMI runtime limit of {max_capacity} slots (IDs 0–{max_capacity - 1})."
+        )
 
     def fail_workspace(reason):
         raise ValueError("WWMI DrawIB " + draw_ib + ", workspace: shape metadata "

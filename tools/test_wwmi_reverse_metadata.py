@@ -208,8 +208,8 @@ class ReverseMetadataTests(unittest.TestCase):
         self.assertEqual(len(self.info.shapekeys.batches), 2)
 
     def test_overlapping_runtime_identities_must_agree(self):
-        # All four fields identify the original runtime dispatch and its slots.
-        # Mod sparse vertex counts deliberately are not part of that identity.
+        # Three fields identify the runtime dispatch. The first batch's key
+        # count also determines where IDs start in the second batch.
         # A mismatch must fail before extending any other source's batches.
         for key in ('vertex_offset', 'dispatch_y', 'checksum', 'shapekey_count'):
             with self.subTest(key=key):
@@ -218,6 +218,34 @@ class ReverseMetadataTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.resolve([self.object(buffers)])
                 self.assertEqual(len(self.info.shapekeys.batches), 1)
+
+    def test_terminal_population_does_not_block_runtime_metadata_recovery(self):
+        self.info.shapekeys.batches = deepcopy(self.batches)
+        self.info.shapekeys.batches[1]['checksum'] = None
+        buffers = deepcopy(self.buffers)
+        # Xin's game batch populates 49 slots, while the reverse Mod uses 56.
+        # The next ID boundary is unaffected and the INI supplies the checksum.
+        buffers['metadata']['batches'][1]['shapekey_count'] = 56
+        RESOLVE(self.info, [self.object(buffers)], 'e590b8d4_LOD0', required_key_count=183)
+        self.assertEqual(self.info.shapekeys.batches[1]['checksum'], 3465)
+        self.assertEqual(self.info.shapekeys.batches[1]['shapekey_count'], 49)
+        self.assertEqual(self.info.shapekeys.batches[1]['shapekey_offset'], 127)
+
+    def test_terminal_populated_count_cannot_hide_a_checksum_conflict(self):
+        self.info.shapekeys.batches = deepcopy(self.batches)
+        buffers = deepcopy(self.buffers)
+        buffers['metadata']['batches'][1].update(shapekey_count=56, checksum=7)
+        with self.assertRaisesRegex(ValueError, 'conflicts'):
+            self.resolve([self.object(buffers)])
+
+    def test_runtime_capacity_error_identifies_out_of_range_key(self):
+        self.info.shapekeys.batches = deepcopy(self.batches)
+        before = deepcopy(self.info.shapekeys.batches)
+        # A corrupt optional sidecar must not mask an unrepresentable key ID.
+        with self.assertRaisesRegex(ValueError, 'e590b8d4_LOD0: shape key ID 254.*254 slots'):
+            RESOLVE(self.info, [Object({PROPERTY: '{'})], 'e590b8d4_LOD0', required_key_count=255)
+        self.assertEqual(self.info.shapekeys.batches, before)
+        RESOLVE(self.info, [Object({PROPERTY: '{'})], 'e590b8d4_LOD0', required_key_count=254)
 
     def test_incomplete_metadata_never_fabricates_checksum(self):
         for change in ({'checksum': None}, {'runtime_metadata_complete': False}, {'dispatch_y': 0}):

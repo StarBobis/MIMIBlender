@@ -26,7 +26,7 @@ from ...blueprint.blueprint_export_helper import BlueprintExportHelper
 from ...utils.format_utils import Fatal
 from .model import DrawIBModelWWMI
 from .names import scoped_global, scoped_name, scoped_section
-from ...workspace.wwmi_reverse_metadata import validate_runtime_batch
+from ...workspace.wwmi_reverse_metadata import MAX_RUNTIME_SHAPE_BATCHES, validate_runtime_batch
 
 
 def get_safe_shapekey_name(shapekey_name: str) -> str:
@@ -87,7 +87,7 @@ def get_wwmi_shapekey_batches(draw_ib_model: DrawIBModelWWMI) -> list[dict]:
     batch_count = len(shapekey_offsets) // 128
     # The pinned WWMI Package exposes only batch0 and batch1 to its overrider.
     # Do not emit batch2 variables that that public runtime cannot consume.
-    if batch_count > 2:
+    if batch_count > MAX_RUNTIME_SHAPE_BATCHES:
         raise Fatal("WWMI runtime supports at most two native shape key batches.")
     metadata_batches = list(getattr(draw_ib_model.wwmi_info.shapekeys, "batches", []) or [])
     if not metadata_batches and getattr(draw_ib_model.wwmi_info.shapekeys, "checksum", None) is not None:
