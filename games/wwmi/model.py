@@ -3,7 +3,6 @@ import os
 import re
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import TypedDict
 
 import bpy
 import numpy
@@ -12,6 +11,7 @@ from ...common.mimi_global_properties import MIMIGlobalProperties
 from ...common.global_config import GlobalConfig
 from ...common.global_config import LogicName
 from ...utils.export_utils import ExportUtils, ObjElementContext, WWMIBufferBuildResult
+from ...utils.draw_range_utils import DrawRangeUtils
 from ...utils.log_utils import LOG
 from ...utils.mesh_mirror_utils import MeshMirrorUtils
 from ...utils.obj_utils import (
@@ -43,11 +43,6 @@ from ...workspace.texture_metadata_helper import TextureMetadataResolver
 GLOBAL_GROUP_NAME = re.compile(r"^(\d+)(?:\.\d+)?$")
 
 
-class BlendRemapEntry(TypedDict):
-    forward: list[int]
-    reverse: dict[int, int]
-
-
 @dataclass
 class DrawIBModelWWMI:
     draw_ib: str # Current DrawIB
@@ -73,12 +68,7 @@ class DrawIBModelWWMI:
     # Every component table in one DrawIB must use the same stride.
     blend_remap_bone_count: int = field(init=False, default=512)
     obj_buffer_model_wwmi: WWMIBufferBuildResult | None = field(init=False, default=None, repr=False)
-    blend_remap_maps: dict[str, BlendRemapEntry] = field(init=False, default_factory=dict, repr=False)
-    blend_remap_used: dict[str, bool] = field(init=False, default_factory=dict, repr=False)
-    # Same information keyed by the real component index. A component without
-    # any object in the blueprint produces no joined object, so the name keyed
-    # map above has no entry for it; every INI writer must use this map to stay
-    # aligned with wwmi_info.components.
+    # Keyed by native component index, including gaps left by omitted draws.
     blend_remap_used_by_index: dict[int, bool] = field(init=False, default_factory=dict, repr=False)
     component_real_vg_count_dict: dict[int, int] = field(init=False, default_factory=dict, repr=False)
 
@@ -254,8 +244,8 @@ class DrawIBModelWWMI:
         # Resolve names after the final join, which may reorder group IDs.
         # Keep full-width identities for the runtime remapper's input too.
         self.resolve_named_blendindices(element_context)
-        if self.blend_remap:
-            self.replace_remapped_blendindices(element_context)
+        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+            self.export_blendremap_forward_and_reverse(element_context)
 
         element_context.element_vertex_ndarray = ObjBufferHelper.convert_to_element_vertex_ndarray(
             mesh=element_context.mesh,
@@ -302,7 +292,6 @@ class DrawIBModelWWMI:
         # WWMI bypasses SubMeshModel, but must use the same actual polygon ranges.
         # Keep components contiguous for dispatch and merged-component remapping.
         # TempObject entries are the range owners consumed by the WWMI INI writer.
-        from ...utils.draw_range_utils import DrawRangeUtils
         range_owners = [temp for component in self.merged_object.components for temp in component.objects]
         self.obj_buffer_model_wwmi.ib = DrawRangeUtils.align_buffer_ranges(
             element_context.mesh, self.obj_buffer_model_wwmi.ib, range_owners,
@@ -342,7 +331,7 @@ class DrawIBModelWWMI:
                 resolved[(indices == index) & active] = int(match.group(1))
             # Local-mode components share a joined group list but not a palette.
             # Validate by their polygon ranges before the R8 pack can truncate.
-            # In Merged, the named runtime palette was checked by table creation.
+            # In Merged, table creation validates the named runtime palette.
             if MIMIGlobalProperties.import_merged_vgmap() != 'MERGED':
                 for component_id, component in enumerate(self.merged_object.components):
                     limit = min(256, self.wwmi_info.components[component_id].vg_count)
@@ -490,7 +479,6 @@ class DrawIBModelWWMI:
                     )
                 )
 
-        self.component_real_vg_count_dict = {}
         index_offset = 0
         owner = 0
 
@@ -521,7 +509,6 @@ class DrawIBModelWWMI:
 
                 # Track the same component/object order used for WWMI draw emission.
                 # Face tags survive the two joins and the evaluated buffer mesh.
-                from ...utils.draw_range_utils import DrawRangeUtils
                 owner += 1
                 DrawRangeUtils.tag_object(temp_obj, owner)
 
@@ -551,9 +538,7 @@ class DrawIBModelWWMI:
         drawib_merged_object: list[bpy.types.Object] = []
         drawib_vertex_count: int = 0
         drawib_index_count: int = 0
-        component_obj_list: list[tuple[int, bpy.types.Object]] = []
-
-        for component_index, component in enumerate(components):
+        for component in components:
             component_merged_object = [temp_object.object for temp_object in component.objects]
 
             if len(component_merged_object) == 0:
@@ -577,29 +562,14 @@ class DrawIBModelWWMI:
                 ObjUtils.select_obj(component_obj)
                 VertexGroupUtils.fill_vertex_group_gaps()
                 # The final join performs this normalization too. Do it before
-                # selecting each component's top influences, otherwise combining
-                # duplicate names later can introduce a bone absent from its map.
+                # extracting the final weights so duplicate names can merge.
                 VertexGroupUtils.merge_vertex_groups_with_same_number_v2()
                 component_obj.select_set(False)
 
-            component.remap_key_name = component_obj.name
-            component_obj_list.append((component_index, component_obj))
             drawib_merged_object.append(component_obj)
-
-            used_vg_indices = set()
-            for vertex in component_obj.data.vertices:
-                for group in vertex.groups:
-                    if group.weight > 0.0:
-                        used_vg_indices.add(group.group)
-            self.component_real_vg_count_dict[component_index] = len(used_vg_indices)
 
             drawib_vertex_count += component.vertex_count
             drawib_index_count += component.index_count
-
-        # Offline local indices need no runtime remap tables, even for global
-        # names above 511. Only Merged uses the runtime remap shaders.
-        if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
-            self.export_blendremap_forward_and_reverse(component_obj_list)
 
         if drawib_merged_object:
             bpy.ops.object.select_all(action='DESELECT')
@@ -640,159 +610,80 @@ class DrawIBModelWWMI:
         LOG.newline()
         return merged_object
 
-    def export_blendremap_forward_and_reverse(self, component_objects: list[tuple[int, bpy.types.Object]]):
-        """Build the blend remap buffers of every component that has objects.
+    def export_blendremap_forward_and_reverse(self, element_context: ObjElementContext):
+        """Build each runtime palette from the final, packed-weight draw loops."""
+        source = element_context.original_elementname_data_dict
+        if "BLENDINDICES" not in source:
+            return
+        indices = source["BLENDINDICES"]
+        weights = source["BLENDWEIGHT"]
+        mesh = element_context.mesh
 
-        ``component_objects`` pairs each joined component object with its real
-        component index, so the remap flags can be looked up by index later.
-        """
-        num_vgs = self.d3d11_game_type.get_blendindices_count_wwmi()
+        # Use the same face owners that will route the IB spans to each draw.
+        # Loose vertices and weights that quantized to zero have no palette use.
+        owner_components = numpy.array([
+            component_index
+            for component_index, component in enumerate(self.merged_object.components)
+            for _ in component.objects
+        ], dtype=numpy.int32)
+        attribute = mesh.attributes.get(DrawRangeUtils.OWNER_ATTRIBUTE)
+        if attribute is None or len(attribute.data) != len(mesh.polygons):
+            raise ValueError("WWMI export mesh lost polygon ownership.")
+        owners = numpy.empty(len(mesh.polygons), dtype=numpy.int32)
+        attribute.data.foreach_get("value", owners)
+        if (numpy.any((owners < 1) | (owners > len(owner_components)))
+                or len(mesh.loops) != 3 * len(mesh.polygons)):
+            raise ValueError("WWMI export mesh contains unowned or non-triangular polygons.")
+        loop_components = numpy.repeat(owner_components[owners - 1], 3)
 
-        blend_remap_forward: numpy.ndarray = numpy.empty(0, dtype=numpy.uint16)
-        blend_remap_reverse: numpy.ndarray = numpy.empty(0, dtype=numpy.uint16)
-        remap_maps: dict[str, BlendRemapEntry] = {}
-        remap_used: dict[str, bool] = {}
-        remap_used_by_index: dict[int, bool] = {}
-
-        # The merged skeleton contains all original runtime slots, including
-        # aliases that VGMap collapses during import. Size from the actual end,
-        # not a fixed 512-bone assumption or a count of named Blender groups.
+        # SkeletonMerger initializes only the recorded ranges. Gaps may fit
+        # the table stride but cannot be used as weighted global bone IDs.
         skeleton_count = max((c.vg_offset + c.vg_count for c in self.wwmi_info.components), default=0)
         self.blend_remap_bone_count = max(512, skeleton_count)
         if self.blend_remap_bone_count > 65536:
             raise ValueError("WWMI merged skeleton exceeds the R16 remap index range.")
-        # Metadata may contain gaps between component ranges. Those slots fit
-        # the buffer but are never initialized by SkeletonMerger and therefore
-        # cannot be accepted as weighted bone identities.
-        valid_runtime_slots = numpy.zeros(self.blend_remap_bone_count, dtype=bool)
+        valid_slots = numpy.zeros(self.blend_remap_bone_count, dtype=bool)
         for component in self.wwmi_info.components:
             if component.vg_offset < 0 or component.vg_count < 0:
-                raise ValueError('WWMI component skeleton ranges must be nonnegative.')
-            valid_runtime_slots[component.vg_offset:component.vg_offset + component.vg_count] = True
-        for component_index, component_obj in component_objects:
-            used_vg_set: set[int] = set()
-            group_names = {group.index: GLOBAL_GROUP_NAME.fullmatch(group.name)
-                           for group in component_obj.vertex_groups}
+                raise ValueError("WWMI component skeleton ranges must be nonnegative.")
+            valid_slots[component.vg_offset:component.vg_offset + component.vg_count] = True
 
-            for vertex in component_obj.data.vertices:
-                groups = [(group.group, group.weight) for group in vertex.groups]
-                if len(groups) == 0:
-                    continue
-
-                groups.sort(key=lambda item: item[1], reverse=True)
-                for group_index, weight in groups[:num_vgs]:
-                    if weight > 0:
-                        # A group name survives joins; its internal index does not.
-                        # Unknown weighted identities must fail rather than disappear.
-                        match = group_names.get(int(group_index))
-                        if match is None:
-                            raise ValueError("WWMI weighted vertex group requires a numeric bone name in " + component_obj.name)
-                        identity = int(match.group(1))
-                        if identity >= skeleton_count or not valid_runtime_slots[identity]:
-                            raise ValueError("WWMI bone " + str(identity) + " is outside the original merged skeleton in " + component_obj.name)
-                        used_vg_set.add(identity)
-
-            # The draw shader can address at most 256 bones with R8 indices.
-            # Report an unrepresentable cross-component edit before truncation.
-            if len(used_vg_set) > 256:
-                raise ValueError("WWMI component " + str(component_index) + " uses more than 256 bones; split the draw before export.")
-            self.component_real_vg_count_dict[component_index] = len(used_vg_set)
-            max_used = max(used_vg_set) if len(used_vg_set) else 0
-            if len(used_vg_set) == 0 or max_used < 256:
-                remap_maps[component_obj.name] = {"forward": [], "reverse": {}}
-                remap_used[component_obj.name] = False
-                remap_used_by_index[component_index] = False
+        packed_indices = indices.copy()
+        forward_tables, reverse_tables = [], []
+        for component_index in numpy.unique(loop_components).tolist():
+            loops = loop_components == component_index
+            obj_indices = indices[loops]
+            used = numpy.unique(obj_indices[weights[loops] > 0])
+            self.component_real_vg_count_dict[component_index] = len(used)
+            if numpy.any(used >= skeleton_count) or not numpy.all(valid_slots[used]):
+                raise ValueError(f"WWMI component {component_index} contains a bone outside the original merged skeleton.")
+            # The runtime writes compact IDs to R8_UINT, so 256 active bones
+            # fit exactly. An additional active bone cannot be represented.
+            if len(used) > 256:
+                raise ValueError(
+                    f"WWMI component {component_index} uses {len(used)} exported bones "
+                    "(maximum 256); split the draw before export."
+                )
+            if not len(used) or used[-1] < 256:
+                self.blend_remap_used_by_index[component_index] = False
                 continue
 
-            self.blend_remap = True
-
-            obj_vg_ids = numpy.array(sorted(used_vg_set), dtype=numpy.uint16)
             forward = numpy.zeros(self.blend_remap_bone_count, dtype=numpy.uint16)
-            forward[:len(obj_vg_ids)] = obj_vg_ids
+            reverse = numpy.zeros_like(forward)
+            forward[:len(used)] = used
+            reverse[used] = numpy.arange(len(used), dtype=numpy.uint16)
+            packed_indices[loops] = reverse[obj_indices]
+            forward_tables.append(forward)
+            reverse_tables.append(reverse)
+            self.blend_remap_used_by_index[component_index] = True
 
-            reverse = numpy.zeros(self.blend_remap_bone_count, dtype=numpy.uint16)
-            reverse[obj_vg_ids] = numpy.arange(len(obj_vg_ids), dtype=numpy.uint16)
-
-            blend_remap_forward = numpy.concatenate((blend_remap_forward, forward), axis=0)
-            blend_remap_reverse = numpy.concatenate((blend_remap_reverse, reverse), axis=0)
-
-            forward_list = [int(value) for value in obj_vg_ids.tolist()]
-            reverse_map: dict[int, int] = {int(value): int(index) for index, value in enumerate(forward_list)}
-            remap_maps[component_obj.name] = {"forward": forward_list, "reverse": reverse_map}
-            remap_used[component_obj.name] = True
-            remap_used_by_index[component_index] = True
-
-        self.blend_remap_maps = remap_maps
-        self.blend_remap_used = remap_used
-        self.blend_remap_used_by_index = remap_used_by_index
-        self.blend_remap_forward_buffer = blend_remap_forward
-        self.blend_remap_reverse_buffer = blend_remap_reverse
-
-    def replace_remapped_blendindices(self, element_context: ObjElementContext):
-        if not hasattr(self, "blend_remap_maps") or not self.blend_remap_maps:
-            return
-
-        mesh = element_context.mesh
-        loops_len = len(mesh.loops)
-
-        loop_to_poly = numpy.empty(loops_len, dtype=numpy.int32)
-        for poly in mesh.polygons:
-            start = poly.loop_start
-            end = start + poly.loop_total
-            loop_to_poly[start:end] = poly.index
-
-        arr: numpy.ndarray | None = None
-        if "BLENDINDICES" in getattr(element_context, "original_elementname_data_dict", {}):
-            arr = element_context.original_elementname_data_dict["BLENDINDICES"].copy()
-        elif element_context.element_vertex_ndarray is not None and "BLENDINDICES" in element_context.element_vertex_ndarray.dtype.names:
-            arr = element_context.element_vertex_ndarray["BLENDINDICES"].copy()
-
-        if arr is None:
-            return
-
-        poly_count = len(mesh.polygons)
-        polygon_to_objname: list[str | None] = [None] * poly_count
-
-        for component in self.merged_object.components:
-            component_remap_key_name = getattr(component, "remap_key_name", None)
-            for temp_obj in component.objects:
-                if not hasattr(temp_obj, "index_offset") or not hasattr(temp_obj, "index_count"):
-                    continue
-                poly_start = int(temp_obj.index_offset // 3)
-                poly_end = poly_start + int(temp_obj.index_count // 3)
-                for poly_index in range(poly_start, poly_end):
-                    if 0 <= poly_index < poly_count:
-                        polygon_to_objname[poly_index] = component_remap_key_name or temp_obj.name
-
-        width = 1 if getattr(arr, "ndim", 1) == 1 else arr.shape[1]
-        weights = element_context.original_elementname_data_dict.get('BLENDWEIGHT')
-        # Validate active identities rather than falling back to an original
-        # global number that would be truncated when packed into the R8 field.
-        # Zero-weight padding may legitimately be absent from a compact palette.
-
-        for loop_index in range(loops_len):
-            poly_idx = int(loop_to_poly[loop_index])
-            component_obj_name = polygon_to_objname[poly_idx] if 0 <= poly_idx < len(polygon_to_objname) else None
-            if not component_obj_name:
-                continue
-            remap_entry = self.blend_remap_maps.get(component_obj_name)
-            if not remap_entry:
-                continue
-            reverse_map = remap_entry.get("reverse", {})
-
-            if width == 1:
-                original_value = int(arr[loop_index])
-                if reverse_map and original_value not in reverse_map and weights is not None and weights[loop_index] > 0:
-                    raise ValueError('WWMI active bone is missing from its component remap: ' + str(original_value))
-                arr[loop_index] = reverse_map.get(original_value, original_value)
-            else:
-                for value_index in range(width):
-                    original_value = int(arr[loop_index, value_index])
-                    if reverse_map and original_value not in reverse_map and weights is not None and weights[loop_index, value_index] > 0:
-                        raise ValueError('WWMI active bone is missing from its component remap: ' + str(original_value))
-                    arr[loop_index, value_index] = reverse_map.get(original_value, original_value)
-
-        element_context.final_elementname_data_dict["BLENDINDICES"] = arr
+        if forward_tables:
+            # Keep the full-width IDs in the source arrays for the separate
+            # VertexVG buffer. Only the packed Blend indices use compact IDs.
+            self.blend_remap = True
+            self.blend_remap_forward_buffer = numpy.concatenate(forward_tables)
+            self.blend_remap_reverse_buffer = numpy.concatenate(reverse_tables)
+            element_context.final_elementname_data_dict["BLENDINDICES"] = packed_indices
 
     @property
     def part_name_submesh_dict(self) -> dict:

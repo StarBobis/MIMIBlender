@@ -40,6 +40,7 @@ from MIMIBlender.utils.shapekey_utils import ShapeKeyUtils
 from MIMIBlender.common.global_config import GlobalConfig
 from MIMIBlender.common.d3d11_gametype import D3D11GameType
 from MIMIBlender.utils.export_utils import ExportUtils
+from MIMIBlender.utils.draw_range_utils import DrawRangeUtils
 
 DRAW_IB = '94517393'
 
@@ -143,6 +144,79 @@ class WWMIAdversarialRegressionTests(unittest.TestCase):
                 finally:
                     bpy.data.objects.remove(obj, do_unlink=True)
                     bpy.data.meshes.remove(mesh)
+
+    def test_merged_palette_counts_only_exported_nonzero_influences(self):
+        elements = [
+            dict(SemanticName=semantic, SemanticIndex=0, Format=fmt, ByteWidth=size, Category=category)
+            for semantic, fmt, size, category in (
+                ('POSITION', 'R32G32B32_FLOAT', 12, 'Position'),
+                ('BLENDINDICES', 'R8G8B8A8_UINT', 4, 'Blend'),
+                ('BLENDWEIGHT', 'R8G8B8A8_UNORM', 4, 'Blend'),
+            )
+        ]
+        game = D3D11GameType.from_submesh_json_dict({'CategoryBufferList': [{'D3D11ElementList': elements}]})
+        mesh = bpy.data.meshes.new('palette_boundary')
+        vertices = [(2 * i + x, y, 0) for i in range(86) for x, y in [(0, 0), (1, 0), (0, 1)]]
+        faces = [(i, i + 1, i + 2) for i in range(0, len(vertices), 3)]
+        mesh.from_pydata(vertices + [(0, 0, 1)], [], faces)
+        mesh.uv_layers.new(name='TEXCOORD.xy')
+        obj = bpy.data.objects.new('palette_boundary', mesh)
+        bpy.context.collection.objects.link(obj)
+        try:
+            for bone in range(255):
+                obj.vertex_groups.new(name=str(bone)).add([bone], 1, 'REPLACE')
+            obj.vertex_groups.new(name='300').add([255], 1, 'REPLACE')
+            tiny_group = obj.vertex_groups.new(name='301')
+            tiny_group.add([255], 0.00001, 'REPLACE')
+            obj.vertex_groups.new(name='302').add([258], 1, 'REPLACE')
+            DrawRangeUtils.tag_object(obj, 1)
+
+            # The only draw uses native component 7. Its 256th bone needs a
+            # compact index, while loose and quantized-zero weights add none.
+            def build_model():
+                model = DrawIBModelWWMI.__new__(DrawIBModelWWMI)
+                model.wwmi_info = SimpleNamespace(
+                    components=[make_component(0, 0, 0, 0) for _ in range(7)]
+                    + [make_component(0, 0, 0, 400)]
+                )
+                model.merged_object = SimpleNamespace(
+                    components=[SimpleNamespace(objects=[]) for _ in range(7)]
+                    + [SimpleNamespace(objects=[obj])]
+                )
+                model.component_real_vg_count_dict = {}
+                model.blend_remap_used_by_index = {}
+                return model
+
+            with (
+                patch.object(GlobalConfig, 'logic_name', 'WWMI'),
+                patch.object(wwmi_exporter.MIMIGlobalProperties, 'import_merged_vgmap', return_value='MERGED'),
+            ):
+                model = build_model()
+                context = ExportUtils.build_obj_element_context(game, obj)
+                model.resolve_named_blendindices(context)
+                model.export_blendremap_forward_and_reverse(context)
+                self.assertEqual(model.component_real_vg_count_dict, {7: 256})
+                self.assertEqual(model.blend_remap_used_by_index, {7: True})
+                self.assertEqual(model.blend_remap_forward_buffer[255], 300)
+                self.assertEqual(model.blend_remap_reverse_buffer[300], 255)
+                result = ExportUtils.build_wwmi_obj_buffer_result(context)
+                raw = result.category_buffer_dict['Blend'].reshape(-1, 8)
+                self.assertEqual(raw[255].tolist(), [255, 0, 0, 0, 255, 0, 0, 0])
+                model.d3d11_game_type = game
+                model.obj_buffer_model_wwmi = result
+                full_ids = model._build_blend_remap_vertex_vg_buffer(context)
+                self.assertEqual(full_ids[255].tolist(), [300, 0, 0, 0])
+
+                # The same 257th bone at a representable weight must still fail.
+                tiny_group.add([255], 0.25, 'REPLACE')
+                context = ExportUtils.build_obj_element_context(game, obj)
+                model = build_model()
+                model.resolve_named_blendindices(context)
+                with self.assertRaisesRegex(ValueError, 'component 7 uses 257 exported bones'):
+                    model.export_blendremap_forward_and_reverse(context)
+        finally:
+            bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
 
 
 def make_component(index_offset, index_count, vg_offset, vg_count):
