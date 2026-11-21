@@ -36,9 +36,14 @@ def bind_subdivision_sources(evidence, vertices, uv, triangles):
         source_groups[members[offsets[group]:offsets[group + 1]]] = group
 
     buckets = {}
+    uv_buckets = {}
     def add(point, parents, texcoord, normal):
         key = tuple(np.rint(point.astype(np.float64) * 1e6).astype(np.int64))
         buckets.setdefault(key, []).append((point, parents, texcoord, normal))
+        # Sculpting preserves UVs while changing positions and normals.
+        # Keep all UV candidates so overlaps cannot silently choose a surface.
+        uv_key = tuple(np.rint(texcoord.astype(np.float64) * 1e6).astype(np.int64))
+        uv_buckets.setdefault(uv_key, []).append((parents, texcoord))
 
     # Candidates carry the actual source-side UV/normal combination. Mixing
     # attributes from unrelated members could falsely resolve an overlap.
@@ -75,7 +80,18 @@ def bind_subdivision_sources(evidence, vertices, uv, triangles):
                 scores[origin] = min(scores.get(origin, score), score)
         ranked = sorted((score, origin) for origin, score in scores.items())
         if not ranked:
-            raise NativePostSkinError("Vertex has no supported source correspondence: " + str(vertex))
+            # A unique UV identity can recover a displaced sculpt vertex.
+            # Do not use distance or changed normals to guess UV overlaps.
+            uv_key = np.rint(uv[vertex].astype(np.float64) * 1e6).astype(np.int64)
+            origins = set()
+            for neighbor in itertools.product((-1, 0, 1), repeat=2):
+                for origin, texcoord in uv_buckets.get(tuple(uv_key + neighbor), ()):
+                    if np.linalg.norm(uv[vertex] - texcoord) <= 1e-7:
+                        origins.add(origin)
+            if len(origins) != 1:
+                raise NativePostSkinError("Vertex has no unique source correspondence (position/UV): " + str(vertex))
+            parents.append(origins.pop())
+            continue
         if len(ranked) > 1:
             best, second = ranked[0][0], ranked[1][0]
             if abs(best[0] - second[0]) < 1e-6 and abs(best[1] - second[1]) < 1e-3:

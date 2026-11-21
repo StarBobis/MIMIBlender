@@ -5,6 +5,7 @@ opt-in local capture result for a complete source-data validation.
 """
 from pathlib import Path
 import hashlib
+import itertools
 import importlib.util
 import json
 import os
@@ -82,7 +83,7 @@ class NativeEvidenceTests(unittest.TestCase):
                                [-0.2, 0.3, 0.5], [0.7, 0.1, -0.4]]
         depth = np.array([[0.7, 1.3], [1.2, 0.8], [0.9, 1.4], [1.1, 0.6]])
         g, scale = 0.65, 0.8
-        for mode in [0, 1, 2, 3]:
+        for mode, sculpt in itertools.product([0, 1, 2, 3], [False, True]):
             for inactive in [False, True]:
                 cb = np.array([2, 2, 99, count, 0, 0, mode, 0, 0, 0, 0, 0], "<u4")
                 batches = np.array([[0, 2, 0, 0], [2, 3, 1, 0]], "<u4")
@@ -95,7 +96,14 @@ class NativeEvidenceTests(unittest.TestCase):
                     "frame_count": 4, "bone_count": 1, "normal_targets": np.arange(count),
                     "position_inputs": {"cs-cb0": cb.tobytes(), "cs-t0": batches.tobytes(),
                                         "cs-t1": bases.tobytes()}}
-                generated = BUFFERS.build_native_buffers(evidence, parents, triangles)["arrays"]
+                # Exercise the actual sculpt export input, including a midpoint.
+                # Every vertex gets an independent offset, not a global shift.
+                exported = np.vstack((source, (source[0] + source[2]) / 2))
+                delta = np.array([[.02, -.01, .03], [0, .04, 0], [-.02, 0, .01], [.03, .02, -.01]], "<f4")
+                if sculpt:
+                    exported[:, :3] += delta
+                generated = BUFFERS.build_native_buffers(
+                    evidence, parents, triangles, exported if sculpt else None)["arrays"]
                 self.assertEqual(generated["position-cb"][6], mode)
                 expected = source[:, :3].astype(float).copy()
                 for index, row in enumerate(records):
@@ -139,7 +147,9 @@ class NativeEvidenceTests(unittest.TestCase):
                         total += float(term[0]) * transformed
                     result.append(total)
                 wanted = np.vstack((expected, (expected[0] + expected[2]) / 2))
-                with self.subTest(mode=mode, inactive=inactive):
+                if sculpt:
+                    wanted += delta
+                with self.subTest(mode=mode, inactive=inactive, sculpt=sculpt):
                     np.testing.assert_allclose(result, wanted, atol=2e-7, rtol=2e-7)
                 # Source evidence stays immutable; another export may reuse it.
                 self.assertEqual(evidence["position_influences"].tobytes(), influences.tobytes())
@@ -218,9 +228,9 @@ class NativeEvidenceTests(unittest.TestCase):
             with self.assertRaisesRegex(DATA.NativePostSkinError, "ShaderHash must"):
                 DATA.requires_native_postskin(dict(pair, Stages=[stage]))
 
-    def test_displaced_unbound_vertex_is_rejected(self):
-        # A newly moved vertex is not silently snapped to the old surface.
-        # Such edits require a different binding method, outside this recipe.
+    def test_sculpt_uv_binding_and_ambiguous_overlap(self):
+        # Position changes must retain their unique UV source correspondence.
+        # Duplicate UVs must fail rather than use sculpted normals to guess.
         vertices = np.zeros((3, 10), dtype=np.float32)
         vertices[:, :3] = [[0, 0, 0], [1, 0, 0], [0, 1, 0]]
         vertices[:, 5] = 1
@@ -230,8 +240,18 @@ class NativeEvidenceTests(unittest.TestCase):
                     "members": np.arange(3), "offsets": np.arange(4)}
         edited = vertices.copy()
         edited[0, 2] = 0.01
-        with self.assertRaises(DATA.NativePostSkinError):
-            BIND.bind_subdivision_sources(evidence, edited, uv, triangles)
+        parents = BIND.bind_subdivision_sources(evidence, edited, uv, triangles)
+        np.testing.assert_array_equal(parents, [[0, -1], [1, -1], [2, -1]])
+        # A UV overlap with a different group cannot establish identity.
+        overlap = uv.copy()
+        overlap[1] = overlap[0]
+        evidence["source_uv"] = overlap
+        with self.assertRaisesRegex(DATA.NativePostSkinError, "no unique source"):
+            BIND.bind_subdivision_sources(evidence, edited, overlap, triangles)
+        # UV identity alone still cannot authorize a different source surface.
+        evidence["source_uv"] = uv
+        with self.assertRaisesRegex(DATA.NativePostSkinError, "source surface"):
+            BIND.bind_subdivision_sources(evidence, edited, uv, np.array([[0, 0, 1]], dtype=np.uint32))
 
     def test_changed_file_and_path_escape_are_rejected(self):
         # All disposable fixtures stay under the repository's tmp directory.

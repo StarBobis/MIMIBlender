@@ -62,7 +62,7 @@ def _active_position_records(evidence):
             np.asarray(terms, "<f4").reshape(-1, 8), int(cb[6]))
 
 
-def build_native_buffers(evidence, parents, triangles):
+def build_native_buffers(evidence, parents, triangles, vertices=None):
     """Build the exact affine expansion and native normal CSR tables.
 
     Three transform families represent simulation*g*scale, bones, and bones*g.
@@ -128,6 +128,21 @@ def build_native_buffers(evidence, parents, triangles):
         raise NativePostSkinError("Source bone index exceeds captured skeleton")
     record_int = records.view("<u4")
     by_group = {int(row[0]): index for index, row in enumerate(record_int)}
+    # Sculpt offsets are transported by the original bone blend. Native
+    # simulation remains unchanged, so its live motion is still preserved.
+    # No extra affine term is needed: shift only the positive bone position.
+    deltas = np.zeros((count, 3), dtype=np.float32)
+    if vertices is not None:
+        positions = np.asarray(vertices, dtype=np.float32)
+        if positions.shape != (count, 10) or not np.isfinite(positions).all():
+            raise NativePostSkinError("Invalid sculpt position records")
+        for vertex, pair in enumerate(parents):
+            origin = pair[pair >= 0]
+            rest = source[members[offsets[origin]], :3].mean(axis=0)
+            delta = positions[vertex, :3] - rest
+            # Preserve historical buffers for unchanged/rounded subdivision.
+            if np.linalg.norm(delta) > 1e-7:
+                deltas[vertex] = delta
     rows, terms = [], []
     for vertex, pair in enumerate(parents):
         origin = pair[pair >= 0]
@@ -147,6 +162,10 @@ def build_native_buffers(evidence, parents, triangles):
                         continue
                     term = np.zeros(8, "<f4")
                     term[0], term[1:4] = factor, source[source_vertex, :3]
+                    # Only the bone family carries the sculpt displacement;
+                    # subtractive bone*g terms must retain the captured pose.
+                    if frame == frame_count + bone:
+                        term[1:4] += deltas[vertex]
                     term.view("<u4")[4] = frame
                     terms.append(term)
             if record is not None:

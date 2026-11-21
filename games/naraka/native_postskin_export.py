@@ -47,7 +47,7 @@ def prepare_native_export(json_path, metadata, draw_ib, output_hash, categories,
     except (KeyError, ValueError) as error:
         raise NativePostSkinError("Unsupported native output category layout") from error
     parents = bind_subdivision_sources(evidence, vertices, uv, triangles)
-    generated = build_native_buffers(evidence, parents, triangles)
+    generated = build_native_buffers(evidence, parents, triangles, vertices)
     generated["draw_ib"] = draw_ib.lower()
     generated["output_hash"] = output_hash.lower()
     generated["shader_hashes"] = [stage["ShaderHash"] for stage in metadata["Stages"]]
