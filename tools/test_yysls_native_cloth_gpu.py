@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 import struct
 from test_naraka_shapekey_gpu import run
-from test_yysls_cloth_shader import compile_shader
+from test_yysls_cloth_shader import compile_shader, dxbc_chunks, signature_elements
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,6 +28,27 @@ def main():
         helpers.append(source[source.index("float3 MIMINormalize"):source.index("void main(")])
         print("PASS: native cloth VS compiles with simulation and source map:", name)
     assert helpers[0] == helpers[1], "Main and shadow must decode the same normal bits"
+
+    # Both Qinghe variants shift the original input slots after COLOR0.
+    # The main shader forwards COLOR0, while shadow keeps its two-component UV.
+    for name, main_pass in (("873adf", True), ("f58ef6", False)):
+        shader = ROOT / "resources" / f"yysls_cloth_{name}.hlsl"
+        code = compile_shader(shader)
+        assert b"tPositionDeformTex" in code and b"MIMIClothSource" in code
+        signatures = dxbc_chunks(code)
+        inputs = signature_elements(signatures[b"ISGN"])
+        outputs = signature_elements(signatures[b"OSGN"])
+        assert [(e[0], e[4]) for e in inputs] == list(zip((
+            "SV_InstanceID", "POSITION", "COLOR", "NORMAL", "TEXCOORD",
+            "TANGENT", "BINORMAL", "BLENDWEIGHT", "BLENDINDICES", "SV_VertexID",
+        ), range(10)))
+        if main_pass:
+            assert any(e[0] == "COLOR" and e[4:] == (6, 15) for e in outputs)
+        else:
+            assert [(e[0], e[1], e[4], e[5]) for e in outputs] == [
+                ("SV_Position", 0, 0, 15), ("TEXCOORD", 0, 1, 3), ("TEXCOORD", 1, 2, 15),
+            ]
+        print("PASS: Qinghe cloth signature and resource bindings:", name)
     # The first normal word is from the supplied capture. Interpreting that word
     # as float produces 1.45e-38, whose numeric integer conversion is zero.
     normal_words = (0x009e3fe9, 0x00ee7cbe, 0x00a9adee, 0x00808080, 0)

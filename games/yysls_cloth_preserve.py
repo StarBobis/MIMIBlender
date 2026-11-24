@@ -35,6 +35,10 @@ CLOTH_SHADER_VARIANTS = (
     # c01 uses the same VS code and binding layout. Its differing material
     # constant declarations are unused by the vertex program.
     ("c01b8886cbc05321", 823114, CLOTH_SHADER_FILENAME, "c01"),
+    # Qinghe variants keep COLOR0 in the input signature. The main pass also
+    # forwards the color to its pixel shader; the shadow output stays float2.
+    ("f58ef6686b0665e0", 823113, "yysls_cloth_f58ef6.hlsl", "f58ef6"),
+    ("873adf1f14b3109d", 823112, "yysls_cloth_873adf.hlsl", "873adf"),
 )
 
 # Captured with active cloth, but the original bytecode is not available for

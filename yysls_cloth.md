@@ -39,7 +39,17 @@ signatures. The c01 material-only declaration differences are unused by its VS.
 The observed 89f65adb8660822d pass has active cloth and uses filter 823118.
 It keeps the original geometry until its replacement ABI can be validated.
 
-The main, c01 and shadow variants treat the sentinel as ordinary skinning.
+Qinghe shadow VS `f58ef6686b0665e0` (823113) and main VS
+`873adf1f14b3109d` (823112) ship distinct templates with the original
+`COLOR0` input register. The main passes that color through and remaps the
+current, historical and tangent data. The shadow keeps its two-component UV
+output and remaps the current layer. Both reuse the same `t118` record format.
+Their compiled input/output signatures and read/write masks match the supplied
+original assembly. WARP stream output also matched both originals on a
+synthetic three-vertex fixture with identity mappings, remapped vertex order
+and the disabled sentinel. A separate edited draw verified the position offset.
+
+All shipped native cloth variants treat the sentinel as ordinary skinning.
 The main variant bypasses current deformation, tangent reconstruction and
 historical deformation together. Mapped draws retain native t11 simulation
 and skeleton animation. They address
