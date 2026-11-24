@@ -320,6 +320,8 @@ class ClothTests(unittest.TestCase):
                 self.assertEqual((output / filename).read_bytes(),
                                  (ROOT / "resources" / filename).read_bytes())
             text = (output / "fixture.ini").read_text()
+            self.assertIn("match_first_index = 0", text)
+            self.assertNotIn("match_index_count", text)
             self.assertIn("[Resource31e22cc3YYSLSClothMap]", text)
             self.assertIn("format = R32_UINT", text)
             self.assertNotIn("vs-t119", text)

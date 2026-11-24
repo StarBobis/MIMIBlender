@@ -1,10 +1,11 @@
-"""Match identity tests: every IB override carries match_index_count.
+"""Match identity tests for exporters that emit match_index_count.
 
 3Dmigoto selects a draw by its hash, its first index and its index count.  A
 Submesh override that only writes match_first_index therefore also matches any
 other draw that happens to start at the same offset, which is common on the
-GPU pre-skinning presets.  Every game exporter now writes the Submesh's index
-count directly after the first index line.
+GPU pre-skinning presets. Exporters that use the count write it directly after
+the first index line. YYSLS omits it because the override matcher does not see
+the index count of indirect world draws.
 
 The value comes from the import side: SubMeshJson.IndexCount is copied into
 SubMeshModel.match_index_count and corrected by the workspace model later on.
@@ -532,7 +533,7 @@ class IdentityVDictPathTests(unittest.TestCase):
 
 
 class SourceInventoryTests(unittest.TestCase):
-    """Every exporter path keeps calling the one guarded writer."""
+    """Exporter paths use the guarded writer wherever count matching is enabled."""
 
     # Number of "append_match_index_count(" occurrences per file, i.e. the
     # call itself (the import line has no parenthesis and is covered by the
@@ -551,7 +552,7 @@ class SourceInventoryTests(unittest.TestCase):
         "games/pgr/exporter.py": 1,
         "games/snowbreak.py": 1,
         "games/srmi.py": 1,
-        "games/yysls.py": 1,
+        "games/yysls.py": 0,
         "games/zzmi.py": 1,
         "games/zzmidx12.py": 1,
     }
