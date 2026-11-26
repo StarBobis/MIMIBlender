@@ -113,7 +113,7 @@ def verify_mesh(record, metadata, output):
                 np.testing.assert_array_equal(left[payload], right[payload], err_msg=label)
 
 
-def verify_ini(path):
+def verify_ini(path, selected):
     contents = path.read_text(encoding="utf-8-sig")
     sections = re.findall(r"^\[([^\]]+)\]", contents, re.M)
     names = {section.lower() for section in sections}
@@ -125,7 +125,26 @@ def verify_ini(path):
             for resource in re.findall(r"\b(Resource\w+)", line, re.I):
                 assert resource.lower() in names, resource
     for ref in re.findall(r"^\s*run = (\w+)", contents, re.M):
-        assert ref in sections, ref
+        # Hash-textured IBs call the command list supplied by APMI-Package.
+        assert ref == "CommandListSkinTexture" or ref in sections, ref
+    # This blueprint contains no explicit texture nodes. Verify the call against
+    # each component's actual Hash override, including on marked capture copies.
+    blocks = {}
+    for block in re.split(r"(?=^\[)", contents, flags=re.M):
+        header, _, body = block.partition("\n")
+        blocks[header] = body.splitlines()
+    for record, candidate in selected:
+        meta = json.loads(Path(candidate["json"]).read_text(encoding="utf8"))
+        marked = any(mark["MarkType"] == "Hash" and "textureoverride_" + mark["MarkHash"].lower() in names
+                     for mark in meta.get("TextureMarkUpInfoList", []))
+        key = record["submesh"].replace("-", "_")
+        lines = blocks["[CommandListAPMIDraw_" + key + "]"]
+        call = "run = CommandListSkinTexture"
+        assert lines.count(call) == int(marked), key
+        if marked:
+            bind = next(i for i, line in enumerate(lines) if line.startswith("ib = Resource"))
+            redraw = next(i for i, line in enumerate(lines) if line.strip().startswith("drawindexed"))
+            assert bind < lines.index(call) < redraw, key
     for line in contents.splitlines():
         if line.startswith(("filename = ", "cs = ")):
             assert (path.parent / line.split(" = ", 1)[1]).is_file(), line
@@ -174,7 +193,7 @@ def main():
     _link_group_to_output(tree, group, output)
     BlueprintExportHelper.set_runtime_blueprint_tree(tree)
     [ini] = _export_regular_output(tree, bpy.context, output, "APMI.ini")
-    verify_ini(Path(ini))
+    verify_ini(Path(ini), selected)
     for record, candidate in selected:
         verify_mesh(record, candidate["json"], dest / "Buffers")
     print(f"APMI capture round trip passed for {len(selected)} components. {ini}")

@@ -1,5 +1,6 @@
 """APMI shader-scoped skin dispatch and indexed draw replacement."""
 from pathlib import Path
+import re
 from shutil import copyfile
 
 from ..common.buffer_export_helper import BufferExportHelper
@@ -8,6 +9,7 @@ from ..common.m_ini_builder import M_IniSection, M_SectionType
 from ..common.m_ini_helper import M_IniHelper
 from ..common.mimi_global_properties import MIMIGlobalProperties
 from ..common.skip_draw import is_submesh_skipped
+from ..utils.json_utils import JsonUtils
 from .base import sections
 from .base.standard_exporter import StandardExporter
 
@@ -26,6 +28,8 @@ class APMIExporter(StandardExporter):
         self.markers = {}
         self.shader_commands = {}
         self.indirect = False
+        self.global_hashes = M_IniHelper._collect_global_active_hashes(blueprint_model.global_hash_texture_binding_list)
+        self.global_hash_components = {}
         for model in self.drawib_model_list:
             for part in model.submesh_model_list:
                 # Old workspaces lack the VS/base-vertex identity for shared CPU IBs.
@@ -88,6 +92,37 @@ class APMIExporter(StandardExporter):
         sections.add_unity_cs_resource_vertexlimit(builder, model)
         sections.add_unity_cs_resource_vb_sections(builder, model)
 
+    def uses_hash_textures(self, part, marks):
+        # A missing automatic DDS produces no Hash override. Explicit hash nodes
+        # have their own resolved rows and still work with automatic export off.
+        if any(mark.mark_type == "Hash" and (mark.mark_hash or "").lower() in self.automatic_texture_hashes for mark in marks):
+            return True
+        if any(draw.resolved_hash_texture_binding_list or draw.resolved_hash_slot_binding_list
+               for draw in part.drawcall_model_list):
+            return True
+        if not self.global_hashes:
+            return False
+        if any((mark.mark_hash or "").lower() in self.global_hashes for mark in marks):
+            return True
+
+        # A manually entered global hash can name an unmarked texture. Match the
+        # live workspace's texture and component indices, once per LOD, to limit
+        # the package check to IBs that actually used a replaced texture.
+        folder = Path(part.d3d11_game_type.FilePath).parents[1]
+        lod = folder.parent
+        if lod not in self.global_hash_components:
+            textures = JsonUtils.LoadFromFile(lod / "TrianglelistDedupedFileName.json")
+            calls = set()
+            for filename in textures:
+                # FrameAnalysis can prefix a written resource hash with "!C!=".
+                match = re.match(r"^(\d+)-ps-t\d+=(?:!C!=)?([0-9a-f]{8})\b", filename, re.I)
+                if match and match[2].lower() in self.global_hashes:
+                    calls.add(match[1])
+            components = JsonUtils.LoadFromFile(lod / "ComponentName_DrawCallIndexList.json")
+            self.global_hash_components[lod] = {name for name, indices in components.items()
+                                                if not calls.isdisjoint(indices)}
+        return folder.name in self.global_hash_components[lod]
+
     def add_drawib_sections(self, ini_builder, drawib_model):
         model = drawib_model
         gpu = model.d3d11_game_type.GPU_PreSkinning
@@ -126,9 +161,15 @@ class APMIExporter(StandardExporter):
                             "filename = " + GlobalConfig.ini_buffer_filename(part.display_str + "-Index.buf"))
                     lines += ["ResourceAPMIOldVB0 = ref vb0", "vb0 = " + pos]
                 lines.append("ib = " + ib)
+                marks = model.get_submesh_texture_markup_info_list(part)
+                if self.uses_hash_textures(part, marks):
+                    # The package checks ps-t0 through ps-t19. Explicit slot
+                    # bindings below keep their precedence on mixed components.
+                    lines.append("run = CommandListSkinTexture")
                 if not MIMIGlobalProperties.forbid_auto_texture_ini():
-                    for texture in model.get_submesh_texture_markup_info_list(part):
-                        if texture.mark_type == "Hash":
+                    for texture in marks:
+                        if texture.mark_type == "Hash" and not re.fullmatch(r"ps-t(?:[0-9]|1[0-9])", texture.mark_slot, re.I):
+                            # Preserve explicit checks for slots outside package coverage.
                             lines.append("checktextureoverride = " + texture.mark_slot)
                         elif texture.mark_type in ("Slot", "SharedSlot"):
                             lines.append(texture.mark_slot + " = " + texture.get_resource_name())

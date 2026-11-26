@@ -720,6 +720,7 @@ class M_IniHelper:
         resource_prefix: str = "",
         guard_with_object_detected: bool = False,
         use_component_filters: bool = False,
+        emitted_hashes: set | None = None,
     ):
         """
         Hash style textures: generate texture config sections (Resource_Texture + TextureOverride) and copy the texture files.
@@ -873,6 +874,10 @@ class M_IniHelper:
                         )
                     resource_texture_section.new_line()
                     ini_builder.append_section(resource_texture_section)
+                    # Draw-scoped callers need the hashes that got a real override.
+                    # Missing files, managed hashes and filter-only rows skip this path.
+                    if emitted_hashes is not None:
+                        emitted_hashes.add(mark_hash)
 
         return bindings
 

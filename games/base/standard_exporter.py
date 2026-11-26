@@ -101,10 +101,12 @@ class StandardExporter:
 
         # Automatic Hash / SharedSlot texture INI sections and file copies.
         # Managed global hashes are excluded from the automatic replacement.
+        self.automatic_texture_hashes = set()
         M_IniHelper.generate_hash_style_texture_ini(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
             global_hash_texture_binding_list=global_hash_rows,
+            emitted_hashes=self.automatic_texture_hashes,
         )
         M_IniHelper.generate_shared_slot_style_texture_ini(
             ini_builder=ini_builder,
