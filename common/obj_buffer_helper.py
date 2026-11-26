@@ -474,6 +474,20 @@ class ObjBufferHelper:
 
     @staticmethod
     def _parse_texcoord(mesh, mesh_loops_length, d3d11_element_name, d3d11_element):
+        # APMI declares float3 and float4 streams directly. Assemble both
+        # UV layers, filling a missing custom layer with zero in game space.
+        if GlobalConfig.logic_name == LogicName.APMI and d3d11_element.ByteWidth in (12, 16):
+            width = d3d11_element.ByteWidth // 4
+            values = numpy.zeros((mesh_loops_length, 4), dtype=numpy.float32)
+            for offset, suffix in ((0, ".xy"), (2, ".zw")):
+                layer = mesh.uv_layers.get(d3d11_element_name + suffix)
+                if layer:
+                    pair = numpy.empty((mesh_loops_length, 2), dtype=numpy.float32)
+                    layer.data.foreach_get("uv", pair.ravel())
+                    pair[:, 1] = 1.0 - pair[:, 1]
+                    values[:, offset:offset + 2] = pair
+            return values[:, :width]
+
         result = None
         # TimerUtils.Start("GET TEXCOORD")
         for uv_name in ('%s.xy' % d3d11_element_name, '%s.zw' % d3d11_element_name):
@@ -633,7 +647,13 @@ class ObjBufferHelper:
         # must not normalize either four-column half again. Ordinary YYSLS
         # layouts and every other game retain their existing code path.
         yysls_extended = GlobalConfig.logic_name == LogicName.YYSLS and has_extended_blend(d3d11_game_type)
-        if yysls_extended:
+        if GlobalConfig.logic_name == LogicName.APMI and normalize_weights:
+            # The shader selects one, two or four uint32 indices per vertex.
+            # Truncate before normalizing so edited dual-weight vertices still sum to one.
+            index_element = d3d11_game_type.ElementNameD3D11ElementDict["BLENDINDICES"]
+            blendweights_dict, blendindices_dict = VertexGroupUtils.get_blendweights_blendindices_v4_fast(
+                mesh, normalize_weights=True, blend_size=index_element.ByteWidth // 4)
+        elif yysls_extended:
             blendweights_dict, blendindices_dict = pack_extended_blend(mesh, d3d11_game_type)
         elif GlobalConfig.logic_name == LogicName.WWMI or GlobalConfig.logic_name == LogicName.NTEMI:
             # print("Wuthering Waves test-only weight handling:")
@@ -670,6 +690,13 @@ class ObjBufferHelper:
                     pass
                 else:
                     data = ObjBufferHelper._parse_normal(mesh_loops, mesh_loops_length, d3d11_element, has_encoded_data)
+                    if GlobalConfig.logic_name == LogicName.APMI:
+                        original = ObjBufferHelper._load_raw_point_element(
+                            mesh, "3DMigoto:APMI:Normal", d3d11_element, loop_vertex_indices)
+                        if original is not None:
+                            # Keep ordinary unit normals editable in Blender.
+                            payload = ~numpy.isclose(numpy.linalg.norm(original, axis=1), 1.0, atol=0.001)
+                            data[payload] = original[payload]
                     # Only the raw-byte round-trip presets (GIMI and SRMI)
                     # restore the raw NORMAL w component stored on import;
                     # all other presets keep the legacy parsing result untouched.
@@ -681,7 +708,8 @@ class ObjBufferHelper:
             elif d3d11_element_name == 'TANGENT':
                 if has_encoded_data and (GlobalConfig.logic_name == LogicName.EFMI ):
                     pass
-                elif LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name):
+                elif (LogicName.uses_raw_vertex_attributes(GlobalConfig.logic_name)
+                      or GlobalConfig.logic_name == LogicName.APMI):
                     # Raw-byte round-trip path (GIMI and SRMI): prefer the
                     # lossless raw TANGENT bytes stored on import, and only fall
                     # back to Blender loop tangents when no raw payload exists
@@ -689,6 +717,8 @@ class ObjBufferHelper:
                     data = ObjBufferHelper._load_raw_point_element(
                         mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, d3d11_element, loop_vertex_indices
                     )
+                    if data is None and GlobalConfig.logic_name == LogicName.APMI and not mesh.uv_layers:
+                        MMTErrorUtils.raise_fatal("APMI tangent export needs the imported tangent attribute or a UV map.")
                     if data is None:
                         data = ObjBufferHelper._parse_tangent(mesh_loops, mesh_loops_length, d3d11_element)
                 else:

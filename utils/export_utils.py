@@ -78,7 +78,9 @@ class ExportUtils:
         ShapeKeyUtils.reset_all_shapekey_values(resolved_obj)
 
         mesh = ObjUtils.get_mesh_evaluate_from_obj(obj=resolved_obj)
-        if len(mesh.polygons) > 0:
+        # APMI has both Position-only meshes and a UV-less tangent stream.
+        # The latter reads its original point attribute during vertex packing.
+        if len(mesh.polygons) > 0 and (GlobalConfig.logic_name != LogicName.APMI or mesh.uv_layers):
             try:
                 mesh.calc_tangents()
             except RuntimeError:

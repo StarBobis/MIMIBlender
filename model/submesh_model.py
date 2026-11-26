@@ -131,6 +131,10 @@ class SubMeshModel:
 
         submesh_json_path = MMTWorkSpace.check_and_get_submesh_json_path(self.submesh_name)
         submesh_json = SubmeshJson(submesh_json_path)
+        if GlobalConfig.logic_name == LogicName.APMI:
+            # CPU components sharing an IB can have different original VB0s.
+            self.apmi_draw = submesh_json.JsonDict.get("APMIDraw", {})
+            self.apmi_vb0 = submesh_json.JsonDict.get("VertexLimitVB", "")
         self.match_cs = submesh_json.MatchCS
         self.match_uav_bytes = submesh_json.MatchUAVBytes
         self.d3d11_game_type = D3D11GameType.from_submesh_json_dict(
@@ -326,6 +330,7 @@ class SubMeshModel:
         if (GlobalConfig.logic_name == LogicName.SRMI
             or GlobalConfig.logic_name == LogicName.GIMI
             or GlobalConfig.logic_name == LogicName.HIMI
+            or GlobalConfig.logic_name == LogicName.APMI
             or GlobalConfig.logic_name == LogicName.GF2
             or GlobalConfig.logic_name == LogicName.YYSLS
             or GlobalConfig.logic_name == LogicName.IdentityV):

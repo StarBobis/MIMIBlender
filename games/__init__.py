@@ -15,6 +15,7 @@ if/elif chain, and every preset is free to pick its internal structure:
 
 from ..common.global_config import LogicName
 
+from .apmi import APMIExporter
 from .efmi import ExportEFMI
 from .gf2.exporter import GF2Exporter
 from .gimi.exporter import Exporter as GimiExporter
@@ -33,6 +34,7 @@ from .zzmidx12 import ExportZZMIDX12
 # LogicName -> exporter class.  Presets without an entry raise the
 # "not yet supported" error in the export UI.
 _LOGIC_EXPORTER_DICT = {
+    LogicName.APMI: APMIExporter,
     LogicName.EFMI: ExportEFMI,
     # GF2 keeps its own copy of the Genshin exporter (games/gf2/) so its mod
     # layout can diverge without touching GIMI.

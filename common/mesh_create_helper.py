@@ -141,11 +141,17 @@ class MeshCreateHelper:
             print("Current Element: " + element.ElementName)
             print("Shape before data conversion: " + str(data.shape))
 
-            # Only presets on the raw-byte round-trip channel (GIMI and SRMI)
-            # preserve these raw vertex payload bytes.
-            # Blender has no native representation for these game-specific
-            # components, but every other game preset must keep the legacy
-            # import behavior unchanged (no extra mesh attributes created).
+            # APMI uses TANGENT as shader input, including unnormalized UI data
+            # and UV-less skinned meshes. Recomputing it changes the payload.
+            if logic_name == LogicName.APMI:
+                if element.SemanticName == "TANGENT":
+                    store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
+                elif element.SemanticName == "NORMAL" and element.Format == "R32G32B32_FLOAT":
+                    # Blender normalizes custom normals. Some UI records carry
+                    # zeros or other non-unit vectors that must survive import.
+                    if not numpy.allclose(numpy.linalg.norm(data, axis=1), 1.0, atol=0.001):
+                        store_raw_bytes(mesh, "3DMigoto:APMI:Normal", data, element.ByteWidth)
+
             if LogicName.uses_raw_vertex_attributes(logic_name):
                 if element.SemanticName == "TANGENT":
                     store_raw_bytes(mesh, RAW_TANGENT_ATTRIBUTE_PREFIX, data, element.ByteWidth)
@@ -219,6 +225,10 @@ class MeshCreateHelper:
             elif element.SemanticName == "BLENDWEIGHT" or element.SemanticName == "BLENDWEIGHTS":
                 blend_weights[element.SemanticIndex] = data
             elif element.SemanticName.startswith("TEXCOORD"):
+                # Four float3 payloads share the 88-byte UI vertex. Carry z in
+                # its own UV layer so editing xy never reinterprets float bits.
+                if logic_name == LogicName.APMI and data.shape[1] == 3:
+                    data = numpy.pad(data, ((0, 0), (0, 1)))
                 texcoords[element.SemanticIndex] = data
             elif element.SemanticName.startswith("SHAPEKEY"):
                 shapekeys[element.SemanticIndex] = data
@@ -307,7 +317,7 @@ class MeshCreateHelper:
         # Other presets and ordinary four-weight YYSLS retain legacy behavior.
         MeshCreateHelper.import_vertex_groups(
             mesh, obj, blend_indices, blend_weights, _vg_component,
-            merge_duplicate_weights=(logic_name == LogicName.WWMI
+            merge_duplicate_weights=(logic_name in (LogicName.WWMI, LogicName.APMI)
                                      or (logic_name == LogicName.YYSLS and len(blend_weights) > 1)),
         )
         print("Vertex group import complete")

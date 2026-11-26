@@ -165,7 +165,7 @@ class WorkSpaceModel:
             self.lod_component_info[lod_name] = {}
 
             for draw_ib, entries in raw_entries.items():
-                entries.sort(key=lambda x: x[1])  # ascending by FirstIndex
+                entries.sort(key=lambda x: (x[1], x[0]))  # ascending by FirstIndex
 
                 comp_map: Dict[int, str] = {}
                 reverse_map: Dict[str, int] = {}
