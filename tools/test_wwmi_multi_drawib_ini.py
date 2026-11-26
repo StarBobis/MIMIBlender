@@ -23,6 +23,7 @@ from pathlib import Path
 import re
 import sys
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -293,16 +294,113 @@ class WWMIMultiDrawIBExportTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(patch.object(MIMIGlobalProperties, 'forbid_auto_texture_ini', return_value=False))
             stack.enter_context(patch.object(wwmi_exporter.M_IniHelper, '_count_marked_textures', return_value=1))
-            stack.enter_context(patch.object(wwmi_exporter.M_IniHelper, '_get_slot_texture_source_path', return_value='source.dds'))
+            (ROOT / 'tmp').mkdir(exist_ok=True)
+            folder = Path(stack.enter_context(tempfile.TemporaryDirectory(dir=ROOT / 'tmp')))
+            source = folder / 'source.dds'
+            source.write_bytes(b'shared DDS')
+            stack.enter_context(patch.object(wwmi_exporter.M_IniHelper, '_get_slot_texture_source_path', return_value=str(source)))
             stack.enter_context(patch.object(helper_module.MMTWorkSpace, 'get_hash_deduped_texture_info_dict', return_value={}))
-            stack.enter_context(patch.object(helper_module.os.path, 'exists', side_effect=lambda path: path == 'source.dds'))
-            copied = stack.enter_context(patch.object(helper_module.shutil, 'copy2'))
-            stack.enter_context(patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value='Textures/'))
+            copied = stack.enter_context(patch.object(helper_module.shutil, 'copy2', wraps=helper_module.shutil.copy2))
+            stack.enter_context(patch.object(GlobalConfig, 'path_generatemod_texture_folder', return_value=str(folder)))
             stack.enter_context(patch.object(GlobalConfig, 'ini_texture_filename', side_effect=lambda name: 'Textures/' + name))
             wwmi_exporter.M_IniHelper.generate_shared_slot_style_texture_ini(builder, models)
         text = '\n'.join(line for section in builder.ini_section_list for line in section.SectionLineList)
         self.assertEqual(text.count('[ResourceSharedDiffuse]'), 1)
         self.assertEqual(copied.call_count, 1)
+
+    def test_ambiguous_texture_filters_keep_exact_hashes(self):
+        from MIMIBlender.workspace.texture_metadata_helper import TextureMarkUpInfo
+        # The same perceptual signature can belong to unrelated captures.
+        # An exact match owned by a node must also survive this collision.
+        first = TextureMarkUpInfo(mark_dhash="01ab456789abcdef", mark_format="BC7_UNORM")
+        first.mark_hash, first.mark_type = "12345678", "Hash"
+        from copy import copy
+        second = copy(first)
+        second.mark_hash = "abcdef12"
+        model = SimpleNamespace(submesh_model_list=[SimpleNamespace(submesh_name="body")],
+                                get_submesh_texture_markup_info_list=lambda part: [first, second])
+        collect = wwmi_exporter.M_IniHelper._collect_component_texture_filters
+        self.assertEqual(collect({"ib": model}, set()), {})
+        self.assertEqual(collect({"ib": model}, {second.mark_hash}), {})
+        # Distinct formats separate the signatures, even for the same dHash.
+        second.mark_format = "BC7_UNORM_SRGB"
+        self.assertEqual(set(collect({"ib": model}, {second.mark_hash})), {first.mark_hash})
+        second.mark_format = "invalid format"
+        self.assertEqual(set(collect({"ib": model}, set())), {first.mark_hash})
+        # Mixed legacy and new observations of one hash use the legacy path.
+        second.mark_hash = first.mark_hash
+        self.assertEqual(collect({"ib": model}, set()), {})
+
+    def test_dhash_draw_scope_and_legacy_fallback(self):
+        from contextlib import ExitStack
+        from MIMIBlender.games.efmi import ExportEFMI
+        from MIMIBlender.workspace.texture_metadata_helper import TextureMetadataResolver
+
+        # Exercise the two production writers with a marked component followed
+        # by an unrelated component. The copy path reads real files, including
+        # an already edited output during subsequent exports.
+        raw_mark = dict(MarkType="Hash", MarkName="DiffuseMap", MarkHash="abcdef12",
+                        MarkFileName="source.dds", MarkDHash="01ab456789abcdef", MarkFormat="BC7_UNORM_SRGB")
+        old_mark = dict(MarkType="Hash", MarkName="NormalMap", MarkHash="12345678", MarkFileName="old.dds")
+        marks = TextureMetadataResolver.normalize_texture_markup_info_list([raw_mark, old_mark])
+        models = {}
+        for name, offset, count in DRAW_IB_LIST[:2]:
+            model = make_draw_ib_model(name, offset, count)
+            draw = model.ordered_drawcall_model_list[0]
+            draw.get_drawindexed_instanced_str = lambda offsets: "drawindexedinstanced = 3, INSTANCE_COUNT, 0, 0, FIRST_INSTANCE"
+            submesh = SimpleNamespace(submesh_name=draw.get_submesh_name(), display_str=name,
+                                      drawcall_model_list=[draw], match_draw_ib=name,
+                                      match_first_index=offset, match_index_count=count * 3,
+                                      category_buffer_dict={}, d3d11_game_type=model.d3d11_game_type)
+            model.submesh_model_list = [submesh]
+            model.get_submesh_texture_markup_info_list = lambda part: marks if part.match_first_index == 0 else []
+            model.get_submesh_part_name = lambda part: part.submesh_name
+            model.get_submesh_unique_key = model.get_submesh_texture_override_suffix = lambda part: part.display_str
+            model.get_submesh_ib_resource_name = lambda part: "Resource_" + part.display_str + "_Index"
+            models[name] = model
+
+        (ROOT / "tmp").mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as tmp, ExitStack() as stack:
+            folder = Path(tmp)
+            for mark in marks:
+                (folder / mark.mark_filename).write_bytes(b"captured")
+            stack.enter_context(patch.object(GlobalConfig, "path_generate_mod_folder", return_value=tmp))
+            stack.enter_context(patch.object(GlobalConfig, "get_generated_mod_name", return_value="testmod"))
+            stack.enter_context(patch.object(wwmi_exporter.M_IniHelper, "_get_slot_texture_source_path",
+                                            side_effect=lambda model, part, mark: str(folder / mark.mark_filename)))
+            blueprint = SimpleNamespace(keyname_mkey_dict={})
+            for mode in ("MERGED", "PER_COMPONENT", "EFMI"):
+                with self.subTest(mode=mode), patch.object(MIMIGlobalProperties, "import_merged_vgmap", return_value=mode):
+                    if mode == "EFMI":
+                        exporter = ExportEFMI.__new__(ExportEFMI)
+                        exporter.blueprint_model = blueprint
+                        exporter.drawib_model_list = list(models.values())
+                        exporter.submesh_model_list = [model.submesh_model_list[0] for model in models.values()]
+                        exporter.generate_ini_file()
+                    else:
+                        exporter = wwmi_exporter.Exporter.__new__(wwmi_exporter.Exporter)
+                        exporter.blueprint_model = blueprint
+                        exporter.drawib_drawibmodel_dict = models
+                        exporter.generate_unreal_vs_config_ini()
+                    text = (folder / "testmod.ini").read_text(encoding="utf-8-sig")
+                    self.assertEqual(text.count("[FilterTexture_abcdef12]\n"), 1)
+                    self.assertIn("match_dhash = 01ab456789abcdef", text)
+                    self.assertIn("match_format = BC7_UNORM_SRGB", text)
+                    self.assertIn("[TextureOverride_12345678]", text)
+                    self.assertNotIn("[TextureOverride_abcdef12]", text)
+                    if mode != "EFMI":
+                        self.assertIn("global $required_wwmi_version = 1.22", text)
+                    # Only the marked draw may own this binding and snapshot pair.
+                    component = next(block for block in re.split(r"^\[", text, flags=re.M) if "run = SnapshotInitialTextures" in block)
+                    self.assertIn("DrawIB_0]", component.splitlines()[0])
+                    calls = ["SnapshotInitialTextures", "OverrideTextures" if mode == "EFMI" else "CommandListTriggerResourceOverrides",
+                             "ps-t[FilterTexture_abcdef12] = ref Resource_DiffuseMap_abcdef12", "drawindexed", "RestoreInitialTextures"]
+                    positions = [component.index(call) for call in calls]
+                    self.assertEqual(positions, sorted(positions))
+                    self.assertEqual(text.count("run = RestoreInitialTextures"), 1)
+                    target = folder / "Textures/abcdef12_DiffuseMap.dds"
+                    self.assertEqual(target.read_bytes(), b"captured" if mode == "MERGED" else b"edited")
+                    target.write_bytes(b"edited")
 
     def test_shared_hotkeys_and_timelines_are_declared_once(self):
         from MIMIBlender.common.m_key import M_Key

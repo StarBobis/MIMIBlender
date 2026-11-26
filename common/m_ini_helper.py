@@ -677,6 +677,40 @@ class M_IniHelper:
 
             ini_builder.append_section(switch_section)
 
+    @staticmethod
+    def _collect_component_texture_filters(models, managed_hashes):
+        """Find unambiguous dHash filters and every component that requested each."""
+        identities = {}
+        scopes = {}
+        # Explicit hash nodes own their exact targets. Include their captured
+        # identities in collision detection so another filter cannot shadow them.
+        ambiguous = set(managed_hashes)
+        for draw_ib, model in models.items():
+            for submesh in getattr(model, "submesh_model_list", []):
+                # Two distinct replacements matching the same filter in one draw
+                # cannot be distinguished. Keep their precise legacy overrides.
+                local_filters = {}
+                for mark in model.get_submesh_texture_markup_info_list(submesh) or []:
+                    key = str(mark.mark_hash or "").strip().lower()
+                    if mark.mark_type != "Hash":
+                        continue
+                    dhash = str(getattr(mark, "mark_dhash", "") or "").lower()
+                    fmt = str(getattr(mark, "mark_format", "") or "").upper().removeprefix("DXGI_FORMAT_")
+                    if not (_GLOBAL_HASH_PATTERN.fullmatch(key) and re.fullmatch(r"[0-9a-f]{16}", dhash)
+                            and re.fullmatch(r"[A-Z][A-Z0-9_]*", fmt)):
+                        ambiguous.add(key)
+                        continue
+                    identity = (fmt, dhash)
+                    if identities.setdefault(key, identity) != identity:
+                        ambiguous.add(key)
+                    previous = local_filters.setdefault(identity, key)
+                    if previous != key:
+                        ambiguous.update((previous, key))
+                    scopes.setdefault(key, set()).add((draw_ib, submesh.submesh_name))
+        # A legacy mark of the same hash also makes the broad override necessary.
+        # Never output both mechanisms for the same source hash.
+        return {key: (*identity, scopes[key]) for key, identity in identities.items() if key not in ambiguous}
+
     @classmethod
     def generate_hash_style_texture_ini(
         cls,
@@ -685,6 +719,7 @@ class M_IniHelper:
         global_hash_texture_binding_list: list | None = None,
         resource_prefix: str = "",
         guard_with_object_detected: bool = False,
+        use_component_filters: bool = False,
     ):
         """
         Hash style textures: generate texture config sections (Resource_Texture + TextureOverride) and copy the texture files.
@@ -721,6 +756,10 @@ class M_IniHelper:
             global_hash_texture_binding_list=global_hash_texture_binding_list,
         )
 
+        filters = {}
+        if use_component_filters:
+            filters = cls._collect_component_texture_filters(drawib_drawibmodel_dict, managed_hash_set)
+        bindings = {}
         for draw_ib, draw_ib_model in drawib_drawibmodel_dict.items():
             submesh_list = getattr(draw_ib_model, "submesh_model_list", [])
             print("M_IniHelper: DrawIB " + draw_ib + " Hash mark count: "
@@ -798,6 +837,20 @@ class M_IniHelper:
                         "filename = " + GlobalConfig.ini_texture_filename(hash_style_texture_filename),
                     )
                     resource_texture_section.new_line()
+                    if mark_hash in filters:
+                        # Declare a filter only after its replacement exists. The legacy
+                        # resource name and DDS path preserve the user's edited output.
+                        fmt, dhash, scopes = filters[mark_hash]
+                        name = "FilterTexture_" + mark_hash
+                        resource_texture_section.append("[" + name + "]")
+                        resource_texture_section.append("match_format = " + fmt)
+                        resource_texture_section.append("match_dhash = " + dhash)
+                        resource_texture_section.new_line()
+                        ini_builder.append_section(resource_texture_section)
+                        for scope in scopes:
+                            bindings.setdefault(scope, []).append("ps-t[" + name + "] = ref " + hash_style_resource_name)
+                        continue
+
                     resource_texture_section.append(
                         "[" + hash_style_override_section_name + "]",
                     )
@@ -820,6 +873,8 @@ class M_IniHelper:
                         )
                     resource_texture_section.new_line()
                     ini_builder.append_section(resource_texture_section)
+
+        return bindings
 
     @classmethod
     def generate_shared_slot_style_texture_ini(cls, ini_builder: M_IniBuilder, drawib_drawibmodel_dict: dict[str, DrawIBModel]):

@@ -161,7 +161,7 @@ class Exporter:
         for draw_ib_model in self.drawib_drawibmodel_dict.values():
             draw_ib_model.apply_drawib_alias()
 
-    def add_constants_section(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+    def add_constants_section(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI, use_texture_filters=False):
         """[Constants] of one DrawIB.
 
         Two groups of variables live here:
@@ -184,12 +184,9 @@ class Exporter:
         # Mod globals are singleton declarations even with multiple models.
         # Inspect the builder, not exporter state, so rebuilding stays safe.
         if not any(section.SectionType == M_SectionType.Constants for section in ini_builder.ini_section_list):
-            # Extended tables require the verified WWMI 1.10 stride API. The
-            # requirement is mod-wide, so inspect every DrawIB before emitting
-            # the singleton even if the first character needs only legacy maps.
-            models = getattr(self, "drawib_drawibmodel_dict", {}).values()
-            extended_remap = any(model.blend_remap and getattr(model, "blend_remap_bone_count", 512) > 512 for model in models)
-            required_version = "1.10" if extended_remap else WWMI_REQUIRED_RUNTIME_VERSION
+            # Texture filtering needs WWMI 1.2.2 and the XXMI 1.3.2 DLL.
+            # Old captures still generate a mod with the original runtime floor.
+            required_version = "1.22" if use_texture_filters else WWMI_REQUIRED_RUNTIME_VERSION
             constants_section.append("global $required_wwmi_version = " + required_version)
             constants_section.append("global $mod_id = -1000")
             constants_section.append("global $mod_enabled = 0")
@@ -568,7 +565,7 @@ class Exporter:
         texture_override_mark_bonedatacb_section.new_line()
         ini_builder.append_section(texture_override_mark_bonedatacb_section)
 
-    def add_texture_override_component(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI):
+    def add_texture_override_component(self, ini_builder: M_IniBuilder, draw_ib_model: DrawIBModelWWMI, filter_bindings=None):
         """One [TextureOverrideComponent...] per Submesh of the DrawIB.
 
         A Submesh without any object in the blueprint still gets its section:
@@ -611,6 +608,11 @@ class Exporter:
             # A component without any object is skipped in game instead of drawn
             # from the mod's buffers.
             component_has_objects = len(drawindexed_str_list) != 0
+            # Component ordinals include empty native ranges. Resolve the actual
+            # blueprint Submesh instead of indexing the compact list of marks.
+            filters = []
+            if filter_bindings and component_has_objects:
+                filters = filter_bindings.get((draw_ib, drawcall_model_list[0].get_submesh_name()), [])
 
             # One reason string keeps both draw branches below in sync when a
             # component is hidden on purpose instead of unassigned.
@@ -641,7 +643,8 @@ class Exporter:
 
             texture_override_component.append("if $mod_enabled")
 
-            if MIMIGlobalProperties.import_merged_vgmap() == 'MERGED':
+            merged = MIMIGlobalProperties.import_merged_vgmap() == 'MERGED'
+            if merged:
                 # The status is handed to the merge command list through one
                 # shared variable and the updated status is read back, so a
                 # component merges at most once per frame even when its draw
@@ -659,41 +662,37 @@ class Exporter:
                 texture_override_component.append("  endif")
 
                 texture_override_component.append("  if " + scoped_name("ResourceMergedSkeleton", draw_ib) + " !== null")
-                # Skipping the original draw is what removes an unassigned
-                # Submesh from the scene; the mod has no geometry for it.
-                texture_override_component.append("    handling = skip")
-                if component_has_objects:
-                    if component_blend_remap_used:
-                        texture_override_component.append("    " + scoped_name("ResourceBlendBufferOverride", draw_ib) + " = ref " + scoped_name("ResourceRemappedBlendBufferComponent" + component_count_str, draw_ib))
-                        texture_override_component.append("    " + scoped_name("ResourceMergedSkeletonOverride", draw_ib) + " = ref " + scoped_name("ResourceRemappedSkeletonComponent" + component_count_str, draw_ib))
-                        texture_override_component.append("    " + scoped_name("ResourceExtraMergedSkeletonOverride", draw_ib) + " = ref " + scoped_name("ResourceExtraRemappedSkeletonComponent" + component_count_str, draw_ib))
+            indent = "    " if merged else "  "
+            texture_override_component.append(indent + "handling = skip")
+            if component_has_objects:
+                if component_blend_remap_used:
+                    for target, source in (
+                        ("ResourceBlendBufferOverride", "ResourceRemappedBlendBufferComponent"),
+                        ("ResourceMergedSkeletonOverride", "ResourceRemappedSkeletonComponent"),
+                        ("ResourceExtraMergedSkeletonOverride", "ResourceExtraRemappedSkeletonComponent"),
+                    ):
+                        texture_override_component.append(indent + scoped_name(target, draw_ib)
+                                                          + " = ref " + scoped_name(source + component_count_str, draw_ib))
 
-                    texture_override_component.append("    run = " + scoped_name("CommandListTriggerResourceOverrides", draw_ib))
-                    texture_override_component.append("    run = " + scoped_name("CommandListOverrideSharedResources", draw_ib))
-                    texture_override_component.append("    ; Draw Component " + component_count_str)
-                    for drawindexed_str in drawindexed_str_list:
-                        texture_override_component.append("    " + drawindexed_str)
-                    texture_override_component.append("    run = " + scoped_name("CommandListCleanupSharedResources", draw_ib))
-                else:
-                    texture_override_component.append("    ; Draw skipped: " + draw_skipped_reason)
-                texture_override_component.append("  endif")
+                # Both skeleton modes use the original slot snapshot. Legacy hash
+                # checks can change slots, so capture before running any of them.
+                if filters:
+                    texture_override_component.append(indent + "run = SnapshotInitialTextures")
+                texture_override_component.append(indent + "run = " + scoped_name("CommandListTriggerResourceOverrides", draw_ib))
+                texture_override_component.append(indent + "run = " + scoped_name("CommandListOverrideSharedResources", draw_ib))
+                for binding in filters:
+                    texture_override_component.append(indent + binding)
+                texture_override_component.append(indent + "; Draw Component " + component_count_str)
+                for drawindexed_str in drawindexed_str_list:
+                    texture_override_component.append(indent + drawindexed_str)
+                texture_override_component.append(indent + "run = " + scoped_name("CommandListCleanupSharedResources", draw_ib))
+                if filters:
+                    texture_override_component.append(indent + "run = RestoreInitialTextures")
             else:
-                texture_override_component.append("  handling = skip")
-                if component_has_objects:
-                    if component_blend_remap_used:
-                        texture_override_component.append("  " + scoped_name("ResourceBlendBufferOverride", draw_ib) + " = ref " + scoped_name("ResourceRemappedBlendBufferComponent" + component_count_str, draw_ib))
-                        texture_override_component.append("  " + scoped_name("ResourceMergedSkeletonOverride", draw_ib) + " = ref " + scoped_name("ResourceRemappedSkeletonComponent" + component_count_str, draw_ib))
-                        texture_override_component.append("  " + scoped_name("ResourceExtraMergedSkeletonOverride", draw_ib) + " = ref " + scoped_name("ResourceExtraRemappedSkeletonComponent" + component_count_str, draw_ib))
+                texture_override_component.append(indent + "; Draw skipped: " + draw_skipped_reason)
 
-                    texture_override_component.append("  run = " + scoped_name("CommandListTriggerResourceOverrides", draw_ib))
-                    texture_override_component.append("  run = " + scoped_name("CommandListOverrideSharedResources", draw_ib))
-                    texture_override_component.append("  ; Draw Component " + component_count_str)
-                    for drawindexed_str in drawindexed_str_list:
-                        texture_override_component.append("  " + drawindexed_str)
-                    texture_override_component.append("  run = " + scoped_name("CommandListCleanupSharedResources", draw_ib))
-                else:
-                    texture_override_component.append("  ; Draw skipped: " + draw_skipped_reason)
-
+            if merged:
+                texture_override_component.append("  endif")
             texture_override_component.append("endif")
             texture_override_component.new_line()
 
@@ -827,8 +826,16 @@ class Exporter:
                                      + "; recapture LODs with distinct VB hashes or index ranges")
                 matches[match] = model.draw_ib
 
+        # Collect the component commands before writing geometry, but keep the
+        # texture sections at their usual position in the consolidated INI.
+        texture_builder = M_IniBuilder()
+        global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
+        filter_bindings = M_IniHelper.generate_hash_style_texture_ini(
+            ini_builder=texture_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
+            global_hash_texture_binding_list=global_hash_rows, guard_with_object_detected=True,
+            use_component_filters=True)
         for draw_ib, draw_ib_model in self.drawib_drawibmodel_dict.items():
-            self.add_constants_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
+            self.add_constants_section(config_ini_builder, draw_ib_model, bool(filter_bindings))
             self.add_present_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             self.add_commandlist_register_mod_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             blend_remap.add_commandlist_update_merged_skeleton(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
@@ -841,7 +848,7 @@ class Exporter:
                 bone_hashes.add(draw_ib_model.wwmi_info.cb4_hash)
             blend_remap.add_commandlist_merge_skeleton_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             self.add_commandlist_trigger_shared_cleanup_section(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
-            self.add_texture_override_component(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
+            self.add_texture_override_component(config_ini_builder, draw_ib_model, filter_bindings)
             shapekeys.add_texture_override_shapekeys(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             shapekeys.add_resource_shapekeys(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
             shapekeys.add_wwmi_shapekey_sections(ini_builder=config_ini_builder, draw_ib_model=draw_ib_model)
@@ -862,10 +869,8 @@ class Exporter:
         # Running these helpers per model repeats both names and copy work.
         M_IniHelper.add_branch_key_sections(
             ini_builder=config_ini_builder, key_name_mkey_dict=self.blueprint_model.keyname_mkey_dict)
-        global_hash_rows = getattr(self.blueprint_model, "global_hash_texture_binding_list", [])
-        M_IniHelper.generate_hash_style_texture_ini(
-            ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict,
-            global_hash_texture_binding_list=global_hash_rows, guard_with_object_detected=True)
+        for section in texture_builder.ini_section_list:
+            config_ini_builder.append_section(section)
         M_IniHelper.generate_shared_slot_style_texture_ini(
             ini_builder=config_ini_builder, drawib_drawibmodel_dict=self.drawib_drawibmodel_dict)
         M_IniHelper.generate_hash_style_global_texture_ini(

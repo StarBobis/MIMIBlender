@@ -68,11 +68,11 @@ class ExportEFMI:
             global_hash_texture_binding_list=global_hash_rows,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
         )
-        M_IniHelper.generate_hash_style_texture_ini(
+        filter_bindings = M_IniHelper.generate_hash_style_texture_ini(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
-            global_hash_texture_binding_list=global_hash_rows,
-        )
+            global_hash_texture_binding_list=global_hash_rows, use_component_filters=True,
+        ) or {}
         M_IniHelper.generate_shared_slot_style_texture_ini(
             ini_builder=ini_builder,
             drawib_drawibmodel_dict=drawib_drawibmodel_dict,
@@ -108,7 +108,15 @@ class ExportEFMI:
                 texture_override_ib_section.new_line()
                 continue
 
+            # Direct instanced draws bypass the Package callback that normally
+            # snapshots PS slots. Bracket this draw before any legacy hash checks.
+            filters = filter_bindings.get((drawib_model.draw_ib, submesh_model.submesh_name), [])
+            if filters:
+                texture_override_ib_section.append("; Requires EFMI 1.5.1 / XXMI DLL 1.3.2")
+                texture_override_ib_section.append("run = SnapshotInitialTextures")
             texture_override_ib_section.append("run = CommandList\\EFMIv1\\OverrideTextures")
+            for binding in filters:
+                texture_override_ib_section.append(binding)
 
             ib_resource_name = drawib_model.get_submesh_ib_resource_name(submesh_model)
             texture_override_ib_section.append("ib = " + ib_resource_name)
@@ -127,6 +135,8 @@ class ExportEFMI:
 
             for draw_line in M_IniHelper.get_drawindexed_instanced_str_list(submesh_model.drawcall_model_list):
                 texture_override_ib_section.append(draw_line)
+            if filters:
+                texture_override_ib_section.append("run = RestoreInitialTextures")
 
             if len(self.blueprint_model.keyname_mkey_dict.keys()) != 0:
                 texture_override_ib_section.append("$active" + str(active_index) + " = 1")
