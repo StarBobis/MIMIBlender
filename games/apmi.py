@@ -133,6 +133,9 @@ class APMIExporter(StandardExporter):
             suffix = model.get_submesh_unique_key(part)
             command = "CommandListAPMIDraw_" + suffix
             test = "ib == {} && vb0 == {}".format(self.marker(model.draw_ib), self.marker(part.apmi_vb0))
+            if not gpu and part.apmi_vb1:
+                # Independent CPU UV buffers can reuse the same VB0 and draw range.
+                test += " && vb1 == {}".format(self.marker(part.apmi_vb1))
             if meta.get("IndirectOffset") is None:
                 # ProjectBunny exposes FirstVertex as UINT even for a signed base.
                 test += " && (draw_type == 2 || draw_type == 4) && first_vertex == {} && first_index == {} && index_count == {}".format(
@@ -149,10 +152,7 @@ class APMIExporter(StandardExporter):
             if not is_submesh_skipped(part) and part.ib:
                 ib = model.get_submesh_ib_resource_name(part)
                 lines.append("ResourceAPMIOldIB = ref ib")
-                if gpu:
-                    if "Texcoord" in part.category_buffer_dict:
-                        lines.extend(["ResourceAPMIOldVB1 = ref vb1", "vb1 = Resource" + model.draw_ib + "Texcoord"])
-                else:
+                if not gpu:
                     pos = "Resource_" + suffix + "_Position"
                     section(ini_builder, M_SectionType.ResourceBuffer, pos, "type = Buffer",
                             "stride = " + str(part.d3d11_game_type.CategoryStrideDict["Position"]),
@@ -160,6 +160,15 @@ class APMIExporter(StandardExporter):
                     section(ini_builder, M_SectionType.ResourceBuffer, ib, "type = Buffer", "format = R32_UINT",
                             "filename = " + GlobalConfig.ini_buffer_filename(part.display_str + "-Index.buf"))
                     lines += ["ResourceAPMIOldVB0 = ref vb0", "vb0 = " + pos]
+                if "Texcoord" in part.category_buffer_dict:
+                    uv = "Resource" + model.draw_ib + "Texcoord"
+                    if not gpu:
+                        # CPU meshes use local indices and per-component buffers.
+                        uv = "Resource_" + suffix + "_Texcoord"
+                        section(ini_builder, M_SectionType.ResourceBuffer, uv, "type = Buffer",
+                                "stride = " + str(part.d3d11_game_type.CategoryStrideDict["Texcoord"]),
+                                "filename = " + GlobalConfig.ini_buffer_filename(part.display_str + "-Texcoord.buf"))
+                    lines.extend(["ResourceAPMIOldVB1 = ref vb1", "vb1 = " + uv])
                 lines.append("ib = " + ib)
                 marks = model.get_submesh_texture_markup_info_list(part)
                 if self.uses_hash_textures(part, marks):
@@ -179,7 +188,7 @@ class APMIExporter(StandardExporter):
                 lines.append("ib = ref ResourceAPMIOldIB")
                 if not gpu:
                     lines.append("vb0 = ref ResourceAPMIOldVB0")
-                elif "Texcoord" in part.category_buffer_dict:
+                if "Texcoord" in part.category_buffer_dict:
                     lines.append("vb1 = ref ResourceAPMIOldVB1")
             section(ini_builder, M_SectionType.CommandList, command, *lines)
         sections.add_resource_texture_sections(ini_builder, model)

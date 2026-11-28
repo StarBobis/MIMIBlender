@@ -135,6 +135,7 @@ class SubMeshModel:
             # CPU components sharing an IB can have different original VB0s.
             self.apmi_draw = submesh_json.JsonDict.get("APMIDraw", {})
             self.apmi_vb0 = submesh_json.JsonDict.get("VertexLimitVB", "")
+            self.apmi_vb1 = submesh_json.CategoryHash.get("Texcoord", "")
         self.match_cs = submesh_json.MatchCS
         self.match_uav_bytes = submesh_json.MatchUAVBytes
         self.d3d11_game_type = D3D11GameType.from_submesh_json_dict(

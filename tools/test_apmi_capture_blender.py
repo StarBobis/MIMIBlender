@@ -1,8 +1,9 @@
-"""Headless round trip of the APMI 2026-11-26 capture extracted by MMT.
+"""Headless round trip of the APMI 2026-11-26 and 2026-11-28 captures extracted by MMT.
 
 Set APMI_TEST_WORKSPACE to the full Rust extraction. Run Blender with
 --background --factory-startup --python-exit-code 1 --python <this file>.
-Set APMI_CAPTURE as well to replay the captured skin matrices against the UAV.
+For the 2026-11-28 extraction add -- --posed to select the ten posed snapshots.
+For 2026-11-26 set APMI_CAPTURE to replay its captured skin matrices against the UAV.
 The generated mod and selection stay in a new directory under the repo's tmp.
 """
 import json
@@ -62,7 +63,7 @@ def verify_skin_dispatches(capture):
     assert counts == [1, 1, 7], counts
 
 
-def verify_mesh(record, metadata, output):
+def verify_mesh(record, metadata, output, posed=False):
     source = Path(metadata).parent
     meta = json.loads(Path(metadata).read_text(encoding="utf8"))
     # Compare at referenced triangle corners. Blender can legally split or
@@ -72,6 +73,13 @@ def verify_mesh(record, metadata, output):
     prefix = record["draw_ib"] if gpu else label
     index = np.fromfile(source / meta["IndexBufferList"][0]["FileName"], "<u4")
     new_index = np.fromfile(output / (label + "-Index.buf"), "<u4")
+    if posed and record["draw_ib"] == "761cc770":
+        # Blender validates duplicate faces on import. Compare the retained
+        # corners to the source, and pin the exact number of duplicates here.
+        tris = index.reshape(-1, 3)
+        _, first = np.unique(np.sort(tris, axis=1), axis=0, return_index=True)
+        assert len(tris) - len(first) == 40
+        index = tris[np.sort(first)].ravel()
     assert len(index) == len(new_index), label
 
     for buf in meta["CategoryBufferList"]:
@@ -102,7 +110,16 @@ def verify_mesh(record, metadata, output):
             if semantic == "POSITION":
                 # Blender applies a pair of Y/Z axis conversions to float32
                 # scene coordinates, including the large UI coordinates.
-                np.testing.assert_allclose(left.view("<f4"), right.view("<f4"), atol=2e-4, err_msg=label)
+                lhs, rhs = left.view("<f4"), right.view("<f4")
+                if posed:
+                    # Axis rotations mix coordinates. Bound float32 round-off by
+                    # each source position's magnitude, including large UI meshes.
+                    scale = np.maximum(np.abs(lhs).max(axis=1, keepdims=True), 1)
+                    np.testing.assert_allclose(lhs / scale, rhs / scale, rtol=0, atol=8 * np.finfo("f4").eps, err_msg=label)
+                else:
+                    np.testing.assert_allclose(lhs, rhs, atol=2e-4, err_msg=label)
+            elif category == "Texcoord" and not gpu and element["Format"] in {"R16G16_FLOAT", "R8G8B8A8_UNORM"}:
+                np.testing.assert_array_equal(left, right, err_msg=label)
             elif semantic == "TANGENT":
                 np.testing.assert_array_equal(left, right, err_msg=label)
             elif semantic == "TEXCOORD" and element["Format"].startswith("R32"):
@@ -113,13 +130,13 @@ def verify_mesh(record, metadata, output):
                 np.testing.assert_array_equal(left[payload], right[payload], err_msg=label)
 
 
-def verify_ini(path, selected):
+def verify_ini(path, selected, posed):
     contents = path.read_text(encoding="utf-8-sig")
     sections = re.findall(r"^\[([^\]]+)\]", contents, re.M)
     names = {section.lower() for section in sections}
     assert len(sections) == len(names)
-    assert sum(name.startswith("commandlistapmidraw_") for name in names) == 199
-    assert sum(name.startswith("commandlistapmiskin_") for name in names) == 9
+    assert sum(name.startswith("commandlistapmidraw_") for name in names) == len(selected)
+    assert sum(name.startswith("commandlistapmiskin_") for name in names) == (2 if posed else 9)
     for line in contents.splitlines():
         if "=" in line and not line.lstrip().startswith(";"):
             for resource in re.findall(r"\b(Resource\w+)", line, re.I):
@@ -139,6 +156,13 @@ def verify_ini(path, selected):
                      for mark in meta.get("TextureMarkUpInfoList", []))
         key = record["submesh"].replace("-", "_")
         lines = blocks["[CommandListAPMIDraw_" + key + "]"]
+        if not meta["GPU-PreSkinning"] and "Texcoord" in meta["CategoryHash"]:
+            # A split posed mesh has its own local IB and both local vertex streams.
+            uv = "Resource_" + key + "_Texcoord"
+            assert "vb1 = " + uv in lines and "vb1 = ref ResourceAPMIOldVB1" in lines
+            [buffer] = [b for b in meta["CategoryBufferList"] if b["FileName"].endswith("-Texcoord.buf")]
+            stride = sum(int(e["ByteWidth"]) for e in buffer["D3D11ElementList"])
+            assert "stride = " + str(stride) in blocks["[" + uv + "]"]
         call = "run = CommandListSkinTexture"
         assert lines.count(call) == int(marked), key
         if marked:
@@ -150,6 +174,9 @@ def verify_ini(path, selected):
             assert (path.parent / line.split(" = ", 1)[1]).is_file(), line
     # Each live skin shader gets a command-list entry. The indirect UI draw
     # must retain its runtime arguments and use the generated compute shader.
+    if posed:
+        assert "ShaderOverrideAPMI_09d91b2eee7e232f" in sections
+        return
     for shader in ("3b4f1b1749cd3030", "10749e66a6e6de89", "09d91b2eee7e232f"):
         assert "ShaderOverrideAPMI_" + shader in sections
     assert "drawindexedinstancedindirect = ResourceAPMIArgs, 0" in contents
@@ -157,12 +184,21 @@ def verify_ini(path, selected):
 
 
 def main():
-    if os.environ.get("APMI_CAPTURE"):
+    posed = "--posed" in sys.argv
+    if not posed and os.environ.get("APMI_CAPTURE"):
         verify_skin_dispatches(Path(os.environ["APMI_CAPTURE"]))
     MIMIBlender.register()
     root, model, records, _ = scan_workspace(os.environ["APMI_TEST_WORKSPACE"])
-    selected = choose_candidates(root, records, "APMI", {})
-    assert len(selected) == 199
+    requested = {}
+    if posed:
+        # Each repeated component has a posed CPU result and a GPU skin-input result.
+        for r in records:
+            if len(r["choices"]) > 1:
+                [cpu] = [c for c in r["choices"] if c["type"].startswith("CPU_")]
+                requested[r["submesh"]] = cpu["type"]
+        assert len(requested) == 10
+    selected = choose_candidates(root, records, "APMI", requested)
+    assert len(selected) == (80 if posed else 199)
     # Use the add-on's normal workspace selection, object nodes and export
     # path. Isolate all test artifacts from both the user's Mods and capture.
     tmp = REPO / "tmp"
@@ -193,9 +229,9 @@ def main():
     _link_group_to_output(tree, group, output)
     BlueprintExportHelper.set_runtime_blueprint_tree(tree)
     [ini] = _export_regular_output(tree, bpy.context, output, "APMI.ini")
-    verify_ini(Path(ini), selected)
+    verify_ini(Path(ini), selected, posed)
     for record, candidate in selected:
-        verify_mesh(record, candidate["json"], dest / "Buffers")
+        verify_mesh(record, candidate["json"], dest / "Buffers", posed)
     print(f"APMI capture round trip passed for {len(selected)} components. {ini}")
 
 
